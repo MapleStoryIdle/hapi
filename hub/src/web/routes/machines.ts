@@ -52,6 +52,12 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             undefined,
             parsed.data.effort
         )
+        if (result.type === 'success') {
+            const session = engine.getSessionByNamespace(result.sessionId, c.get('namespace'))
+            if (session) {
+                return c.json({ ...result, session })
+            }
+        }
         return c.json(result)
     })
 

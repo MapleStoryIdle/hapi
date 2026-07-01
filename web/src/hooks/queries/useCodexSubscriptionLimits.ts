@@ -4,6 +4,8 @@ import type { ApiClient } from '@/api/client'
 import type { CodexSubscriptionLimits } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 
+const CODEX_SUBSCRIPTION_LIMITS_MIN_REFETCH_INTERVAL_MS = 5 * 60 * 1000
+
 export function useCodexSubscriptionLimits(args: {
     api: ApiClient | null
     sessionId?: string | null
@@ -41,7 +43,11 @@ export function useCodexSubscriptionLimits(args: {
 
     useEffect(() => {
         if (enabled && prevThinkingRef.current && !thinking) {
-            void query.refetch()
+            const lastUpdatedAt = query.dataUpdatedAt || 0
+            const shouldRefetch = Date.now() - lastUpdatedAt >= CODEX_SUBSCRIPTION_LIMITS_MIN_REFETCH_INTERVAL_MS
+            if (shouldRefetch) {
+                void query.refetch()
+            }
         }
         prevThinkingRef.current = thinking
     }, [enabled, thinking, query, sessionId, model])

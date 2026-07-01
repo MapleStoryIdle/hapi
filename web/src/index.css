@@ -2,9 +2,74 @@
 @import "katex/dist/katex.min.css";
 @config "../tailwind.config.ts";
 
+@font-face {
+    font-family: "Test Tiempos Text";
+    src: url("/fonts/tiempos-test/TestTiemposText-Regular.otf") format("opentype");
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Test Tiempos Text";
+    src: url("/fonts/tiempos-test/TestTiemposText-RegularItalic.otf") format("opentype");
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Test Tiempos Text";
+    src: url("/fonts/tiempos-test/TestTiemposText-Medium.otf") format("opentype");
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Test Tiempos Text";
+    src: url("/fonts/tiempos-test/TestTiemposText-MediumItalic.otf") format("opentype");
+    font-style: italic;
+    font-weight: 500;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Test Tiempos Text";
+    src: url("/fonts/tiempos-test/TestTiemposText-Semibold.otf") format("opentype");
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Test Tiempos Text";
+    src: url("/fonts/tiempos-test/TestTiemposText-SemiboldItalic.otf") format("opentype");
+    font-style: italic;
+    font-weight: 600;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Test Tiempos Text";
+    src: url("/fonts/tiempos-test/TestTiemposText-Bold.otf") format("opentype");
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Test Tiempos Text";
+    src: url("/fonts/tiempos-test/TestTiemposText-BoldItalic.otf") format("opentype");
+    font-style: italic;
+    font-weight: 700;
+    font-display: swap;
+}
+
 :root {
     --app-bg: var(--tg-theme-bg-color, #ffffff);
     --app-fg: var(--tg-theme-text-color, #111827);
+    --app-text: var(--app-fg);
     --app-hint: var(--tg-theme-hint-color, #6b7280);
     --app-link: var(--tg-theme-link-color, #111827);
     --app-button: var(--tg-theme-button-color, #111827);
@@ -76,6 +141,8 @@
     --app-badge-error-border: rgba(239, 68, 68, 0.3);
 
     --app-font-scale: 1;
+    --app-font-family: "Test Tiempos Text", "Tiempos Text", "Tiempos", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+    --app-control-font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --app-chat-font-size: 0.9375rem;
     --app-chat-line-height: 1.75rem;
     --app-message-action-size: 1.125rem;
@@ -301,9 +368,22 @@ html:not([data-telegram-app="true"]) body {
 }
 
 body {
+    font-family: var(--app-font-family);
     font-size: 1rem;
     background: var(--app-bg);
     color: var(--app-fg);
+}
+
+select,
+option {
+    font-family: var(--app-control-font-family);
+    color: var(--app-fg);
+    line-height: 1.25rem;
+}
+
+select {
+    min-height: 2.5rem;
+    -webkit-font-smoothing: antialiased;
 }
 
 #root {

@@ -24,17 +24,21 @@ describe('NewSession preferences', () => {
         expect(loadPreferredYoloMode()).toBe(true)
     })
 
-    it('falls back to default agent on invalid stored value', () => {
+    it('falls back to default agent on invalid or hidden stored value', () => {
         localStorage.setItem('hapi:newSession:agent', 'unknown-agent')
+
+        expect(loadPreferredAgent()).toBe('claude')
+
+        localStorage.setItem('hapi:newSession:agent', 'cursor')
 
         expect(loadPreferredAgent()).toBe('claude')
     })
 
     it('persists new values to storage', () => {
-        savePreferredAgent('gemini')
+        savePreferredAgent('codex')
         savePreferredYoloMode(true)
 
-        expect(localStorage.getItem('hapi:newSession:agent')).toBe('gemini')
+        expect(localStorage.getItem('hapi:newSession:agent')).toBe('codex')
         expect(localStorage.getItem('hapi:newSession:yolo')).toBe('true')
     })
 })

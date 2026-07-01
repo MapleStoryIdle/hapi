@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
-import { AgentFlavorIcon } from './AgentFlavorIcon'
+import { AgentFlavorIcon, AgentFlavorStatusIcon } from './AgentFlavorIcon'
 
 function getBadge(container: HTMLElement): HTMLElement {
     const badge = container.querySelector('span')
@@ -13,7 +13,7 @@ describe('AgentFlavorIcon', () => {
         // These flavors have official icon components in @lobehub/icons; the
         // UI should no longer render the old two-letter text badge for them.
         const cases: Array<{ flavor: string; title: string; oldLabel: string }> = [
-            { flavor: 'claude', title: 'Claude Code', oldLabel: 'Cl' },
+            { flavor: 'claude', title: 'Claude', oldLabel: 'Cl' },
             { flavor: 'codex', title: 'Codex', oldLabel: 'Cx' },
             { flavor: 'cursor', title: 'Cursor', oldLabel: 'Cu' },
             { flavor: 'gemini', title: 'Gemini CLI', oldLabel: 'Gm' },
@@ -75,6 +75,46 @@ describe('AgentFlavorIcon', () => {
             expect(badge.querySelector('svg')).toBeTruthy()
             expect(badge.title).toBe('Codex')
         }
+    })
+
+    it('uses the monochrome OpenAI knot icon for Codex', () => {
+        const { container } = render(<AgentFlavorIcon flavor="codex" />)
+        const svg = container.querySelector('svg')
+        expect(svg).toBeTruthy()
+        expect(svg?.getAttribute('fill')).toBe('currentColor')
+        expect(container.querySelector('path[fill="#fff"]')).toBeNull()
+    })
+
+    it('uses the orange Claude avatar mark for Claude sessions', () => {
+        // Claude uses the product avatar treatment: orange rounded square with a
+        // white vector mark, matching the official app icon style.
+        const { container } = render(<AgentFlavorIcon flavor="claude" />)
+        const badge = getBadge(container)
+        const svg = badge.querySelector('svg')
+
+        expect(svg).toBeTruthy()
+        expect(badge.title).toBe('Claude')
+        expect(badge.className).toContain('bg-[#D97757]')
+        expect(badge.className).toContain('text-white')
+        expect(svg?.getAttribute('fill')).toBe('currentColor')
+    })
+
+    it('can render an online status dot attached to the icon corner', () => {
+        const { container } = render(
+            <AgentFlavorStatusIcon
+                flavor="claude"
+                showStatus
+                statusClassName="bg-[#34C759]"
+            />
+        )
+        const wrapper = container.querySelector('span.relative')
+        const statusDot = container.querySelector('span.absolute')
+
+        expect(wrapper).toBeTruthy()
+        expect(statusDot).toBeTruthy()
+        expect(statusDot?.className).toContain('-right-0.5')
+        expect(statusDot?.className).toContain('-bottom-0.5')
+        expect(statusDot?.className).toContain('bg-[#34C759]')
     })
 
     it('does NOT match a flavor when only whitespace is present', () => {

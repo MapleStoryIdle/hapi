@@ -1,5 +1,4 @@
-import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol'
-import type { AgentType, ClaudeEffort, CodexReasoningEffort, SessionType } from './types'
+import { NEW_SESSION_AGENT_OPTIONS, type AgentType, type ClaudeEffort, type NewSessionReasoningEffort, type SessionType } from './types'
 
 const DRAFT_STORAGE_KEY = 'hapi:new-session-form-draft'
 
@@ -9,7 +8,7 @@ export type NewSessionFormDraft = {
     cursorSelectedBase: string
     machineId: string | null
     effort: ClaudeEffort
-    modelReasoningEffort: CodexReasoningEffort
+    modelReasoningEffort: NewSessionReasoningEffort
     yoloMode: boolean
     sessionType: SessionType
     worktreeName: string
@@ -33,11 +32,11 @@ export function loadNewSessionFormDraft(): NewSessionFormDraft | null {
         if (typeof parsed.agent !== 'string' || typeof parsed.model !== 'string') {
             return null
         }
-        // Coerce a stale/uncreatable agent (e.g. a pre-removal 'gemini' draft)
+        // Coerce stale or currently hidden agents (e.g. a previous Cursor draft)
         // back to a launchable default. When the agent is coerced, also drop the
-        // agent-dependent fields (model / cursor base / effort) so a Gemini
-        // draft does not carry a Gemini model into the Claude fallback.
-        const restoredAgent: AgentType = (CREATABLE_AGENT_FLAVORS as readonly string[]).includes(parsed.agent)
+        // agent-dependent fields (model / cursor base / effort) so a hidden
+        // agent's model is not carried into the Claude fallback.
+        const restoredAgent: AgentType = (NEW_SESSION_AGENT_OPTIONS as readonly string[]).includes(parsed.agent)
             ? (parsed.agent as AgentType)
             : 'claude'
         const agentPreserved = restoredAgent === parsed.agent
@@ -50,7 +49,7 @@ export function loadNewSessionFormDraft(): NewSessionFormDraft | null {
             machineId: typeof parsed.machineId === 'string' ? parsed.machineId : null,
             effort: agentPreserved ? ((parsed.effort as ClaudeEffort | undefined) ?? 'auto') : 'auto',
             modelReasoningEffort: agentPreserved
-                ? ((parsed.modelReasoningEffort as CodexReasoningEffort | undefined) ?? 'default')
+                ? ((parsed.modelReasoningEffort as NewSessionReasoningEffort | undefined) ?? 'default')
                 : 'default',
             yoloMode: Boolean(parsed.yoloMode),
             sessionType: (parsed.sessionType as SessionType | undefined) ?? 'simple',

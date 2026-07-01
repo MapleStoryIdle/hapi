@@ -12,26 +12,26 @@ describe('newSessionFormDraft', () => {
         clearNewSessionFormDraft()
     })
 
-    it('round-trips cursor model fields through sessionStorage', () => {
+    it('round-trips visible agent model fields through sessionStorage', () => {
         saveNewSessionFormDraft({
-            agent: 'cursor',
-            model: 'composer-2.5[fast=false]',
-            cursorSelectedBase: 'composer-2.5',
+            agent: 'codex',
+            model: 'gpt-5.5',
+            cursorSelectedBase: 'auto',
             machineId: 'machine-1',
             effort: 'auto',
-            modelReasoningEffort: 'default',
+            modelReasoningEffort: 'xhigh',
             yoloMode: false,
             sessionType: 'simple',
             worktreeName: ''
         })
 
         expect(loadNewSessionFormDraft()).toEqual({
-            agent: 'cursor',
-            model: 'composer-2.5[fast=false]',
-            cursorSelectedBase: 'composer-2.5',
+            agent: 'codex',
+            model: 'gpt-5.5',
+            cursorSelectedBase: 'auto',
             machineId: 'machine-1',
             effort: 'auto',
-            modelReasoningEffort: 'default',
+            modelReasoningEffort: 'xhigh',
             yoloMode: false,
             sessionType: 'simple',
             worktreeName: ''
@@ -81,10 +81,10 @@ describe('newSessionFormDraft', () => {
         expect(newSessionDraftMatchesMachine(draft, 'machine-b')).toBe(false)
     })
 
-    it('coerces a stale uncreatable agent (gemini) to claude and resets dependent fields', () => {
+    it('coerces a hidden agent to claude and resets dependent fields', () => {
         saveNewSessionFormDraft({
-            agent: 'gemini',
-            model: 'gemini-2.5-pro',
+            agent: 'cursor',
+            model: 'composer-2.5[fast=false]',
             cursorSelectedBase: 'composer-2.5',
             machineId: 'machine-1',
             effort: 'high',
@@ -96,7 +96,7 @@ describe('newSessionFormDraft', () => {
 
         const loaded = loadNewSessionFormDraft()!
         expect(loaded.agent).toBe('claude')
-        // agent-dependent fields reset so a Gemini model isn't carried into Claude
+        // agent-dependent fields reset so a hidden agent model isn't carried into Claude
         expect(loaded.model).toBe('auto')
         expect(loaded.cursorSelectedBase).toBe('auto')
         expect(loaded.effort).toBe('auto')

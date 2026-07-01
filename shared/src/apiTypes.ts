@@ -86,7 +86,7 @@ export type MessagesResponse = {
 export type MachinesResponse = { machines: Machine[] }
 
 export type SpawnResponse =
-    | { type: 'success'; sessionId: string }
+    | { type: 'success'; sessionId: string; session?: Session }
     | { type: 'error'; message: string }
 
 export const SessionPermissionModeRequestSchema = z.object({

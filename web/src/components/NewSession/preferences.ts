@@ -1,17 +1,15 @@
-import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol'
-import type { AgentType } from './types'
+import { NEW_SESSION_AGENT_OPTIONS, type AgentType } from './types'
 
 const AGENT_STORAGE_KEY = 'hapi:newSession:agent'
 const YOLO_STORAGE_KEY = 'hapi:newSession:yolo'
 
-// Only launchable flavors are valid defaults; a stale 'gemini' preference
-// (no longer creatable) falls back to 'claude'.
-const VALID_AGENTS = CREATABLE_AGENT_FLAVORS
+// New-session picker intentionally exposes only the primary local coding agents.
+const VALID_AGENTS = NEW_SESSION_AGENT_OPTIONS
 
 export function loadPreferredAgent(): AgentType {
     try {
         const stored = localStorage.getItem(AGENT_STORAGE_KEY)
-        if (stored && VALID_AGENTS.includes(stored as AgentType)) {
+        if (stored && (VALID_AGENTS as readonly string[]).includes(stored)) {
             return stored as AgentType
         }
     } catch {

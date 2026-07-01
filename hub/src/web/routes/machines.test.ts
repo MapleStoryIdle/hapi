@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
+import type { Session } from '@hapi/protocol/types'
 import type { WebAppEnv } from '../middleware/auth'
 import { createMachinesRoutes } from './machines'
 
@@ -26,6 +27,85 @@ function createMachine(overrides?: Partial<Machine>): Machine {
 }
 
 describe('machines routes', () => {
+    it('returns the spawned session so web can seed selected model and reasoning state', async () => {
+        const machine = createMachine()
+        const session: Session = {
+            id: 'session-1',
+            namespace: 'default',
+            seq: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            active: true,
+            activeAt: 1,
+            metadata: { path: '/work/project', host: 'localhost', flavor: 'codex' },
+            metadataVersion: 1,
+            agentState: { controlledByUser: false },
+            agentStateVersion: 1,
+            thinking: false,
+            thinkingAt: 0,
+            model: 'gpt-5.5',
+            modelReasoningEffort: 'xhigh',
+            effort: null,
+            serviceTier: null,
+            permissionMode: 'yolo',
+            collaborationMode: 'default',
+        }
+        const calls: Array<{
+            machineId: string
+            directory: string
+            agent: string | undefined
+            model: string | undefined
+            modelReasoningEffort: string | undefined
+        }> = []
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            spawnSession: async (
+                machineId: string,
+                directory: string,
+                agent?: string,
+                model?: string,
+                modelReasoningEffort?: string
+            ) => {
+                calls.push({ machineId, directory, agent, model, modelReasoningEffort })
+                return { type: 'success' as const, sessionId: session.id }
+            },
+            getSessionByNamespace: () => session,
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/spawn', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                directory: '/work/project',
+                agent: 'codex',
+                model: 'gpt-5.5',
+                modelReasoningEffort: 'xhigh',
+            }),
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{
+            machineId: 'machine-1',
+            directory: '/work/project',
+            agent: 'codex',
+            model: 'gpt-5.5',
+            modelReasoningEffort: 'xhigh',
+        }])
+        expect(await response.json()).toEqual({
+            type: 'success',
+            sessionId: 'session-1',
+            session,
+        })
+    })
+
     it('returns Codex models for an online machine', async () => {
         const machine = createMachine()
         const engine = {

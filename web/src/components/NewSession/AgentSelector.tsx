@@ -1,6 +1,15 @@
-import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol'
-import type { AgentType } from './types'
+import { getFlavorLabel } from '@hapi/protocol'
+import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
+import { NEW_SESSION_AGENT_OPTIONS, type AgentType } from './types'
 import { useTranslation } from '@/lib/use-translation'
+
+const AGENT_TAB_LABELS: Partial<Record<AgentType, string>> = {
+    claude: 'Claude Code',
+}
+
+function getAgentTabLabel(agentType: AgentType): string {
+    return AGENT_TAB_LABELS[agentType] ?? getFlavorLabel(agentType)
+}
 
 export function AgentSelector(props: {
     agent: AgentType
@@ -14,24 +23,44 @@ export function AgentSelector(props: {
             <label className="text-xs font-medium text-[var(--app-hint)]">
                 {t('newSession.agent')}
             </label>
-            <div className="flex flex-wrap gap-x-3 gap-y-2">
-                {CREATABLE_AGENT_FLAVORS.map((agentType) => (
-                    <label
-                        key={agentType}
-                        className="flex items-center gap-1.5 cursor-pointer"
-                    >
-                        <input
-                            type="radio"
-                            name="agent"
-                            value={agentType}
-                            checked={props.agent === agentType}
-                            onChange={() => props.onAgentChange(agentType)}
-                            disabled={props.isDisabled}
-                            className="accent-[var(--app-link)]"
-                        />
-                        <span className="text-sm capitalize">{agentType}</span>
-                    </label>
-                ))}
+            <div className="-mx-3 overflow-x-auto px-3">
+                <div
+                    role="radiogroup"
+                    aria-label={t('newSession.agent')}
+                    className="inline-flex w-max flex-nowrap items-center gap-1 rounded-xl bg-[var(--app-secondary-bg)] p-1"
+                >
+                    {NEW_SESSION_AGENT_OPTIONS.map((agentType) => {
+                        const label = getAgentTabLabel(agentType)
+                        const checked = props.agent === agentType
+
+                        return (
+                            <label
+                                key={agentType}
+                                aria-label={label}
+                                title={label}
+                                className={[
+                                    'inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors',
+                                    checked
+                                        ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm ring-1 ring-[var(--app-border)]'
+                                        : 'bg-transparent text-[var(--app-hint)] hover:text-[var(--app-fg)]',
+                                    props.isDisabled ? 'cursor-not-allowed opacity-50' : ''
+                                ].filter(Boolean).join(' ')}
+                            >
+                                <input
+                                    type="radio"
+                                    name="agent"
+                                    value={agentType}
+                                    checked={checked}
+                                    onChange={() => props.onAgentChange(agentType)}
+                                    disabled={props.isDisabled}
+                                    className="sr-only"
+                                />
+                                <AgentFlavorIcon flavor={agentType} className="h-5 w-5" />
+                                <span className="whitespace-nowrap">{label}</span>
+                            </label>
+                        )
+                    })}
+                </div>
             </div>
         </div>
     )

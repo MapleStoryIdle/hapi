@@ -40,7 +40,10 @@ export function useSpawnSession(api: ApiClient | null): {
                 input.effort
             )
         },
-        onSuccess: () => {
+        onSuccess: (result) => {
+            if (result.type === 'success' && result.session) {
+                queryClient.setQueryData(queryKeys.session(result.sessionId), { session: result.session })
+            }
             void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         },
     })

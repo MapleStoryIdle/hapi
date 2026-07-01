@@ -1,18 +1,22 @@
-import type { AgentType, CodexReasoningEffort } from './types'
-import { CODEX_REASONING_EFFORT_OPTIONS } from './types'
+import type { AgentType, NewSessionReasoningEffort } from './types'
+import { CODEX_REASONING_EFFORT_OPTIONS, OPENCODE_REASONING_EFFORT_OPTIONS } from './types'
 import { useTranslation } from '@/lib/use-translation'
 
 export function ReasoningEffortSelector(props: {
     agent: AgentType
-    value: CodexReasoningEffort
+    value: NewSessionReasoningEffort
     isDisabled: boolean
-    onChange: (value: CodexReasoningEffort) => void
+    onChange: (value: NewSessionReasoningEffort) => void
 }) {
     const { t } = useTranslation()
 
     if (props.agent !== 'codex' && props.agent !== 'opencode') {
         return null
     }
+
+    const options = props.agent === 'opencode'
+        ? OPENCODE_REASONING_EFFORT_OPTIONS
+        : CODEX_REASONING_EFFORT_OPTIONS
 
     return (
         <div className="flex flex-col gap-1.5 px-3 py-3">
@@ -22,11 +26,11 @@ export function ReasoningEffortSelector(props: {
             </label>
             <select
                 value={props.value}
-                onChange={(e) => props.onChange(e.target.value as CodexReasoningEffort)}
+                onChange={(e) => props.onChange(e.target.value as NewSessionReasoningEffort)}
                 disabled={props.isDisabled}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--app-divider)] bg-[var(--app-bg)] text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
+                className="w-full rounded-lg border border-[var(--app-divider)] bg-[var(--app-bg)] px-3 py-2 font-sans text-sm text-[var(--app-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
             >
-                {CODEX_REASONING_EFFORT_OPTIONS.filter((option) => props.agent === 'opencode' ? option.value !== 'xhigh' : option.value !== 'max').map((option) => (
+                {options.map((option) => (
                     <option key={option.value} value={option.value}>
                         {option.label}
                     </option>

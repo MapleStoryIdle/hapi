@@ -5,11 +5,32 @@ import type {
     GetCodexSubscriptionLimitsRequest as ProtocolGetCodexSubscriptionLimitsRequest
 } from '@hapi/protocol/apiTypes';
 import { CodexAppServerClient } from '@/codex/codexAppServerClient';
-import type { RateLimitSnapshot, RateLimitWindow } from '@/codex/appServerTypes';
+import type { GetAccountRateLimitsResponse, RateLimitSnapshot, RateLimitWindow } from '@/codex/appServerTypes';
 import { getErrorMessage } from './rpcResponses';
 
 export type GetCodexSubscriptionLimitsResponse = CodexSubscriptionLimitsResponse;
 export type GetCodexSubscriptionLimitsRequest = ProtocolGetCodexSubscriptionLimitsRequest;
+
+export const CODEX_SUBSCRIPTION_LIMITS_MIN_QUERY_INTERVAL_MS = 5 * 60 * 1000;
+
+type CodexRateLimitsCacheEntry = {
+    response: GetAccountRateLimitsResponse;
+    fetchedAt: number;
+};
+
+type CodexRateLimitsAttempt = {
+    attemptedAt: number;
+    error?: Error;
+};
+
+type CodexRateLimitsReaderOptions = {
+    fetcher?: () => Promise<GetAccountRateLimitsResponse>;
+    now?: () => number;
+};
+
+let codexRateLimitsCache: CodexRateLimitsCacheEntry | null = null;
+let codexRateLimitsInFlight: Promise<CodexRateLimitsCacheEntry> | null = null;
+let codexRateLimitsLastAttempt: CodexRateLimitsAttempt | null = null;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value && typeof value === 'object' ? value as Record<string, unknown> : null;
@@ -45,7 +66,15 @@ function normalizeWindow(value: RateLimitWindow | null | undefined): CodexSubscr
     };
 }
 
-function normalizeSnapshot(value: RateLimitSnapshot | null | undefined): CodexSubscriptionLimits | null {
+function isCacheFresh(fetchedAt: number, now: number): boolean {
+    return now - fetchedAt < CODEX_SUBSCRIPTION_LIMITS_MIN_QUERY_INTERVAL_MS;
+}
+
+function normalizeError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
+}
+
+function normalizeSnapshot(value: RateLimitSnapshot | null | undefined, updatedAt: number): CodexSubscriptionLimits | null {
     const record = asRecord(value);
     if (!record) {
         return null;
@@ -63,7 +92,7 @@ function normalizeSnapshot(value: RateLimitSnapshot | null | undefined): CodexSu
         planType: asStringOrNull(record.planType),
         primary,
         secondary,
-        updatedAt: Date.now()
+        updatedAt
     };
 }
 
@@ -114,7 +143,7 @@ function pickCodexSnapshot(
 
 export const selectCodexRateLimitSnapshotForTests = pickCodexSnapshot;
 
-export async function getCodexSubscriptionLimits(model?: string | null): Promise<CodexSubscriptionLimits> {
+async function fetchCodexRateLimitsFromAppServer(): Promise<GetAccountRateLimitsResponse> {
     const client = new CodexAppServerClient();
 
     try {
@@ -129,16 +158,84 @@ export async function getCodexSubscriptionLimits(model?: string | null): Promise
             }
         });
 
-        const response = await client.readAccountRateLimits();
+        return await client.readAccountRateLimits();
+    } finally {
+        await client.disconnect().catch(() => undefined);
+    }
+}
+
+async function readCodexRateLimitsWithMinimumInterval(
+    options: CodexRateLimitsReaderOptions = {}
+): Promise<CodexRateLimitsCacheEntry> {
+    const fetcher = options.fetcher ?? fetchCodexRateLimitsFromAppServer;
+    const now = options.now ?? Date.now;
+    const currentTime = now();
+
+    if (codexRateLimitsCache && isCacheFresh(codexRateLimitsCache.fetchedAt, currentTime)) {
+        return codexRateLimitsCache;
+    }
+
+    if (codexRateLimitsInFlight) {
+        return await codexRateLimitsInFlight;
+    }
+
+    if (codexRateLimitsLastAttempt && isCacheFresh(codexRateLimitsLastAttempt.attemptedAt, currentTime)) {
+        if (codexRateLimitsCache) {
+            return codexRateLimitsCache;
+        }
+        if (codexRateLimitsLastAttempt.error) {
+            throw codexRateLimitsLastAttempt.error;
+        }
+    }
+
+    codexRateLimitsLastAttempt = { attemptedAt: currentTime };
+    codexRateLimitsInFlight = fetcher()
+        .then((response) => {
+            const entry = {
+                response,
+                fetchedAt: now()
+            };
+            codexRateLimitsCache = entry;
+            codexRateLimitsLastAttempt = { attemptedAt: entry.fetchedAt };
+            return entry;
+        })
+        .catch((error) => {
+            const normalizedError = normalizeError(error);
+            codexRateLimitsLastAttempt = {
+                attemptedAt: now(),
+                error: normalizedError
+            };
+            throw normalizedError;
+        })
+        .finally(() => {
+            codexRateLimitsInFlight = null;
+        });
+
+    return await codexRateLimitsInFlight;
+}
+
+export function resetCodexSubscriptionLimitsCacheForTests(): void {
+    codexRateLimitsCache = null;
+    codexRateLimitsInFlight = null;
+    codexRateLimitsLastAttempt = null;
+}
+
+export async function readCodexRateLimitsWithMinimumIntervalForTests(
+    options: CodexRateLimitsReaderOptions
+): Promise<CodexRateLimitsCacheEntry> {
+    return await readCodexRateLimitsWithMinimumInterval(options);
+}
+
+export async function getCodexSubscriptionLimits(model?: string | null): Promise<CodexSubscriptionLimits> {
+    try {
+        const { response, fetchedAt } = await readCodexRateLimitsWithMinimumInterval();
         const snapshot = pickCodexSnapshot(response.rateLimits, response.rateLimitsByLimitId, model);
-        const limits = normalizeSnapshot(snapshot);
+        const limits = normalizeSnapshot(snapshot, fetchedAt);
         if (!limits) {
             throw new Error('Codex subscription limits unavailable');
         }
         return limits;
     } catch (error) {
         throw new Error(getErrorMessage(error, 'Failed to read Codex subscription limits'));
-    } finally {
-        await client.disconnect().catch(() => undefined);
     }
 }

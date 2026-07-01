@@ -41,6 +41,7 @@ import { fetchLatestMessages, seedMessageWindowFromSession } from '@/lib/message
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
+import { pickMostRecentActiveSession } from '@/lib/initialSessionSelection'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
 import FilesPage from '@/routes/sessions/files'
@@ -150,6 +151,27 @@ function SettingsIcon(props: { className?: string }) {
     )
 }
 
+function MoreHorizontalIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <circle cx="5" cy="12" r="1" />
+            <circle cx="12" cy="12" r="1" />
+            <circle cx="19" cy="12" r="1" />
+        </svg>
+    )
+}
+
 function getMachineTitle(machine: Machine): string {
     if (machine.metadata?.displayName) return machine.metadata.displayName
     if (machine.metadata?.host) return machine.metadata.host
@@ -175,6 +197,8 @@ function SessionsPage() {
     const [duplicateSessionGroups, setDuplicateSessionGroups] = useState<CodexDuplicateSessionGroup[]>([])
     const [isDuplicateMergeConfirmOpen, setIsDuplicateMergeConfirmOpen] = useState(false)
     const [isMergingDuplicateSessions, setIsMergingDuplicateSessions] = useState(false)
+    const [isSessionsMenuOpen, setIsSessionsMenuOpen] = useState(false)
+    const sessionsMenuRef = useRef<HTMLDivElement>(null)
 
     const handleRefresh = useCallback(() => {
         void refetch()
@@ -213,7 +237,35 @@ function SessionsPage() {
         ? (selectedSession.metadata.agentSessionId ?? null)
         : null
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
+    const shouldAutoSelectInitialSessionRef = useRef(isSessionsIndex)
+    const didResolveInitialSessionRef = useRef(false)
     const sidebar = useSidebarResize()
+
+    useEffect(() => {
+        if (!shouldAutoSelectInitialSessionRef.current || didResolveInitialSessionRef.current) {
+            return
+        }
+        if (!isSessionsIndex) {
+            didResolveInitialSessionRef.current = true
+            return
+        }
+        if (isLoading || error) {
+            return
+        }
+
+        didResolveInitialSessionRef.current = true
+        const target = pickMostRecentActiveSession(sessions)
+        if (!target) {
+            return
+        }
+
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId: target.id },
+            replace: true,
+        })
+    }, [error, isLoading, isSessionsIndex, navigate, sessions])
+
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -465,6 +517,30 @@ function SessionsPage() {
         t
     ])
 
+    useEffect(() => {
+        if (!isSessionsMenuOpen) return
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target
+            if (target instanceof Node && sessionsMenuRef.current?.contains(target)) {
+                return
+            }
+            setIsSessionsMenuOpen(false)
+        }
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setIsSessionsMenuOpen(false)
+            }
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown)
+        document.addEventListener('keydown', handleKeyDown)
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown)
+            document.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [isSessionsMenuOpen])
+
     return (
         <>
             <div className="flex h-full min-h-0">
@@ -477,42 +553,54 @@ function SessionsPage() {
                         <div className="text-xs text-[var(--app-hint)]">
                             {t('sessions.count', { n: sessions.length, m: projectCount })}
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div ref={sessionsMenuRef} className="relative flex items-center">
                             <button
                                 type="button"
-                                onClick={() => void openCodexImportDialog()}
-                                disabled={isSyncingCodexSession || isLoadingCodexSessions}
-                                aria-label={t('codexSync.tooltip')}
-                                aria-busy={isSyncingCodexSession || isLoadingCodexSessions}
-                                className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors disabled:opacity-60 disabled:cursor-wait"
-                                title={t('codexSync.tooltip')}
-                            >
-                                <CodexImportIcon className={`h-5 w-5 ${isLoadingCodexSessions ? 'animate-spin' : ''}`} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => navigate({ to: '/browse' })}
+                                onClick={() => setIsSessionsMenuOpen((open) => !open)}
+                                aria-label={t('session.more')}
+                                aria-expanded={isSessionsMenuOpen}
                                 className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                title={t('browse.nav')}
+                                title={t('session.more')}
                             >
-                                <FolderOpenIcon className="h-5 w-5" />
+                                <MoreHorizontalIcon className="h-5 w-5" />
                             </button>
-                            <button
-                                type="button"
-                                onClick={() => navigate({ to: '/settings' })}
-                                className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                title={t('settings.title')}
-                            >
-                                <SettingsIcon className="h-5 w-5" />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => navigate({ to: '/sessions/new' })}
-                                className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
-                                title={t('sessions.new')}
-                            >
-                                <PlusIcon className="h-5 w-5" />
-                            </button>
+                            {isSessionsMenuOpen ? (
+                                <div className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border border-[var(--app-divider)] bg-[var(--app-bg)] py-1 shadow-lg">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsSessionsMenuOpen(false)
+                                            navigate({ to: '/sessions/new' })
+                                        }}
+                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                                    >
+                                        <PlusIcon className="h-4 w-4" />
+                                        <span>{t('sessions.new')}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsSessionsMenuOpen(false)
+                                            navigate({ to: '/browse' })
+                                        }}
+                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                                    >
+                                        <FolderOpenIcon className="h-4 w-4" />
+                                        <span>{t('browse.nav')}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsSessionsMenuOpen(false)
+                                            navigate({ to: '/settings' })
+                                        }}
+                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                                    >
+                                        <SettingsIcon className="h-4 w-4" />
+                                        <span>{t('settings.title')}</span>
+                                    </button>
+                                </div>
+                            ) : null}
                         </div>
                     </div>
                 </div>

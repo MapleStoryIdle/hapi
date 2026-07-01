@@ -24,7 +24,7 @@ export function ClaudeEffortSelector(props: {
                 value={props.effort}
                 onChange={(e) => props.onEffortChange(e.target.value as ClaudeEffort)}
                 disabled={props.isDisabled}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--app-divider)] bg-[var(--app-bg)] text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
+                className="w-full rounded-lg border border-[var(--app-divider)] bg-[var(--app-bg)] px-3 py-2 font-sans text-sm text-[var(--app-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
             >
                 {CLAUDE_EFFORT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>

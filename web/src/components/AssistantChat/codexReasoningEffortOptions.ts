@@ -9,6 +9,7 @@ export type ComposerReasoningEffortSourceOption = {
 }
 
 const CODEX_REASONING_EFFORT_PRESETS = ['low', 'medium', 'high', 'xhigh'] as const
+const CODEX_UNSUPPORTED_REASONING_EFFORTS = new Set(['max'])
 const CODEX_REASONING_EFFORT_LABELS: Record<string, string> = {
     low: 'Low',
     medium: 'Medium',
@@ -75,6 +76,7 @@ export function getCodexComposerReasoningEffortOptions(
 
     if (
         normalizedCurrentEffort
+        && !CODEX_UNSUPPORTED_REASONING_EFFORTS.has(normalizedCurrentEffort)
         && !(CODEX_REASONING_EFFORT_PRESETS as readonly string[]).includes(normalizedCurrentEffort)
     ) {
         options.push({

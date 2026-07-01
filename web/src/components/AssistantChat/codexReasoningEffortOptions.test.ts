@@ -23,6 +23,16 @@ describe('getCodexComposerReasoningEffortOptions', () => {
         ])
     })
 
+    it('does not preserve max as a selectable Codex value', () => {
+        expect(getCodexComposerReasoningEffortOptions('max', 'codex')).toEqual([
+            { value: null, label: 'Default' },
+            { value: 'low', label: 'Low' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'high', label: 'High' },
+            { value: 'xhigh', label: 'XHigh' }
+        ])
+    })
+
     it('returns no options for OpenCode until dynamic options are available', () => {
         expect(getCodexComposerReasoningEffortOptions(null, 'opencode')).toEqual([])
         expect(getCodexComposerReasoningEffortOptions(null, 'opencode', [])).toEqual([])

@@ -8,6 +8,7 @@ import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { AgentFlavorStatusIcon } from '@/components/AgentFlavorIcon'
 import { formatReopenError } from '@/lib/reopenError'
 import { useTranslation } from '@/lib/use-translation'
 import type { StatusBarProps } from '@/components/AssistantChat/StatusBar'
@@ -273,12 +274,12 @@ export function SessionHeader(props: {
                     </button>
 
                     <div className="flex min-w-0 flex-1 items-center gap-2">
-                        {props.status ? (
-                            <span
-                                className={`h-2 w-2 shrink-0 rounded-full ${getStatusDotClass(props.status)}`}
-                                aria-hidden="true"
-                            />
-                        ) : null}
+                        <AgentFlavorStatusIcon
+                            flavor={session.metadata?.flavor ?? 'claude'}
+                            className="h-5 w-5"
+                            showStatus={Boolean(props.status)}
+                            statusClassName={getStatusDotClass(props.status)}
+                        />
                         <div className="truncate font-semibold">
                             {title}
                         </div>

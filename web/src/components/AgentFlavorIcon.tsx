@@ -1,14 +1,19 @@
-import ClaudeCodeIcon from '@lobehub/icons/es/ClaudeCode/components/Color'
-import CodexIcon from '@lobehub/icons/es/Codex/components/Color'
+import ClaudeIcon from '@lobehub/icons/es/Claude/components/Mono'
 import CursorIcon from '@lobehub/icons/es/Cursor/components/Mono'
 import GeminiCliIcon from '@lobehub/icons/es/GeminiCLI/components/Color'
 import KimiIcon from '@lobehub/icons/es/Kimi/components/Color'
 import OpenCodeIcon from '@lobehub/icons/es/OpenCode/components/Mono'
+import OpenAIIcon from '@lobehub/icons/es/OpenAI/components/Mono'
 import type { IconType } from '@lobehub/icons/es/types'
 
-const FLAVOR_ICONS: Record<string, { Icon: IconType; title: string; colors?: string }> = {
-    claude: { Icon: ClaudeCodeIcon, title: 'Claude Code' },
-    codex: { Icon: CodexIcon, title: 'Codex' },
+const FLAVOR_ICONS: Record<string, { Icon: IconType; title: string; colors?: string; shape?: string; iconClassName?: string }> = {
+    claude: {
+        Icon: ClaudeIcon,
+        title: 'Claude',
+        colors: 'bg-[#D97757] text-white shadow-[0_1px_2px_rgba(0,0,0,0.16)]',
+        shape: 'rounded-[22%] p-[12.5%]'
+    },
+    codex: { Icon: OpenAIIcon, title: 'Codex' },
     cursor: { Icon: CursorIcon, title: 'Cursor', colors: 'text-[var(--app-fg)]' },
     gemini: { Icon: GeminiCliIcon, title: 'Gemini CLI' },
     kimi: { Icon: KimiIcon, title: 'Kimi' },
@@ -38,9 +43,9 @@ export function AgentFlavorIcon({ flavor, className }: { flavor?: string | null;
             <span
                 aria-hidden="true"
                 title={icon.title}
-                className={`inline-flex items-center justify-center overflow-hidden rounded-sm ${icon.colors ?? ''} ${className ?? 'h-4 w-4'}`}
+                className={`inline-flex items-center justify-center overflow-hidden ${icon.shape ?? 'rounded-sm'} ${icon.colors ?? ''} ${className ?? 'h-4 w-4'}`}
             >
-                <Icon className="h-full w-full" focusable="false" size="100%" />
+                <Icon className={icon.iconClassName ?? 'h-full w-full'} focusable="false" size="100%" />
             </span>
         )
     }
@@ -53,6 +58,30 @@ export function AgentFlavorIcon({ flavor, className }: { flavor?: string | null;
             className={`inline-flex items-center justify-center rounded-sm text-[8px] font-semibold leading-none ${badge.colors} ${className ?? 'h-4 w-4'}`}
         >
             {badge.label}
+        </span>
+    )
+}
+
+export function AgentFlavorStatusIcon({
+    flavor,
+    className,
+    statusClassName,
+    showStatus
+}: {
+    flavor?: string | null
+    className?: string
+    statusClassName?: string
+    showStatus?: boolean
+}) {
+    return (
+        <span className={`relative inline-flex shrink-0 items-center justify-center ${className ?? 'h-5 w-5'}`}>
+            <AgentFlavorIcon flavor={flavor} className="h-full w-full" />
+            {showStatus ? (
+                <span
+                    className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--app-bg)] ${statusClassName ?? 'bg-[#34C759]'}`}
+                    aria-hidden="true"
+                />
+            ) : null}
         </span>
     )
 }

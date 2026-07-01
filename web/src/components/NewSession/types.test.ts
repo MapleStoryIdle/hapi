@@ -1,6 +1,11 @@
 import { CLAUDE_MODEL_PRESETS, getClaudeModelLabel } from '@hapi/protocol'
 import { describe, expect, it } from 'vitest'
-import { CLAUDE_EFFORT_OPTIONS, MODEL_OPTIONS } from './types'
+import {
+    CLAUDE_EFFORT_OPTIONS,
+    CODEX_REASONING_EFFORT_OPTIONS,
+    MODEL_OPTIONS,
+    OPENCODE_REASONING_EFFORT_OPTIONS
+} from './types'
 
 describe('Claude model options', () => {
     it('derives options from shared Claude model presets', () => {
@@ -29,6 +34,28 @@ describe('Claude effort options', () => {
             { value: 'medium', label: 'Medium' },
             { value: 'high', label: 'High' },
             { value: 'xhigh', label: 'XHigh' },
+            { value: 'max', label: 'Max' },
+        ])
+    })
+})
+
+describe('reasoning effort options', () => {
+    it('does not offer max for Codex new sessions', () => {
+        expect(CODEX_REASONING_EFFORT_OPTIONS).toEqual([
+            { value: 'default', label: 'Default' },
+            { value: 'low', label: 'Low' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'high', label: 'High' },
+            { value: 'xhigh', label: 'XHigh' },
+        ])
+    })
+
+    it('keeps max isolated to OpenCode new sessions', () => {
+        expect(OPENCODE_REASONING_EFFORT_OPTIONS).toEqual([
+            { value: 'default', label: 'Default' },
+            { value: 'low', label: 'Low' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'high', label: 'High' },
             { value: 'max', label: 'Max' },
         ])
     })
