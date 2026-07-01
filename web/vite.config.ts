@@ -136,7 +136,18 @@ export default defineConfig({
                 }
             },
             injectManifest: {
-                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
+                globPatterns: [
+                    'index.html',
+                    '404.html',
+                    'manifest.webmanifest',
+                    'favicon.ico',
+                    'apple-touch-icon-180x180.png',
+                    'mask-icon.svg',
+                    'pwa-64x64.png',
+                    'pwa-192x192.png',
+                    'assets/index-*.js',
+                    'assets/index-*.css'
+                ]
             },
             devOptions: {
                 enabled: true,
