@@ -9,7 +9,30 @@ function getBadge(container: HTMLElement): HTMLElement {
 }
 
 describe('AgentFlavorIcon', () => {
-    it('renders the "Pi" label and purple background for the pi flavor', () => {
+    it('renders official SVG icons for flavors present in @lobehub/icons', () => {
+        // These flavors have official icon components in @lobehub/icons; the
+        // UI should no longer render the old two-letter text badge for them.
+        const cases: Array<{ flavor: string; title: string; oldLabel: string }> = [
+            { flavor: 'claude', title: 'Claude Code', oldLabel: 'Cl' },
+            { flavor: 'codex', title: 'Codex', oldLabel: 'Cx' },
+            { flavor: 'cursor', title: 'Cursor', oldLabel: 'Cu' },
+            { flavor: 'gemini', title: 'Gemini CLI', oldLabel: 'Gm' },
+            { flavor: 'kimi', title: 'Kimi', oldLabel: 'Km' },
+            { flavor: 'opencode', title: 'OpenCode', oldLabel: 'Op' },
+        ]
+
+        for (const { flavor, title, oldLabel } of cases) {
+            const { container } = render(<AgentFlavorIcon flavor={flavor} />)
+            const badge = getBadge(container)
+            expect(badge.querySelector('svg')).toBeTruthy()
+            expect(badge.title).toBe(title)
+            expect(badge.textContent).not.toBe(oldLabel)
+        }
+    })
+
+    it('renders the "Pi" text fallback and purple background for the pi flavor', () => {
+        // Pi has no dedicated official icon in the installed icon catalog, so it
+        // intentionally keeps the branded fallback badge.
         const { container } = render(<AgentFlavorIcon flavor="pi" />)
         const badge = getBadge(container)
         expect(badge.textContent).toBe('Pi')
@@ -17,24 +40,6 @@ describe('AgentFlavorIcon', () => {
         // the test should fail and force an intentional design update.
         expect(badge.className).toContain('bg-[#5b21b6]')
         expect(badge.className).toContain('text-white')
-    })
-
-    it('matches the exact class contract for all known flavors (regression)', () => {
-        const cases: Array<{ flavor: string; label: string; bg: string }> = [
-            { flavor: 'claude', label: 'Cl', bg: 'bg-[#d97706]' },
-            { flavor: 'codex', label: 'Cx', bg: 'bg-[#111827]' },
-            { flavor: 'cursor', label: 'Cu', bg: 'bg-[#0f766e]' },
-            { flavor: 'gemini', label: 'Gm', bg: 'bg-[#2563eb]' },
-            { flavor: 'kimi', label: 'Km', bg: 'bg-[#7c3aed]' },
-            { flavor: 'pi', label: 'Pi', bg: 'bg-[#5b21b6]' },
-            { flavor: 'opencode', label: 'Op', bg: 'bg-[#15803d]' },
-        ]
-        for (const { flavor, label, bg } of cases) {
-            const { container } = render(<AgentFlavorIcon flavor={flavor} />)
-            const badge = getBadge(container)
-            expect(badge.textContent).toBe(label)
-            expect(badge.className).toContain(bg)
-        }
     })
 
     it('renders the "Un" badge with secondary-bg colors for null flavor', () => {
@@ -62,11 +67,13 @@ describe('AgentFlavorIcon', () => {
     })
 
     it('normalizes flavor case and whitespace', () => {
-        // The component lowercases + trims internally so 'PI ', 'Pi', '  pi'
-        // all resolve to the Pi badge.
-        for (const flavor of ['PI', 'Pi', '  pi  ', 'PI ']) {
+        // The component lowercases + trims internally so casing and surrounding
+        // whitespace do not change the resolved flavor.
+        for (const flavor of ['CODEX', 'Codex', '  codex  ', 'CODEX ']) {
             const { container } = render(<AgentFlavorIcon flavor={flavor} />)
-            expect(getBadge(container).textContent).toBe('Pi')
+            const badge = getBadge(container)
+            expect(badge.querySelector('svg')).toBeTruthy()
+            expect(badge.title).toBe('Codex')
         }
     })
 
