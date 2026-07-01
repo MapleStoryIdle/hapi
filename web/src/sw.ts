@@ -32,6 +32,21 @@ type PushPayload = {
 precacheAndRoute(self.__WB_MANIFEST)
 
 registerRoute(
+    ({ request, sameOrigin, url }) => sameOrigin
+        && url.pathname.includes('/assets/')
+        && ['script', 'style', 'font', 'image'].includes(request.destination),
+    new CacheFirst({
+        cacheName: 'static-assets',
+        plugins: [
+            new ExpirationPlugin({
+                maxEntries: 80,
+                maxAgeSeconds: 60 * 60 * 24 * 30
+            })
+        ]
+    })
+)
+
+registerRoute(
     ({ url }) => url.pathname === '/api/sessions',
     new NetworkFirst({
         cacheName: 'api-sessions',
