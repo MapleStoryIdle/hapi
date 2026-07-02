@@ -125,16 +125,17 @@ export function ScrollToBottomButton(props: {
     const label = hasNewMessages ? newMessageLabel : t('misc.backToBottom')
     const bottomOffsetPx = (props.bottomInset ?? 0) + (props.bottomAccessoryVisible ? 8 : 0)
     const bottomOffset = `${bottomOffsetPx}px`
+    const rightOffset = 'max(1rem, calc((100% - var(--content-max-w, 960px)) / 2 + 0.75rem))'
     const contentClass = hasNewMessages
-        ? 'inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--app-button)] px-3.5 text-sm font-medium text-[var(--app-button-text)] shadow-lg animate-bounce-in'
-        : 'flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_10px_30px_rgba(15,23,42,0.16)] animate-bounce-in'
+        ? 'inline-flex h-8 items-center gap-1 rounded-full border border-white/25 bg-[color-mix(in_srgb,var(--app-button)_82%,transparent)] px-3 text-xs font-medium text-[var(--app-button-text)] shadow-[0_8px_22px_rgba(15,23,42,0.14)] backdrop-blur-md animate-bounce-in'
+        : 'flex h-8 w-8 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-border)_72%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_78%,transparent)] text-[var(--app-fg)] shadow-[0_8px_22px_rgba(15,23,42,0.14)] backdrop-blur-md animate-bounce-in'
 
     return (
         <button
             type="button"
             onClick={props.onClick}
-            style={{ bottom: bottomOffset }}
-            className="absolute left-1/2 z-10 -translate-x-1/2 bg-transparent p-0 transition-[bottom] duration-150 ease-out"
+            style={{ bottom: bottomOffset, right: rightOffset }}
+            className="absolute z-10 bg-transparent p-0 opacity-90 transition-[bottom,opacity] duration-150 ease-out hover:opacity-100"
             aria-label={label}
             title={label}
         >
@@ -142,10 +143,10 @@ export function ScrollToBottomButton(props: {
                 {hasNewMessages ? (
                     <>
                         {newMessageLabel}
-                        <ArrowDownIcon className="h-3.5 w-3.5" />
+                        <ArrowDownIcon className="h-3 w-3" />
                     </>
                 ) : (
-                    <ArrowDownIcon className="h-5 w-5" />
+                    <ArrowDownIcon className="h-4 w-4" />
                 )}
             </span>
         </button>
@@ -304,6 +305,7 @@ export function HappyThread(props: {
     outlineItems: readonly ConversationOutlineItem[]
     topInset?: number
     bottomInset?: number
+    scrollButtonBottomInset?: number
     bottomAccessoryVisible?: boolean
     bottomAccessoryExpanded?: boolean
     scrollButtonPositionReady?: boolean
@@ -818,8 +820,8 @@ export function HappyThread(props: {
                             bottomAccessoryVisible: props.bottomAccessoryVisible,
                             pendingCount: props.pendingCount
                         })}
-                        bottomInset={props.bottomInset}
-                        bottomAccessoryVisible={props.bottomAccessoryVisible}
+                        bottomInset={props.scrollButtonBottomInset ?? props.bottomInset}
+                        bottomAccessoryVisible={props.scrollButtonBottomInset === undefined ? props.bottomAccessoryVisible : false}
                         onClick={scrollToBottom}
                     />
                 ) : null}

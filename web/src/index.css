@@ -187,7 +187,7 @@
     --app-md-table-head-bg: #353b43;
     --app-reasoning-bg: #2b3036;
     --app-composer-expanded-border: rgba(96, 165, 250, 0.28);
-    --app-composer-expanded-bg: linear-gradient(180deg, rgba(59, 130, 246, 0.14) 0%, var(--app-bg) 72%);
+    --app-composer-expanded-bg: linear-gradient(180deg, color-mix(in srgb, var(--app-bg) 86%, #3B82F6) 0%, var(--app-bg) 72%);
     --app-composer-expanded-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
     --app-mermaid-node-fill: #323843;
     --app-mermaid-node-border: #7aa2ff;
@@ -268,7 +268,7 @@
     --app-md-table-head-bg: #161618;
     --app-reasoning-bg: #0e0e10;
     --app-composer-expanded-border: rgba(78, 161, 255, 0.32);
-    --app-composer-expanded-bg: linear-gradient(180deg, rgba(78, 161, 255, 0.1) 0%, var(--app-bg) 72%);
+    --app-composer-expanded-bg: linear-gradient(180deg, color-mix(in srgb, var(--app-bg) 90%, #4EA1FF) 0%, var(--app-bg) 72%);
     --app-composer-expanded-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
     --app-mermaid-node-fill: #16181d;
     --app-mermaid-node-border: #4ea1ff;

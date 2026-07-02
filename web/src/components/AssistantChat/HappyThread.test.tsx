@@ -96,6 +96,7 @@ describe('ScrollToBottomButton', () => {
         )
 
         expect(container.querySelector('button')?.style.bottom).toBe('0px')
+        expect(container.querySelector('button')?.style.right).toContain('var(--content-max-w')
         expect(container.querySelector('button')?.className).not.toContain('animate-bounce-in')
         expect(container.querySelector('button span')?.className).toContain('animate-bounce-in')
     })

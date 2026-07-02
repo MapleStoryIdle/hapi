@@ -84,7 +84,6 @@ const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSessio
 
 const RUN_SETTLE_DELAY_MS = 1500
 const RUN_ACTIVITY_KEY_LOOKBACK = 12
-const FLOATING_HEADER_INSET_PX = 64
 
 /**
  * Returns whether a PendingSchedule should trigger an auto-clear timer.
@@ -564,10 +563,15 @@ function SessionChatInner(props: SessionChatProps) {
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
     const bottomOverlayRef = useRef<HTMLDivElement | null>(null)
+    const composerOverlayRef = useRef<HTMLDivElement | null>(null)
     const [bottomOverlayHeight, setBottomOverlayHeight] = useState(0)
+    const [composerOverlayHeight, setComposerOverlayHeight] = useState(0)
     const [bottomAccessoryExpanded, setBottomAccessoryExpanded] = useState(false)
     const [clearedPlanSourceBlockId, setClearedPlanSourceBlockId] = useState<string | null>(null)
     const scrollButtonPositionReady = bottomOverlayHeight > 0 && !(gitSessionId && gitStatusLoading)
+    const scrollButtonBottomInset = composerOverlayHeight > 0
+        ? composerOverlayHeight + 4
+        : bottomOverlayHeight
     const lastGitRefreshUpdatedAtRef = useRef(props.session.updatedAt)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
@@ -1286,12 +1290,16 @@ function SessionChatInner(props: SessionChatProps) {
     }, [bottomAccessoryVisible])
 
     useLayoutEffect(() => {
-        const node = bottomOverlayRef.current
-        if (!node) return
+        const bottomNode = bottomOverlayRef.current
+        const composerNode = composerOverlayRef.current
+        if (!bottomNode) return
 
         const measure = () => {
-            const height = Math.ceil(node.getBoundingClientRect().height)
-            setBottomOverlayHeight((current) => current === height ? current : height)
+            const bottomHeight = Math.ceil(bottomNode.getBoundingClientRect().height)
+            setBottomOverlayHeight((current) => current === bottomHeight ? current : bottomHeight)
+
+            const composerHeight = Math.ceil(composerNode?.getBoundingClientRect().height ?? 0)
+            setComposerOverlayHeight((current) => current === composerHeight ? current : composerHeight)
         }
 
         measure()
@@ -1301,7 +1309,10 @@ function SessionChatInner(props: SessionChatProps) {
         }
 
         const observer = new ResizeObserver(measure)
-        observer.observe(node)
+        observer.observe(bottomNode)
+        if (composerNode) {
+            observer.observe(composerNode)
+        }
         window.addEventListener('resize', measure)
         return () => {
             observer.disconnect()
@@ -1469,8 +1480,8 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineOpen={outlineOpen}
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
-                        topInset={FLOATING_HEADER_INSET_PX}
                         bottomInset={bottomOverlayHeight}
+                        scrollButtonBottomInset={scrollButtonBottomInset}
                         bottomAccessoryVisible={bottomAccessoryVisible}
                         bottomAccessoryExpanded={bottomAccessoryExpanded}
                         scrollButtonPositionReady={scrollButtonPositionReady}
@@ -1541,7 +1552,7 @@ function SessionChatInner(props: SessionChatProps) {
                             )}
                         </div>
 
-                        <div className="pointer-events-auto">
+                        <div ref={composerOverlayRef} className="pointer-events-auto">
                             <HappyComposer
                                 key={`composer-${props.session.id}`}
                                 sessionId={props.session.id}

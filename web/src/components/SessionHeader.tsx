@@ -344,16 +344,18 @@ export function SessionHeader(props: {
         return null
     }
 
+    const headerShellClass = props.floating
+        ? 'relative z-20 shrink-0 border-b border-[color-mix(in_srgb,var(--app-border)_72%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_84%,transparent)] pt-[env(safe-area-inset-top)] shadow-[0_10px_32px_rgba(15,23,42,0.08)] backdrop-blur-xl'
+        : 'bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]'
+    const headerSurfaceClass = props.floating
+        ? 'border-[color-mix(in_srgb,var(--app-border)_82%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_74%,transparent)] shadow-[0_8px_24px_rgba(15,23,42,0.12)] backdrop-blur-xl'
+        : 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+
     return (
         <>
-            <div
-                className={props.floating
-                    ? 'pointer-events-none absolute inset-x-0 top-0 z-20 bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]'
-                    : 'bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]'
-                }
-            >
+            <div className={headerShellClass}>
                 <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3">
-                    <div className={`${props.floating ? 'pointer-events-auto' : ''} flex min-w-0 items-center gap-2 rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] px-1.5 py-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]`}>
+                    <div className={`${props.floating ? 'pointer-events-auto' : ''} flex min-w-0 items-center gap-2 rounded-[20px] border px-1.5 py-1.5 ${headerSurfaceClass}`}>
                         {/* Back button */}
                         <button
                             type="button"
@@ -403,7 +405,7 @@ export function SessionHeader(props: {
                             aria-haspopup="menu"
                             aria-expanded={menuOpen}
                             aria-controls={menuOpen ? menuId : undefined}
-                            className="pointer-events-auto flex h-12 w-10 items-center justify-center rounded-[18px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-hint)] shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)]"
+                            className={`pointer-events-auto flex h-12 w-10 items-center justify-center rounded-[18px] border text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] ${headerSurfaceClass}`}
                             title={t('session.more')}
                         >
                             <MoreVerticalIcon />
