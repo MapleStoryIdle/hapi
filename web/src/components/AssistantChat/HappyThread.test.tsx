@@ -10,6 +10,7 @@ import {
     locateOutlineTargetMessage,
     restoreScrollAnchor,
     shouldCancelInitialScrollSettling,
+    shouldHideScrollToBottomButton,
 } from '@/components/AssistantChat/HappyThread'
 import type { ConversationOutlineItem } from '@/chat/outline'
 
@@ -123,6 +124,40 @@ describe('ScrollToBottomButton', () => {
         )
 
         expect(container.textContent).toBe('')
+    })
+
+    it('can be suppressed while a bottom accessory popover is open', () => {
+        const { container } = render(
+            <I18nProvider>
+                <ScrollToBottomButton count={3} visible={true} hidden={true} onClick={vi.fn()} />
+            </I18nProvider>
+        )
+
+        expect(container.textContent).toBe('')
+    })
+})
+
+describe('shouldHideScrollToBottomButton', () => {
+    it('keeps the plain back-to-bottom button visible while a bottom accessory is only collapsed', () => {
+        expect(shouldHideScrollToBottomButton({
+            bottomAccessoryVisible: true,
+            pendingCount: 0
+        })).toBe(false)
+    })
+
+    it('keeps the new-message button visible even with a bottom accessory', () => {
+        expect(shouldHideScrollToBottomButton({
+            bottomAccessoryVisible: true,
+            pendingCount: 2
+        })).toBe(false)
+    })
+
+    it('hides the button while a bottom accessory popover is expanded', () => {
+        expect(shouldHideScrollToBottomButton({
+            bottomAccessoryExpanded: true,
+            bottomAccessoryVisible: true,
+            pendingCount: 2
+        })).toBe(true)
     })
 })
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -14,12 +14,9 @@ import {
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import { App } from '@/App'
-import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { NewSession } from '@/components/NewSession'
-import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { LoadingState } from '@/components/LoadingState'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
@@ -32,7 +29,6 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
 import { useSendMessage, type SendErrorInfo } from '@/hooks/mutations/useSendMessage'
-import type { ComposerSendError } from '@/components/AssistantChat/HappyComposer'
 import { ApiError } from '@/api/client'
 import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
@@ -43,14 +39,30 @@ import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
-import FilesPage from '@/routes/sessions/files'
-import FilePage from '@/routes/sessions/file'
-import TerminalPage from '@/routes/sessions/terminal'
-import SettingsPage from '@/routes/settings'
-import SharePage from '@/routes/share'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
-import RemoteServersPage from '@/components/RemoteServers'
+
+const SessionChat = lazy(() => import('@/components/SessionChat').then((module) => ({ default: module.SessionChat })))
+const NewSession = lazy(() => import('@/components/NewSession').then((module) => ({ default: module.NewSession })))
+const WorkspaceBrowser = lazy(() => import('@/components/WorkspaceBrowser').then((module) => ({ default: module.WorkspaceBrowser })))
+const FilesPage = lazy(() => import('@/routes/sessions/files'))
+const FilePage = lazy(() => import('@/routes/sessions/file'))
+const TerminalPage = lazy(() => import('@/routes/sessions/terminal'))
+const SettingsPage = lazy(() => import('@/routes/settings'))
+const SharePage = lazy(() => import('@/routes/share'))
+const RemoteServersPage = lazy(() => import('@/components/RemoteServers'))
+
+type ComposerSendError = {
+    id: number
+    text: string
+    message: string
+    scheduledAt: number | null
+    action?: {
+        label: string
+        onClick: () => void
+        pending?: boolean
+    } | null
+}
 
 function BackIcon(props: { className?: string }) {
     return (

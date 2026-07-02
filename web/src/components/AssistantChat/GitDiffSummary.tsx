@@ -3,7 +3,6 @@ import type { GitFileStatus, GitStatusFiles } from '@/types/api'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
-import { ArrowDownIcon } from '@/components/icons'
 
 type DiffFileRow = {
     path: string
@@ -102,12 +101,17 @@ function formatPath(path: string, fileName: string): string {
 export function GitDiffSummary(props: {
     status: GitStatusFiles | null
     onViewDiff: () => void
+    onExpandedChange?: (expanded: boolean) => void
 }) {
     const { t } = useTranslation()
     const [expanded, setExpanded] = useState(false)
     const rootRef = useRef<HTMLDivElement>(null)
     const { copied, copy } = useCopyToClipboard()
     const summary = useMemo(() => summarizeGitStatusFiles(props.status), [props.status])
+
+    useEffect(() => {
+        props.onExpandedChange?.(expanded)
+    }, [expanded, props.onExpandedChange])
 
     useEffect(() => {
         if (!expanded) return
@@ -142,7 +146,7 @@ export function GitDiffSummary(props: {
         <div ref={rootRef} className="relative mx-auto mb-3 flex w-full max-w-content justify-center px-3">
             {expanded ? (
                 <div
-                    className="absolute bottom-14 left-6 right-6 z-20 max-h-64 origin-bottom overflow-visible rounded-[22px] border border-[var(--app-border)] bg-[var(--app-code-bg)] shadow-[0_18px_45px_rgba(15,23,42,0.16)] animate-diff-pop"
+                    className="absolute bottom-14 left-6 right-6 z-20 max-h-64 origin-bottom overflow-hidden rounded-[22px] border border-[var(--app-border)] bg-[var(--app-code-bg)] shadow-[0_18px_45px_rgba(15,23,42,0.16)] animate-diff-pop"
                     role="dialog"
                     aria-label={t('gitDiff.summary.title')}
                 >
@@ -207,15 +211,6 @@ export function GitDiffSummary(props: {
                             {t('gitDiff.summary.viewDiff')}
                         </button>
                     </div>
-                    <button
-                        type="button"
-                        className="absolute -bottom-5 left-1/2 flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_10px_30px_rgba(15,23,42,0.18)]"
-                        aria-label={t('gitDiff.summary.collapse')}
-                        title={t('gitDiff.summary.collapse')}
-                        onClick={() => setExpanded(false)}
-                    >
-                        <ArrowDownIcon className="h-5 w-5" />
-                    </button>
                 </div>
             ) : null}
 

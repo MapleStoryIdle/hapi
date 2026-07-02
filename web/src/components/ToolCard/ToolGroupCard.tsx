@@ -8,6 +8,9 @@ import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { CliOutputBlock } from '@/components/CliOutputBlock'
+import { getEventPresentation } from '@/chat/presentation'
+import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { usePointerFocusRing } from '@/hooks/usePointerFocusRing'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
@@ -78,9 +81,87 @@ export function formatToolGroupCompactTitle(
     t: (key: string, params?: Record<string, string | number>) => string
 ): string {
     const compactDuration = formatCompactDuration(getToolGroupDurationMs(block, now))
+    const singleTool = !block.forceGenericCompactTitle && block.tools.length === 1 ? block.tools[0] : null
+    if (singleTool) {
+        const status = isToolGroupActive(block) ? 'processing' : 'processed'
+        const kind = getToolGroupActionKind(singleTool)
+        if (kind !== 'other') {
+            return t(`toolGroup.compact.single.${status}.${kind}`, { duration: compactDuration })
+        }
+    }
+
     return isToolGroupActive(block)
         ? t('toolGroup.compact.processing', { duration: compactDuration })
         : t('toolGroup.compact.processed', { duration: compactDuration })
+}
+
+function CompactDetailBlock(props: { block: Exclude<NonNullable<ToolGroupBlock['detailBlocks']>[number], ToolCallBlock> }) {
+    const block = props.block
+
+    if (block.kind === 'agent-text') {
+        return (
+            <div className="min-w-0 whitespace-pre-wrap rounded-md bg-[var(--app-subtle-bg)] px-2 py-1.5 text-sm leading-6 text-[var(--app-fg)]">
+                {block.text}
+            </div>
+        )
+    }
+
+    if (block.kind === 'agent-reasoning') {
+        return (
+            <div className="min-w-0 whitespace-pre-wrap rounded-md bg-[var(--app-subtle-bg)] px-2 py-1.5 text-sm leading-6 text-[var(--app-hint)]">
+                {block.text}
+            </div>
+        )
+    }
+
+    if (block.kind === 'cli-output') {
+        return <CliOutputBlock text={block.text} />
+    }
+
+    if (block.kind === 'agent-event') {
+        const presentation = getEventPresentation(block.event)
+        return (
+            <div className="text-sm text-[var(--app-hint)]">
+                {presentation.text}
+            </div>
+        )
+    }
+
+    if (block.kind === 'codex-review') {
+        return null
+    }
+
+    if (block.kind === 'generated-image') {
+        return null
+    }
+
+    return null
+}
+
+function CompactDetailItem(props: {
+    block: NonNullable<ToolGroupBlock['detailBlocks']>[number]
+    metadata: SessionMetadataSummary | null
+    onSelectTool: (toolId: string) => void
+}) {
+    const block = props.block
+
+    if (block.kind === 'tool-call') {
+        return (
+            <button
+                type="button"
+                className="flex min-w-0 items-center gap-2 rounded-md px-0 py-0.5 text-left transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                onClick={() => props.onSelectTool(block.id)}
+            >
+                <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center', toolStatusColorClass(block.tool.state))}>
+                    <ToolStatusIcon state={block.tool.state} />
+                </span>
+                <CompactRowLabel block={block} metadata={props.metadata} />
+                <RowStatusBadge block={block} />
+            </button>
+        )
+    }
+
+    return <CompactDetailBlock block={block} />
 }
 
 function SummaryBadge(props: { className: string; text: string }) {
@@ -393,7 +474,7 @@ export function ToolGroupCard(props: {
                         type="button"
                         onClick={toggleOpen}
                         className={cn(
-                            'flex w-full items-center gap-1.5 text-left text-sm font-medium text-[var(--app-hint)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                            'flex w-full items-center gap-1.5 text-left text-base font-medium leading-6 text-[var(--app-hint)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                             suppressFocusRing && 'focus-visible:ring-0'
                         )}
                         onPointerDown={onTriggerPointerDown}
@@ -401,6 +482,9 @@ export function ToolGroupCard(props: {
                         onBlur={onTriggerBlur}
                         aria-expanded={displayedOpen}
                     >
+                        {props.block.showAgentIcon ? (
+                            <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-[1em] w-[1em] shrink-0 text-[var(--app-hint)]" />
+                        ) : null}
                         <span>{compactTitle}</span>
                         <span className="shrink-0 text-[var(--app-hint)]">
                             <DetailsIcon open={displayedOpen} />
@@ -410,20 +494,31 @@ export function ToolGroupCard(props: {
 
                 {displayedOpen ? (
                     <div className={cn('flex flex-col gap-2', useExternalCompactHeader ? 'mt-1' : 'mt-3')}>
-                        {props.block.tools.map((tool) => (
-                            <button
-                                key={tool.id}
-                                type="button"
-                                className="flex min-w-0 items-center gap-2 rounded-md px-0 py-0.5 text-left transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                onClick={() => setSelectedToolId(tool.id)}
-                            >
-                                <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center', toolStatusColorClass(tool.tool.state))}>
-                                    <ToolStatusIcon state={tool.tool.state} />
-                                </span>
-                                <CompactRowLabel block={tool} metadata={props.metadata} />
-                                <RowStatusBadge block={tool} />
-                            </button>
-                        ))}
+                        {props.block.detailBlocks && props.block.detailBlocks.length > 0 ? (
+                            props.block.detailBlocks.map((block, index) => (
+                                <CompactDetailItem
+                                    key={`detail:${block.kind}:${block.id}:${index}`}
+                                    block={block}
+                                    metadata={props.metadata}
+                                    onSelectTool={setSelectedToolId}
+                                />
+                            ))
+                        ) : (
+                            props.block.tools.map((tool) => (
+                                <button
+                                    key={tool.id}
+                                    type="button"
+                                    className="flex min-w-0 items-center gap-2 rounded-md px-0 py-0.5 text-left transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                    onClick={() => setSelectedToolId(tool.id)}
+                                >
+                                    <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center', toolStatusColorClass(tool.tool.state))}>
+                                        <ToolStatusIcon state={tool.tool.state} />
+                                    </span>
+                                    <CompactRowLabel block={tool} metadata={props.metadata} />
+                                    <RowStatusBadge block={tool} />
+                                </button>
+                            ))
+                        )}
 
                         {isHydratingHistory ? (
                             <div className="text-xs text-[var(--app-hint)]">

@@ -227,6 +227,181 @@ describe('ToolGroupCard', () => {
         expect(screen.getByText('bun run build')).toBeInTheDocument()
     })
 
+    it('uses action-specific compact titles for single tool groups', () => {
+        const tools = [
+            makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+                createdAt: 0,
+                startedAt: 0,
+                completedAt: 2_000,
+            }),
+        ]
+        const view = renderCard(makeGroup({
+            tools,
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        expect(within(view.container).getByRole('button', { name: /ran 2s/i })).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByText('Processed 2s')).not.toBeInTheDocument()
+    })
+
+    it('uses action-specific processing titles for active single tool groups', () => {
+        const startedAt = Date.now() - 8_000
+        const tools = [
+            makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+                state: 'running',
+                createdAt: startedAt,
+                startedAt,
+                completedAt: null,
+            }),
+        ]
+        const view = renderCard(makeGroup({
+            tools,
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 1,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        expect(within(view.container).getByRole('button', { name: /running \d+s/i })).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
+    })
+
+    it('uses a generic compact title and renders detail blocks for result detail groups', () => {
+        const tools = [
+            makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+                createdAt: 0,
+                startedAt: 0,
+                completedAt: 2_000,
+            }),
+        ]
+        const view = renderCard(makeGroup({
+            tools,
+            forceGenericCompactTitle: true,
+            detailBlocks: [{
+                kind: 'agent-text',
+                id: 'detail-1',
+                localId: null,
+                createdAt: 1,
+                text: 'Collected process notes',
+            }],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        const toggle = within(view.container).getByRole('button', { name: /processed 2s/i })
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByText('Ran 2s')).not.toBeInTheDocument()
+
+        fireEvent.click(toggle)
+
+        expect(screen.getByText('Collected process notes')).toBeInTheDocument()
+    })
+
+    it('renders result detail blocks in chronological order', () => {
+        const tool = makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+            createdAt: 2,
+            startedAt: 2,
+            completedAt: 3_000,
+        })
+        const view = renderCard(makeGroup({
+            tools: [tool],
+            forceGenericCompactTitle: true,
+            detailBlocks: [
+                {
+                    kind: 'agent-text',
+                    id: 'detail-1',
+                    localId: null,
+                    createdAt: 1,
+                    text: 'First process note',
+                },
+                tool,
+                {
+                    kind: 'agent-text',
+                    id: 'detail-2',
+                    localId: null,
+                    createdAt: 4,
+                    text: 'Second process note',
+                }
+            ],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        fireEvent.click(within(view.container).getByRole('button', { name: /processed 2s/i }))
+
+        const text = view.container.textContent ?? ''
+        expect(text.indexOf('First process note')).toBeGreaterThanOrEqual(0)
+        expect(text.indexOf('Ran')).toBeGreaterThan(text.indexOf('First process note'))
+        expect(text.indexOf('Second process note')).toBeGreaterThan(text.indexOf('Ran'))
+    })
+
     it('keeps compact groups expanded while tools are still active', () => {
         const startedAt = Date.now() - 8_000
         const tools = [

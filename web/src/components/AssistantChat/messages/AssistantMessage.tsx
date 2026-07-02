@@ -123,7 +123,9 @@ function AssistantToolGroupMetaBar(props: {
             aria-expanded={props.expanded}
             className="mb-1 flex w-full items-center gap-1.5 text-left text-base font-medium leading-6 text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
         >
-            <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-[1em] w-[1em] shrink-0 text-[var(--app-hint)]" />
+            {props.block.showAgentIcon ? (
+                <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-[1em] w-[1em] shrink-0 text-[var(--app-hint)]" />
+            ) : null}
             <span>{label}</span>
             <span
                 aria-hidden="true"

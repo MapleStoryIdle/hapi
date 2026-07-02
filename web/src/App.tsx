@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Outlet, useLocation, useMatchRoute, useRouter } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { getTelegramWebApp, isTelegramApp } from '@/hooks/useTelegram'
@@ -447,7 +447,13 @@ function AppInner() {
                 <VoiceErrorBanner />
                 <OfflineBanner />
                 <div className="h-full min-h-0 flex flex-col">
-                    <Outlet />
+                    <Suspense fallback={
+                        <div className="flex flex-1 items-center justify-center p-4">
+                            <LoadingState label={t('loading.session')} className="text-sm" />
+                        </div>
+                    }>
+                        <Outlet />
+                    </Suspense>
                 </div>
                 <ToastContainer />
                 <InstallPrompt />

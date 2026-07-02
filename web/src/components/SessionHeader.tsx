@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { CodexSubscriptionLimits, CodexSubscriptionLimitWindow, Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -83,6 +83,22 @@ function formatLimitWindow(window: CodexSubscriptionLimitWindow | null): string 
     return `${formatLimitDuration(window)} ${Math.round(100 - clampPercent(window.usedPercent))}%`
 }
 
+function formatLimitUpdatedAt(updatedAt: number | null | undefined): string | null {
+    if (!updatedAt) {
+        return null
+    }
+    const timestamp = updatedAt > 1_000_000_000_000 ? updatedAt : updatedAt * 1000
+    const date = new Date(timestamp)
+    if (Number.isNaN(date.getTime())) {
+        return null
+    }
+    return date.toLocaleTimeString([], {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit'
+    })
+}
+
 function getRemainingPercent(window: CodexSubscriptionLimitWindow): number {
     return Math.round(100 - clampPercent(window.usedPercent))
 }
@@ -126,11 +142,27 @@ function formatResetAt(resetsAt: number | null): string | null {
     return date.toLocaleString()
 }
 
+function QuotaProgressBar(props: { remainingPercent: number | null }) {
+    const remaining = props.remainingPercent === null ? 0 : clampPercent(props.remainingPercent)
+    const fillStyle = {
+        clipPath: `inset(0 ${100 - remaining}% 0 0)`,
+        background: 'linear-gradient(90deg, #ef4444 0%, #ef4444 8%, #f97316 22%, #f97316 32%, #38bdf8 48%, #38bdf8 62%, #22c55e 78%, #22c55e 100%)'
+    } satisfies CSSProperties
+
+    return (
+        <div className="relative h-1.5 overflow-hidden rounded-full bg-[var(--app-border)]">
+            <div className="absolute inset-0" style={fillStyle} />
+        </div>
+    )
+}
+
 function CodexSubscriptionLimitsBadge(props: {
     limits: CodexSubscriptionLimits | null
     isFetching: boolean
     error: string | null
 }) {
+    const [open, setOpen] = useState(false)
+    const rootRef = useRef<HTMLDivElement | null>(null)
     const windows = getDisplayLimitWindows(props.limits)
     const text = windows.length > 0
         ? windows.map(formatLimitWindow).filter(Boolean).join(' · ')
@@ -138,11 +170,12 @@ function CodexSubscriptionLimitsBadge(props: {
     const rows = windows.length > 0
         ? windows.map((window) => ({
             label: formatLimitDuration(window),
-            remaining: getRemainingPercent(window)
+            remaining: getRemainingPercent(window),
+            resetAt: formatResetAt(window.resetsAt)
         }))
         : [
-            { label: '5h', remaining: null },
-            { label: '7d', remaining: null }
+            { label: '5h', remaining: null, resetAt: null },
+            { label: '7d', remaining: null, resetAt: null }
         ]
     const resetDetails = windows
         .map((window) => {
@@ -157,24 +190,86 @@ function CodexSubscriptionLimitsBadge(props: {
     const title = props.error
         ? `Codex limits unavailable: ${props.error}`
         : resetDetails || 'Codex subscription limits'
+    const updatedAt = formatLimitUpdatedAt(props.limits?.updatedAt)
+
+    useEffect(() => {
+        if (!open) return
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target as Node
+            if (rootRef.current?.contains(target)) return
+            setOpen(false)
+        }
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setOpen(false)
+            }
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown)
+        document.addEventListener('keydown', handleKeyDown)
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown)
+            document.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [open])
 
     return (
-        <div
-            className={[
-                'flex shrink-0 flex-col items-end justify-center px-2 py-0.5 text-[11px] font-medium leading-3 tabular-nums',
-                props.isFetching ? 'opacity-60' : ''
-            ].filter(Boolean).join(' ')}
-            title={title}
-            aria-label={`Codex subscription limits: ${text}`}
-        >
-            {rows.map((row) => (
-                <div key={row.label} className="flex items-center gap-1 text-[var(--app-hint)]">
-                    <span>{row.label}</span>
-                    <span className={getLimitPercentClass(row.remaining)}>
-                        {row.remaining === null ? '--' : `${row.remaining}%`}
+        <div ref={rootRef} className="relative shrink-0">
+            <button
+                type="button"
+                onClick={() => setOpen((value) => !value)}
+                className={[
+                    'flex h-9 w-[68px] flex-col justify-center gap-0.5 rounded-[13px] border border-[var(--app-border)] bg-transparent px-2 text-[11px] font-semibold leading-none tabular-nums text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                    props.isFetching ? 'opacity-60' : ''
+                ].filter(Boolean).join(' ')}
+                title={title}
+                aria-label={`Codex subscription limits: ${text}`}
+                aria-haspopup="dialog"
+                aria-expanded={open}
+            >
+                {rows.map((row) => (
+                    <span key={row.label} className="flex items-center justify-between gap-1">
+                        <span className="text-[var(--app-fg)]">{row.label}</span>
+                        <span className={getLimitPercentClass(row.remaining)}>
+                            {row.remaining === null ? '--' : `${row.remaining}%`}
+                        </span>
                     </span>
+                ))}
+            </button>
+
+            {open ? (
+                <div
+                    role="dialog"
+                    aria-label="Codex 额度"
+                    className="absolute right-0 top-full z-50 mt-2 w-[248px] rounded-[18px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+                >
+                    <div className="mb-2 flex items-center justify-between gap-3 px-0.5">
+                        <div className="text-sm font-semibold text-[var(--app-fg)]">Codex 额度</div>
+                        <div className="text-[11px] text-[var(--app-hint)]">
+                            {props.isFetching ? '更新中' : updatedAt ? `${updatedAt} 更新` : '已更新'}
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                        {rows.map((row) => (
+                            <div key={row.label} className="rounded-[13px] border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2.5">
+                                <div className="mb-2 flex items-baseline justify-between gap-3 tabular-nums">
+                                    <div className="text-sm font-semibold text-[var(--app-fg)]">{row.label} 额度</div>
+                                    <div className={['text-lg font-bold', getLimitPercentClass(row.remaining)].join(' ')}>
+                                        {row.remaining === null ? '--' : `${row.remaining}%`}
+                                    </div>
+                                </div>
+                                <QuotaProgressBar remainingPercent={row.remaining} />
+                                <div className="mt-2 truncate text-[11px] text-[var(--app-hint)]">
+                                    {row.resetAt ? `重置：${row.resetAt}` : '重置时间未知'}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
-            ))}
+            ) : null}
         </div>
     )
 }

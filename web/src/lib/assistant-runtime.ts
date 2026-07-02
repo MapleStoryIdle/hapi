@@ -108,14 +108,20 @@ type TurnSource = {
 // kinds map to a single source.
 function turnSourcesFromBlock(block: VisibleChatBlock): TurnSource[] {
     if (block.kind === 'tool-group') {
-        return block.tools.map((tool) => ({
-            localId: tool.localId,
-            invokedAt: tool.invokedAt ?? null,
-            durationMs: tool.durationMs,
-            model: tool.model ?? null,
-            usage: tool.usage,
-            createdAt: tool.createdAt
-        }))
+        const toolIds = new Set(block.tools.map((tool) => tool.id))
+        return [
+            ...block.tools.map((tool) => ({
+                localId: tool.localId,
+                invokedAt: tool.invokedAt ?? null,
+                durationMs: tool.durationMs,
+                model: tool.model ?? null,
+                usage: tool.usage,
+                createdAt: tool.createdAt
+            })),
+            ...(block.detailBlocks ?? [])
+                .filter((detailBlock) => detailBlock.kind !== 'tool-call' || !toolIds.has(detailBlock.id))
+                .flatMap(turnSourcesFromBlock)
+        ]
     }
     if (
         block.kind === 'agent-text'

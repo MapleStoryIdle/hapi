@@ -1,6 +1,5 @@
-import type { ToolGroupBlock } from '@/chat/toolGroups'
+import { getToolGroupActionKind, type ToolGroupBlock } from '@/chat/toolGroups'
 import type { ToolCallBlock } from '@/chat/types'
-import { getInputStringAny } from '@/lib/toolInputUtils'
 
 type Translator = (key: string, params?: Record<string, string | number>) => string
 
@@ -12,21 +11,6 @@ export type GroupedSummaryIntent =
     | 'open-web'
     | 'generic-command'
     | 'generic-tool'
-
-const FILE_INSPECTION_COMMAND_RE = /\b(get-childitem|ls|dir|get-content|cat|type|tree)\b/i
-const CONTENT_SEARCH_COMMAND_RE = /\b(rg|grep|select-string|findstr)\b/i
-
-function getCommandText(input: unknown): string | null {
-    const direct = getInputStringAny(input, ['command', 'cmd'])
-    if (direct) return direct
-
-    if (!input || typeof input !== 'object') return null
-    const command = (input as { command?: unknown }).command
-    if (!Array.isArray(command)) return null
-
-    const parts = command.filter((part): part is string => typeof part === 'string' && part.length > 0)
-    return parts.length > 0 ? parts.join(' ') : null
-}
 
 function getIntentLabel(intent: GroupedSummaryIntent, t: Translator): string {
     switch (intent) {
@@ -49,7 +33,6 @@ function getIntentLabel(intent: GroupedSummaryIntent, t: Translator): string {
 
 export function inferGroupedSummaryIntent(tool: ToolCallBlock): GroupedSummaryIntent {
     const toolName = tool.tool.name
-    const command = getCommandText(tool.tool.input)
 
     if (toolName === 'Read' || toolName === 'LS' || toolName === 'NotebookRead') {
         return 'inspect-files'
@@ -65,11 +48,15 @@ export function inferGroupedSummaryIntent(tool: ToolCallBlock): GroupedSummaryIn
     }
 
     if (toolName === 'Bash' || toolName === 'CodexBash' || toolName === 'shell_command') {
-        if (command && FILE_INSPECTION_COMMAND_RE.test(command)) {
+        const kind = getToolGroupActionKind(tool)
+        if (kind === 'read') {
             return 'inspect-files'
         }
-        if (command && CONTENT_SEARCH_COMMAND_RE.test(command)) {
+        if (kind === 'search') {
             return 'search-content'
+        }
+        if (kind === 'mutation') {
+            return 'modify-files'
         }
         return 'run-project-command'
     }

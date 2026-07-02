@@ -2,6 +2,7 @@ import type { ChatBlock, ToolCallBlock } from '@/chat/types'
 import { isSubagentToolName } from '@/chat/subagentTool'
 import { isAskUserQuestionToolName } from '@/components/ToolCard/askUserQuestion'
 import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInput'
+import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { getInputStringAny } from '@/lib/toolInputUtils'
 
 export type ToolGroupActionKind = 'read' | 'search' | 'command' | 'mutation' | 'web' | 'other'
@@ -31,6 +32,9 @@ export type ToolGroupBlock = {
     historyState: 'complete' | 'needs-older-history'
     needsOlderHistory: boolean
     summary: ToolGroupSummary
+    detailBlocks?: ChatBlock[]
+    showAgentIcon?: boolean
+    forceGenericCompactTitle?: boolean
 }
 
 export type VisibleChatBlock = ChatBlock | ToolGroupBlock
@@ -38,6 +42,7 @@ export type VisibleChatBlock = ChatBlock | ToolGroupBlock
 type ToolGroupingOptions = {
     hasMoreMessages: boolean
     previousGroups?: ToolGroupBlock[]
+    terminalToolDisplayMode?: TerminalToolDisplayMode
 }
 
 const PLAN_TOOL_NAMES = new Set([
@@ -85,12 +90,48 @@ function normalizeCommandInput(input: unknown): string | null {
     return parts.length > 0 ? parts.join(' ') : null
 }
 
+function parsedCodexCommandKind(input: unknown): ToolGroupActionKind | null {
+    if (!input || typeof input !== 'object') return null
+    const parsed = (input as { parsed_cmd?: unknown }).parsed_cmd
+    if (!Array.isArray(parsed)) return null
+
+    let sawRead = false
+    let sawWrite = false
+    for (const item of parsed) {
+        if (!item || typeof item !== 'object') continue
+        const type = (item as { type?: unknown }).type
+        if (type === 'write') sawWrite = true
+        if (type === 'read') sawRead = true
+    }
+
+    if (sawWrite) return 'mutation'
+    if (sawRead) return 'read'
+    return null
+}
+
+const SHELL_MUTATION_RE = /(?:^|[;&|]\s*)(?:apply_patch|rm|mv|cp|mkdir|touch|chmod|chown|install|tee|npm\s+install|npm\s+i|bun\s+add|pnpm\s+add|yarn\s+add)\b|(?:^|[^<])(?:>>|>\s*[^&])|\b(?:sed|perl)\b[^;&|]*\s-(?:[A-Za-z]*i[A-Za-z]*|[A-Za-z]*p[A-Za-z]*i[A-Za-z]*)\b/i
+const SHELL_SEARCH_RE = /(?:^|[;&|()]\s*|["'])(?:rg|grep|git\s+grep|fd|find|ag|ack|select-string|findstr)\b/i
+const SHELL_READ_RE = /(?:^|[;&|()]\s*|["'])(?:ls|dir|cat|type|get-content|tree|get-childitem|head|tail|less|more|pwd|wc|du|stat|file|which|where|jq|sed|awk|git\s+(?:diff|status|log|show|branch|rev-parse|ls-files|blame))\b/i
+
+function getShellCommandActionKind(input: unknown): ToolGroupActionKind {
+    const parsedKind = parsedCodexCommandKind(input)
+    if (parsedKind) return parsedKind
+
+    const command = normalizeCommandInput(input)
+    if (!command) return 'command'
+
+    if (SHELL_MUTATION_RE.test(command)) return 'mutation'
+    if (SHELL_SEARCH_RE.test(command)) return 'search'
+    if (SHELL_READ_RE.test(command)) return 'read'
+    return 'command'
+}
+
 export function getToolGroupActionKind(block: ToolCallBlock): ToolGroupActionKind {
     const name = block.tool.name
 
     if (name === 'Read' || name === 'NotebookRead') return 'read'
     if (name === 'Grep' || name === 'Glob' || name === 'LS') return 'search'
-    if (name === 'Bash' || name === 'CodexBash' || name === 'shell_command') return 'command'
+    if (name === 'Bash' || name === 'CodexBash' || name === 'shell_command') return getShellCommandActionKind(block.tool.input)
     if (name === 'Edit' || name === 'MultiEdit' || name === 'Write' || name === 'NotebookEdit' || name === 'CodexPatch' || name === 'CodexDiff') {
         return 'mutation'
     }
@@ -126,7 +167,7 @@ function getPrimaryOtherTarget(block: ToolCallBlock): string | null {
     return block.tool.name
 }
 
-function summarizeToolGroup(tools: ToolCallBlock[]): ToolGroupSummary {
+export function summarizeToolGroup(tools: ToolCallBlock[]): ToolGroupSummary {
     const countsByKind: Record<ToolGroupActionKind, number> = {
         read: 0,
         search: 0,
@@ -157,11 +198,11 @@ function summarizeToolGroup(tools: ToolCallBlock[]): ToolGroupSummary {
         }
 
         if (kind === 'read' || kind === 'mutation') {
-            pushUnique(fileTargets, getPrimaryFileTarget(tool))
+            pushUnique(fileTargets, getPrimaryFileTarget(tool) ?? normalizeCommandInput(tool.tool.input))
             continue
         }
         if (kind === 'search') {
-            pushUnique(searchTargets, getPrimarySearchTarget(tool))
+            pushUnique(searchTargets, getPrimarySearchTarget(tool) ?? normalizeCommandInput(tool.tool.input))
             continue
         }
         if (kind === 'command') {
@@ -232,6 +273,7 @@ export function buildVisibleChatBlocks(
 ): VisibleChatBlock[] {
     const visibleBlocks: VisibleChatBlock[] = []
     const previousGroups = options.previousGroups ?? []
+    const groupSingleTools = options.terminalToolDisplayMode === 'compact'
 
     for (let index = 0; index < blocks.length; index += 1) {
         const block = blocks[index]
@@ -251,7 +293,7 @@ export function buildVisibleChatBlocks(
             cursor += 1
         }
 
-        if (tools.length < 2) {
+        if (tools.length < 2 && !groupSingleTools) {
             visibleBlocks.push(block)
             continue
         }

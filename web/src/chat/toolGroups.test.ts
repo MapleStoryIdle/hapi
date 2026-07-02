@@ -48,6 +48,14 @@ describe('getToolGroupActionKind', () => {
         expect(getToolGroupActionKind(makeToolBlock('bash-1', 'Bash'))).toBe('command')
         expect(getToolGroupActionKind(makeToolBlock('edit-1', 'Edit'))).toBe('mutation')
     })
+
+    it('classifies read-only shell commands by their intent', () => {
+        expect(getToolGroupActionKind(makeToolBlock('rg-1', 'Bash', { command: 'rg "TODO" web/src' }))).toBe('search')
+        expect(getToolGroupActionKind(makeToolBlock('ls-1', 'Bash', { command: 'ls web/src' }))).toBe('read')
+        expect(getToolGroupActionKind(makeToolBlock('diff-1', 'Bash', { command: 'git diff -- web/src/router.tsx' }))).toBe('read')
+        expect(getToolGroupActionKind(makeToolBlock('patch-1', 'Bash', { command: 'apply_patch <<PATCH' }))).toBe('mutation')
+        expect(getToolGroupActionKind(makeToolBlock('test-1', 'Bash', { command: 'bun test' }))).toBe('command')
+    })
 })
 
 describe('isEligibleForToolGrouping', () => {
@@ -174,6 +182,45 @@ describe('buildVisibleChatBlocks', () => {
 
         expect(visible).toHaveLength(3)
         expect(visible.every((block) => !isToolGroupBlock(block))).toBe(true)
+    })
+
+    it('groups single eligible tool cards in compact display mode', () => {
+        const runningTool = makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+            tool: {
+                id: 'bash-1',
+                name: 'Bash',
+                state: 'running',
+                input: { command: 'bun test' },
+                createdAt: 1,
+                startedAt: 1,
+                completedAt: null,
+                description: null,
+                result: null,
+                permission: undefined,
+            }
+        })
+        const completedTool = makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' })
+        const visible = buildVisibleChatBlocks([
+            runningTool,
+            makeTextBlock('text-1'),
+            completedTool,
+        ], {
+            hasMoreMessages: false,
+            terminalToolDisplayMode: 'compact'
+        })
+
+        expect(visible).toHaveLength(3)
+        expect(isToolGroupBlock(visible[0])).toBe(true)
+        expect(visible[1].kind).toBe('agent-text')
+        expect(isToolGroupBlock(visible[2])).toBe(true)
+
+        if (!isToolGroupBlock(visible[0]) || !isToolGroupBlock(visible[2])) {
+            throw new Error('expected compact single tool groups')
+        }
+        expect(visible[0].tools).toEqual([runningTool])
+        expect(visible[0].summary.runningCount).toBe(1)
+        expect(visible[2].tools).toEqual([completedTool])
+        expect(visible[2].summary.totalTools).toBe(1)
     })
 
     it('keeps interactive cards standalone and uses them as hard boundaries', () => {

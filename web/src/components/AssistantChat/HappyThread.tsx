@@ -106,11 +106,16 @@ export async function locateOutlineTargetMessage(options: LocateOutlineTargetOpt
 export function ScrollToBottomButton(props: {
     count: number
     visible: boolean
+    hidden?: boolean
     bottomInset?: number
     bottomAccessoryVisible?: boolean
     onClick: () => void
 }) {
     const { t } = useTranslation()
+    if (props.hidden) {
+        return null
+    }
+
     if (!props.visible && props.count === 0) {
         return null
     }
@@ -144,6 +149,14 @@ export function ScrollToBottomButton(props: {
             </span>
         </button>
     )
+}
+
+export function shouldHideScrollToBottomButton(params: {
+    bottomAccessoryExpanded?: boolean
+    bottomAccessoryVisible?: boolean
+    pendingCount: number
+}): boolean {
+    return params.bottomAccessoryExpanded === true
 }
 
 function MessageSkeleton() {
@@ -290,6 +303,7 @@ export function HappyThread(props: {
     outlineItems: readonly ConversationOutlineItem[]
     bottomInset?: number
     bottomAccessoryVisible?: boolean
+    bottomAccessoryExpanded?: boolean
     scrollButtonPositionReady?: boolean
     onOutlineOpenChange: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
@@ -792,6 +806,11 @@ export function HappyThread(props: {
                     <ScrollToBottomButton
                         count={props.pendingCount}
                         visible={isAwayFromBottom}
+                        hidden={shouldHideScrollToBottomButton({
+                            bottomAccessoryExpanded: props.bottomAccessoryExpanded,
+                            bottomAccessoryVisible: props.bottomAccessoryVisible,
+                            pendingCount: props.pendingCount
+                        })}
                         bottomInset={props.bottomInset}
                         bottomAccessoryVisible={props.bottomAccessoryVisible}
                         onClick={scrollToBottom}

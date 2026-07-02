@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { AssistantRuntimeProvider, useAssistantApi, useAssistantState } from '@assistant-ui/react'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
@@ -19,6 +19,7 @@ import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { buildConversationOutline } from '@/chat/outline'
 import { buildVisibleChatBlocks, isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
+import { groupAssistantResultDetails } from '@/chat/assistantResultGrouping'
 import { isQueuedForInvocation, mergeMessages } from '@/lib/messages'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { HappyComposer, type ComposerSendError } from '@/components/AssistantChat/HappyComposer'
@@ -29,6 +30,12 @@ import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { QueuedMessagesBar } from '@/components/AssistantChat/QueuedMessagesBar'
 import { ScratchlistDrawer } from '@/components/AssistantChat/ScratchlistPanel'
 import { GitDiffSummary, summarizeGitStatusFiles } from '@/components/AssistantChat/GitDiffSummary'
+import {
+    PlanStatusSummary,
+    extractLatestPlanStatus,
+    hasActiveToolBlock,
+    removeChatBlockById
+} from '@/components/AssistantChat/PlanStatusSummary'
 import { useScratchlist } from '@/lib/use-scratchlist'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
@@ -62,10 +69,16 @@ import { useOpencodeModels } from '@/hooks/queries/useOpencodeModels'
 import { usePiModels } from '@/hooks/queries/usePiModels'
 import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeReasoningEffortOptions'
 import { useGitStatusFiles } from '@/hooks/queries/useGitStatusFiles'
+import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useVoiceOptional } from '@/lib/voice-context'
-import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
+import { registerSessionStore } from '@/realtime/realtimeClientTools'
+import { registerVoiceHooksStore, voiceHooks } from '@/realtime/hooks/voiceHooks'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 import { RemoteServerCandidatePrompt } from '@/components/RemoteServers'
+
+const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSession').then((module) => ({
+    default: module.VoiceBackendSession
+})))
 
 /**
  * Returns whether a PendingSchedule should trigger an auto-clear timer.
@@ -405,6 +418,7 @@ export function SessionChat(props: SessionChatProps) {
 function SessionChatInner(props: SessionChatProps) {
     const { haptic } = usePlatform()
     const { t } = useTranslation()
+    const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const navigate = useNavigate()
     const sessionInactive = !props.session.active
     const inactiveCanResume = inactiveSessionCanResume(props.session, props.messages.length)
@@ -428,6 +442,7 @@ function SessionChatInner(props: SessionChatProps) {
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
     const bottomOverlayRef = useRef<HTMLDivElement | null>(null)
     const [bottomOverlayHeight, setBottomOverlayHeight] = useState(0)
+    const [bottomAccessoryExpanded, setBottomAccessoryExpanded] = useState(false)
     const scrollButtonPositionReady = bottomOverlayHeight > 0 && !(gitSessionId && gitStatusLoading)
     const lastGitRefreshUpdatedAtRef = useRef(props.session.updatedAt)
     useEffect(() => {
@@ -707,7 +722,9 @@ function SessionChatInner(props: SessionChatProps) {
 
     // Voice assistant integration
     const voice = useVoiceOptional()
+    const [voiceBackendRequested, setVoiceBackendRequested] = useState(false)
     const [voiceBackendReady, setVoiceBackendReady] = useState(false)
+    const [voiceStartRequested, setVoiceStartRequested] = useState(false)
 
     // Register session store for voice client tools
     useEffect(() => {
@@ -785,11 +802,29 @@ function SessionChatInner(props: SessionChatProps) {
     const handleVoiceToggle = useCallback(async () => {
         if (!voice) return
         if (voice.status === 'connected' || voice.status === 'connecting') {
+            setVoiceStartRequested(false)
             await voice.stopVoice()
-        } else {
-            await voice.startVoice(props.session.id)
+            return
         }
-    }, [voice, props.session.id])
+
+        setVoiceBackendRequested(true)
+        voice.setStatus('connecting')
+        if (!voiceBackendReady) {
+            setVoiceStartRequested(true)
+            return
+        }
+
+        await voice.startVoice(props.session.id)
+    }, [voice, voiceBackendReady, props.session.id])
+
+    useEffect(() => {
+        if (!voice || !voiceBackendReady || !voiceStartRequested || voice.status !== 'connecting') {
+            return
+        }
+
+        setVoiceStartRequested(false)
+        void voice.startVoice(props.session.id)
+    }, [voice, voiceBackendReady, voiceStartRequested, props.session.id])
 
     const handleVoiceMicToggle = useCallback(() => {
         if (!voice) return
@@ -877,22 +912,48 @@ function SessionChatInner(props: SessionChatProps) {
         () => hasAbortableAgentRun(reduced.blocks),
         [reduced.blocks]
     )
+    const latestPlanStatus = useMemo(
+        () => extractLatestPlanStatus(reconciled.blocks),
+        [reconciled.blocks]
+    )
+    const hasActiveTool = useMemo(
+        () => hasActiveToolBlock(reconciled.blocks),
+        [reconciled.blocks]
+    )
+    const runActive = props.isSending || props.session.thinking || hasRunningChildAgent || hasActiveTool
+    const planStatusVisible = runActive && latestPlanStatus !== null
+    const gitDiffAccessoryVisible = !runActive && gitDiffSummaryVisible
+    const bottomAccessoryVisible = planStatusVisible || gitDiffAccessoryVisible
+    const displayBlocks = useMemo(
+        () => (
+            planStatusVisible && latestPlanStatus
+                ? removeChatBlockById(reconciled.blocks, latestPlanStatus.sourceBlockId)
+                : reconciled.blocks
+        ),
+        [latestPlanStatus, planStatusVisible, reconciled.blocks]
+    )
 
     useEffect(() => {
         blocksByIdRef.current = reconciled.byId
     }, [reconciled.byId])
 
-    const visibleBlocks = useMemo(
-        () => buildVisibleChatBlocks(reconciled.blocks, {
+    const groupedVisibleBlocks = useMemo(
+        () => buildVisibleChatBlocks(displayBlocks, {
             hasMoreMessages: props.hasMoreMessages,
-            previousGroups: visibleGroupsRef.current
+            previousGroups: visibleGroupsRef.current,
+            terminalToolDisplayMode
         }),
-        [reconciled.blocks, props.hasMoreMessages]
+        [displayBlocks, props.hasMoreMessages, terminalToolDisplayMode]
+    )
+
+    const visibleBlocks = useMemo(
+        () => groupAssistantResultDetails(groupedVisibleBlocks, { runActive }),
+        [groupedVisibleBlocks, runActive]
     )
 
     useEffect(() => {
-        visibleGroupsRef.current = visibleBlocks.filter(isToolGroupBlock)
-    }, [visibleBlocks])
+        visibleGroupsRef.current = groupedVisibleBlocks.filter(isToolGroupBlock)
+    }, [groupedVisibleBlocks])
 
     const outlineItems = useMemo(
         () => buildConversationOutline(reconciled.blocks),
@@ -1046,6 +1107,10 @@ function SessionChatInner(props: SessionChatProps) {
         setOutlineOpen((open) => !open)
     }, [])
 
+    const handleBottomAccessoryExpandedChange = useCallback((expanded: boolean) => {
+        setBottomAccessoryExpanded(expanded)
+    }, [])
+
     const handleViewTerminal = useCallback(() => {
         navigate({
             to: '/sessions/$sessionId/terminal',
@@ -1059,6 +1124,12 @@ function SessionChatInner(props: SessionChatProps) {
         lastGitRefreshUpdatedAtRef.current = props.session.updatedAt
         void refetchGitStatus()
     }, [gitSessionId, props.session.updatedAt, refetchGitStatus])
+
+    useEffect(() => {
+        if (!bottomAccessoryVisible) {
+            setBottomAccessoryExpanded(false)
+        }
+    }, [bottomAccessoryVisible])
 
     useLayoutEffect(() => {
         const node = bottomOverlayRef.current
@@ -1244,7 +1315,8 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
                         bottomInset={bottomOverlayHeight}
-                        bottomAccessoryVisible={gitDiffSummaryVisible}
+                        bottomAccessoryVisible={bottomAccessoryVisible}
+                        bottomAccessoryExpanded={bottomAccessoryExpanded}
                         scrollButtonPositionReady={scrollButtonPositionReady}
                         onOutlineOpenChange={setOutlineOpen}
                     />
@@ -1298,10 +1370,18 @@ function SessionChatInner(props: SessionChatProps) {
                         </div>
 
                         <div className="pointer-events-auto">
-                            <GitDiffSummary
-                                status={gitDiffDisplayStatus}
-                                onViewDiff={handleViewDiff}
-                            />
+                            {planStatusVisible ? (
+                                <PlanStatusSummary
+                                    plan={latestPlanStatus}
+                                    onExpandedChange={handleBottomAccessoryExpandedChange}
+                                />
+                            ) : (
+                                <GitDiffSummary
+                                    status={gitDiffAccessoryVisible ? gitDiffDisplayStatus : null}
+                                    onViewDiff={handleViewDiff}
+                                    onExpandedChange={handleBottomAccessoryExpandedChange}
+                                />
+                            )}
                         </div>
 
                         <div className="pointer-events-auto">
@@ -1432,7 +1512,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 autocompleteSuggestions={props.autocompleteSuggestions}
                                 voiceStatus={voice?.status}
                                 voiceMicMuted={voice?.micMuted}
-                                onVoiceToggle={voice && voiceBackendReady ? handleVoiceToggle : undefined}
+                                onVoiceToggle={voice ? handleVoiceToggle : undefined}
                                 onVoiceMicToggle={voice && voiceBackendReady ? handleVoiceMicToggle : undefined}
                                 scratchlistMode={scratchlistMode}
                                 scratchlistCount={scratchlist.entries.length}
@@ -1453,15 +1533,17 @@ function SessionChatInner(props: SessionChatProps) {
                 </DragDropZone>
             </AssistantRuntimeProvider>
 
-            {/* Voice session component - renders nothing but initializes voice backend */}
-            {voice && (
-                <VoiceBackendSession
-                    api={props.api}
-                    micMuted={voice.micMuted}
-                    onStatusChange={voice.setStatus}
-                    onReadyChange={setVoiceBackendReady}
-                />
-            )}
+            {/* Voice backend is loaded only after the user asks to start voice. */}
+            {voice && voiceBackendRequested ? (
+                <Suspense fallback={null}>
+                    <LazyVoiceBackendSession
+                        api={props.api}
+                        micMuted={voice.micMuted}
+                        onStatusChange={voice.setStatus}
+                        onReadyChange={setVoiceBackendReady}
+                    />
+                </Suspense>
+            ) : null}
         </div>
     )
 }
