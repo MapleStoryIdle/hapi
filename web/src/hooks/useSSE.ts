@@ -532,6 +532,22 @@ export function useSSE(options: {
                 }
             }
 
+            if (
+                event.type === 'remote-server-candidate-created'
+                || event.type === 'remote-server-candidate-updated'
+            ) {
+                void queryClient.invalidateQueries({ queryKey: queryKeys.remoteServerCandidates })
+            }
+
+            if (event.type === 'remote-server-updated') {
+                void queryClient.invalidateQueries({ queryKey: queryKeys.remoteServers })
+            }
+
+            if (event.type === 'remote-server-deleted') {
+                void queryClient.invalidateQueries({ queryKey: queryKeys.remoteServers })
+                void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
+            }
+
             onEventRef.current(event)
         }
 

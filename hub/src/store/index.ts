@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { PushStore } from './pushStore'
+import { RemoteServerStore } from './remoteServerStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 
@@ -12,6 +13,10 @@ export type {
     StoredMachine,
     StoredMessage,
     StoredPushSubscription,
+    StoredRemoteServer,
+    StoredRemoteServerCandidate,
+    StoredRemoteServerCandidateStatus,
+    StoredRemoteServerDetectedCommandKind,
     StoredSession,
     StoredUser,
     VersionedUpdateResult
@@ -20,16 +25,21 @@ export type { CancelQueuedMessageResult, LookupQueuedMessageResult } from './mes
 export { MachineStore } from './machineStore'
 export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
+export { RemoteServerStore } from './remoteServerStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION: number = 10
+const SCHEMA_VERSION: number = 13
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'messages',
     'users',
-    'push_subscriptions'
+    'push_subscriptions',
+    'remote_servers',
+    'remote_server_connections',
+    'remote_server_candidates',
+    'remote_server_candidate_connections'
 ] as const
 
 export class Store {
@@ -42,6 +52,7 @@ export class Store {
     readonly messages: MessageStore
     readonly users: UserStore
     readonly push: PushStore
+    readonly remoteServers: RemoteServerStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -92,6 +103,7 @@ export class Store {
         this.messages = new MessageStore(this.db)
         this.users = new UserStore(this.db)
         this.push = new PushStore(this.db)
+        this.remoteServers = new RemoteServerStore(this.db)
     }
 
     close(): void {
@@ -124,6 +136,9 @@ export class Store {
             7: () => this.migrateFromV7ToV8(),
             8: () => this.migrateFromV8ToV9(),
             9: () => this.migrateFromV9ToV10(),
+            10: () => this.migrateFromV10ToV11(),
+            11: () => this.migrateFromV11ToV12(),
+            12: () => this.migrateFromV12ToV13(),
         })
 
         if (currentVersion === 0) {
@@ -186,6 +201,7 @@ export class Store {
                 model_reasoning_effort TEXT,
                 effort TEXT,
                 service_tier TEXT,
+                remote_server_id TEXT,
                 todos TEXT,
                 todos_updated_at INTEGER,
                 team_state TEXT,
@@ -252,6 +268,86 @@ export class Store {
                 UNIQUE(namespace, endpoint)
             );
             CREATE INDEX IF NOT EXISTS idx_push_subscriptions_namespace ON push_subscriptions(namespace);
+
+            CREATE TABLE IF NOT EXISTS remote_servers (
+                id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL DEFAULT 'default',
+                name TEXT NOT NULL,
+                alias TEXT NOT NULL DEFAULT '未命名',
+                host TEXT NOT NULL,
+                user TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 22,
+                workspace TEXT NOT NULL,
+                tags TEXT NOT NULL DEFAULT '[]',
+                source_project TEXT NOT NULL,
+                source_project_path TEXT,
+                source_session_id TEXT NOT NULL,
+                source_session_title TEXT,
+                last_used_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(namespace, workspace, user, host, port)
+            );
+            CREATE INDEX IF NOT EXISTS idx_remote_servers_namespace_workspace
+                ON remote_servers(namespace, workspace, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS remote_server_connections (
+                id TEXT PRIMARY KEY,
+                server_id TEXT NOT NULL,
+                machine_id TEXT NOT NULL DEFAULT '',
+                last_verified_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(server_id, machine_id),
+                FOREIGN KEY (server_id) REFERENCES remote_servers(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_remote_server_connections_server
+                ON remote_server_connections(server_id, last_verified_at DESC);
+
+            CREATE TABLE IF NOT EXISTS remote_server_candidates (
+                id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL DEFAULT 'default',
+                machine_id TEXT NOT NULL DEFAULT '',
+                session_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'accepted', 'dismissed')),
+                name TEXT NOT NULL,
+                alias TEXT NOT NULL DEFAULT '未命名',
+                host TEXT NOT NULL,
+                user TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 22,
+                workspace TEXT NOT NULL,
+                tags TEXT NOT NULL DEFAULT '[]',
+                source_project TEXT NOT NULL,
+                source_project_path TEXT,
+                source_session_title TEXT,
+                detected_command_kind TEXT NOT NULL CHECK(detected_command_kind IN ('ssh', 'scp', 'rsync')),
+                detected_tool_call_id TEXT,
+                existing_server_id TEXT,
+                verified_at INTEGER NOT NULL,
+                last_seen_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+                FOREIGN KEY (existing_server_id) REFERENCES remote_servers(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_remote_server_candidates_namespace_status
+                ON remote_server_candidates(namespace, status, updated_at DESC);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_remote_server_candidates_pending_target
+                ON remote_server_candidates(namespace, workspace, user, host, port)
+                WHERE status = 'pending';
+
+            CREATE TABLE IF NOT EXISTS remote_server_candidate_connections (
+                id TEXT PRIMARY KEY,
+                candidate_id TEXT NOT NULL,
+                machine_id TEXT NOT NULL DEFAULT '',
+                last_verified_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(candidate_id, machine_id),
+                FOREIGN KEY (candidate_id) REFERENCES remote_server_candidates(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_remote_server_candidate_connections_candidate
+                ON remote_server_candidate_connections(candidate_id, last_verified_at DESC);
         `)
     }
 
@@ -435,6 +531,111 @@ export class Store {
         }
     }
 
+    private migrateFromV10ToV11(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size !== 0 && !columns.has('remote_server_id')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN remote_server_id TEXT')
+        }
+
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS remote_servers (
+                id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL DEFAULT 'default',
+                name TEXT NOT NULL,
+                alias TEXT NOT NULL DEFAULT '未命名',
+                host TEXT NOT NULL,
+                user TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 22,
+                workspace TEXT NOT NULL,
+                tags TEXT NOT NULL DEFAULT '[]',
+                source_project TEXT NOT NULL,
+                source_project_path TEXT,
+                source_session_id TEXT NOT NULL,
+                source_session_title TEXT,
+                last_used_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(namespace, workspace, user, host, port)
+            );
+            CREATE INDEX IF NOT EXISTS idx_remote_servers_namespace_workspace
+                ON remote_servers(namespace, workspace, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS remote_server_connections (
+                id TEXT PRIMARY KEY,
+                server_id TEXT NOT NULL,
+                machine_id TEXT NOT NULL DEFAULT '',
+                last_verified_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(server_id, machine_id),
+                FOREIGN KEY (server_id) REFERENCES remote_servers(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_remote_server_connections_server
+                ON remote_server_connections(server_id, last_verified_at DESC);
+
+            CREATE TABLE IF NOT EXISTS remote_server_candidates (
+                id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL DEFAULT 'default',
+                machine_id TEXT NOT NULL DEFAULT '',
+                session_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'accepted', 'dismissed')),
+                name TEXT NOT NULL,
+                alias TEXT NOT NULL DEFAULT '未命名',
+                host TEXT NOT NULL,
+                user TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 22,
+                workspace TEXT NOT NULL,
+                tags TEXT NOT NULL DEFAULT '[]',
+                source_project TEXT NOT NULL,
+                source_project_path TEXT,
+                source_session_title TEXT,
+                detected_command_kind TEXT NOT NULL CHECK(detected_command_kind IN ('ssh', 'scp', 'rsync')),
+                detected_tool_call_id TEXT,
+                existing_server_id TEXT,
+                verified_at INTEGER NOT NULL,
+                last_seen_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+                FOREIGN KEY (existing_server_id) REFERENCES remote_servers(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_remote_server_candidates_namespace_status
+                ON remote_server_candidates(namespace, status, updated_at DESC);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_remote_server_candidates_pending_target
+                ON remote_server_candidates(namespace, workspace, user, host, port)
+                WHERE status = 'pending';
+        `)
+    }
+
+    private migrateFromV11ToV12(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS remote_server_candidate_connections (
+                id TEXT PRIMARY KEY,
+                candidate_id TEXT NOT NULL,
+                machine_id TEXT NOT NULL DEFAULT '',
+                last_verified_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(candidate_id, machine_id),
+                FOREIGN KEY (candidate_id) REFERENCES remote_server_candidates(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_remote_server_candidate_connections_candidate
+                ON remote_server_candidate_connections(candidate_id, last_verified_at DESC);
+        `)
+    }
+
+    private migrateFromV12ToV13(): void {
+        const remoteServerColumns = this.getColumnNames('remote_servers')
+        if (remoteServerColumns.size !== 0 && !remoteServerColumns.has('alias')) {
+            this.db.exec("ALTER TABLE remote_servers ADD COLUMN alias TEXT NOT NULL DEFAULT '未命名'")
+        }
+
+        const candidateColumns = this.getColumnNames('remote_server_candidates')
+        if (candidateColumns.size !== 0 && !candidateColumns.has('alias')) {
+            this.db.exec("ALTER TABLE remote_server_candidates ADD COLUMN alias TEXT NOT NULL DEFAULT '未命名'")
+        }
+    }
+
     private getSessionColumnNames(): Set<string> {
         const rows = this.db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
         return new Set(rows.map((row) => row.name))
@@ -447,6 +648,11 @@ export class Store {
 
     private getMessageColumnNames(): Set<string> {
         const rows = this.db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
+        return new Set(rows.map((row) => row.name))
+    }
+
+    private getColumnNames(table: string): Set<string> {
+        const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
         return new Set(rows.map((row) => row.name))
     }
 

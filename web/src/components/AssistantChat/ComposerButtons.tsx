@@ -1,11 +1,13 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
-import type { PermissionMode } from '@/types/api'
+import type { PermissionMode, Session } from '@/types/api'
+import type { ApiClient } from '@/api/client'
 import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
 import { ScheduleIcon } from '@/components/icons'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { RemoteServerContextMenuContent, ServerIcon, useRemoteServerContextSelection } from '@/components/RemoteServers'
 
 function ChevronIcon() {
     return <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 3.75L5 6.25L7.5 3.75" /></svg>
@@ -259,6 +261,183 @@ function ScratchlistToggleIcon() {
     )
 }
 
+function PermissionHandIcon(props: { className?: string }) {
+    return (
+        <svg
+            className={props.className ?? 'h-[18px] w-[18px]'}
+            viewBox="0 0 24 24"
+            fill="currentColor"
+        >
+            <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M10.25 4a.75.75 0 0 0-.75.75V10a1 1 0 1 1-2 0V6.75a.75.75 0 0 0-1.5 0V14a6 6 0 0 0 12 0V9.333A.333.333 0 0 0 17.667 9C16.747 9 16 9.746 16 10.667V12.5a1 1 0 0 1-.684.949l-.628.21A2.469 2.469 0 0 0 13 16a1 1 0 1 1-2 0 4.469 4.469 0 0 1 3-4.22v-1.113c0-.675.182-1.307.5-1.85V5.75a.75.75 0 0 0-1.5 0V9a1 1 0 1 1-2 0V4.75a.75.75 0 0 0-.75-.75Zm2.316-.733A2.75 2.75 0 0 1 16.5 5.75v1.44A3.66 3.66 0 0 1 17.667 7 2.333 2.333 0 0 1 20 9.333V14a8 8 0 1 1-16 0V6.75a2.75 2.75 0 0 1 3.571-2.625 2.751 2.751 0 0 1 4.995-.858Z"
+            />
+        </svg>
+    )
+}
+
+function PermissionAutoReviewIcon(props: { className?: string }) {
+    return (
+        <svg
+            className={props.className ?? 'h-[18px] w-[18px]'}
+            viewBox="0 0 24 24"
+            fill="currentColor"
+        >
+            <path d="M15.344 10.036a1 1 0 1 0-1.688-1.072l-2.474 3.896-.943-1.034a1 1 0 0 0-1.478 1.348l1.826 2a1 1 0 0 0 1.583-.138l3.174-5Z" />
+            <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M13.203 1.935a3 3 0 0 0-2.405 0l-6 2.625A3 3 0 0 0 3 7.308V13a9 9 0 1 0 18 0V7.308a3 3 0 0 0-1.797-2.748l-6-2.625Zm-1.604 1.832a1 1 0 0 1 .802 0l6 2.625a1 1 0 0 1 .599.916V13a7 7 0 1 1-14 0V7.308a1 1 0 0 1 .6-.916l6-2.625Z"
+            />
+        </svg>
+    )
+}
+
+function PermissionFullAccessIcon(props: { className?: string }) {
+    return (
+        <svg
+            className={props.className ?? 'h-[18px] w-[18px]'}
+            viewBox="0 0 24 24"
+            fill="currentColor"
+        >
+            <path d="M11 12C11 12.5523 11.4477 13 12 13C12.5523 13 13 12.5523 13 12V8C13 7.44772 12.5523 7 12 7C11.4477 7 11 7.44772 11 8V12Z" />
+            <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM20 12C20 16.4183 16.4183 20 12 20C7.58172 20 4 16.4183 4 12C4 7.58172 7.58172 4 12 4C16.4183 4 20 7.58172 20 12Z" />
+            <path d="M12 14.7C11.3649 14.7 10.85 15.2148 10.85 15.85C10.85 16.4851 11.3649 17 12 17C12.6351 17 13.15 16.4851 13.15 15.85C13.15 15.2148 12.6351 14.7 12 14.7Z" />
+        </svg>
+    )
+}
+
+function PermissionGearIcon(props: { className?: string }) {
+    return (
+        <svg
+            className={props.className ?? 'h-[18px] w-[18px]'}
+            viewBox="0 0 24 24"
+            fill="currentColor"
+        >
+            <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M11.568 3.5a1 1 0 0 0-.863.494l-.811 1.381A3.001 3.001 0 0 1 7.33 6.856l-1.596.013a1 1 0 0 0-.858.501l-.439.761a1 1 0 0 0-.004.992l.792 1.4a3 3 0 0 1 0 2.954l-.792 1.4a1 1 0 0 0 .004.992l.439.76a1 1 0 0 0 .858.502l1.596.013a3 3 0 0 1 2.564 1.48l.811 1.382a1 1 0 0 0 .863.494h.87a1 1 0 0 0 .862-.494l.812-1.381a3.001 3.001 0 0 1 2.563-1.481l1.596-.013a1 1 0 0 0 .86-.501l.438-.761a1 1 0 0 0 .004-.992l-.793-1.4a3 3 0 0 1 0-2.954l.793-1.4a1 1 0 0 0-.004-.992l-.439-.76a1 1 0 0 0-.858-.502l-1.597-.013a3 3 0 0 1-2.563-1.48L13.3 3.993a1 1 0 0 0-.862-.494h-.87ZM8.98 2.981A3.001 3.001 0 0 1 11.568 1.5h.87c1.064 0 2.049.564 2.588 1.481l.811 1.382a1 1 0 0 0 .855.494l1.596.013a3 3 0 0 1 2.575 1.502l.44.76a3 3 0 0 1 .011 2.975l-.792 1.4a1 1 0 0 0 0 .985l.792 1.401a3 3 0 0 1-.012 2.974l-.439.761a3.001 3.001 0 0 1-2.575 1.503l-1.597.012a1 1 0 0 0-.854.494l-.811 1.382a3.001 3.001 0 0 1-2.588 1.481h-.87a3.001 3.001 0 0 1-2.588-1.481l-.811-1.382a1 1 0 0 0-.855-.494l-1.596-.012a3.001 3.001 0 0 1-2.576-1.503l-.438-.76a3 3 0 0 1-.013-2.975l.793-1.4a1 1 0 0 0 0-.985l-.793-1.4a3 3 0 0 1 .013-2.975l.438-.761A3.001 3.001 0 0 1 5.718 4.87l1.596-.013a1 1 0 0 0 .855-.494l.81-1.382Z"
+            />
+            <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M12.003 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM8.502 12a3.5 3.5 0 1 1 7 .001 3.5 3.5 0 0 1-7-.001Z"
+            />
+        </svg>
+    )
+}
+
+function PermissionCheckIcon(props: { className?: string }) {
+    return (
+        <svg
+            className={props.className ?? 'h-4 w-4'}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.25"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="m5 12 4 4L19 6" />
+        </svg>
+    )
+}
+
+function PermissionModeIcon(props: { mode?: PermissionMode; className?: string }) {
+    switch (props.mode) {
+        case 'default':
+        case 'ask':
+            return <PermissionHandIcon className={props.className} />
+        case 'plan':
+            return <PlanModeIcon />
+        case 'debug':
+            return <PermissionGearIcon className={props.className} />
+        case 'read-only':
+        case 'acceptEdits':
+            return <PermissionHandIcon className={props.className} />
+        case 'safe-yolo':
+        case 'auto':
+            return <PermissionAutoReviewIcon className={props.className} />
+        case 'yolo':
+        case 'bypassPermissions':
+            return <PermissionFullAccessIcon className={props.className} />
+        default:
+            return <PermissionGearIcon className={props.className} />
+    }
+}
+
+function getPermissionToneClass(mode: PermissionMode | undefined): string {
+    if (mode === 'safe-yolo') {
+        return 'text-blue-500 dark:text-blue-400'
+    }
+
+    if (mode === 'yolo' || mode === 'bypassPermissions') {
+        return 'text-orange-500 dark:text-orange-400'
+    }
+
+    return mode === 'default'
+        ? 'text-black/55 dark:text-white/70'
+        : 'text-black/62 dark:text-white/62'
+}
+
+function getPermissionCopy(mode: PermissionMode, fallbackLabel: string, t: ReturnType<typeof useTranslation>['t']) {
+    switch (mode) {
+        case 'default':
+            return {
+                title: t('permissionMode.default.title'),
+                description: t('permissionMode.default.description')
+            }
+        case 'read-only':
+            return {
+                title: t('permissionMode.readOnly.title'),
+                description: t('permissionMode.readOnly.description')
+            }
+        case 'safe-yolo':
+            return {
+                title: t('permissionMode.safeYolo.title'),
+                description: t('permissionMode.safeYolo.description')
+            }
+        case 'yolo':
+        case 'bypassPermissions':
+            return {
+                title: t('permissionMode.fullAccess.title'),
+                description: t('permissionMode.fullAccess.description')
+            }
+        case 'acceptEdits':
+            return {
+                title: t('permissionMode.acceptEdits.title'),
+                description: t('permissionMode.acceptEdits.description')
+            }
+        case 'auto':
+            return {
+                title: t('permissionMode.auto.title'),
+                description: t('permissionMode.auto.description')
+            }
+        case 'plan':
+            return {
+                title: t('permissionMode.plan.title'),
+                description: t('permissionMode.plan.description')
+            }
+        case 'ask':
+            return {
+                title: t('permissionMode.ask.title'),
+                description: t('permissionMode.ask.description')
+            }
+        case 'debug':
+            return {
+                title: t('permissionMode.debug.title'),
+                description: t('permissionMode.debug.description')
+            }
+        default:
+            return {
+                title: fallbackLabel,
+                description: t('permissionMode.custom.description')
+            }
+    }
+}
+
 function StopIcon() {
     return (
         <svg
@@ -300,11 +479,13 @@ function ToolbarMenu(props: {
     align?: 'left' | 'right'
     width?: number
     maxHeight?: number
+    surface?: 'default' | 'permission'
+    showArrow?: boolean
     onClose: () => void
     children: ReactNode
 }) {
     const panelRef = useRef<HTMLDivElement>(null)
-    const [position, setPosition] = useState<{ top: number; left: number; maxHeight: number } | null>(null)
+    const [position, setPosition] = useState<{ top: number; left: number; maxHeight: number; arrowLeft: number } | null>(null)
 
     useLayoutEffect(() => {
         function measure() {
@@ -331,7 +512,8 @@ function ToolbarMenu(props: {
                 ? aboveTop
                 : clamp(belowTop, viewportTop + margin, viewportTop + viewportHeight - margin - fullHeight)
             const maxHeight = Math.max(120, Math.min(fullHeight, viewportTop + viewportHeight - margin - top))
-            setPosition({ top, left, maxHeight })
+            const arrowLeft = clamp(rect.left + rect.width / 2 - left - 6, 20, panelWidth - 20)
+            setPosition({ top, left, maxHeight, arrowLeft })
         }
 
         measure()
@@ -365,10 +547,28 @@ function ToolbarMenu(props: {
                 ? { position: 'fixed', top: position.top, left: position.left, width: props.width ?? 220, maxHeight: position.maxHeight }
                 : { position: 'fixed', visibility: 'hidden', width: props.width ?? 220 }
             }
-            className="z-50 overflow-hidden rounded-xl border border-[var(--app-divider)] bg-[var(--app-bg)] shadow-lg"
+            className={
+                props.surface === 'permission'
+                    ? 'z-50 overflow-visible'
+                    : 'z-50 overflow-hidden rounded-xl border border-[var(--app-divider)] bg-[var(--app-bg)] shadow-lg'
+            }
             onPointerDown={(event) => event.stopPropagation()}
         >
-            <div className="overflow-y-auto" style={{ maxHeight: position?.maxHeight ?? props.maxHeight ?? 260 }}>
+            {props.showArrow && position ? (
+                <div
+                    className="pointer-events-none absolute -bottom-1.5 h-3 w-3 rotate-45 border-b border-r border-[var(--app-divider)] bg-[var(--app-bg)]"
+                    style={{ left: position.arrowLeft }}
+                    aria-hidden="true"
+                />
+            ) : null}
+            <div
+                className={
+                    props.surface === 'permission'
+                        ? 'overflow-y-auto rounded-[26px] border border-[var(--app-divider)] bg-[var(--app-bg)] shadow-[0_18px_48px_rgba(15,23,42,0.18)]'
+                        : 'overflow-y-auto'
+                }
+                style={{ maxHeight: position?.maxHeight ?? props.maxHeight ?? 260 }}
+            >
                 {props.children}
             </div>
         </div>
@@ -406,6 +606,39 @@ function ContextUsageIndicator(props: { percentage: number | null | undefined; l
                 />
             </svg>
         </span>
+    )
+}
+
+function RemoteServerSelectedButton(props: {
+    context: {
+        api: ApiClient
+        session: Session
+        onChanged: () => void
+    }
+    buttonRef: RefObject<HTMLButtonElement | null>
+    active: boolean
+    controlsDisabled: boolean
+    onClick: () => void
+}) {
+    const { selected } = useRemoteServerContextSelection(props.context.api, props.context.session)
+    if (!selected) return null
+
+    return (
+        <button
+            ref={props.buttonRef}
+            type="button"
+            aria-label={`远程服务器: ${selected.name}`}
+            title={`远程服务器: ${selected.name}`}
+            disabled={props.controlsDisabled}
+            className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                props.active
+                    ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
+                    : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+            }`}
+            onClick={props.onClick}
+        >
+            <ServerIcon className="h-[18px] w-[18px]" />
+        </button>
     )
 }
 
@@ -571,14 +804,23 @@ export function ComposerButtons(props: {
     scratchlistMode?: boolean
     scratchlistCount?: number
     onScratchlistToggle?: () => void
+    remoteServerContext?: {
+        api: ApiClient
+        session: Session
+        onChanged: () => void
+    }
 }) {
     const { t } = useTranslation()
     const isVoiceConnected = props.voiceStatus === 'connected'
     const [showSchedulePicker, setShowSchedulePicker] = useState(false)
     const [showToolsMenu, setShowToolsMenu] = useState(false)
     const [showPermissionMenu, setShowPermissionMenu] = useState(false)
+    const [showRemoteServerMenu, setShowRemoteServerMenu] = useState(false)
+    const [remoteServerAnchor, setRemoteServerAnchor] = useState<'tools' | 'button'>('tools')
     const toolsButtonRef = useRef<HTMLButtonElement>(null)
     const permissionButtonRef = useRef<HTMLButtonElement>(null)
+    const remoteServerButtonRef = useRef<HTMLButtonElement>(null)
+    const hasRemoteServerContext = Boolean(props.remoteServerContext)
 
     const hasSchedule = props.pendingSchedule != null
     const hasAttachments = props.hasAttachments ?? false
@@ -587,11 +829,6 @@ export function ComposerButtons(props: {
         ?? props.permissionModeOptions?.find((option) => option.mode === props.permissionMode)?.label
         ?? props.permissionMode
         ?? t('misc.permissionMode')
-    const isYoloPermission = (mode: PermissionMode | undefined) => (
-        mode === 'bypassPermissions'
-        || mode === 'safe-yolo'
-        || mode === 'yolo'
-    )
     const toolMenuItemClass = 'flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)] disabled:cursor-not-allowed disabled:opacity-45'
 
     return (
@@ -611,6 +848,7 @@ export function ComposerButtons(props: {
                         setShowToolsMenu((open) => !open)
                         setShowPermissionMenu(false)
                         setShowSchedulePicker(false)
+                        setShowRemoteServerMenu(false)
                     }}
                 >
                     <PlusIcon />
@@ -620,23 +858,39 @@ export function ComposerButtons(props: {
                     <button
                         ref={permissionButtonRef}
                         type="button"
-                        aria-label={t('misc.permissionMode')}
-                        title={t('misc.permissionMode')}
+                        aria-label={`${t('misc.permissionMode')}: ${permissionLabel}`}
+                        title={`${t('misc.permissionMode')}: ${permissionLabel}`}
                         disabled={props.controlsDisabled}
-                        className={`flex h-8 items-center gap-1 rounded-full px-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                             showPermissionMenu
-                                ? isYoloPermission(props.permissionMode) ? 'bg-[var(--app-bg)] text-orange-500' : 'bg-[var(--app-bg)] text-[var(--app-fg)]'
-                                : isYoloPermission(props.permissionMode) ? 'text-orange-500 hover:bg-[var(--app-bg)] hover:text-orange-600' : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                                ? `bg-[var(--app-bg)] ${getPermissionToneClass(props.permissionMode)}`
+                                : `${getPermissionToneClass(props.permissionMode)} hover:bg-[var(--app-bg)]`
                         }`}
                         onClick={() => {
                             setShowPermissionMenu((open) => !open)
                             setShowToolsMenu(false)
                             setShowSchedulePicker(false)
+                            setShowRemoteServerMenu(false)
                         }}
                     >
-                        <span className="max-w-28 truncate">{permissionLabel}</span>
-                        <ChevronIcon />
+                        <PermissionModeIcon mode={props.permissionMode} />
                     </button>
+                ) : null}
+
+                {props.remoteServerContext ? (
+                    <RemoteServerSelectedButton
+                        context={props.remoteServerContext}
+                        buttonRef={remoteServerButtonRef}
+                        active={showRemoteServerMenu && remoteServerAnchor === 'button'}
+                        controlsDisabled={props.controlsDisabled}
+                        onClick={() => {
+                            setRemoteServerAnchor('button')
+                            setShowRemoteServerMenu((open) => !(open && remoteServerAnchor === 'button'))
+                            setShowToolsMenu(false)
+                            setShowPermissionMenu(false)
+                            setShowSchedulePicker(false)
+                        }}
+                    />
                 ) : null}
 
                 {showToolsMenu ? (
@@ -686,6 +940,26 @@ export function ComposerButtons(props: {
 
                             {(props.showPlanModeButton || props.showGoalModeButton) ? (
                                 <div className="my-1 h-px bg-[var(--app-divider)]" />
+                            ) : null}
+
+                            {hasRemoteServerContext ? (
+                                <button
+                                    type="button"
+                                    aria-label="远程服务器"
+                                    title="远程服务器"
+                                    disabled={props.controlsDisabled}
+                                    onClick={() => {
+                                        setShowToolsMenu(false)
+                                        setShowPermissionMenu(false)
+                                        setShowSchedulePicker(false)
+                                        setRemoteServerAnchor('tools')
+                                        setShowRemoteServerMenu(true)
+                                    }}
+                                    className={toolMenuItemClass}
+                                >
+                                    <ServerIcon className="h-[18px] w-[18px]" />
+                                    <span className="flex-1">远程服务器</span>
+                                </button>
                             ) : null}
 
                             <ComposerPrimitive.AddAttachment
@@ -769,29 +1043,41 @@ export function ComposerButtons(props: {
                     <ToolbarMenu
                         anchorRef={permissionButtonRef}
                         align="left"
-                        width={190}
-                        maxHeight={280}
+                        width={336}
+                        maxHeight={360}
+                        surface="permission"
+                        showArrow
                         onClose={() => setShowPermissionMenu(false)}
                     >
-                        <div className="py-1">
+                        <div className="py-2">
                             {props.permissionModeOptions.map((option) => {
                                 const selected = option.mode === props.permissionMode
-                                const yoloOption = isYoloPermission(option.mode)
+                                const copy = getPermissionCopy(option.mode, option.label, t)
                                 return (
                                     <button
                                         key={option.mode}
                                         type="button"
                                         disabled={props.controlsDisabled}
-                                        className={toolMenuItemClass}
+                                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--app-secondary-bg)] disabled:cursor-not-allowed disabled:opacity-45"
                                         onClick={() => {
                                             props.onPermissionModeChange?.(option.mode)
                                             setShowPermissionMenu(false)
                                         }}
                                     >
-                                        <span className={`flex-1 ${selected ? 'font-medium' : ''} ${yoloOption ? 'text-orange-500' : ''}`}>
-                                            {option.label}
+                                        <span className={`flex h-7 w-7 shrink-0 items-center justify-center ${getPermissionToneClass(option.mode)}`}>
+                                            <PermissionModeIcon mode={option.mode} />
                                         </span>
-                                        {selected ? <span className="text-[var(--app-hint)]">✓</span> : null}
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block text-[15px] font-semibold leading-5 text-[var(--app-fg)]">
+                                                {copy.title}
+                                            </span>
+                                            <span className="mt-0.5 block text-xs leading-4 text-[var(--app-hint)]">
+                                                {copy.description}
+                                            </span>
+                                        </span>
+                                        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-[var(--app-fg)]">
+                                            {selected ? <PermissionCheckIcon className="h-4 w-4" /> : null}
+                                        </span>
                                     </button>
                                 )
                             })}
@@ -894,6 +1180,7 @@ export function ComposerButtons(props: {
                             setShowToolsMenu(false)
                             setShowPermissionMenu(false)
                             setShowSchedulePicker(false)
+                            setShowRemoteServerMenu(false)
                             props.onSettingsToggle()
                         }}
                         disabled={props.controlsDisabled}
@@ -910,6 +1197,23 @@ export function ComposerButtons(props: {
                         )}
                         <ChevronIcon />
                     </button>
+                ) : null}
+
+                {showRemoteServerMenu && props.remoteServerContext ? (
+                    <ToolbarMenu
+                        anchorRef={remoteServerAnchor === 'button' ? remoteServerButtonRef : toolsButtonRef}
+                        align="left"
+                        width={300}
+                        maxHeight={320}
+                        onClose={() => setShowRemoteServerMenu(false)}
+                    >
+                        <RemoteServerContextMenuContent
+                            api={props.remoteServerContext.api}
+                            session={props.remoteServerContext.session}
+                            onChanged={props.remoteServerContext.onChanged}
+                            onClose={() => setShowRemoteServerMenu(false)}
+                        />
+                    </ToolbarMenu>
                 ) : null}
 
                 {isVoiceConnected && props.onVoiceMicToggle ? (

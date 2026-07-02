@@ -123,6 +123,40 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       }
     );
 
+    const verifySshServerCandidateInputSchema: z.ZodTypeAny = z.object({
+      host: z.string().min(1).describe('SSH host or IP address'),
+      user: z.string().min(1).describe('SSH username'),
+      port: z.number().int().min(1).max(65535).optional().describe('SSH port, defaults to 22'),
+      alias: z.string().max(120).optional().describe('SSH config Host alias if the successful command used one'),
+      workspace: z.string().min(1).optional().describe('HAPI remote server workspace, defaults to 默认'),
+      tags: z.array(z.string().min(1)).optional().describe('Optional server tags'),
+      detectedCommandKind: z.enum(['ssh', 'scp', 'rsync']).describe('Command kind that discovered this server'),
+      detectedToolCallId: z.string().optional().describe('Optional tool call id that discovered this server'),
+    });
+
+    server.registerTool<any, any>(
+      'verify_ssh_server_candidate',
+      {
+        description: 'Verify an SSH server is reachable and create a pending HAPI remote server candidate for user confirmation. Use this only after a successful ssh, scp, or rsync command.',
+        title: 'Verify SSH Server Candidate',
+        inputSchema: verifySshServerCandidateInputSchema,
+      },
+      async (args: Record<string, unknown>) => {
+        try {
+          const client = await ensureHttpClient();
+          const response = await client.callTool({ name: 'verify_ssh_server_candidate', arguments: args });
+          return response as any;
+        } catch (error) {
+          return {
+            content: [
+              { type: 'text' as const, text: `Failed to verify SSH server candidate: ${error instanceof Error ? error.message : String(error)}` },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+
     // Start STDIO transport
     const stdio = new StdioServerTransport();
     await server.connect(stdio);

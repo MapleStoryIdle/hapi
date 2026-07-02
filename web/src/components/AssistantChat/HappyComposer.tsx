@@ -12,7 +12,8 @@ import {
     useRef,
     useState
 } from 'react'
-import type { AgentState, CodexCollaborationMode, PermissionMode, PiModelSummary, ThreadGoal } from '@/types/api'
+import type { ApiClient } from '@/api/client'
+import type { AgentState, CodexCollaborationMode, PermissionMode, PiModelSummary, Session, ThreadGoal } from '@/types/api'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import type { ConversationStatus } from '@/realtime/types'
 import { useActiveWord } from '@/hooks/useActiveWord'
@@ -226,6 +227,11 @@ export function HappyComposer(props: {
     sendError?: ComposerSendError | null
     onClearSendError?: () => void
     showStatusBar?: boolean
+    remoteServerContext?: {
+        api: ApiClient
+        session: Session
+        onChanged: () => void
+    }
 }) {
     const { t, locale } = useTranslation()
     const {
@@ -276,7 +282,8 @@ export function HappyComposer(props: {
         onClearSchedule: onClearScheduleProp,
         sendError = null,
         onClearSendError,
-        showStatusBar = true
+        showStatusBar = true,
+        remoteServerContext
     } = props
 
     // Use ?? so missing values fall back to default (destructuring defaults only handle undefined)
@@ -1233,7 +1240,7 @@ export function HappyComposer(props: {
     ])
 
     return (
-        <div className={`px-3 ${bottomPaddingClass} pt-2 bg-[var(--app-bg)]`}>
+        <div className={`px-3 ${bottomPaddingClass} pt-2`}>
             <div className="mx-auto w-full max-w-content">
                 <ComposerPrimitive.Root className="relative" onSubmit={handleSubmit}>
                     {overlays}
@@ -1280,7 +1287,7 @@ export function HappyComposer(props: {
                     ) : null}
 
                     <div
-                        className={`overflow-hidden rounded-[20px] bg-[var(--app-secondary-bg)] ${
+                        className={`overflow-hidden rounded-[22px] border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_10px_30px_rgba(15,23,42,0.08)] ${
                             sendError ? 'ring-1 ring-red-500' : ''
                         }`}
                     >
@@ -1361,6 +1368,7 @@ export function HappyComposer(props: {
                             scratchlistMode={props.scratchlistMode}
                             scratchlistCount={props.scratchlistCount}
                             onScratchlistToggle={props.onScratchlistToggle}
+                            remoteServerContext={remoteServerContext}
                         />
                     </div>
                 </ComposerPrimitive.Root>

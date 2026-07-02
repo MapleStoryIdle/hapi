@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ToolGroupBlock } from '@/chat/toolGroups'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { getToolGroupActionKind, type ToolGroupBlock } from '@/chat/toolGroups'
 import type { ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
@@ -8,8 +8,21 @@ import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { usePointerFocusRing } from '@/hooks/usePointerFocusRing'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
+
+const COMPACT_ELAPSED_INTERVAL_MS = 1000
+
+type ToolGroupCompactHeaderState = {
+    groupId: string
+    open: boolean
+    setOpen: Dispatch<SetStateAction<boolean>>
+}
+
+const ToolGroupCompactHeaderContext = createContext<ToolGroupCompactHeaderState | null>(null)
+
+export const ToolGroupCompactHeaderProvider = ToolGroupCompactHeaderContext.Provider
 
 function DetailsIcon(props: { open: boolean }) {
     return (
@@ -17,6 +30,57 @@ function DetailsIcon(props: { open: boolean }) {
             <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
     )
+}
+
+function getToolStartMs(tool: ToolCallBlock): number {
+    return tool.tool.startedAt ?? tool.tool.createdAt
+}
+
+function getToolEndMs(tool: ToolCallBlock, now: number): number {
+    if (tool.tool.state === 'running' || tool.tool.state === 'pending') {
+        return now
+    }
+    return tool.tool.completedAt ?? tool.tool.startedAt ?? tool.tool.createdAt
+}
+
+export function isToolGroupActive(block: ToolGroupBlock): boolean {
+    return block.summary.runningCount > 0 || block.summary.pendingCount > 0
+}
+
+export function getToolGroupDurationMs(block: ToolGroupBlock, now: number): number {
+    if (block.tools.length === 0) {
+        return 0
+    }
+
+    const startedAt = Math.min(...block.tools.map(getToolStartMs))
+    const endedAt = Math.max(...block.tools.map((tool) => getToolEndMs(tool, now)))
+    return Math.max(0, endedAt - startedAt)
+}
+
+export function formatCompactDuration(durationMs: number): string {
+    const totalSeconds = Math.max(0, Math.floor(durationMs / 1000))
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+
+    if (hours > 0) {
+        return `${hours}h ${minutes}m`
+    }
+    if (minutes > 0) {
+        return `${minutes}m ${seconds}s`
+    }
+    return `${seconds}s`
+}
+
+export function formatToolGroupCompactTitle(
+    block: ToolGroupBlock,
+    now: number,
+    t: (key: string, params?: Record<string, string | number>) => string
+): string {
+    const compactDuration = formatCompactDuration(getToolGroupDurationMs(block, now))
+    return isToolGroupActive(block)
+        ? t('toolGroup.compact.processing', { duration: compactDuration })
+        : t('toolGroup.compact.processed', { duration: compactDuration })
 }
 
 function SummaryBadge(props: { className: string; text: string }) {
@@ -67,6 +131,44 @@ function formatActionSummary(block: ToolGroupBlock, t: (key: string, params?: Re
     return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function CompactRowLabel(props: { block: ToolCallBlock; metadata: SessionMetadataSummary | null }) {
+    const { t } = useTranslation()
+    const presentation = useMemo(() => getToolPresentation({
+        toolName: props.block.tool.name,
+        input: props.block.tool.input,
+        result: props.block.tool.result,
+        childrenCount: props.block.children.length,
+        description: props.block.tool.description,
+        metadata: props.metadata
+    }, t), [props.block, props.metadata, t])
+    const kind = getToolGroupActionKind(props.block)
+    const label = kind === 'command'
+        ? t('toolGroup.compact.row.command')
+        : kind === 'search'
+            ? t('toolGroup.compact.row.search')
+            : kind === 'read'
+                ? t('toolGroup.compact.row.read')
+                : kind === 'mutation'
+                    ? t('toolGroup.compact.row.mutation')
+                    : kind === 'web'
+                        ? t('toolGroup.compact.row.web')
+                        : presentation.title
+    const detail = presentation.subtitle ?? (kind === 'other' ? null : presentation.title)
+
+    return (
+        <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap text-base leading-6">
+                <span className="shrink-0 font-medium text-[var(--app-hint)]">{label}</span>
+                {detail ? (
+                    <span className="min-w-0 flex-1 truncate font-mono text-[0.9em] text-[var(--app-tool-card-subtitle)]">
+                        {detail}
+                    </span>
+                ) : null}
+            </div>
+        </div>
+    )
+}
+
 function RowLabel(props: { block: ToolCallBlock; metadata: SessionMetadataSummary | null }) {
     const { t } = useTranslation()
     const presentation = useMemo(() => getToolPresentation({
@@ -110,8 +212,24 @@ export function ToolGroupCard(props: {
     const [isHydratingHistory, setIsHydratingHistory] = useState(false)
     const [historyExhausted, setHistoryExhausted] = useState(false)
     const [retryNonce, setRetryNonce] = useState(0)
+    const [now, setNow] = useState(() => Date.now())
     const hydrationRunRef = useRef(0)
     const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const wasActiveRef = useRef(props.block.summary.runningCount > 0 || props.block.summary.pendingCount > 0)
+    const { suppressFocusRing, onTriggerPointerDown, onTriggerKeyDown, onTriggerBlur } = usePointerFocusRing()
+    const compactHeaderState = useContext(ToolGroupCompactHeaderContext)
+    const compactMode = ctx.terminalToolDisplayMode === 'compact'
+    const hasActiveTools = isToolGroupActive(props.block)
+    const useExternalCompactHeader = compactMode && compactHeaderState?.groupId === props.block.id
+    const displayedOpen = useExternalCompactHeader ? compactHeaderState.open : open
+    const externalSetOpen = compactHeaderState?.setOpen
+    const setDisplayedOpen = useCallback((nextOpen: SetStateAction<boolean>) => {
+        if (useExternalCompactHeader && externalSetOpen) {
+            externalSetOpen(nextOpen)
+            return
+        }
+        setOpen(nextOpen)
+    }, [externalSetOpen, useExternalCompactHeader])
 
     function clearRetryTimer() {
         if (retryTimerRef.current === null) {
@@ -124,11 +242,21 @@ export function ToolGroupCard(props: {
     useEffect(() => {
         clearRetryTimer()
         hydrationRunRef.current += 1
-        setOpen(props.block.defaultOpen)
+        setDisplayedOpen(compactMode && hasActiveTools ? true : props.block.defaultOpen)
         setSelectedToolId(null)
         setIsHydratingHistory(false)
         setHistoryExhausted(false)
-    }, [props.block.id, props.block.defaultOpen])
+        wasActiveRef.current = hasActiveTools
+    }, [
+        ctx.terminalToolDisplayMode,
+        compactMode,
+        hasActiveTools,
+        props.block.defaultOpen,
+        props.block.id,
+        props.block.summary.pendingCount,
+        props.block.summary.runningCount,
+        setDisplayedOpen,
+    ])
 
     useEffect(() => {
         return () => {
@@ -137,7 +265,34 @@ export function ToolGroupCard(props: {
     }, [])
 
     useEffect(() => {
-        if (!open) {
+        if (!compactMode) {
+            wasActiveRef.current = hasActiveTools
+            return
+        }
+
+        if (hasActiveTools) {
+            wasActiveRef.current = true
+            setDisplayedOpen(true)
+            return
+        }
+
+        if (wasActiveRef.current) {
+            wasActiveRef.current = false
+            setDisplayedOpen(false)
+        }
+    }, [compactMode, hasActiveTools, setDisplayedOpen])
+
+    useEffect(() => {
+        if (!compactMode || !hasActiveTools) {
+            return
+        }
+        setNow(Date.now())
+        const interval = setInterval(() => setNow(Date.now()), COMPACT_ELAPSED_INTERVAL_MS)
+        return () => clearInterval(interval)
+    }, [compactMode, hasActiveTools])
+
+    useEffect(() => {
+        if (!displayedOpen) {
             clearRetryTimer()
             hydrationRunRef.current += 1
             setIsHydratingHistory(false)
@@ -192,7 +347,7 @@ export function ToolGroupCard(props: {
                 setHistoryExhausted(true)
             })
     }, [
-        open,
+        displayedOpen,
         props.block.needsOlderHistory,
         ctx.hasMoreMessages,
         ctx.isLoadingMoreMessages,
@@ -221,21 +376,108 @@ export function ToolGroupCard(props: {
     const primaryTitle = formatGroupedHeaderTitle(props.block, t)
     const subtitle = formatGroupedHeaderSubtitle(props.block, t) ?? formatActionSummary(props.block, t)
     const fileCount = props.block.summary.fileTargets.length
+    const compactTitle = formatToolGroupCompactTitle(props.block, now, t)
+    const toggleOpen = () => {
+        if (compactMode && hasActiveTools) {
+            setDisplayedOpen(true)
+            return
+        }
+        setDisplayedOpen((value) => !value)
+    }
+
+    if (compactMode) {
+        return (
+            <div className={cn('overflow-hidden bg-transparent', useExternalCompactHeader ? 'py-0' : 'py-2')}>
+                {!useExternalCompactHeader ? (
+                    <button
+                        type="button"
+                        onClick={toggleOpen}
+                        className={cn(
+                            'flex w-full items-center gap-1.5 text-left text-sm font-medium text-[var(--app-hint)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                            suppressFocusRing && 'focus-visible:ring-0'
+                        )}
+                        onPointerDown={onTriggerPointerDown}
+                        onKeyDown={onTriggerKeyDown}
+                        onBlur={onTriggerBlur}
+                        aria-expanded={displayedOpen}
+                    >
+                        <span>{compactTitle}</span>
+                        <span className="shrink-0 text-[var(--app-hint)]">
+                            <DetailsIcon open={displayedOpen} />
+                        </span>
+                    </button>
+                ) : null}
+
+                {displayedOpen ? (
+                    <div className={cn('flex flex-col gap-2', useExternalCompactHeader ? 'mt-1' : 'mt-3')}>
+                        {props.block.tools.map((tool) => (
+                            <button
+                                key={tool.id}
+                                type="button"
+                                className="flex min-w-0 items-center gap-2 rounded-md px-0 py-0.5 text-left transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                onClick={() => setSelectedToolId(tool.id)}
+                            >
+                                <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center', toolStatusColorClass(tool.tool.state))}>
+                                    <ToolStatusIcon state={tool.tool.state} />
+                                </span>
+                                <CompactRowLabel block={tool} metadata={props.metadata} />
+                                <RowStatusBadge block={tool} />
+                            </button>
+                        ))}
+
+                        {isHydratingHistory ? (
+                            <div className="text-xs text-[var(--app-hint)]">
+                                {t('toolGroup.loadingOlderHistory')}
+                            </div>
+                        ) : null}
+                        {!isHydratingHistory && historyExhausted && props.block.needsOlderHistory ? (
+                            <div className="text-xs text-[var(--app-hint)]">
+                                {t('toolGroup.historyUnavailable')}
+                            </div>
+                        ) : null}
+                    </div>
+                ) : null}
+
+                <Dialog open={selectedTool !== null} onOpenChange={(nextOpen) => {
+                    if (!nextOpen) {
+                        setSelectedToolId(null)
+                    }
+                }}>
+                    <DialogContent className="max-w-2xl" aria-describedby={undefined}>
+                        {selectedTool && selectedPresentation ? (
+                            <>
+                                <DialogHeader>
+                                    <DialogTitle>{selectedPresentation.title}</DialogTitle>
+                                </DialogHeader>
+                                <ToolDetailDialogContent block={selectedTool} metadata={props.metadata} />
+                            </>
+                        ) : null}
+                    </DialogContent>
+                </Dialog>
+            </div>
+        )
+    }
 
     return (
         <Card className="overflow-hidden rounded-[20px] bg-[var(--app-tool-group-bg)] shadow-none">
             <CardHeader className={cn('space-y-0 p-3', subtitle ? 'pb-2' : null)}>
                 <button
                     type="button"
-                    onClick={() => setOpen((value) => !value)}
-                    className="w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                    aria-expanded={open}
+                    onClick={toggleOpen}
+                    className={cn(
+                        'w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                        suppressFocusRing && 'focus-visible:ring-0'
+                    )}
+                    onPointerDown={onTriggerPointerDown}
+                    onKeyDown={onTriggerKeyDown}
+                    onBlur={onTriggerBlur}
+                    aria-expanded={displayedOpen}
                 >
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex flex-1 flex-col gap-1">
                             <div className="min-w-0 flex items-center gap-2">
                                 <div className="shrink-0 flex h-3.5 w-3.5 items-center justify-center text-[var(--app-tool-card-accent)] leading-none">
-                                    <DetailsIcon open={open} />
+                                    <DetailsIcon open={displayedOpen} />
                                 </div>
                                 <CardTitle className="min-w-0 truncate whitespace-nowrap text-sm font-medium leading-tight text-[var(--app-fg)]">
                                     {primaryTitle}
@@ -282,7 +524,7 @@ export function ToolGroupCard(props: {
                 </button>
             </CardHeader>
 
-            {open ? (
+            {displayedOpen ? (
                 <CardContent className="px-3 pb-3 pt-1">
                     <div className="flex flex-col gap-2">
                         {props.block.tools.map((tool) => {

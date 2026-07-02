@@ -366,17 +366,17 @@ function CodeHeader(props: CodeHeaderProps) {
     const language = props.language && props.language !== 'unknown' ? props.language : 'text'
 
     return (
-        <div className="aui-code-shell-header flex items-center justify-between gap-3 rounded-t-xl bg-[var(--app-code-header-bg)] px-3 py-2 text-[11px] uppercase tracking-[0.08em] text-[var(--app-code-header-fg)]">
-            <div className="min-w-0 flex-1 truncate font-mono">
+        <div className="aui-code-shell-header flex items-center justify-between gap-3 rounded-t-[22px] border border-b-0 border-[var(--app-border)] bg-[var(--app-code-bg)] px-6 pb-3 pt-5 text-[0.95rem] font-semibold text-[var(--app-fg)]">
+            <div className="min-w-0 flex-1 truncate">
                 {language}
             </div>
             <button
                 type="button"
                 onClick={() => copy(props.code)}
-                className="shrink-0 rounded-md p-1 text-[var(--app-code-header-fg)] transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)]"
+                className="shrink-0 rounded-md p-1 text-[var(--app-fg)] opacity-75 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:opacity-100"
                 title="Copy"
             >
-                {copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
+                {copied ? <CheckIcon className="h-5 w-5" /> : <CopyIcon className="h-5 w-5" />}
             </button>
         </div>
     )
@@ -386,11 +386,11 @@ function Pre(props: ComponentPropsWithoutRef<'pre'>) {
     const { className, ...rest } = props
 
     return (
-        <div className="aui-md-pre-wrapper min-w-0 w-full max-w-full overflow-x-auto overflow-y-hidden">
+        <div className="aui-md-pre-wrapper min-w-0 w-full max-w-full overflow-x-auto overflow-y-hidden rounded-b-[22px] border border-t-0 border-[var(--app-border)] bg-[var(--app-code-bg)]">
             <pre
                 {...rest}
                 className={cn(
-                    'aui-md-pre m-0 w-max min-w-full rounded-b-xl bg-[var(--app-code-bg)] px-4 py-3 text-sm',
+                    'aui-md-pre m-0 w-max min-w-full bg-transparent px-6 pb-5 pt-0 text-[0.95rem] leading-7',
                     className
                 )}
             />
@@ -414,7 +414,7 @@ function Code(props: ComponentPropsWithoutRef<'code'>) {
         <code
             {...props}
             className={cn(
-                'aui-md-code break-words rounded-md border border-[var(--app-inline-code-border)] bg-[var(--app-inline-code-bg)] px-[0.38em] py-[0.14em] font-mono text-[0.88em] text-[var(--app-inline-code-fg)]',
+                'aui-md-code break-words rounded-md border border-[var(--app-inline-code-border)] bg-[var(--app-inline-code-bg)] px-[0.38em] py-[0.14em] font-mono text-[0.86em] text-[var(--app-inline-code-fg)]',
                 props.className
             )}
         />
@@ -551,7 +551,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
 }
 
 function Paragraph(props: ComponentPropsWithoutRef<'p'>) {
-    return <p {...props} className={cn('aui-md-p my-2.5 leading-7 first:mt-0 last:mb-0', props.className)} />
+    return <p {...props} className={cn('aui-md-p my-4 leading-[1.88] first:mt-0 last:mb-0', props.className)} />
 }
 
 function Blockquote(props: ComponentPropsWithoutRef<'blockquote'>) {
@@ -559,7 +559,7 @@ function Blockquote(props: ComponentPropsWithoutRef<'blockquote'>) {
         <blockquote
             {...props}
             className={cn(
-                'aui-md-blockquote my-3 rounded-r-2xl border-l-[3px] border-[var(--app-md-quote-border)] bg-[var(--app-md-quote-bg)] px-4 py-3 text-[var(--app-md-quote-fg)]',
+                'aui-md-blockquote my-5 rounded-r-2xl border-l-[3px] border-[var(--app-md-quote-border)] bg-[var(--app-md-quote-bg)] px-5 py-4 text-[var(--app-md-quote-fg)]',
                 props.className
             )}
         />
@@ -567,15 +567,15 @@ function Blockquote(props: ComponentPropsWithoutRef<'blockquote'>) {
 }
 
 function UnorderedList(props: ComponentPropsWithoutRef<'ul'>) {
-    return <ul {...props} className={cn('aui-md-ul my-2.5 list-disc pl-6 marker:text-[var(--app-hint)] [&>li]:mt-1.5', props.className)} />
+    return <ul {...props} className={cn('aui-md-ul my-4 list-disc pl-6 marker:text-[var(--app-hint)] [&>li]:mt-2', props.className)} />
 }
 
 function OrderedList(props: ComponentPropsWithoutRef<'ol'>) {
-    return <ol {...props} className={cn('aui-md-ol my-2.5 list-decimal pl-6 marker:text-[var(--app-hint)] [&>li]:mt-1.5', props.className)} />
+    return <ol {...props} className={cn('aui-md-ol my-4 list-decimal pl-6 marker:text-[var(--app-hint)] [&>li]:mt-2', props.className)} />
 }
 
 function ListItem(props: ComponentPropsWithoutRef<'li'>) {
-    return <li {...props} className={cn('aui-md-li leading-7', props.className)} />
+    return <li {...props} className={cn('aui-md-li leading-[1.82]', props.className)} />
 }
 
 function Hr(props: ComponentPropsWithoutRef<'hr'>) {
@@ -586,7 +586,7 @@ function Table(props: ComponentPropsWithoutRef<'table'>) {
     const { className, ...rest } = props
 
     return (
-        <div className="aui-md-table-wrapper my-3 max-w-full overflow-x-auto rounded-xl bg-[var(--app-md-table-bg)]">
+        <div className="aui-md-table-wrapper my-4 max-w-full overflow-x-auto rounded-[18px] bg-[var(--app-md-table-bg)]">
             <table {...rest} className={cn('aui-md-table w-full border-collapse text-sm', className)} />
         </div>
     )
@@ -621,19 +621,19 @@ function Td(props: ComponentPropsWithoutRef<'td'>) {
 }
 
 function H1(props: ComponentPropsWithoutRef<'h1'>) {
-    return <h1 {...props} className={cn('aui-md-h1 mt-4 text-[1.05rem] font-semibold tracking-[-0.01em] first:mt-0', props.className)} />
+    return <h1 {...props} className={cn('aui-md-h1 mb-3 mt-8 text-[1.35rem] font-semibold first:mt-0', props.className)} />
 }
 
 function H2(props: ComponentPropsWithoutRef<'h2'>) {
-    return <h2 {...props} className={cn('aui-md-h2 mt-4 text-base font-semibold tracking-[-0.01em] first:mt-0', props.className)} />
+    return <h2 {...props} className={cn('aui-md-h2 mb-3 mt-8 text-[1.2rem] font-semibold first:mt-0', props.className)} />
 }
 
 function H3(props: ComponentPropsWithoutRef<'h3'>) {
-    return <h3 {...props} className={cn('aui-md-h3 mt-3 text-[0.95rem] font-semibold first:mt-0', props.className)} />
+    return <h3 {...props} className={cn('aui-md-h3 mb-2.5 mt-7 text-[1.08rem] font-semibold first:mt-0', props.className)} />
 }
 
 function H4(props: ComponentPropsWithoutRef<'h4'>) {
-    return <h4 {...props} className={cn('aui-md-h4 mt-3 text-[0.92rem] font-semibold first:mt-0', props.className)} />
+    return <h4 {...props} className={cn('aui-md-h4 mb-2 mt-6 text-[1rem] font-semibold first:mt-0', props.className)} />
 }
 
 function H5(props: ComponentPropsWithoutRef<'h5'>) {

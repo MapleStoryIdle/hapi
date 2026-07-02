@@ -8,15 +8,34 @@
  */
 
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
-import type { CursorMigrateOutcome, CursorMigrateToAcpRequest, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
-import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type {
+    AcceptRemoteServerCandidateRequest,
+    CursorMigrateOutcome,
+    CursorMigrateToAcpRequest,
+    SlashCommandsResponse,
+    UpdateRemoteServerRequest,
+    VerifyRemoteServerCandidateRequest
+} from '@hapi/protocol/apiTypes'
+import type {
+    AgentFlavor,
+    CodexCollaborationMode,
+    DecryptedMessage,
+    PermissionMode,
+    RemoteServer,
+    RemoteServerCandidate,
+    RemoteServerSnapshot,
+    Session,
+    SyncEvent
+} from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import type { Store, CancelQueuedMessageResult } from '../store'
+import { toRemoteServerSnapshot } from '../store/remoteServers'
 import type { HapiSessionExportResult } from '@hapi/protocol/sessionExport'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 import type { SSEManager } from '../sse/sseManager'
 import { CursorLegacyMigrator, type CursorLegacyMigratorOptions } from '../cursor/cursorLegacyMigrator'
+import { basename } from 'node:path'
 
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
@@ -80,6 +99,19 @@ export type LocalHandoffResult =
     | { type: 'success' }
     | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'handoff_failed' }
 
+export type VerifyRemoteServerCandidateResult =
+    | { type: 'candidate-created'; candidate: RemoteServerCandidate }
+    | { type: 'already-recorded'; server: RemoteServer }
+    | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' }
+
+export type AcceptRemoteServerCandidateResult =
+    | { type: 'accepted'; server: RemoteServer; candidate: RemoteServerCandidate; created: boolean }
+    | { type: 'error'; message: string; code: 'candidate_not_found' | 'candidate_not_pending' | 'target_conflict' }
+
+function isCodexSession(session: Session): boolean {
+    return session.metadata?.flavor === 'codex'
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
         ? value as Record<string, unknown>
@@ -127,6 +159,29 @@ function extractClaudeUserMessageTextFromAgentOutput(content: unknown): string |
     if (message?.role !== 'user') return undefined
 
     return extractUserMessageText(message.content)
+}
+
+function resolveRemoteServerSource(session: Session): {
+    sourceProject: string
+    sourceProjectPath: string | null
+    sourceSessionTitle: string | null
+    machineId: string | null
+} {
+    const metadata = session.metadata
+    const projectPath = metadata?.worktree?.basePath ?? metadata?.path ?? null
+    const projectName = metadata?.worktree?.name
+        ?? (projectPath ? basename(projectPath) : null)
+        ?? metadata?.host
+        ?? 'Unknown'
+    const summary = metadata?.summary?.text?.trim()
+    const sourceSessionTitle = metadata?.name?.trim() || summary || null
+
+    return {
+        sourceProject: projectName,
+        sourceProjectPath: projectPath,
+        sourceSessionTitle,
+        machineId: metadata?.machineId ?? null
+    }
 }
 
 export class SyncEngine {
@@ -268,6 +323,174 @@ export class SyncEngine {
 
     getDeliverableMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number; now: number }): DecryptedMessage[] {
         return this.messageService.getDeliverableMessagesAfter(sessionId, options)
+    }
+
+    listRemoteServersByNamespace(namespace: string): RemoteServer[] {
+        return this.store.remoteServers.listRemoteServers(namespace)
+    }
+
+    getRemoteServerByNamespace(serverId: string, namespace: string): RemoteServer | null {
+        return this.store.remoteServers.getRemoteServerByNamespace(serverId, namespace)
+    }
+
+    listRemoteServerCandidatesByNamespace(namespace: string): RemoteServerCandidate[] {
+        return this.store.remoteServers.listRemoteServerCandidates(namespace, 'pending')
+    }
+
+    verifyRemoteServerCandidate(
+        sessionId: string,
+        namespace: string,
+        request: VerifyRemoteServerCandidateRequest
+    ): VerifyRemoteServerCandidateResult {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) {
+            return {
+                type: 'error',
+                message: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found',
+                code: access.reason === 'access-denied' ? 'access_denied' : 'session_not_found'
+            }
+        }
+
+        const source = resolveRemoteServerSource(access.session)
+        const result = this.store.remoteServers.verifyRemoteServerCandidate({
+            namespace,
+            sessionId: access.sessionId,
+            machineId: source.machineId,
+            host: request.host,
+            user: request.user,
+            port: request.port,
+            alias: request.alias,
+            workspace: request.workspace,
+            tags: request.tags,
+            sourceProject: source.sourceProject,
+            sourceProjectPath: source.sourceProjectPath,
+            sourceSessionTitle: source.sourceSessionTitle,
+            detectedCommandKind: request.detectedCommandKind,
+            detectedToolCallId: request.detectedToolCallId ?? null
+        })
+
+        if (result.status === 'already-recorded') {
+            this.eventPublisher.emit({
+                type: 'remote-server-updated',
+                namespace,
+                server: result.server
+            })
+            return { type: 'already-recorded', server: result.server }
+        }
+
+        this.eventPublisher.emit({
+            type: result.created ? 'remote-server-candidate-created' : 'remote-server-candidate-updated',
+            namespace,
+            candidate: result.candidate
+        })
+        return { type: 'candidate-created', candidate: result.candidate }
+    }
+
+    acceptRemoteServerCandidate(
+        candidateId: string,
+        namespace: string,
+        request: AcceptRemoteServerCandidateRequest
+    ): AcceptRemoteServerCandidateResult {
+        const result = this.store.remoteServers.acceptRemoteServerCandidate(candidateId, namespace, request)
+        if (result.status === 'not-found') {
+            return { type: 'error', message: 'Remote server candidate not found', code: 'candidate_not_found' }
+        }
+        if (result.status === 'not-pending') {
+            return { type: 'error', message: 'Remote server candidate is not pending', code: 'candidate_not_pending' }
+        }
+        if (result.status === 'conflict') {
+            return { type: 'error', message: 'Remote server already exists in this workspace', code: 'target_conflict' }
+        }
+
+        this.eventPublisher.emit({ type: 'remote-server-updated', namespace, server: result.server })
+        this.eventPublisher.emit({ type: 'remote-server-candidate-updated', namespace, candidate: result.candidate })
+        return {
+            type: 'accepted',
+            server: result.server,
+            candidate: result.candidate,
+            created: result.created
+        }
+    }
+
+    dismissRemoteServerCandidate(candidateId: string, namespace: string): RemoteServerCandidate | null {
+        const candidate = this.store.remoteServers.dismissRemoteServerCandidate(candidateId, namespace)
+        if (candidate) {
+            this.eventPublisher.emit({ type: 'remote-server-candidate-updated', namespace, candidate })
+        }
+        return candidate
+    }
+
+    updateRemoteServer(
+        serverId: string,
+        namespace: string,
+        request: UpdateRemoteServerRequest
+    ): RemoteServer | null {
+        const server = this.store.remoteServers.updateRemoteServer(serverId, namespace, request)
+        if (server) {
+            this.eventPublisher.emit({ type: 'remote-server-updated', namespace, server })
+        }
+        return server
+    }
+
+    deleteRemoteServer(serverId: string, namespace: string): boolean {
+        const affectedSessionIds = this.getSessionsByNamespace(namespace)
+            .filter((session) => session.remoteServerId === serverId)
+            .map((session) => session.id)
+        const deleted = this.store.remoteServers.deleteRemoteServer(serverId, namespace)
+        if (!deleted) {
+            return false
+        }
+        for (const sessionId of affectedSessionIds) {
+            this.sessionCache.refreshSession(sessionId)
+        }
+        this.eventPublisher.emit({ type: 'remote-server-deleted', namespace, serverId })
+        return true
+    }
+
+    setSessionRemoteServerContext(
+        sessionId: string,
+        namespace: string,
+        remoteServerId: string | null
+    ): {
+        ok: true
+        session: Session
+    } | {
+        ok: false
+        code: 'session_not_found' | 'access_denied' | 'server_not_found' | 'unsupported_agent' | 'server_not_verified_for_machine'
+        message: string
+    } {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) {
+            return {
+                ok: false,
+                code: access.reason === 'access-denied' ? 'access_denied' : 'session_not_found',
+                message: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found'
+            }
+        }
+        if (remoteServerId !== null) {
+            if (!isCodexSession(access.session)) {
+                return {
+                    ok: false,
+                    code: 'unsupported_agent',
+                    message: 'Remote server context is only supported for Codex sessions'
+                }
+            }
+            const server = this.store.remoteServers.getRemoteServerByNamespace(remoteServerId, namespace)
+            if (!server) {
+                return { ok: false, code: 'server_not_found', message: 'Remote server not found' }
+            }
+            if (!this.store.remoteServers.hasConnection(remoteServerId, access.session.metadata?.machineId ?? null)) {
+                return {
+                    ok: false,
+                    code: 'server_not_verified_for_machine',
+                    message: 'Remote server has not been verified from this runner'
+                }
+            }
+        }
+
+        this.sessionCache.applySessionConfig(access.sessionId, { remoteServerId })
+        const session = this.sessionCache.getSession(access.sessionId) ?? access.session
+        return { ok: true, session }
     }
 
     handleRealtimeEvent(event: SyncEvent): void {
@@ -413,9 +636,44 @@ export class SyncEngine {
             }>
             sentFrom?: 'telegram-bot' | 'webapp'
             scheduledAt?: number | null
+            remoteServerId?: string | null
         }
     ): Promise<void> {
-        await this.messageService.sendMessage(sessionId, payload)
+        let remoteServer: RemoteServerSnapshot | undefined
+        const session = this.sessionCache.getSession(sessionId) ?? this.sessionCache.refreshSession(sessionId) ?? undefined
+        const requestedRemoteServerId = payload.remoteServerId !== undefined
+            ? payload.remoteServerId
+            : session?.remoteServerId ?? null
+        if (requestedRemoteServerId) {
+            if (!session) {
+                throw new Error('Session not found')
+            }
+            if (!isCodexSession(session)) {
+                throw new Error('Remote server context is only supported for Codex sessions')
+            }
+            const storedRemoteServer = this.store.remoteServers.getRemoteServerByNamespace(requestedRemoteServerId, session.namespace)
+            if (!storedRemoteServer) {
+                throw new Error('Remote server not found')
+            }
+            if (!this.store.remoteServers.hasConnection(storedRemoteServer.id, session.metadata?.machineId ?? null)) {
+                throw new Error('Remote server has not been verified from this runner')
+            }
+            remoteServer = toRemoteServerSnapshot(storedRemoteServer)
+            const touched = this.store.remoteServers.touchRemoteServerLastUsed(
+                storedRemoteServer.id,
+                session.namespace,
+                Date.now()
+            )
+            if (touched) {
+                this.eventPublisher.emit({
+                    type: 'remote-server-updated',
+                    namespace: session.namespace,
+                    server: touched
+                })
+            }
+        }
+
+        await this.messageService.sendMessage(sessionId, { ...payload, remoteServer })
         this.sessionCache.markMessageQueued(sessionId)
         this.sessionCache.recordSessionActivity(sessionId, Date.now())
     }

@@ -74,6 +74,9 @@ export async function buildHapiMcpBridge(
                 tools: {
                     change_title: {
                         approval_mode: 'approve'
+                    },
+                    verify_ssh_server_candidate: {
+                        approval_mode: 'prompt'
                     }
                 }
             }

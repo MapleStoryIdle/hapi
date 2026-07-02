@@ -15,6 +15,10 @@ import type {
     PushSubscriptionPayload,
     PushUnsubscribePayload,
     PushVapidPublicKeyResponse,
+    RemoteServerCandidateResponse,
+    RemoteServerCandidatesResponse,
+    RemoteServerResponse,
+    RemoteServersResponse,
     SlashCommandsResponse,
     SkillsResponse,
     SpawnResponse,
@@ -37,7 +41,9 @@ import type {
     MachinePathsExistsResponse,
     OpencodeModelsResponse,
     OpencodeReasoningEffortResponse,
+    AcceptRemoteServerCandidateRequest,
     ReopenSessionResponse,
+    UpdateRemoteServerRequest,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor } from '@hapi/protocol'
@@ -388,14 +394,67 @@ export class ApiClient {
         return response.sessionId
     }
 
-    async sendMessage(sessionId: string, text: string, localId?: string | null, attachments?: AttachmentMetadata[], scheduledAt?: number | null): Promise<void> {
+    async getRemoteServers(): Promise<RemoteServersResponse> {
+        return await this.request<RemoteServersResponse>('/api/remote-servers')
+    }
+
+    async getRemoteServerCandidates(): Promise<RemoteServerCandidatesResponse> {
+        return await this.request<RemoteServerCandidatesResponse>('/api/remote-server-candidates')
+    }
+
+    async updateRemoteServer(serverId: string, payload: UpdateRemoteServerRequest): Promise<RemoteServerResponse> {
+        return await this.request<RemoteServerResponse>(`/api/remote-servers/${encodeURIComponent(serverId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+        })
+    }
+
+    async deleteRemoteServer(serverId: string): Promise<void> {
+        await this.request(`/api/remote-servers/${encodeURIComponent(serverId)}`, {
+            method: 'DELETE'
+        })
+    }
+
+    async acceptRemoteServerCandidate(candidateId: string, payload: AcceptRemoteServerCandidateRequest = {}): Promise<RemoteServerCandidateResponse & RemoteServerResponse & { created: boolean }> {
+        return await this.request<RemoteServerCandidateResponse & RemoteServerResponse & { created: boolean }>(
+            `/api/remote-server-candidates/${encodeURIComponent(candidateId)}/accept`,
+            {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            }
+        )
+    }
+
+    async dismissRemoteServerCandidate(candidateId: string): Promise<RemoteServerCandidateResponse> {
+        return await this.request<RemoteServerCandidateResponse>(
+            `/api/remote-server-candidates/${encodeURIComponent(candidateId)}/dismiss`,
+            { method: 'POST' }
+        )
+    }
+
+    async setSessionRemoteServer(sessionId: string, remoteServerId: string | null): Promise<SessionResponse> {
+        return await this.request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/remote-server`, {
+            method: 'POST',
+            body: JSON.stringify({ remoteServerId })
+        })
+    }
+
+    async sendMessage(
+        sessionId: string,
+        text: string,
+        localId?: string | null,
+        attachments?: AttachmentMetadata[],
+        scheduledAt?: number | null,
+        remoteServerId?: string | null
+    ): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
             method: 'POST',
             body: JSON.stringify({
                 text,
                 localId: localId ?? undefined,
                 attachments: attachments ?? undefined,
-                scheduledAt: scheduledAt ?? undefined
+                scheduledAt: scheduledAt ?? undefined,
+                remoteServerId: remoteServerId ?? undefined
             })
         })
     }

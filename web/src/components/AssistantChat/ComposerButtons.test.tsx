@@ -1,8 +1,8 @@
 import type { ReactElement } from 'react'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
-import { UnifiedButton } from './ComposerButtons'
+import { ComposerButtons, UnifiedButton } from './ComposerButtons'
 
 function renderInProviders(ui: ReactElement) {
     return render(<I18nProvider>{ui}</I18nProvider>)
@@ -81,5 +81,69 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
         )
         const btn = getButton('Send')
         expect(btn.className).not.toContain('bg-amber-500')
+    })
+})
+
+describe('ComposerButtons — permission mode button', () => {
+    const noop = () => {}
+
+    afterEach(() => {
+        cleanup()
+    })
+
+    /**
+     * Verifies the composer permission control stays icon-only while the
+     * expanded menu carries the readable mode labels and descriptions.
+     */
+    it('renders the permission mode trigger as icon-only and shows rich menu rows', () => {
+        renderInProviders(
+            <ComposerButtons
+                canSend={false}
+                controlsDisabled={false}
+                showSettingsButton={false}
+                onSettingsToggle={noop}
+                permissionMode="yolo"
+                permissionLabel="Yolo"
+                permissionModeOptions={[
+                    { mode: 'default', label: 'Default' },
+                    { mode: 'read-only', label: 'Read Only' },
+                    { mode: 'safe-yolo', label: 'Safe Yolo' },
+                    { mode: 'yolo', label: 'Yolo' }
+                ]}
+                onPermissionModeChange={noop}
+                showTerminalButton={false}
+                terminalDisabled={false}
+                terminalLabel="Terminal"
+                onTerminal={noop}
+                showAbortButton={false}
+                abortDisabled={false}
+                isAborting={false}
+                onAbort={noop}
+                showSwitchButton={false}
+                switchDisabled={false}
+                isSwitching={false}
+                onSwitch={noop}
+                voiceEnabled={false}
+                voiceStatus="disconnected"
+                onVoiceToggle={noop}
+                onSend={noop}
+            />
+        )
+
+        const trigger = screen.getByRole('button', { name: /Permission Mode: Yolo/ })
+        expect(trigger.textContent).toBe('')
+        expect(screen.queryByText('Yolo')).not.toBeInTheDocument()
+
+        fireEvent.click(trigger)
+
+        expect(screen.getByText('Full Access')).toBeInTheDocument()
+        expect(screen.getByText('Full computer access (higher risk)')).toBeInTheDocument()
+        const defaultRow = screen.getByText('Request Approval').closest('button')
+        const safeYoloRow = screen.getByText('Approve For Me').closest('button')
+        const fullAccessRow = screen.getByText('Full Access').closest('button')
+        expect(defaultRow?.querySelector('span')?.className).toContain('text-black/55')
+        expect(safeYoloRow?.querySelector('span')?.className).not.toContain('text-orange-500')
+        expect(safeYoloRow?.querySelector('span')?.className).toContain('text-blue-500')
+        expect(fullAccessRow?.querySelector('span')?.className).toContain('text-orange-500')
     })
 })

@@ -5,9 +5,10 @@ import type { ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock } from '@/chat/toolGroups'
 import { HappyChatProvider } from '@/components/AssistantChat/context'
 import { ToolGroupCard } from '@/components/ToolCard/ToolGroupCard'
+import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { I18nProvider } from '@/lib/i18n-context'
 
-function makeToolBlock(id: string, name: string, input: unknown = {}): ToolCallBlock {
+function makeToolBlock(id: string, name: string, input: unknown = {}, toolOverrides: Partial<ToolCallBlock['tool']> = {}): ToolCallBlock {
     return {
         kind: 'tool-call',
         id,
@@ -25,6 +26,7 @@ function makeToolBlock(id: string, name: string, input: unknown = {}): ToolCallB
             description: null,
             result: { content: 'done' },
             permission: undefined,
+            ...toolOverrides,
         },
         children: [],
     }
@@ -69,7 +71,12 @@ function makeGroup(overrides: Partial<ToolGroupBlock> = {}): ToolGroupBlock {
     }
 }
 
-function renderCard(block: ToolGroupBlock, options?: { loadOlder?: () => Promise<boolean>; hasMore?: boolean; isLoadingMore?: boolean }) {
+function renderCard(block: ToolGroupBlock, options?: {
+    loadOlder?: () => Promise<boolean>
+    hasMore?: boolean
+    isLoadingMore?: boolean
+    terminalToolDisplayMode?: TerminalToolDisplayMode
+}) {
     const loadOlderMessagesPreservingScroll = options?.loadOlder ?? vi.fn(async () => false)
     return render(
         <I18nProvider>
@@ -77,7 +84,7 @@ function renderCard(block: ToolGroupBlock, options?: { loadOlder?: () => Promise
                 api: {} as never,
                 sessionId: 'session-1',
                 metadata: { path: 'repo', host: 'local' },
-                terminalToolDisplayMode: 'detailed',
+                terminalToolDisplayMode: options?.terminalToolDisplayMode ?? 'detailed',
                 disabled: false,
                 onRefresh: vi.fn(),
                 hasMoreMessages: options?.hasMore ?? false,
@@ -170,6 +177,175 @@ describe('ToolGroupCard', () => {
 
         expect(screen.getAllByText('Tool').length).toBeGreaterThan(0)
         expect(screen.getByText('Tool 1')).toBeInTheDocument()
+    })
+
+    it('renders completed compact groups collapsed with processed duration', () => {
+        const tools = [
+            makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+                createdAt: 0,
+                startedAt: 0,
+                completedAt: 125_000,
+            }),
+            makeToolBlock('bash-2', 'Bash', { command: 'bun run build' }, {
+                createdAt: 126_000,
+                startedAt: 126_000,
+                completedAt: 205_000,
+            }),
+        ]
+        const view = renderCard(makeGroup({
+            tools,
+            summary: {
+                totalTools: tools.length,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 2,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['bun test', 'bun run build'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        const toggle = within(view.container).getByRole('button', { name: /processed 3m 25s/i })
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByText('Ran')).not.toBeInTheDocument()
+
+        fireEvent.click(toggle)
+
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getAllByText('Ran')).toHaveLength(2)
+        expect(screen.getByText('bun test')).toBeInTheDocument()
+        expect(screen.getByText('bun run build')).toBeInTheDocument()
+    })
+
+    it('keeps compact groups expanded while tools are still active', () => {
+        const startedAt = Date.now() - 8_000
+        const tools = [
+            makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+                state: 'running',
+                createdAt: startedAt,
+                startedAt,
+                completedAt: null,
+            }),
+            makeToolBlock('read-1', 'Read', { file_path: 'repo/src/a.ts' }),
+        ]
+        const view = renderCard(makeGroup({
+            tools,
+            summary: {
+                totalTools: tools.length,
+                countsByKind: {
+                    read: 1,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: ['repo/src/a.ts'],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 1,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        const toggle = within(view.container).getByRole('button', { name: /processing/i })
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByText('Ran')).toBeInTheDocument()
+
+        fireEvent.click(toggle)
+
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByText('Ran')).toBeInTheDocument()
+    })
+
+    it('auto-collapses compact groups when the active batch completes', async () => {
+        const startedAt = Date.now() - 10_000
+
+        function makeActiveGroup(active: boolean): ToolGroupBlock {
+            const tools = [
+                makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+                    state: active ? 'running' : 'completed',
+                    createdAt: startedAt,
+                    startedAt,
+                    completedAt: active ? null : startedAt + 10_000,
+                }),
+                makeToolBlock('read-1', 'Read', { file_path: 'repo/src/a.ts' }, {
+                    createdAt: startedAt + 1000,
+                    startedAt: startedAt + 1000,
+                    completedAt: startedAt + 2000,
+                }),
+            ]
+            return makeGroup({
+                tools,
+                summary: {
+                    totalTools: tools.length,
+                    countsByKind: {
+                        read: 1,
+                        search: 0,
+                        command: 1,
+                        mutation: 0,
+                        web: 0,
+                        other: 0,
+                    },
+                    fileTargets: ['repo/src/a.ts'],
+                    commandTargets: ['bun test'],
+                    searchTargets: [],
+                    urlTargets: [],
+                    otherTargets: [],
+                    errorCount: 0,
+                    runningCount: active ? 1 : 0,
+                    pendingCount: 0,
+                },
+            })
+        }
+
+        function Harness() {
+            const [active, setActive] = useState(true)
+            return (
+                <I18nProvider>
+                    <HappyChatProvider value={{
+                        api: {} as never,
+                        sessionId: 'session-1',
+                        metadata: { path: 'repo', host: 'local' },
+                        terminalToolDisplayMode: 'compact',
+                        disabled: false,
+                        onRefresh: vi.fn(),
+                        hasMoreMessages: false,
+                        isLoadingMoreMessages: false,
+                        loadOlderMessagesPreservingScroll: vi.fn(async () => false),
+                    }}>
+                        <button type="button" onClick={() => setActive(false)}>finish</button>
+                        <ToolGroupCard block={makeActiveGroup(active)} metadata={{ path: 'repo', host: 'local' }} />
+                    </HappyChatProvider>
+                </I18nProvider>
+            )
+        }
+
+        const view = render(<Harness />)
+        let toggle = within(view.container).getByRole('button', { name: /processing/i })
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByText('Ran')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'finish' }))
+
+        await waitFor(() => {
+            toggle = within(view.container).getByRole('button', { name: /processed/i })
+            expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        })
+        expect(screen.queryByText('Ran')).not.toBeInTheDocument()
     })
 
     it('auto-loads older history after expand when the group is incomplete', async () => {

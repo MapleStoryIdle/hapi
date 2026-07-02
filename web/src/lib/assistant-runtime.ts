@@ -5,11 +5,12 @@ import { useExternalMessageConverter, useExternalStoreRuntime } from '@assistant
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { safeStringify } from '@hapi/protocol'
+import { RemoteServerSnapshotSchema } from '@hapi/protocol/schemas'
 import { renderEventLabel } from '@/chat/presentation'
 import type { ChatBlock, CliOutputBlock, CodexReview, UsageData } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
-import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
+import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, RemoteServerSnapshot, Session } from '@/types/api'
 
 /**
  * Aggregated metadata for a multi-turn response group, surfaced on the
@@ -33,6 +34,7 @@ export type HappyChatMessageMetadata = {
     event?: AgentEvent
     source?: CliOutputBlock['source']
     attachments?: AttachmentMetadata[]
+    remoteServer?: RemoteServerSnapshot
     invokedAt?: number | null
     durationMs?: number
     usage?: UsageData
@@ -44,6 +46,13 @@ export type HappyChatMessageMetadata = {
      * per-message footer is rendered unchanged.
      */
     turnCount?: number
+}
+
+function getRemoteServerFromMeta(meta: unknown): RemoteServerSnapshot | undefined {
+    if (!meta || typeof meta !== 'object') return undefined
+    const remoteServer = (meta as { remoteServer?: unknown }).remoteServer
+    const parsed = RemoteServerSnapshotSchema.safeParse(remoteServer)
+    return parsed.success ? parsed.data : undefined
 }
 
 function formatCodexReviewText(review: CodexReview): string {
@@ -332,6 +341,7 @@ function toThreadMessageLike(block: VisibleChatBlock, threadMessageId: string): 
                     localId: block.localId,
                     originalText: block.originalText,
                     attachments: block.attachments,
+                    remoteServer: getRemoteServerFromMeta(block.meta),
                     invokedAt: block.invokedAt
                 } satisfies HappyChatMessageMetadata
             }

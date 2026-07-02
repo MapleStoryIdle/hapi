@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { AssistantRuntimeProvider, useAssistantApi, useAssistantState } from '@assistant-ui/react'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
@@ -28,6 +28,7 @@ import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimeP
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { QueuedMessagesBar } from '@/components/AssistantChat/QueuedMessagesBar'
 import { ScratchlistDrawer } from '@/components/AssistantChat/ScratchlistPanel'
+import { GitDiffSummary, summarizeGitStatusFiles } from '@/components/AssistantChat/GitDiffSummary'
 import { useScratchlist } from '@/lib/use-scratchlist'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
@@ -60,9 +61,11 @@ import { buildCursorEffortPickerOptions, resolveCursorVariantOptions } from '@/l
 import { useOpencodeModels } from '@/hooks/queries/useOpencodeModels'
 import { usePiModels } from '@/hooks/queries/usePiModels'
 import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeReasoningEffortOptions'
+import { useGitStatusFiles } from '@/hooks/queries/useGitStatusFiles'
 import { useVoiceOptional } from '@/lib/voice-context'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
+import { RemoteServerCandidatePrompt } from '@/components/RemoteServers'
 
 /**
  * Returns whether a PendingSchedule should trigger an auto-clear timer.
@@ -406,11 +409,27 @@ function SessionChatInner(props: SessionChatProps) {
     const sessionInactive = !props.session.active
     const inactiveCanResume = inactiveSessionCanResume(props.session, props.messages.length)
     const terminalSupported = isRemoteTerminalSupported(props.session.metadata)
+    const gitSessionId = props.session.metadata?.path ? props.session.id : null
+    const {
+        status: gitStatus,
+        error: gitStatusError,
+        isLoading: gitStatusLoading,
+        refetch: refetchGitStatus
+    } = useGitStatusFiles(props.api, gitSessionId)
+    const gitDiffDisplayStatus = gitStatusError ? null : gitStatus
+    const gitDiffSummaryVisible = useMemo(
+        () => summarizeGitStatusFiles(gitDiffDisplayStatus) !== null,
+        [gitDiffDisplayStatus]
+    )
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
+    const bottomOverlayRef = useRef<HTMLDivElement | null>(null)
+    const [bottomOverlayHeight, setBottomOverlayHeight] = useState(0)
+    const scrollButtonPositionReady = bottomOverlayHeight > 0 && !(gitSessionId && gitStatusLoading)
+    const lastGitRefreshUpdatedAtRef = useRef(props.session.updatedAt)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
             return
@@ -1014,6 +1033,15 @@ function SessionChatInner(props: SessionChatProps) {
         })
     }, [navigate, props.session.id])
 
+    const handleViewDiff = useCallback(() => {
+        setOutlineOpen(false)
+        navigate({
+            to: '/sessions/$sessionId/files',
+            params: { sessionId: props.session.id },
+            search: { tab: 'changes' }
+        })
+    }, [navigate, props.session.id])
+
     const handleToggleOutline = useCallback(() => {
         setOutlineOpen((open) => !open)
     }, [])
@@ -1024,6 +1052,37 @@ function SessionChatInner(props: SessionChatProps) {
             params: { sessionId: props.session.id }
         })
     }, [navigate, props.session.id])
+
+    useEffect(() => {
+        if (!gitSessionId) return
+        if (lastGitRefreshUpdatedAtRef.current === props.session.updatedAt) return
+        lastGitRefreshUpdatedAtRef.current = props.session.updatedAt
+        void refetchGitStatus()
+    }, [gitSessionId, props.session.updatedAt, refetchGitStatus])
+
+    useLayoutEffect(() => {
+        const node = bottomOverlayRef.current
+        if (!node) return
+
+        const measure = () => {
+            const height = Math.ceil(node.getBoundingClientRect().height)
+            setBottomOverlayHeight((current) => current === height ? current : height)
+        }
+
+        measure()
+        if (typeof ResizeObserver === 'undefined') {
+            window.addEventListener('resize', measure)
+            return () => window.removeEventListener('resize', measure)
+        }
+
+        const observer = new ResizeObserver(measure)
+        observer.observe(node)
+        window.addEventListener('resize', measure)
+        return () => {
+            observer.disconnect()
+            window.removeEventListener('resize', measure)
+        }
+    }, [])
 
     // Scheduled message state — lifted here so useHappyRuntime can read the ref.
     //
@@ -1184,6 +1243,9 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineOpen={outlineOpen}
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
+                        bottomInset={bottomOverlayHeight}
+                        bottomAccessoryVisible={gitDiffSummaryVisible}
+                        scrollButtonPositionReady={scrollButtonPositionReady}
                         onOutlineOpenChange={setOutlineOpen}
                     />
 
@@ -1195,168 +1257,199 @@ function SessionChatInner(props: SessionChatProps) {
                         </div>
                     ) : null}
 
-                    <div className="px-3">
-                        {/*
-                         * Scratchlist drawer - composer-controlled. Only
-                         * mounted when the operator clicks the notepad icon
-                         * in the composer toolbar. State lives in the
-                         * useScratchlist hook above (so the toolbar counter
-                         * and the drawer share one source of truth).
-                         */}
-                        {scratchlistMode ? (
-                            <ScratchlistDrawerHost
-                                entries={scratchlist.entries}
-                                onMove={scratchlist.move}
-                                onDelete={scratchlist.remove}
-                                onSend={props.onSend}
-                                onExitScratchlistMode={() => setScratchlistMode(false)}
+                    <div
+                        ref={bottomOverlayRef}
+                        className="pointer-events-none absolute inset-x-0 bottom-0 z-10"
+                    >
+                        <div className="pointer-events-auto px-3">
+                            {agentFlavor === 'codex' ? (
+                                <>
+                                    <RemoteServerCandidatePrompt
+                                        api={props.api}
+                                        session={props.session}
+                                        onChanged={props.onRefresh}
+                                    />
+                                </>
+                            ) : null}
+                            {/*
+                             * Scratchlist drawer - composer-controlled. Only
+                             * mounted when the operator clicks the notepad icon
+                             * in the composer toolbar. State lives in the
+                             * useScratchlist hook above (so the toolbar counter
+                             * and the drawer share one source of truth).
+                             */}
+                            {scratchlistMode ? (
+                                <ScratchlistDrawerHost
+                                    entries={scratchlist.entries}
+                                    onMove={scratchlist.move}
+                                    onDelete={scratchlist.remove}
+                                    onSend={props.onSend}
+                                    onExitScratchlistMode={() => setScratchlistMode(false)}
+                                />
+                            ) : null}
+                            <QueuedMessagesBar
+                                sessionId={props.session.id}
+                                api={props.api}
+                                onEdit={({ pendingSchedule: restored }) => {
+                                    // Restore the schedule so the clock button re-activates
+                                    setPendingSchedule(restored)
+                                }}
                             />
-                        ) : null}
-                        <QueuedMessagesBar
-                            sessionId={props.session.id}
-                            api={props.api}
-                            onEdit={({ pendingSchedule: restored }) => {
-                                // Restore the schedule so the clock button re-activates
-                                setPendingSchedule(restored)
-                            }}
-                        />
-                    </div>
+                        </div>
 
-                    <HappyComposer
-                        key={`composer-${props.session.id}`}
-                        sessionId={props.session.id}
-                        disabled={props.isSending}
-                        pendingSchedule={pendingSchedule}
-                        onSchedule={setPendingSchedule}
-                        onClearSchedule={() => setPendingSchedule(null)}
-                        showStatusBar={false}
-                        permissionMode={props.session.permissionMode}
-                        collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
-                        threadGoal={reduced.latestGoal}
-                        model={props.session.model}
-                        modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
-                        effort={props.session.effort}
-                        agentFlavor={agentFlavor}
-                        availableModelOptions={
-                            agentFlavor === 'codex'
-                                ? codexModelOptions
-                                : agentFlavor === 'cursor'
-                                    ? (
-                                        cursorCatalogPending
-                                        || !cursorPicker
-                                        || cursorPicker.modelOptions.length === 0
-                                            ? undefined
-                                            : cursorPicker.modelOptions
-                                    )
-                                    : agentFlavor === 'opencode'
-                                        ? opencodeModelOptions
-                                        // Pi uses its own provider-qualified picker (piModels prop).
-                                        // Feeding piModelOptions here would make the generic Ctrl/Cmd+M
-                                        // cycler (getNextModelForFlavor) post a bare modelId string,
-                                        // which loses the provider and can pick the wrong cached
-                                        // match or throw in runPi. undefined makes the shortcut a no-op
-                                        // so Pi model changes go through the dedicated picker only.
+                        <div className="pointer-events-auto">
+                            <GitDiffSummary
+                                status={gitDiffDisplayStatus}
+                                onViewDiff={handleViewDiff}
+                            />
+                        </div>
+
+                        <div className="pointer-events-auto">
+                            <HappyComposer
+                                key={`composer-${props.session.id}`}
+                                sessionId={props.session.id}
+                                disabled={props.isSending}
+                                pendingSchedule={pendingSchedule}
+                                onSchedule={setPendingSchedule}
+                                onClearSchedule={() => setPendingSchedule(null)}
+                                showStatusBar={false}
+                                permissionMode={props.session.permissionMode}
+                                collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
+                                threadGoal={reduced.latestGoal}
+                                model={props.session.model}
+                                modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
+                                effort={props.session.effort}
+                                agentFlavor={agentFlavor}
+                                availableModelOptions={
+                                    agentFlavor === 'codex'
+                                        ? codexModelOptions
+                                        : agentFlavor === 'cursor'
+                                            ? (
+                                                cursorCatalogPending
+                                                || !cursorPicker
+                                                || cursorPicker.modelOptions.length === 0
+                                                    ? undefined
+                                                    : cursorPicker.modelOptions
+                                            )
+                                            : agentFlavor === 'opencode'
+                                                ? opencodeModelOptions
+                                                // Pi uses its own provider-qualified picker (piModels prop).
+                                                // Feeding piModelOptions here would make the generic Ctrl/Cmd+M
+                                                // cycler (getNextModelForFlavor) post a bare modelId string,
+                                                // which loses the provider and can pick the wrong cached
+                                                // match or throw in runPi. undefined makes the shortcut a no-op
+                                                // so Pi model changes go through the dedicated picker only.
+                                                : undefined
+                                }
+                                piModels={agentFlavor === 'pi' ? (piModelsState.availableModels.length > 0 ? piModelsState.availableModels : piCachedModels) : undefined}
+                                piSelectedModel={agentFlavor === 'pi' ? piSelectedModel : undefined}
+                                availableModelReasoningEffortOptions={
+                                    agentFlavor === 'opencode' && opencodeReasoningEffortState.options.length > 0
+                                        ? opencodeReasoningEffortState.options
                                         : undefined
-                        }
-                        piModels={agentFlavor === 'pi' ? (piModelsState.availableModels.length > 0 ? piModelsState.availableModels : piCachedModels) : undefined}
-                        piSelectedModel={agentFlavor === 'pi' ? piSelectedModel : undefined}
-                        availableModelReasoningEffortOptions={
-                            agentFlavor === 'opencode' && opencodeReasoningEffortState.options.length > 0
-                                ? opencodeReasoningEffortState.options
-                                : undefined
-                        }
-                        active={props.session.active}
-                        allowSendWhenInactive
-                        thinking={props.session.thinking}
-                        agentState={props.session.agentState}
-                        backgroundTaskCount={props.session.backgroundTaskCount}
-                        contextSize={reduced.latestUsage?.contextSize}
-                        contextCacheRead={reduced.latestUsage?.cacheRead}
-                        contextWindow={reduced.latestUsage?.contextWindow}
-                        controlledByUser={controlledByUser}
-                        onCollaborationModeChange={
-                            codexCollaborationModeSupported && props.session.active && !controlledByUser
-                                ? handleCollaborationModeChange
-                                : undefined
-                        }
-                        onPermissionModeChange={handlePermissionModeChange}
-                        selectedModelBase={
-                            agentFlavor === 'cursor' && cursorPicker?.mode === 'dual'
-                                ? cursorSelectedBaseValue
-                                : undefined
-                        }
-                        selectedModelVariant={
-                            agentFlavor === 'cursor' && !cursorCatalogPending
-                                ? cursorVariantSelectValue
-                                : undefined
-                        }
-                        modelEffortOptions={
-                            agentFlavor === 'cursor'
-                                && !cursorCatalogPending
-                                && cursorPicker?.mode === 'dual'
-                                && cursorModelEffortOptions
-                                && cursorModelEffortOptions.length > 1
-                                ? cursorModelEffortOptions
-                                : undefined
-                        }
-                        onModelChange={
-                            agentFlavor === 'codex'
-                                ? (props.session.active && !controlledByUser && !codexModelsState.error ? handleModelChange : undefined)
-                                : agentFlavor === 'cursor'
-                                    ? (props.session.active
+                                }
+                                active={props.session.active}
+                                allowSendWhenInactive
+                                thinking={props.session.thinking}
+                                agentState={props.session.agentState}
+                                backgroundTaskCount={props.session.backgroundTaskCount}
+                                contextSize={reduced.latestUsage?.contextSize}
+                                contextCacheRead={reduced.latestUsage?.cacheRead}
+                                contextWindow={reduced.latestUsage?.contextWindow}
+                                controlledByUser={controlledByUser}
+                                onCollaborationModeChange={
+                                    codexCollaborationModeSupported && props.session.active && !controlledByUser
+                                        ? handleCollaborationModeChange
+                                        : undefined
+                                }
+                                onPermissionModeChange={handlePermissionModeChange}
+                                selectedModelBase={
+                                    agentFlavor === 'cursor' && cursorPicker?.mode === 'dual'
+                                        ? cursorSelectedBaseValue
+                                        : undefined
+                                }
+                                selectedModelVariant={
+                                    agentFlavor === 'cursor' && !cursorCatalogPending
+                                        ? cursorVariantSelectValue
+                                        : undefined
+                                }
+                                modelEffortOptions={
+                                    agentFlavor === 'cursor'
+                                        && !cursorCatalogPending
+                                        && cursorPicker?.mode === 'dual'
+                                        && cursorModelEffortOptions
+                                        && cursorModelEffortOptions.length > 1
+                                        ? cursorModelEffortOptions
+                                        : undefined
+                                }
+                                onModelChange={
+                                    agentFlavor === 'codex'
+                                        ? (props.session.active && !controlledByUser && !codexModelsState.error ? handleModelChange : undefined)
+                                        : agentFlavor === 'cursor'
+                                            ? (props.session.active
+                                                && !controlledByUser
+                                                && !cursorCatalogPending
+                                                && !cursorModelsState.error
+                                                && cursorPicker
+                                                && cursorPicker.modelOptions.length > 0
+                                                    ? ((model) => handleCursorBaseModelChange(typeof model === 'string' ? model : model?.modelId ?? null))
+                                                    : undefined)
+                                            : agentFlavor === 'pi'
+                                                ? (props.session.active && !piModelsState.error ? handleModelChange : undefined)
+                                                : handleModelChange
+                                }
+                                onModelEffortChange={
+                                    agentFlavor === 'cursor'
+                                        && props.session.active
                                         && !controlledByUser
                                         && !cursorCatalogPending
                                         && !cursorModelsState.error
-                                        && cursorPicker
-                                        && cursorPicker.modelOptions.length > 0
-                                        ? ((model) => handleCursorBaseModelChange(typeof model === 'string' ? model : model?.modelId ?? null))
-                                        : undefined)
-                                    : agentFlavor === 'pi'
-                                        ? (props.session.active && !piModelsState.error ? handleModelChange : undefined)
-                                        : handleModelChange
-                        }
-                        onModelEffortChange={
-                            agentFlavor === 'cursor'
-                                && props.session.active
-                                && !controlledByUser
-                                && !cursorCatalogPending
-                                && !cursorModelsState.error
-                                ? handleCursorEffortChange
-                                : undefined
-                        }
-                        onModelReasoningEffortChange={
-                            (agentFlavor === 'codex' || agentFlavor === 'opencode')
-                                && props.session.active
-                                && !controlledByUser
-                                && (agentFlavor !== 'opencode' || opencodeReasoningEffortState.options.length > 0)
-                                ? handleModelReasoningEffortChange
-                                : undefined
-                        }
-                        onEffortChange={handleEffortChange}
-                        serviceTier={agentFlavor === 'codex' ? props.session.serviceTier : undefined}
-                        onServiceTierChange={
-                            agentFlavor === 'codex'
-                                && props.session.active
-                                && !controlledByUser
-                                && !codexModelsState.error
-                                && codexModelAdvertisesFastTier(props.session.model, codexModelsState.models)
-                                ? handleServiceTierChange
-                                : undefined
-                        }
-                        onSwitchToRemote={handleSwitchToRemote}
-                        onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
-                        terminalUnsupported={props.session.active && !terminalSupported}
-                        autocompleteSuggestions={props.autocompleteSuggestions}
-                        voiceStatus={voice?.status}
-                        voiceMicMuted={voice?.micMuted}
-                        onVoiceToggle={voice && voiceBackendReady ? handleVoiceToggle : undefined}
-                        onVoiceMicToggle={voice && voiceBackendReady ? handleVoiceMicToggle : undefined}
-                        scratchlistMode={scratchlistMode}
-                        scratchlistCount={scratchlist.entries.length}
-                        onScratchlistToggle={handleScratchlistToggle}
-                        sendError={props.sendError ?? null}
-                        onClearSendError={props.onClearSendError}
-                    />
+                                        ? handleCursorEffortChange
+                                        : undefined
+                                }
+                                onModelReasoningEffortChange={
+                                    (agentFlavor === 'codex' || agentFlavor === 'opencode')
+                                        && props.session.active
+                                        && !controlledByUser
+                                        && (agentFlavor !== 'opencode' || opencodeReasoningEffortState.options.length > 0)
+                                        ? handleModelReasoningEffortChange
+                                        : undefined
+                                }
+                                onEffortChange={handleEffortChange}
+                                serviceTier={agentFlavor === 'codex' ? props.session.serviceTier : undefined}
+                                onServiceTierChange={
+                                    agentFlavor === 'codex'
+                                        && props.session.active
+                                        && !controlledByUser
+                                        && !codexModelsState.error
+                                        && codexModelAdvertisesFastTier(props.session.model, codexModelsState.models)
+                                        ? handleServiceTierChange
+                                        : undefined
+                                }
+                                onSwitchToRemote={handleSwitchToRemote}
+                                onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
+                                terminalUnsupported={props.session.active && !terminalSupported}
+                                autocompleteSuggestions={props.autocompleteSuggestions}
+                                voiceStatus={voice?.status}
+                                voiceMicMuted={voice?.micMuted}
+                                onVoiceToggle={voice && voiceBackendReady ? handleVoiceToggle : undefined}
+                                onVoiceMicToggle={voice && voiceBackendReady ? handleVoiceMicToggle : undefined}
+                                scratchlistMode={scratchlistMode}
+                                scratchlistCount={scratchlist.entries.length}
+                                onScratchlistToggle={handleScratchlistToggle}
+                                remoteServerContext={agentFlavor === 'codex'
+                                    ? {
+                                        api: props.api,
+                                        session: props.session,
+                                        onChanged: props.onRefresh
+                                    }
+                                    : undefined
+                                }
+                                sendError={props.sendError ?? null}
+                                onClearSendError={props.onClearSendError}
+                            />
+                        </div>
+                    </div>
                 </DragDropZone>
             </AssistantRuntimeProvider>
 

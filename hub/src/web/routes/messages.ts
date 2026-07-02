@@ -71,13 +71,20 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Message requires text or attachments' }, 400)
         }
 
-        await engine.sendMessage(sessionId, {
-            text: parsed.data.text,
-            localId: parsed.data.localId,
-            attachments: parsed.data.attachments,
-            sentFrom: 'webapp',
-            scheduledAt: parsed.data.scheduledAt
-        })
+        try {
+            await engine.sendMessage(sessionId, {
+                text: parsed.data.text,
+                localId: parsed.data.localId,
+                attachments: parsed.data.attachments,
+                sentFrom: 'webapp',
+                scheduledAt: parsed.data.scheduledAt,
+                remoteServerId: parsed.data.remoteServerId
+            })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to send message'
+            const status = message === 'Remote server not found' ? 404 : 409
+            return c.json({ error: message }, status)
+        }
         return c.json({ ok: true })
     })
 

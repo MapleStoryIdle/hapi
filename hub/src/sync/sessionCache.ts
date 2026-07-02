@@ -12,7 +12,7 @@ const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
 // snapshot. Cap retries so genuine concurrent contention still surfaces to the
 // HTTP caller as 409 instead of spinning forever.
 const METADATA_RETRY_ATTEMPTS = 5
-type RuntimeConfigKey = 'permissionMode' | 'model' | 'modelReasoningEffort' | 'effort' | 'serviceTier' | 'collaborationMode'
+type RuntimeConfigKey = 'permissionMode' | 'model' | 'modelReasoningEffort' | 'effort' | 'serviceTier' | 'remoteServerId' | 'collaborationMode'
 
 export class SessionCache {
     private readonly sessions: Map<string, Session> = new Map()
@@ -154,6 +154,7 @@ export class SessionCache {
             modelReasoningEffort: stored.modelReasoningEffort,
             effort: stored.effort,
             serviceTier: stored.serviceTier,
+            remoteServerId: stored.remoteServerId,
             permissionMode: existing?.permissionMode ?? metadata?.preferredPermissionMode,
             collaborationMode: existing?.collaborationMode
         }
@@ -426,6 +427,7 @@ export class SessionCache {
             modelReasoningEffort?: string | null
             effort?: string | null
             serviceTier?: string | null
+            remoteServerId?: string | null
             collaborationMode?: CodexCollaborationMode
         }
     ): void {
@@ -499,6 +501,18 @@ export class SessionCache {
             }
             session.serviceTier = config.serviceTier
             this.markRuntimeConfigUpdated(sessionId, 'serviceTier', appliedAt)
+        }
+        if (config.remoteServerId !== undefined) {
+            if (config.remoteServerId !== session.remoteServerId) {
+                const updated = this.store.sessions.setSessionRemoteServerId(sessionId, config.remoteServerId, session.namespace, {
+                    touchUpdatedAt: true
+                })
+                if (!updated) {
+                    throw new Error('Failed to update session remote server')
+                }
+            }
+            session.remoteServerId = config.remoteServerId
+            this.markRuntimeConfigUpdated(sessionId, 'remoteServerId', appliedAt)
         }
         if (config.collaborationMode !== undefined) {
             session.collaborationMode = config.collaborationMode

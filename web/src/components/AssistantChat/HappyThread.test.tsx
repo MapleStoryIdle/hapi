@@ -4,6 +4,7 @@ import type { ComponentProps } from 'react'
 import { I18nProvider } from '@/lib/i18n-context'
 import {
     ConversationOutlinePanel,
+    ScrollToBottomButton,
     captureScrollAnchor,
     getScrollIntent,
     locateOutlineTargetMessage,
@@ -82,6 +83,46 @@ describe('ConversationOutlinePanel', () => {
         renderPanel({ items: [] })
 
         expect(screen.getByText('No outline items in loaded messages')).toBeInTheDocument()
+    })
+})
+
+describe('ScrollToBottomButton', () => {
+    it('shows a back-to-bottom control when the thread is away from bottom', () => {
+        const { container } = render(
+            <I18nProvider>
+                <ScrollToBottomButton count={0} visible={true} onClick={vi.fn()} />
+            </I18nProvider>
+        )
+
+        expect(container.querySelector('button')?.style.bottom).toBe('0px')
+        expect(container.querySelector('button')?.className).not.toContain('animate-bounce-in')
+        expect(container.querySelector('button span')?.className).toContain('animate-bounce-in')
+    })
+
+    it('moves above the bottom accessory when git diff summary is visible', () => {
+        const { container } = render(
+            <I18nProvider>
+                <ScrollToBottomButton
+                    count={0}
+                    visible={true}
+                    bottomInset={120}
+                    bottomAccessoryVisible={true}
+                    onClick={vi.fn()}
+                />
+            </I18nProvider>
+        )
+
+        expect(container.querySelector('button')?.style.bottom).toBe('128px')
+    })
+
+    it('stays hidden at bottom when there are no pending messages', () => {
+        const { container } = render(
+            <I18nProvider>
+                <ScrollToBottomButton count={0} visible={false} onClick={vi.fn()} />
+            </I18nProvider>
+        )
+
+        expect(container.textContent).toBe('')
     })
 })
 

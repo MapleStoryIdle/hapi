@@ -113,7 +113,7 @@
     --app-border: rgba(15, 23, 42, 0.08);
     --app-divider: rgba(15, 23, 42, 0.08);
     --app-subtle-bg: rgba(15, 23, 42, 0.04);
-    --app-code-bg: #f5f6f7;
+    --app-code-bg: #f7f7f8;
     --app-inline-code-bg: #ebecef;
 
     /* Diff colors (light) - from hapi-app */
@@ -145,7 +145,7 @@
     --app-control-font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --app-chat-font-size: 0.9375rem;
     --app-chat-line-height: 1.75rem;
-    --app-message-action-size: 1.125rem;
+    --app-message-action-size: 1.75rem;
 }
 
 [data-theme="dark"] {
@@ -493,6 +493,18 @@ select {
     line-height: var(--app-chat-line-height);
 }
 
+.happy-assistant-message :where(.aui-md) {
+    font-size: 1.0625rem;
+    line-height: 2rem;
+}
+
+.happy-assistant-message :where(.aui-code-shell-header, .aui-code-surface) {
+    margin-top: 1.25rem;
+}
+
+.happy-assistant-message :where(.aui-md-codeblock, .aui-md-pre-wrapper, .aui-code-surface) {
+    margin-bottom: 1.25rem;
+}
 
 .tool-result-quote :where(.aui-md, .aui-md-p, .aui-md-li, .aui-md-td, .aui-md-th, .aui-md-strong, .aui-md-em, .aui-md-h1, .aui-md-h2, .aui-md-h3, .aui-md-h4, .aui-md-h5, .aui-md-h6) {
     color: inherit;
@@ -534,7 +546,7 @@ select {
 }
 
 .aui-md :where(p + ul, p + ol, p + blockquote, p + .aui-md-table-wrapper) {
-    margin-top: 0.85rem;
+    margin-top: 1.15rem;
 }
 
 .aui-mermaid-diagram svg {
@@ -570,9 +582,10 @@ select {
 
 .aui-md-codeblock pre.shiki {
     margin: 0;
-    padding: 0.75rem 1rem;
+    padding: 0 1.5rem 1.25rem;
     background-color: transparent !important;
-    font-size: 0.875rem;
+    font-size: 0.95rem;
+    line-height: 1.75rem;
 }
 
 .aui-md-codeblock pre.shiki code {
@@ -662,6 +675,36 @@ html[data-theme="oled"] .shiki span {
   animation: menu-pop 0.18s ease-out;
 }
 
+@keyframes diff-pill {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-diff-pill {
+  animation: diff-pill 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes diff-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-diff-pop {
+  animation: diff-pop 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 /* Syncing spinner animation */
 @keyframes spin {
   from {
@@ -683,14 +726,14 @@ html[data-theme="oled"] .shiki span {
 /* New messages indicator bounce animation */
 @keyframes bounce-in {
   0% {
-    transform: translateX(-50%) scale(0.8);
+    transform: scale(0.8);
     opacity: 0;
   }
   50% {
-    transform: translateX(-50%) scale(1.05);
+    transform: scale(1.05);
   }
   100% {
-    transform: translateX(-50%) scale(1);
+    transform: scale(1);
     opacity: 1;
   }
 }
@@ -703,4 +746,8 @@ html[data-theme="oled"] .shiki span {
 .tsqd-open-btn-container {
   bottom: 50% !important;
   transform: translateY(50%);
+}
+
+body:has(.session-list-screen) .tsqd-open-btn-container {
+  display: none !important;
 }

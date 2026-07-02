@@ -192,6 +192,70 @@ export const AttachmentMetadataSchema = z.object({
 
 export type AttachmentMetadata = z.infer<typeof AttachmentMetadataSchema>
 
+export const RemoteServerTagSchema = z.string().trim().min(1).max(50)
+
+export const RemoteServerSnapshotSchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    alias: z.string(),
+    host: z.string(),
+    user: z.string(),
+    port: z.number().int().min(1).max(65535),
+    workspace: z.string(),
+    tags: z.array(RemoteServerTagSchema),
+    sourceProject: z.string()
+})
+
+export type RemoteServerSnapshot = z.infer<typeof RemoteServerSnapshotSchema>
+
+export const RemoteServerSchema = RemoteServerSnapshotSchema.extend({
+    namespace: z.string(),
+    sourceProjectPath: z.string().nullable(),
+    sourceSessionId: z.string(),
+    sourceSessionTitle: z.string().nullable(),
+    machineId: z.string().nullable().optional(),
+    machineIds: z.array(z.string()).optional(),
+    lastVerifiedAt: z.number().nullable().optional(),
+    lastUsedAt: z.number(),
+    createdAt: z.number(),
+    updatedAt: z.number()
+})
+
+export type RemoteServer = z.infer<typeof RemoteServerSchema>
+
+export const RemoteServerCandidateStatusSchema = z.enum(['pending', 'accepted', 'dismissed'])
+export type RemoteServerCandidateStatus = z.infer<typeof RemoteServerCandidateStatusSchema>
+
+export const RemoteServerDetectedCommandKindSchema = z.enum(['ssh', 'scp', 'rsync'])
+export type RemoteServerDetectedCommandKind = z.infer<typeof RemoteServerDetectedCommandKindSchema>
+
+export const RemoteServerCandidateSchema = z.object({
+    id: z.string(),
+    namespace: z.string(),
+    sessionId: z.string(),
+    machineId: z.string().nullable(),
+    status: RemoteServerCandidateStatusSchema,
+    name: z.string(),
+    alias: z.string(),
+    host: z.string(),
+    user: z.string(),
+    port: z.number().int().min(1).max(65535),
+    workspace: z.string(),
+    tags: z.array(RemoteServerTagSchema),
+    sourceProject: z.string(),
+    sourceProjectPath: z.string().nullable(),
+    sourceSessionTitle: z.string().nullable(),
+    detectedCommandKind: RemoteServerDetectedCommandKindSchema,
+    detectedToolCallId: z.string().nullable(),
+    existingServerId: z.string().nullable().optional(),
+    verifiedAt: z.number(),
+    lastSeenAt: z.number(),
+    createdAt: z.number(),
+    updatedAt: z.number()
+})
+
+export type RemoteServerCandidate = z.infer<typeof RemoteServerCandidateSchema>
+
 export const DecryptedMessageSchema = z.object({
     id: z.string(),
     seq: z.number().nullable(),
@@ -225,6 +289,7 @@ export const SessionSchema = z.object({
     modelReasoningEffort: z.string().nullable().optional().default(null),
     effort: z.string().nullable().optional().default(null),
     serviceTier: z.string().nullable().optional().default(null),
+    remoteServerId: z.string().nullable().optional(),
     permissionMode: PermissionModeSchema.optional(),
     collaborationMode: CodexCollaborationModeSchema.optional()
 })
@@ -240,6 +305,7 @@ export const SessionPatchSchema = z.object({
     modelReasoningEffort: z.string().nullable().optional(),
     effort: z.string().nullable().optional(),
     serviceTier: z.string().nullable().optional(),
+    remoteServerId: z.string().nullable().optional(),
     permissionMode: PermissionModeSchema.optional(),
     collaborationMode: CodexCollaborationModeSchema.optional(),
     backgroundTaskCount: z.number().optional()
@@ -394,6 +460,22 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
             status: z.string(),
             subscriptionId: z.string().optional()
         }).optional()
+    }),
+    SessionEventBaseSchema.extend({
+        type: z.literal('remote-server-candidate-created'),
+        candidate: RemoteServerCandidateSchema
+    }),
+    SessionEventBaseSchema.extend({
+        type: z.literal('remote-server-candidate-updated'),
+        candidate: RemoteServerCandidateSchema
+    }),
+    SessionEventBaseSchema.extend({
+        type: z.literal('remote-server-updated'),
+        server: RemoteServerSchema
+    }),
+    SessionEventBaseSchema.extend({
+        type: z.literal('remote-server-deleted'),
+        serverId: z.string()
     })
 ])
 

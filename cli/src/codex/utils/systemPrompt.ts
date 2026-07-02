@@ -19,6 +19,7 @@ export const TITLE_INSTRUCTION = trimIdent(`
     Do not rename the chat for routine progress, substeps, implementation details, or a slightly better wording.
     Rename only when the user's primary objective changes substantially and the existing title would be misleading.
     When you create or find a local image file that the user should see, call functions.hapi__display_image with the image path. If that exact tool name is unavailable, use an equivalent alias such as hapi__display_image, mcp__hapi__display_image, or hapi_display_image.
+    When an ssh, scp, or rsync command succeeds against a remote SSH server, call functions.hapi__verify_ssh_server_candidate with the user, host, port, command kind, optional SSH config Host alias, and optional tool call id. If that exact tool name is unavailable, use an equivalent alias such as hapi__verify_ssh_server_candidate, mcp__hapi__verify_ssh_server_candidate, or hapi_verify_ssh_server_candidate. Do not include or persist the full command.
 `);
 
 /**

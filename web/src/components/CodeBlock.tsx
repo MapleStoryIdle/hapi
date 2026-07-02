@@ -54,8 +54,8 @@ export function CodeBlock(props: {
     const collapsedHeight = props.collapsedHeight ?? DEFAULT_COLLAPSED_HEIGHT
     const scrollHeight = props.maxHeight ?? DEFAULT_SCROLL_HEIGHT
     const codeTextClass = props.size === 'comfortable'
-        ? 'text-sm leading-5'
-        : 'text-xs'
+        ? 'text-[1rem] leading-7'
+        : 'text-[0.95rem] leading-7'
     const lineCount = countCodeLines(props.code)
     const lineNumberWidth = Math.max(String(lineCount).length, 3)
     const lineNumbers = Array.from({ length: lineCount }, (_, index) => String(index + 1)).join('\n')
@@ -70,9 +70,9 @@ export function CodeBlock(props: {
             : { overflowY: 'hidden' as const }
 
     return (
-        <div className="aui-code-surface relative min-w-0 max-w-full overflow-hidden rounded-xl bg-[var(--app-code-bg)] shadow-none">
-            <div className="aui-code-surface-header flex items-center justify-between gap-3 bg-[var(--app-code-header-bg)] px-3 py-2">
-                <div className="min-w-0 flex-1 truncate font-mono text-[11px] uppercase tracking-[0.08em] text-[var(--app-code-header-fg)]">
+        <div className="aui-code-surface relative min-w-0 max-w-full overflow-hidden rounded-[22px] border border-[var(--app-border)] bg-[var(--app-code-bg)] shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
+            <div className="aui-code-surface-header flex items-center justify-between gap-3 bg-[var(--app-code-bg)] px-6 pb-3 pt-5">
+                <div className="min-w-0 flex-1 truncate text-[0.95rem] font-semibold text-[var(--app-fg)]">
                     {label}
                 </div>
                 {showCopyButton ? (
@@ -82,10 +82,10 @@ export function CodeBlock(props: {
                             event.stopPropagation()
                             copy(props.code)
                         }}
-                        className="shrink-0 rounded-md p-1 text-[var(--app-code-header-fg)] transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)]"
+                        className="shrink-0 rounded-md p-1 text-[var(--app-fg)] opacity-75 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:opacity-100"
                         title={t('code.copy')}
                     >
-                        {copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
+                        {copied ? <CheckIcon className="h-5 w-5" /> : <CopyIcon className="h-5 w-5" />}
                     </button>
                 ) : null}
             </div>
@@ -97,11 +97,11 @@ export function CodeBlock(props: {
                 <div className={`grid w-max min-w-full font-mono ${codeTextClass}`} style={codeGridStyle}>
                     <pre
                         aria-hidden="true"
-                        className="m-0 select-none px-3 py-3 text-left text-[var(--app-hint)]/70"
+                        className="m-0 select-none px-5 pb-5 pt-0 text-left text-[var(--app-hint)]/65"
                     >
                         {lineNumbers}
                     </pre>
-                    <pre className="shiki m-0 px-4 py-3 pr-8">
+                    <pre className="shiki m-0 px-6 pb-5 pt-0 pr-8">
                         <code className="block">{highlighted ?? props.code}</code>
                     </pre>
                 </div>

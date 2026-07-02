@@ -19,6 +19,7 @@ import type { ReasoningEffort } from './appServerTypes';
 import { parseCodexSpecialCommand } from './codexSpecialCommands';
 import { listSlashCommands } from '@/modules/common/slashCommands';
 import { resolveCodexSlashCommand } from './utils/slashCommands';
+import { formatMessageWithRemoteServerContext } from '@/remoteServers/contextPrompt';
 
 export { emitReadyIfIdle } from './utils/emitReadyIfIdle';
 
@@ -234,6 +235,7 @@ export async function runCodex(opts: {
                     }
                 }
                 text = formatMessageWithAttachments(text, message.content.attachments);
+                text = formatMessageWithRemoteServerContext(text, message.meta?.remoteServer);
 
                 const messagePermissionMode = currentPermissionMode;
                 logger.debug(
@@ -263,7 +265,11 @@ export async function runCodex(opts: {
                     collaborationMode: currentCollaborationMode,
                     serviceTier: currentServiceTier
                 };
-                messageQueue.push(formatMessageWithAttachments(message.content.text, message.content.attachments), enhancedMode, localId);
+                const fallbackText = formatMessageWithRemoteServerContext(
+                    formatMessageWithAttachments(message.content.text, message.content.attachments),
+                    message.meta?.remoteServer
+                );
+                messageQueue.push(fallbackText, enhancedMode, localId);
             }
         }).catch((error) => {
             logger.debug('[Codex] User message handler chain failed', error);

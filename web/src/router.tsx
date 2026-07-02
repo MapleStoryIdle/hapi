@@ -41,7 +41,6 @@ import { fetchLatestMessages, seedMessageWindowFromSession } from '@/lib/message
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
-import { pickMostRecentActiveSession } from '@/lib/initialSessionSelection'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
 import FilesPage from '@/routes/sessions/files'
@@ -51,6 +50,7 @@ import SettingsPage from '@/routes/settings'
 import SharePage from '@/routes/share'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
+import RemoteServersPage from '@/components/RemoteServers'
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -151,6 +151,28 @@ function SettingsIcon(props: { className?: string }) {
     )
 }
 
+function ServerIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <rect x="4" y="4" width="16" height="6" rx="2" />
+            <rect x="4" y="14" width="16" height="6" rx="2" />
+            <path d="M8 7h.01" />
+            <path d="M8 17h.01" />
+        </svg>
+    )
+}
+
 function MoreHorizontalIcon(props: { className?: string }) {
     return (
         <svg
@@ -168,6 +190,48 @@ function MoreHorizontalIcon(props: { className?: string }) {
             <circle cx="5" cy="12" r="1" />
             <circle cx="12" cy="12" r="1" />
             <circle cx="19" cy="12" r="1" />
+        </svg>
+    )
+}
+
+function MenuLinesIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <path d="M5 9h14" />
+            <path d="M5 15h9" />
+        </svg>
+    )
+}
+
+function LaptopIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <rect x="5" y="5" width="14" height="10" rx="1.5" />
+            <path d="M3 19h18" />
+            <path d="m7 15-1.5 4" />
+            <path d="m17 15 1.5 4" />
         </svg>
     )
 }
@@ -204,22 +268,12 @@ function SessionsPage() {
         void refetch()
     }, [refetch])
 
-    const projectCount = useMemo(() => new Set(sessions.map(s =>
-        s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other'
-    )).size, [sessions])
     const machineLabelsById = useMemo(() => {
         const labels: Record<string, string> = {}
         for (const machine of machines) {
             labels[machine.id] = getMachineTitle(machine)
         }
         return labels
-    }, [machines])
-    const machinesById = useMemo(() => {
-        const byId: Record<string, typeof machines[number]> = {}
-        for (const machine of machines) {
-            byId[machine.id] = machine
-        }
-        return byId
     }, [machines])
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
     const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
@@ -237,34 +291,12 @@ function SessionsPage() {
         ? (selectedSession.metadata.agentSessionId ?? null)
         : null
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
-    const shouldAutoSelectInitialSessionRef = useRef(isSessionsIndex)
-    const didResolveInitialSessionRef = useRef(false)
     const sidebar = useSidebarResize()
-
-    useEffect(() => {
-        if (!shouldAutoSelectInitialSessionRef.current || didResolveInitialSessionRef.current) {
-            return
-        }
-        if (!isSessionsIndex) {
-            didResolveInitialSessionRef.current = true
-            return
-        }
-        if (isLoading || error) {
-            return
-        }
-
-        didResolveInitialSessionRef.current = true
-        const target = pickMostRecentActiveSession(sessions)
-        if (!target) {
-            return
-        }
-
-        navigate({
-            to: '/sessions/$sessionId',
-            params: { sessionId: target.id },
-            replace: true,
-        })
-    }, [error, isLoading, isSessionsIndex, navigate, sessions])
+    const primaryMachine = useMemo(
+        () => machines.find((machine) => machine.active) ?? machines[0] ?? null,
+        [machines]
+    )
+    const primaryMachineLabel = primaryMachine ? getMachineTitle(primaryMachine) : t('machine.unknown')
 
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
@@ -545,27 +577,43 @@ function SessionsPage() {
         <>
             <div className="flex h-full min-h-0">
             <div
-                className={`${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
+                className={`session-list-screen ${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                    <div className="mx-auto w-full max-w-content flex items-center justify-between px-3 py-2">
-                        <div className="text-xs text-[var(--app-hint)]">
-                            {t('sessions.count', { n: sessions.length, m: projectCount })}
+                    <div className="mx-auto grid w-full max-w-[620px] grid-cols-[52px_1fr_52px] items-center px-6 pb-3 pt-5">
+                        <button
+                            type="button"
+                            onClick={() => navigate({ to: '/browse' })}
+                            aria-label={t('browse.nav')}
+                            className="flex h-[52px] w-[52px] items-center justify-center rounded-full border border-[#eeeeee] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors hover:bg-[var(--app-subtle-bg)]"
+                            title={t('browse.nav')}
+                        >
+                            <MenuLinesIcon className="h-6 w-6" />
+                        </button>
+                        <div className="flex min-w-0 flex-col items-center justify-center px-4 text-center">
+                            <div className="text-[26px] font-semibold leading-8 text-[var(--app-fg)]">
+                                Codex
+                            </div>
+                            <div className="mt-0.5 flex min-w-0 items-center justify-center gap-2 text-[16px] font-medium leading-5 text-[#9ca3af]">
+                                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${primaryMachine?.active ? 'bg-[#22c55e]' : 'bg-[#a3a3a3]'}`} aria-hidden="true" />
+                                <LaptopIcon className="h-5 w-5 shrink-0" />
+                                <span className="truncate">{primaryMachineLabel}</span>
+                            </div>
                         </div>
-                        <div ref={sessionsMenuRef} className="relative flex items-center">
+                        <div ref={sessionsMenuRef} className="relative flex items-center justify-end">
                             <button
                                 type="button"
                                 onClick={() => setIsSessionsMenuOpen((open) => !open)}
                                 aria-label={t('session.more')}
                                 aria-expanded={isSessionsMenuOpen}
-                                className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                className="flex h-[52px] w-[52px] items-center justify-center rounded-full border border-[#eeeeee] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors hover:bg-[var(--app-subtle-bg)]"
                                 title={t('session.more')}
                             >
-                                <MoreHorizontalIcon className="h-5 w-5" />
+                                <MoreHorizontalIcon className="h-7 w-7" />
                             </button>
                             {isSessionsMenuOpen ? (
-                                <div className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border border-[var(--app-divider)] bg-[var(--app-bg)] py-1 shadow-lg">
+                                <div className="absolute right-0 top-full z-50 mt-3 w-48 overflow-hidden rounded-2xl border border-[var(--app-divider)] bg-[var(--app-bg)] py-1 shadow-xl">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -587,6 +635,17 @@ function SessionsPage() {
                                     >
                                         <FolderOpenIcon className="h-4 w-4" />
                                         <span>{t('browse.nav')}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsSessionsMenuOpen(false)
+                                            navigate({ to: '/remote-servers' })
+                                        }}
+                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                                    >
+                                        <ServerIcon className="h-4 w-4" />
+                                        <span>远程服务器</span>
                                     </button>
                                     <button
                                         type="button"
@@ -626,7 +685,6 @@ function SessionsPage() {
                         renderHeader={false}
                         api={api}
                         machineLabelsById={machineLabelsById}
-                        machinesById={machinesById}
                     />
                 </div>
             </div>
@@ -1317,6 +1375,12 @@ const settingsRoute = createRoute({
     component: SettingsPage,
 })
 
+const remoteServersRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/remote-servers',
+    component: RemoteServersPage,
+})
+
 // Web Share Target landing route. Service worker (`web/src/sw.ts`)
 // intercepts the manifest's `POST /share` and 303-redirects here with an
 // IDB transfer id. `error=ingest` is set when the SW failed to write IDB.
@@ -1348,6 +1412,7 @@ export const routeTree = rootRoute.addChildren([
         ]),
     ]),
     browseRoute,
+    remoteServersRoute,
     settingsRoute,
     shareRoute,
 ])

@@ -3,6 +3,7 @@ import {
     AttachmentMetadataSchema,
     MachineMetadataSchema,
     MetadataSchema,
+    RemoteServerSnapshotSchema,
     RunnerStateSchema
 } from '@hapi/protocol/schemas'
 import {
@@ -67,7 +68,8 @@ export const MessageMetaSchema = z.object({
     customSystemPrompt: z.string().nullable().optional(),
     appendSystemPrompt: z.string().nullable().optional(),
     allowedTools: z.array(z.string()).nullable().optional(),
-    disallowedTools: z.array(z.string()).nullable().optional()
+    disallowedTools: z.array(z.string()).nullable().optional(),
+    remoteServer: RemoteServerSnapshotSchema.nullable().optional()
 })
 
 export type MessageMeta = z.infer<typeof MessageMetaSchema>

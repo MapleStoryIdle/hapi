@@ -4,7 +4,8 @@ import {
     CreateOrLoadMachineRequestSchema,
     CreateOrLoadSessionRequestSchema,
     CursorMigrateToAcpRequestSchema,
-    PROTOCOL_VERSION
+    PROTOCOL_VERSION,
+    VerifyRemoteServerCandidateRequestSchema
 } from '@hapi/protocol'
 import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -197,6 +198,35 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             now: Date.now()
         })
         return c.json({ messages })
+    })
+
+    app.post('/sessions/:id/remote-server-candidates/verify', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = VerifyRemoteServerCandidateRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
+        }
+
+        const result = engine.verifyRemoteServerCandidate(resolved.sessionId, namespace, parsed.data)
+        if (result.type === 'error') {
+            const status = result.code === 'access_denied' ? 403 : 404
+            return c.json({ error: result.message, code: result.code }, status)
+        }
+        if (result.type === 'already-recorded') {
+            return c.json({ status: 'already-recorded', server: result.server })
+        }
+        return c.json({ status: 'candidate-created', candidate: result.candidate })
     })
 
     app.post('/sessions/:id/migrate-to-acp', async (c) => {

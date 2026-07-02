@@ -3,7 +3,7 @@ import {
     SESSION_EXPORT_MESSAGE_LIMIT,
     type HapiSessionExportResult
 } from '@hapi/protocol/sessionExport'
-import type { AttachmentMetadata, DecryptedMessage, Session } from '@hapi/protocol/types'
+import type { AttachmentMetadata, DecryptedMessage, RemoteServerSnapshot, Session } from '@hapi/protocol/types'
 import {
     isClaudeChatVisibleMessage,
     isRedundantGoalStatusEventContent,
@@ -438,6 +438,7 @@ export class MessageService {
             attachments?: AttachmentMetadata[]
             sentFrom?: 'telegram-bot' | 'webapp'
             scheduledAt?: number | null
+            remoteServer?: RemoteServerSnapshot
         }
     ): Promise<void> {
         // Defence-in-depth invariant for non-REST callers (Telegram bot, MCP,
@@ -462,7 +463,8 @@ export class MessageService {
                 attachments: payload.attachments
             },
             meta: {
-                sentFrom
+                sentFrom,
+                ...(payload.remoteServer ? { remoteServer: payload.remoteServer } : {})
             }
         }
 

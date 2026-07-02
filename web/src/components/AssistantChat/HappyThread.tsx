@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ThreadPrimitive } from '@assistant-ui/react'
 import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useTranslation } from '@/lib/use-translation'
-import { CloseIcon } from '@/components/icons'
+import { ArrowDownIcon, CloseIcon } from '@/components/icons'
 
 type ScrollAnchor = {
     id: string
@@ -103,18 +103,45 @@ export async function locateOutlineTargetMessage(options: LocateOutlineTargetOpt
     return target
 }
 
-function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
+export function ScrollToBottomButton(props: {
+    count: number
+    visible: boolean
+    bottomInset?: number
+    bottomAccessoryVisible?: boolean
+    onClick: () => void
+}) {
     const { t } = useTranslation()
-    if (props.count === 0) {
+    if (!props.visible && props.count === 0) {
         return null
     }
 
+    const hasNewMessages = props.count > 0
+    const newMessageLabel = t('misc.newMessage', { n: props.count, s: props.count === 1 ? '' : 's' })
+    const label = hasNewMessages ? newMessageLabel : t('misc.backToBottom')
+    const bottomOffset = (props.bottomInset ?? 0) + (props.bottomAccessoryVisible ? 8 : 0)
+    const contentClass = hasNewMessages
+        ? 'inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--app-button)] px-3.5 text-sm font-medium text-[var(--app-button-text)] shadow-lg animate-bounce-in'
+        : 'flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_10px_30px_rgba(15,23,42,0.16)] animate-bounce-in'
+
     return (
         <button
+            type="button"
             onClick={props.onClick}
-            className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-[var(--app-button)] text-[var(--app-button-text)] px-3 py-1.5 rounded-full text-sm font-medium shadow-lg animate-bounce-in z-10"
+            style={{ bottom: bottomOffset }}
+            className="absolute left-1/2 z-10 -translate-x-1/2 bg-transparent p-0 transition-[bottom] duration-150 ease-out"
+            aria-label={label}
+            title={label}
         >
-            {t('misc.newMessage', { n: props.count })} &#8595;
+            <span className={contentClass}>
+                {hasNewMessages ? (
+                    <>
+                        {newMessageLabel}
+                        <ArrowDownIcon className="h-3.5 w-3.5" />
+                    </>
+                ) : (
+                    <ArrowDownIcon className="h-5 w-5" />
+                )}
+            </span>
         </button>
     )
 }
@@ -261,6 +288,9 @@ export function HappyThread(props: {
     outlineOpen: boolean
     outlineTitle: string
     outlineItems: readonly ConversationOutlineItem[]
+    bottomInset?: number
+    bottomAccessoryVisible?: boolean
+    scrollButtonPositionReady?: boolean
     onOutlineOpenChange: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
 }) {
@@ -291,6 +321,7 @@ export function HappyThread(props: {
     const initialScrollSessionRef = useRef<string | null>(null)
     const initialScrollDeadlineRef = useRef(0)
     const initialScrollTimersRef = useRef<number[]>([])
+    const [isAwayFromBottom, setIsAwayFromBottom] = useState(false)
 
     // Smart scroll state: enabled only while the user is intentionally at the bottom.
     const autoScrollEnabledRef = useRef(true)
@@ -362,6 +393,7 @@ export function HappyThread(props: {
         }
 
         const setAtBottomMode = (atBottom: boolean) => {
+            setIsAwayFromBottom(!atBottom)
             if (atBottom === atBottomRef.current) {
                 return
             }
@@ -431,6 +463,7 @@ export function HappyThread(props: {
             atBottomRef.current = true
             onAtBottomChangeRef.current(true)
         }
+        setIsAwayFromBottom(false)
         onFlushPendingRef.current()
     }, [])
 
@@ -439,6 +472,7 @@ export function HappyThread(props: {
         autoScrollEnabledRef.current = true
         lastScrollTopRef.current = viewportRef.current?.scrollTop ?? 0
         atBottomRef.current = true
+        setIsAwayFromBottom(false)
         onAtBottomChangeRef.current(true)
         forceScrollTokenRef.current = props.forceScrollToken
         pendingScrollRef.current = null
@@ -463,6 +497,7 @@ export function HappyThread(props: {
         initialScrollSessionRef.current = props.sessionId
         autoScrollEnabledRef.current = true
         atBottomRef.current = true
+        setIsAwayFromBottom(false)
         onAtBottomChangeRef.current(true)
         scrollToBottomInstant()
 
@@ -695,7 +730,11 @@ export function HappyThread(props: {
                     scrollToBottomOnThreadSwitch={false}
                 >
                     <div ref={viewportRef} className="app-scroll-y min-h-0 flex-1 overflow-x-hidden">
-                        <div ref={contentRef} className="mx-auto w-full max-w-content min-w-0 p-3">
+                        <div
+                            ref={contentRef}
+                            className="mx-auto w-full max-w-content min-w-0 p-3"
+                            style={props.bottomInset ? { paddingBottom: props.bottomInset + 12 } : undefined}
+                        >
                             <div ref={topSentinelRef} className="h-px w-full" aria-hidden="true" />
                             {showSkeleton ? (
                                 <MessageSkeleton />
@@ -743,13 +782,21 @@ export function HappyThread(props: {
                                     ) : null}
                                 </>
                             )}
-                            <div className="happy-thread-messages flex flex-col gap-3">
+                            <div className="happy-thread-messages flex flex-col gap-4">
                                 <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
                             </div>
                         </div>
                     </div>
                 </ThreadPrimitive.Viewport>
-                <NewMessagesIndicator count={props.pendingCount} onClick={scrollToBottom} />
+                {(props.scrollButtonPositionReady ?? true) ? (
+                    <ScrollToBottomButton
+                        count={props.pendingCount}
+                        visible={isAwayFromBottom}
+                        bottomInset={props.bottomInset}
+                        bottomAccessoryVisible={props.bottomAccessoryVisible}
+                        onClick={scrollToBottom}
+                    />
+                ) : null}
                 {props.outlineOpen ? (
                     <>
                         <button
