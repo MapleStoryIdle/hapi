@@ -76,10 +76,14 @@ import { registerSessionStore } from '@/realtime/realtimeClientTools'
 import { registerVoiceHooksStore, voiceHooks } from '@/realtime/hooks/voiceHooks'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 import { RemoteServerCandidatePrompt } from '@/components/RemoteServers'
+import { encodeBase64 } from '@/lib/utils'
 
 const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSession').then((module) => ({
     default: module.VoiceBackendSession
 })))
+
+const RUN_SETTLE_DELAY_MS = 1500
+const RUN_ACTIVITY_KEY_LOOKBACK = 12
 
 /**
  * Returns whether a PendingSchedule should trigger an auto-clear timer.
@@ -359,6 +363,123 @@ function hasAbortableAgentRun(blocks: readonly ChatBlock[]): boolean {
         }
     }
     return false
+}
+
+function appendBlockActivityParts(block: ChatBlock, parts: string[]): void {
+    if (block.kind === 'tool-call') {
+        parts.push([
+            block.id,
+            block.kind,
+            block.tool.state,
+            block.tool.startedAt ?? '',
+            block.tool.completedAt ?? '',
+            block.tool.permission?.status ?? '',
+            block.children.length
+        ].join(':'))
+        for (const child of block.children) {
+            appendBlockActivityParts(child, parts)
+        }
+        return
+    }
+
+    if (block.kind === 'agent-text' || block.kind === 'agent-reasoning' || block.kind === 'cli-output') {
+        parts.push([
+            block.id,
+            block.kind,
+            block.text.length,
+            block.durationMs ?? '',
+        ].join(':'))
+        return
+    }
+
+    if (block.kind === 'user-text') {
+        parts.push([
+            block.id,
+            block.kind,
+            block.status ?? '',
+            block.invokedAt ?? '',
+            block.text.length,
+        ].join(':'))
+        return
+    }
+
+    parts.push([
+        block.id,
+        block.kind,
+        'durationMs' in block ? block.durationMs ?? '' : '',
+        'invokedAt' in block ? block.invokedAt ?? '' : '',
+    ].join(':'))
+}
+
+export function getChatActivityKey(blocks: readonly ChatBlock[]): string {
+    const parts: string[] = []
+    const recentBlocks = blocks.slice(-RUN_ACTIVITY_KEY_LOOKBACK)
+    for (const block of recentBlocks) {
+        appendBlockActivityParts(block, parts)
+    }
+    return parts.join('|')
+}
+
+export function getLatestTurnCompletionKey(messages: readonly NormalizedMessage[]): string | null {
+    const latestUserIndex = messages.findLastIndex((message) => message.role === 'user')
+    if (latestUserIndex === -1) return null
+
+    let completionKey: string | null = null
+    for (let index = latestUserIndex + 1; index < messages.length; index += 1) {
+        const message = messages[index]
+        if (message.role !== 'event') continue
+        if (message.content.type !== 'ready' && message.content.type !== 'turn-duration') continue
+        completionKey = `${message.id}:${message.createdAt}:${message.content.type}`
+    }
+    return completionKey
+}
+
+function useSettledRunActive(
+    rawRunActive: boolean,
+    activityKey: string,
+    completionKey: string | null
+): boolean {
+    const [settledRunActive, setSettledRunActive] = useState(rawRunActive)
+    const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const completionKeyAtActivationRef = useRef<string | null>(completionKey)
+    const wasRawActiveRef = useRef(rawRunActive)
+
+    useEffect(() => {
+        if (settleTimerRef.current !== null) {
+            clearTimeout(settleTimerRef.current)
+            settleTimerRef.current = null
+        }
+
+        if (rawRunActive) {
+            if (!wasRawActiveRef.current) {
+                completionKeyAtActivationRef.current = completionKey
+            }
+            wasRawActiveRef.current = true
+            setSettledRunActive(true)
+            return
+        }
+
+        wasRawActiveRef.current = false
+        const hasNewCompletion = completionKey !== null && completionKey !== completionKeyAtActivationRef.current
+        if (hasNewCompletion) {
+            setSettledRunActive(false)
+            return
+        }
+
+        settleTimerRef.current = setTimeout(() => {
+            settleTimerRef.current = null
+            setSettledRunActive(false)
+        }, RUN_SETTLE_DELAY_MS)
+
+        return () => {
+            if (settleTimerRef.current !== null) {
+                clearTimeout(settleTimerRef.current)
+                settleTimerRef.current = null
+            }
+        }
+    }, [activityKey, completionKey, rawRunActive])
+
+    return rawRunActive || settledRunActive
 }
 
 type SessionChatProps = {
@@ -922,7 +1043,16 @@ function SessionChatInner(props: SessionChatProps) {
         () => hasActiveToolBlock(reconciled.blocks),
         [reconciled.blocks]
     )
-    const runActive = props.isSending || props.session.thinking || hasRunningChildAgent || hasActiveTool
+    const rawRunActive = props.isSending || props.session.thinking || hasRunningChildAgent || hasActiveTool
+    const runActivityKey = useMemo(
+        () => getChatActivityKey(reconciled.blocks),
+        [reconciled.blocks]
+    )
+    const turnCompletionKey = useMemo(
+        () => getLatestTurnCompletionKey(normalizedMessages),
+        [normalizedMessages]
+    )
+    const runActive = useSettledRunActive(rawRunActive, runActivityKey, turnCompletionKey)
     const activePlanStatus = getRunScopedPlanStatus(latestPlanStatus, {
         runActive,
         clearedSourceBlockId: clearedPlanSourceBlockId
@@ -1111,6 +1241,18 @@ function SessionChatInner(props: SessionChatProps) {
             to: '/sessions/$sessionId/files',
             params: { sessionId: props.session.id },
             search: { tab: 'changes' }
+        })
+    }, [navigate, props.session.id])
+
+    const handleViewFileDiff = useCallback((file: { path: string; staged: boolean; unstaged: boolean }) => {
+        setOutlineOpen(false)
+        navigate({
+            to: '/sessions/$sessionId/file',
+            params: { sessionId: props.session.id },
+            search: {
+                path: encodeBase64(file.path),
+                staged: file.staged && !file.unstaged ? true : false
+            }
         })
     }, [navigate, props.session.id])
 
@@ -1390,6 +1532,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 <GitDiffSummary
                                     status={gitDiffAccessoryVisible ? gitDiffDisplayStatus : null}
                                     onViewDiff={handleViewDiff}
+                                    onViewFileDiff={handleViewFileDiff}
                                     onExpandedChange={handleBottomAccessoryExpandedChange}
                                 />
                             )}

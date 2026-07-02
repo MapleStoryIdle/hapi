@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 
 const COMPACT_ELAPSED_INTERVAL_MS = 1000
+const COMPACT_DONE_DURATION_VISIBLE_MS = 5000
 
 type ToolGroupCompactHeaderState = {
     groupId: string
@@ -80,19 +81,22 @@ export function formatToolGroupCompactTitle(
     now: number,
     t: (key: string, params?: Record<string, string | number>) => string
 ): string {
-    const compactDuration = formatCompactDuration(getToolGroupDurationMs(block, now))
+    const active = isToolGroupActive(block)
+    const durationMs = getToolGroupDurationMs(block, now)
+    const compactDuration = formatCompactDuration(durationMs)
+    const renderedDuration = active || durationMs > COMPACT_DONE_DURATION_VISIBLE_MS ? compactDuration : ''
     const singleTool = !block.forceGenericCompactTitle && block.tools.length === 1 ? block.tools[0] : null
     if (singleTool) {
-        const status = isToolGroupActive(block) ? 'processing' : 'processed'
+        const status = active ? 'processing' : 'processed'
         const kind = getToolGroupActionKind(singleTool)
         if (kind !== 'other') {
-            return t(`toolGroup.compact.single.${status}.${kind}`, { duration: compactDuration })
+            return t(`toolGroup.compact.single.${status}.${kind}`, { duration: renderedDuration }).trim()
         }
     }
 
-    return isToolGroupActive(block)
-        ? t('toolGroup.compact.processing', { duration: compactDuration })
-        : t('toolGroup.compact.processed', { duration: compactDuration })
+    return active
+        ? t('toolGroup.compact.processing', { duration: renderedDuration }).trim()
+        : t('toolGroup.compact.processed', { duration: renderedDuration }).trim()
 }
 
 function CompactDetailBlock(props: { block: Exclude<NonNullable<ToolGroupBlock['detailBlocks']>[number], ToolCallBlock> }) {
@@ -100,7 +104,7 @@ function CompactDetailBlock(props: { block: Exclude<NonNullable<ToolGroupBlock['
 
     if (block.kind === 'agent-text') {
         return (
-            <div className="min-w-0 whitespace-pre-wrap rounded-md bg-[var(--app-subtle-bg)] px-2 py-1.5 text-sm leading-6 text-[var(--app-fg)]">
+            <div className="min-w-0 whitespace-pre-wrap text-base leading-7 text-[var(--app-fg)]">
                 {block.text}
             </div>
         )
@@ -108,7 +112,7 @@ function CompactDetailBlock(props: { block: Exclude<NonNullable<ToolGroupBlock['
 
     if (block.kind === 'agent-reasoning') {
         return (
-            <div className="min-w-0 whitespace-pre-wrap rounded-md bg-[var(--app-subtle-bg)] px-2 py-1.5 text-sm leading-6 text-[var(--app-hint)]">
+            <div className="min-w-0 whitespace-pre-wrap text-base leading-7 text-[var(--app-hint)]">
                 {block.text}
             </div>
         )

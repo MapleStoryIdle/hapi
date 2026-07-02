@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { I18nProvider } from '@/lib/i18n-context'
+import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import type { ScratchlistEntry } from '@/lib/scratchlist'
 
 /**
@@ -29,7 +30,7 @@ vi.mock('@assistant-ui/react', () => ({
     }),
 }))
 
-import { ScratchlistDrawerHost } from './SessionChat'
+import { ScratchlistDrawerHost, getChatActivityKey, getLatestTurnCompletionKey } from './SessionChat'
 
 function makeEntry(overrides: Partial<ScratchlistEntry> & { id: string }): ScratchlistEntry {
     return { text: 'note', createdAt: 1000, ...overrides }
@@ -100,6 +101,62 @@ describe('ScratchlistDrawerHost.onPromoteToComposer', () => {
         expect(onSend).toHaveBeenCalledWith('send-to-queue text')
         expect(onExitScratchlistMode).not.toHaveBeenCalled()
         expect(setText).not.toHaveBeenCalled()
+    })
+})
+
+describe('SessionChat run-state helpers', () => {
+    it('detects only completion events after the latest user turn', () => {
+        const messages: NormalizedMessage[] = [
+            {
+                id: 'user-1',
+                localId: null,
+                createdAt: 1,
+                isSidechain: false,
+                role: 'user',
+                content: { type: 'text', text: 'old prompt' }
+            },
+            {
+                id: 'ready-old',
+                localId: null,
+                createdAt: 2,
+                isSidechain: false,
+                role: 'event',
+                content: { type: 'ready' }
+            },
+            {
+                id: 'user-2',
+                localId: null,
+                createdAt: 3,
+                isSidechain: false,
+                role: 'user',
+                content: { type: 'text', text: 'new prompt' }
+            }
+        ]
+
+        expect(getLatestTurnCompletionKey(messages)).toBeNull()
+
+        messages.push({
+            id: 'duration-2',
+            localId: null,
+            createdAt: 4,
+            isSidechain: false,
+            role: 'event',
+            content: { type: 'turn-duration', durationMs: 1200 }
+        })
+
+        expect(getLatestTurnCompletionKey(messages)).toBe('duration-2:4:turn-duration')
+    })
+
+    it('changes the activity key when streaming assistant text grows', () => {
+        const makeBlocks = (text: string): ChatBlock[] => [{
+            kind: 'agent-text',
+            id: 'agent-1',
+            localId: null,
+            createdAt: 1,
+            text
+        }]
+
+        expect(getChatActivityKey(makeBlocks('running'))).not.toBe(getChatActivityKey(makeBlocks('running now')))
     })
 })
 

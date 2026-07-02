@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GitFileStatus, GitStatusFiles } from '@/types/api'
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
+
+const VISIBLE_DIFF_ROW_LIMIT = 6
 
 type DiffFileRow = {
     path: string
@@ -81,17 +82,6 @@ export function summarizeGitStatusFiles(status: GitStatusFiles | null): DiffSumm
     }
 }
 
-function buildClipboardSummary(summary: DiffSummary): string {
-    const lines = [
-        `${summary.fileCount} files changed, +${summary.added} -${summary.removed}`,
-        ...summary.rows.map((file) => {
-            const staged = file.staged && file.unstaged ? 'staged+unstaged' : file.staged ? 'staged' : 'unstaged'
-            return `${STATUS_LABELS[file.status]} ${file.path} +${file.added} -${file.removed} (${staged})`
-        })
-    ]
-    return lines.join('\n')
-}
-
 function formatPath(path: string, fileName: string): string {
     const parts = path.split('/').filter(Boolean)
     if (parts.length <= 2) return path
@@ -101,12 +91,12 @@ function formatPath(path: string, fileName: string): string {
 export function GitDiffSummary(props: {
     status: GitStatusFiles | null
     onViewDiff: () => void
+    onViewFileDiff?: (file: DiffFileRow) => void
     onExpandedChange?: (expanded: boolean) => void
 }) {
     const { t } = useTranslation()
     const [expanded, setExpanded] = useState(false)
     const rootRef = useRef<HTMLDivElement>(null)
-    const { copied, copy } = useCopyToClipboard()
     const summary = useMemo(() => summarizeGitStatusFiles(props.status), [props.status])
 
     useEffect(() => {
@@ -139,8 +129,9 @@ export function GitDiffSummary(props: {
 
     if (!summary) return null
 
-    const visibleRows = summary.rows.slice(0, 6)
+    const visibleRows = summary.rows.slice(0, VISIBLE_DIFF_ROW_LIMIT)
     const hiddenCount = Math.max(0, summary.rows.length - visibleRows.length)
+    const showViewAll = hiddenCount > 0
 
     return (
         <div ref={rootRef} className="relative mx-auto mb-3 flex w-full max-w-content justify-center px-3">
@@ -165,9 +156,14 @@ export function GitDiffSummary(props: {
                     </div>
                     <div className="max-h-36 overflow-y-auto pb-4">
                         {visibleRows.map((file) => (
-                            <div
+                            <button
                                 key={file.path}
-                                className="flex items-center gap-2 px-6 py-1.5 text-[0.82rem]"
+                                type="button"
+                                className="flex w-full items-center gap-2 px-6 py-1.5 text-left text-[0.82rem] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--app-link)]"
+                                onClick={() => {
+                                    setExpanded(false)
+                                    props.onViewFileDiff?.(file)
+                                }}
                             >
                                 <span className={cn(
                                     'flex h-5 w-5 shrink-0 items-center justify-center rounded-md font-semibold',
@@ -184,7 +180,7 @@ export function GitDiffSummary(props: {
                                 </span>
                                 <span className="shrink-0 text-[var(--app-git-staged-color)]">+{file.added}</span>
                                 <span className="shrink-0 text-[var(--app-git-deleted-color)]">-{file.removed}</span>
-                            </div>
+                            </button>
                         ))}
                         {hiddenCount > 0 ? (
                             <div className="px-6 py-1.5 text-[0.82rem] text-[var(--app-hint)]">
@@ -192,25 +188,20 @@ export function GitDiffSummary(props: {
                             </div>
                         ) : null}
                     </div>
-                    <div className="flex items-center justify-end gap-2 border-t border-[var(--app-border)] px-5 py-3">
-                        <button
-                            type="button"
-                            className="rounded-full px-3 py-1.5 text-xs font-medium text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                            onClick={() => { void copy(buildClipboardSummary(summary)) }}
-                        >
-                            {copied ? t('button.copied') : t('gitDiff.summary.copy')}
-                        </button>
-                        <button
-                            type="button"
-                            className="rounded-full bg-[var(--app-button)] px-3 py-1.5 text-xs font-medium text-[var(--app-button-text)]"
-                            onClick={() => {
-                                setExpanded(false)
-                                props.onViewDiff()
-                            }}
-                        >
-                            {t('gitDiff.summary.viewDiff')}
-                        </button>
-                    </div>
+                    {showViewAll ? (
+                        <div className="flex items-center justify-end gap-2 border-t border-[var(--app-border)] px-5 py-3">
+                            <button
+                                type="button"
+                                className="rounded-full bg-[var(--app-button)] px-3 py-1.5 text-xs font-medium text-[var(--app-button-text)]"
+                                onClick={() => {
+                                    setExpanded(false)
+                                    props.onViewDiff()
+                                }}
+                            >
+                                {t('gitDiff.summary.viewAll')}
+                            </button>
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
 

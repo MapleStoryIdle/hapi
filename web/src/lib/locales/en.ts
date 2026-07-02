@@ -311,6 +311,7 @@ export default {
   'gitDiff.summary.moreFiles': '+{count} more file(s)',
   'gitDiff.summary.copy': 'Copy summary',
   'gitDiff.summary.viewDiff': 'View Diff',
+  'gitDiff.summary.viewAll': 'View all',
   'gitDiff.summary.collapse': 'Collapse Git changes',
   'planStatus.title': 'Plan',
   'planStatus.dialogTitle': 'Current plan',

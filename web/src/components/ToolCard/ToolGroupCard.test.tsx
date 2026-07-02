@@ -258,8 +258,42 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /ran 2s/i })).toHaveAttribute('aria-expanded', 'false')
+        expect(within(view.container).getByRole('button', { name: /^ran$/i })).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByText('Processed 2s')).not.toBeInTheDocument()
+    })
+
+    it('keeps completed compact durations only when the work took more than five seconds', () => {
+        const tools = [
+            makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+                createdAt: 0,
+                startedAt: 0,
+                completedAt: 6_000,
+            }),
+        ]
+        const view = renderCard(makeGroup({
+            tools,
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        expect(within(view.container).getByRole('button', { name: /ran 6s/i })).toHaveAttribute('aria-expanded', 'false')
     })
 
     it('uses action-specific processing titles for active single tool groups', () => {
@@ -338,13 +372,15 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const toggle = within(view.container).getByRole('button', { name: /processed 2s/i })
+        const toggle = within(view.container).getByRole('button', { name: /^processed$/i })
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByText('Ran 2s')).not.toBeInTheDocument()
 
         fireEvent.click(toggle)
 
-        expect(screen.getByText('Collected process notes')).toBeInTheDocument()
+        const processNote = screen.getByText('Collected process notes')
+        expect(processNote).toBeInTheDocument()
+        expect(processNote.className).not.toContain('bg-[var(--app-subtle-bg)]')
     })
 
     it('renders result detail blocks in chronological order', () => {
@@ -394,7 +430,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        fireEvent.click(within(view.container).getByRole('button', { name: /processed 2s/i }))
+        fireEvent.click(within(view.container).getByRole('button', { name: /^processed$/i }))
 
         const text = view.container.textContent ?? ''
         expect(text.indexOf('First process note')).toBeGreaterThanOrEqual(0)

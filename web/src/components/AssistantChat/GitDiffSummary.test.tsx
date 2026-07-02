@@ -4,12 +4,26 @@ import type { GitStatusFiles } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { GitDiffSummary, summarizeGitStatusFiles } from './GitDiffSummary'
 
-function renderSummary(status: GitStatusFiles | null, onViewDiff = vi.fn()) {
+function makeGitFile(index: number, overrides: Partial<GitStatusFiles['unstagedFiles'][number]> = {}): GitStatusFiles['unstagedFiles'][number] {
+    return {
+        fileName: `changed-${index}.ts`,
+        filePath: 'web/src',
+        fullPath: `web/src/changed-${index}.ts`,
+        status: 'modified',
+        isStaged: false,
+        linesAdded: index,
+        linesRemoved: 1,
+        ...overrides
+    }
+}
+
+function renderSummary(status: GitStatusFiles | null, onViewDiff = vi.fn(), onViewFileDiff = vi.fn()) {
     return {
         onViewDiff,
+        onViewFileDiff,
         ...render(
             <I18nProvider>
-                <GitDiffSummary status={status} onViewDiff={onViewDiff} />
+                <GitDiffSummary status={status} onViewDiff={onViewDiff} onViewFileDiff={onViewFileDiff} />
             </I18nProvider>
         )
     }
@@ -79,8 +93,8 @@ describe('GitDiffSummary', () => {
         expect(container.textContent).toBe('')
     })
 
-    it('点击胶囊展开文件列表，并且查看 Diff 会调用跳转回调', () => {
-        const { onViewDiff } = renderSummary(makeStatus({
+    it('点击胶囊展开文件列表，少量文件不展示底部按钮行', () => {
+        const { onViewFileDiff } = renderSummary(makeStatus({
             unstagedFiles: [{
                 fileName: 'GitDiffSummary.tsx',
                 filePath: 'web/src/components/AssistantChat',
@@ -94,9 +108,27 @@ describe('GitDiffSummary', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /1 file/i }))
         expect(screen.getByRole('dialog', { name: 'Git changes' })).toBeTruthy()
-        expect(screen.getByText('AssistantChat/GitDiffSummary.tsx')).toBeTruthy()
+        const row = screen.getByRole('button', { name: /AssistantChat\/GitDiffSummary\.tsx/i })
+        expect(row).toBeTruthy()
+        expect(screen.queryByRole('button', { name: 'Copy summary' })).toBeNull()
+        expect(screen.queryByRole('button', { name: 'View all' })).toBeNull()
 
-        fireEvent.click(screen.getByRole('button', { name: 'View Diff' }))
+        fireEvent.click(row)
+        expect(onViewFileDiff).toHaveBeenCalledWith(expect.objectContaining({
+            path: 'web/src/components/AssistantChat/GitDiffSummary.tsx'
+        }))
+    })
+
+    it('文件列表被截断时才展示查看全部，并调用跳转回调', () => {
+        const { onViewDiff } = renderSummary(makeStatus({
+            unstagedFiles: Array.from({ length: 7 }, (_, index) => makeGitFile(index + 1))
+        }))
+
+        fireEvent.click(screen.getByRole('button', { name: /7 file\(s\)/i }))
+        expect(screen.getByText('+1 more file(s)')).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Copy summary' })).toBeNull()
+
+        fireEvent.click(screen.getByRole('button', { name: 'View all' }))
         expect(onViewDiff).toHaveBeenCalledOnce()
     })
 

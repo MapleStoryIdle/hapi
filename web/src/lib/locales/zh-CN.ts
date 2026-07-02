@@ -315,6 +315,7 @@ export default {
   'gitDiff.summary.moreFiles': '还有 {count} 个文件',
   'gitDiff.summary.copy': '复制摘要',
   'gitDiff.summary.viewDiff': '查看 Diff',
+  'gitDiff.summary.viewAll': '查看全部',
   'gitDiff.summary.collapse': '收起 Git 变更',
   'planStatus.title': '计划',
   'planStatus.dialogTitle': '当前计划',
