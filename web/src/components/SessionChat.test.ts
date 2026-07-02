@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+    BOTTOM_FLOATING_CONTROL_GAP_PX,
     buildGoalStateMessages,
+    getScrollButtonBottomInset,
     isScratchlistHotkeyBlockedTarget,
     isScratchlistToggleHotkey,
     shouldAutoClearPendingSchedule,
@@ -70,6 +72,23 @@ describe('shouldAutoClearPendingSchedule', () => {
     it('returns true for expired absolute schedule (ms in the past)', () => {
         const expired: PendingSchedule = { type: 'absolute', ms: Date.now() - 1000 }
         expect(shouldAutoClearPendingSchedule(expired)).toBe(true)
+    })
+})
+
+/**
+ * Unit tests for getScrollButtonBottomInset.
+ *
+ * The floating plan/git pill and the scroll-to-bottom button should keep the
+ * same bottom gap above the composer. Before the composer is measured, the
+ * thread still needs the full bottom overlay height so content is not covered.
+ */
+describe('getScrollButtonBottomInset', () => {
+    it('uses the shared floating-control gap once the composer height is known', () => {
+        expect(getScrollButtonBottomInset(128, 320)).toBe(128 + BOTTOM_FLOATING_CONTROL_GAP_PX)
+    })
+
+    it('falls back to the full bottom overlay height before composer measurement', () => {
+        expect(getScrollButtonBottomInset(0, 320)).toBe(320)
     })
 })
 

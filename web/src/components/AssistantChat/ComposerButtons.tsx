@@ -697,7 +697,7 @@ function ContextUsageIndicator(props: {
     if (props.percentage == null) return null
 
     const percentage = Math.min(100, Math.max(0, props.percentage))
-    const radius = 6
+    const radius = 8.25
     const circumference = 2 * Math.PI * radius
     const shade = Math.round(185 - percentage * 1.25)
     const progressColor = `rgb(${shade}, ${shade}, ${shade})`
@@ -706,7 +706,7 @@ function ContextUsageIndicator(props: {
         <button
             ref={props.buttonRef}
             type="button"
-            className={`flex h-[42px] w-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--app-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+            className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--app-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
                 props.active ? 'bg-[var(--app-bg)]' : ''
             }`}
             aria-label={props.label}
@@ -714,19 +714,19 @@ function ContextUsageIndicator(props: {
             aria-expanded={props.active ? true : false}
             onClick={props.onClick}
         >
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="8" r={radius} fill="none" stroke="rgb(229, 231, 235)" strokeWidth="2" />
+            <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+                <circle cx="11" cy="11" r={radius} fill="none" stroke="rgb(229, 231, 235)" strokeWidth="2.5" />
                 <circle
-                    cx="8"
-                    cy="8"
+                    cx="11"
+                    cy="11"
                     r={radius}
                     fill="none"
                     stroke={progressColor}
-                    strokeWidth="2"
+                    strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeDasharray={circumference}
                     strokeDashoffset={circumference * (1 - percentage / 100)}
-                    transform="rotate(-90 8 8)"
+                    transform="rotate(-90 11 11)"
                 />
             </svg>
         </button>
@@ -850,9 +850,11 @@ export function UnifiedButton(props: {
             disabled={isDisabled}
             aria-label={ariaLabel}
             title={ariaLabel}
-            className={`flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px] ${className}`}
+            className="flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
-            {icon}
+            <span className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors [&_svg]:h-[18px] [&_svg]:w-[18px] ${className}`}>
+                {icon}
+            </span>
         </button>
     )
 }

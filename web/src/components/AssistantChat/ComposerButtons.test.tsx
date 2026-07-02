@@ -45,7 +45,7 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
             />,
         )
         const btn = getButton(/scratchlist/i)
-        expect(btn.className).toContain('bg-amber-500')
+        expect(btn.querySelector('span')?.className).toContain('bg-amber-500')
     })
 
     it('paints chat black + announces "Send" when routesToScratchlist=false even if scratchlist toggle conceptually on', () => {
@@ -64,8 +64,8 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
             />,
         )
         const btn = getButton('Send')
-        expect(btn.className).not.toContain('bg-amber-500')
-        expect(btn.className).toContain('bg-black')
+        expect(btn.querySelector('span')?.className).not.toContain('bg-amber-500')
+        expect(btn.querySelector('span')?.className).toContain('bg-black')
     })
 
     it('defaults routesToScratchlist to false when omitted', () => {

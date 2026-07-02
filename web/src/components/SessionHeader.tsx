@@ -12,6 +12,7 @@ import { AgentFlavorStatusIcon } from '@/components/AgentFlavorIcon'
 import { formatReopenError } from '@/lib/reopenError'
 import { useTranslation } from '@/lib/use-translation'
 import type { StatusBarProps } from '@/components/AssistantChat/StatusBar'
+import { CheckIcon, CopyIcon } from '@/components/icons'
 
 function getSessionTitle(session: Session): string {
     if (session.metadata?.name) {
@@ -25,6 +26,24 @@ function getSessionTitle(session: Session): string {
         return parts.length > 0 ? parts[parts.length - 1] : session.id.slice(0, 8)
     }
     return session.id.slice(0, 8)
+}
+
+function getSessionProjectPath(session: Session): string | null {
+    return session.metadata?.worktree?.basePath ?? session.metadata?.path ?? null
+}
+
+function formatSessionAgentInfo(session: Session): string {
+    const parts = [
+        session.metadata?.flavor ?? 'unknown',
+        session.model ? `model: ${session.model}` : null,
+        session.modelReasoningEffort ? `reasoning: ${session.modelReasoningEffort}` : null,
+        session.effort ? `effort: ${session.effort}` : null,
+        session.serviceTier ? `tier: ${session.serviceTier}` : null,
+        session.permissionMode ? `permission: ${session.permissionMode}` : null,
+        session.collaborationMode ? `collaboration: ${session.collaborationMode}` : null
+    ].filter((part): part is string => Boolean(part))
+
+    return parts.join(' · ')
 }
 
 function MoreVerticalIcon(props: { className?: string }) {
@@ -41,6 +60,33 @@ function MoreVerticalIcon(props: { className?: string }) {
             <circle cx="12" cy="12" r="2" />
             <circle cx="12" cy="19" r="2" />
         </svg>
+    )
+}
+
+function SessionHeaderDetailRow(props: {
+    label: string
+    value: string
+    copied: boolean
+    onCopy: () => void
+}) {
+    return (
+        <div className="flex min-w-0 items-center gap-2 rounded-[14px] border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
+            <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-medium text-[var(--app-hint)]">{props.label}</div>
+                <div className="mt-0.5 break-words text-sm leading-5 text-[var(--app-fg)]">{props.value}</div>
+            </div>
+            <button
+                type="button"
+                onClick={props.onCopy}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                aria-label={`复制${props.label}`}
+                title={`复制${props.label}`}
+            >
+                {props.copied
+                    ? <CheckIcon className="h-4 w-4 text-green-500" />
+                    : <CopyIcon className="h-4 w-4" />}
+            </button>
+        </div>
     )
 }
 
@@ -290,11 +336,23 @@ export function SessionHeader(props: {
     const { t } = useTranslation()
     const { session, api, onSessionDeleted, onSessionReopened } = props
     const title = useMemo(() => getSessionTitle(session), [session])
+    const projectPath = useMemo(() => getSessionProjectPath(session), [session])
+    const agentInfo = useMemo(() => formatSessionAgentInfo(session), [session])
+    const sessionDetails = useMemo(() => [
+        { key: 'title', label: '完整名称', value: title },
+        { key: 'path', label: '项目路径', value: projectPath ?? '—' },
+        { key: 'agent', label: 'Agent 信息', value: agentInfo || '—' }
+    ], [agentInfo, projectPath, title])
 
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const menuId = useId()
     const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
+    const detailsId = useId()
+    const titleDetailsRef = useRef<HTMLDivElement | null>(null)
+    const copyResetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+    const [detailsOpen, setDetailsOpen] = useState(false)
+    const [copiedDetailKey, setCopiedDetailKey] = useState<string | null>(null)
     const [renameOpen, setRenameOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
@@ -339,16 +397,52 @@ export function SessionHeader(props: {
         setMenuOpen((open) => !open)
     }
 
+    const copyDetail = async (key: string, value: string) => {
+        try {
+            await navigator.clipboard.writeText(value)
+            setCopiedDetailKey(key)
+            clearTimeout(copyResetTimerRef.current)
+            copyResetTimerRef.current = setTimeout(() => setCopiedDetailKey(null), 1400)
+        } catch {
+            // Clipboard may be unavailable in insecure/local browser contexts.
+        }
+    }
+
+    useEffect(() => {
+        if (!detailsOpen) return
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target as Node
+            if (titleDetailsRef.current?.contains(target)) return
+            setDetailsOpen(false)
+        }
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setDetailsOpen(false)
+            }
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown)
+        document.addEventListener('keydown', handleKeyDown)
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown)
+            document.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [detailsOpen])
+
+    useEffect(() => () => clearTimeout(copyResetTimerRef.current), [])
+
     // In Telegram, don't render header (Telegram provides its own)
     if (isTelegramApp()) {
         return null
     }
 
     const headerShellClass = props.floating
-        ? 'relative z-20 shrink-0 border-b border-[color-mix(in_srgb,var(--app-border)_72%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_84%,transparent)] pt-[env(safe-area-inset-top)] shadow-[0_10px_32px_rgba(15,23,42,0.08)] backdrop-blur-xl'
+        ? 'relative z-20 shrink-0 bg-transparent pt-[env(safe-area-inset-top)] backdrop-blur-xl'
         : 'bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]'
     const headerSurfaceClass = props.floating
-        ? 'border-[color-mix(in_srgb,var(--app-border)_82%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_74%,transparent)] shadow-[0_8px_24px_rgba(15,23,42,0.12)] backdrop-blur-xl'
+        ? 'border-[color-mix(in_srgb,var(--app-border)_70%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_24%,transparent)] shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl'
         : 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
 
     return (
@@ -383,8 +477,40 @@ export function SessionHeader(props: {
                             showStatus={Boolean(props.status)}
                             statusClassName={getStatusDotClass(props.status)}
                         />
-                        <div className="min-w-0 truncate pr-1 font-semibold">
-                            {title}
+                        <div ref={titleDetailsRef} className="relative min-w-0">
+                            <button
+                                type="button"
+                                onClick={() => setDetailsOpen((open) => !open)}
+                                className="block max-w-full truncate rounded-full px-1 pr-1 text-left font-semibold transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                aria-haspopup="dialog"
+                                aria-expanded={detailsOpen}
+                                aria-controls={detailsOpen ? detailsId : undefined}
+                                title={title}
+                            >
+                                {title}
+                            </button>
+
+                            {detailsOpen ? (
+                                <div
+                                    id={detailsId}
+                                    role="dialog"
+                                    aria-label="会话详情"
+                                    className="fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+4.25rem)] z-50 rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)] sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 sm:w-[22rem]"
+                                >
+                                    <div className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">会话详情</div>
+                                    <div className="flex flex-col gap-2">
+                                        {sessionDetails.map((row) => (
+                                            <SessionHeaderDetailRow
+                                                key={row.key}
+                                                label={row.label}
+                                                value={row.value}
+                                                copied={copiedDetailKey === row.key}
+                                                onCopy={() => copyDetail(row.key, row.value)}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : null}
                         </div>
                     </div>
 

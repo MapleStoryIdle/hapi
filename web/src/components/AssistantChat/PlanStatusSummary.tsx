@@ -168,7 +168,7 @@ export function PlanStatusSummary(props: {
     if (!props.plan) return null
 
     return (
-        <div ref={rootRef} className="relative mx-auto mb-3 flex w-full max-w-content justify-center px-3">
+        <div ref={rootRef} className="relative mx-auto flex w-full max-w-content justify-center px-3">
             {expanded ? (
                 <div
                     className="absolute bottom-14 left-1/2 z-20 origin-bottom -translate-x-1/2 overflow-hidden rounded-[18px] border border-[var(--app-border)] bg-[var(--app-code-bg)] shadow-[0_18px_45px_rgba(15,23,42,0.16)] animate-diff-pop"

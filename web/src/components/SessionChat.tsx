@@ -84,6 +84,20 @@ const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSessio
 
 const RUN_SETTLE_DELAY_MS = 1500
 const RUN_ACTIVITY_KEY_LOOKBACK = 12
+export const BOTTOM_FLOATING_CONTROL_GAP_PX = 36
+
+/**
+ * Keeps all floating bottom controls (plan/git pill and scroll-to-bottom)
+ * the same visual distance from the composer once the composer is measured.
+ */
+export function getScrollButtonBottomInset(
+    composerOverlayHeight: number,
+    bottomOverlayHeight: number,
+): number {
+    return composerOverlayHeight > 0
+        ? composerOverlayHeight + BOTTOM_FLOATING_CONTROL_GAP_PX
+        : bottomOverlayHeight
+}
 
 /**
  * Returns whether a PendingSchedule should trigger an auto-clear timer.
@@ -569,9 +583,7 @@ function SessionChatInner(props: SessionChatProps) {
     const [bottomAccessoryExpanded, setBottomAccessoryExpanded] = useState(false)
     const [clearedPlanSourceBlockId, setClearedPlanSourceBlockId] = useState<string | null>(null)
     const scrollButtonPositionReady = bottomOverlayHeight > 0 && !(gitSessionId && gitStatusLoading)
-    const scrollButtonBottomInset = composerOverlayHeight > 0
-        ? composerOverlayHeight + 4
-        : bottomOverlayHeight
+    const scrollButtonBottomInset = getScrollButtonBottomInset(composerOverlayHeight, bottomOverlayHeight)
     const lastGitRefreshUpdatedAtRef = useRef(props.session.updatedAt)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
@@ -1536,7 +1548,10 @@ function SessionChatInner(props: SessionChatProps) {
                             />
                         </div>
 
-                        <div className="pointer-events-auto pb-6">
+                        <div
+                            className="pointer-events-auto"
+                            style={{ paddingBottom: BOTTOM_FLOATING_CONTROL_GAP_PX }}
+                        >
                             {planStatusVisible ? (
                                 <PlanStatusSummary
                                     plan={activePlanStatus}
