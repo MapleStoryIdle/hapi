@@ -84,6 +84,7 @@ const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSessio
 
 const RUN_SETTLE_DELAY_MS = 1500
 const RUN_ACTIVITY_KEY_LOOKBACK = 12
+const FLOATING_HEADER_INSET_PX = 64
 
 /**
  * Returns whether a PendingSchedule should trigger an auto-clear timer.
@@ -1384,7 +1385,7 @@ function SessionChatInner(props: SessionChatProps) {
     })
 
     return (
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="relative flex h-full min-h-0 flex-col">
             <SessionHeader
                 session={props.session}
                 onBack={props.onBack}
@@ -1418,6 +1419,7 @@ function SessionChatInner(props: SessionChatProps) {
                     agentFlavor,
                     voiceStatus: voice?.status
                 }}
+                floating
             />
 
             <CursorMigrationBanner metadata={props.session.metadata} />
@@ -1467,6 +1469,7 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineOpen={outlineOpen}
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
+                        topInset={FLOATING_HEADER_INSET_PX}
                         bottomInset={bottomOverlayHeight}
                         bottomAccessoryVisible={bottomAccessoryVisible}
                         bottomAccessoryExpanded={bottomAccessoryExpanded}
@@ -1522,7 +1525,7 @@ function SessionChatInner(props: SessionChatProps) {
                             />
                         </div>
 
-                        <div className="pointer-events-auto">
+                        <div className="pointer-events-auto pb-6">
                             {planStatusVisible ? (
                                 <PlanStatusSummary
                                     plan={activePlanStatus}

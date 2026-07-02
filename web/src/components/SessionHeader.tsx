@@ -216,12 +216,12 @@ function CodexSubscriptionLimitsBadge(props: {
     }, [open])
 
     return (
-        <div ref={rootRef} className="relative shrink-0">
+        <div ref={rootRef} className="pointer-events-auto relative shrink-0">
             <button
                 type="button"
                 onClick={() => setOpen((value) => !value)}
                 className={[
-                    'flex h-9 w-[68px] flex-col justify-center gap-0.5 rounded-[13px] border border-[var(--app-border)] bg-transparent px-2 text-[11px] font-semibold leading-none tabular-nums text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                    'flex h-12 min-w-[54px] flex-col items-start justify-center gap-1 rounded-[18px] border border-[var(--app-border)] bg-[var(--app-bg)] px-2 text-[11px] font-semibold leading-none tabular-nums text-[var(--app-hint)] shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                     props.isFetching ? 'opacity-60' : ''
                 ].filter(Boolean).join(' ')}
                 title={title}
@@ -230,7 +230,7 @@ function CodexSubscriptionLimitsBadge(props: {
                 aria-expanded={open}
             >
                 {rows.map((row) => (
-                    <span key={row.label} className="flex items-center justify-between gap-1">
+                    <span key={row.label} className="grid grid-cols-[auto_auto] items-center gap-x-1.5">
                         <span className="text-[var(--app-fg)]">{row.label}</span>
                         <span className={getLimitPercentClass(row.remaining)}>
                             {row.remaining === null ? '--' : `${row.remaining}%`}
@@ -285,6 +285,7 @@ export function SessionHeader(props: {
     onSessionDeleted?: () => void
     onSessionReopened?: (newSessionId: string) => void
     status?: StatusBarProps
+    floating?: boolean
 }) {
     const { t } = useTranslation()
     const { session, api, onSessionDeleted, onSessionReopened } = props
@@ -345,62 +346,69 @@ export function SessionHeader(props: {
 
     return (
         <>
-            <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
+            <div
+                className={props.floating
+                    ? 'pointer-events-none absolute inset-x-0 top-0 z-20 bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]'
+                    : 'bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]'
+                }
+            >
                 <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3">
-                    {/* Back button */}
-                    <button
-                        type="button"
-                        onClick={props.onBack}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
+                    <div className={`${props.floating ? 'pointer-events-auto' : ''} flex min-w-0 items-center gap-2 rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] px-1.5 py-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]`}>
+                        {/* Back button */}
+                        <button
+                            type="button"
+                            onClick={props.onBack}
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
                         >
-                            <polyline points="15 18 9 12 15 6" />
-                        </svg>
-                    </button>
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            >
+                                <polyline points="15 18 9 12 15 6" />
+                            </svg>
+                        </button>
 
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
                         <AgentFlavorStatusIcon
                             flavor={session.metadata?.flavor ?? 'claude'}
-                            className="h-5 w-5"
+                            className="h-5 w-5 shrink-0"
                             showStatus={Boolean(props.status)}
                             statusClassName={getStatusDotClass(props.status)}
                         />
-                        <div className="truncate font-semibold">
+                        <div className="min-w-0 truncate pr-1 font-semibold">
                             {title}
                         </div>
                     </div>
 
-                    {session.metadata?.flavor === 'codex' ? (
-                        <CodexSubscriptionLimitsBadge
-                            limits={codexLimitsState.limits}
-                            isFetching={codexLimitsState.isFetching}
-                            error={codexLimitsState.error}
-                        />
-                    ) : null}
+                    <div className={`${props.floating ? 'pointer-events-none' : ''} ml-auto flex shrink-0 items-center gap-1.5`}>
+                        {session.metadata?.flavor === 'codex' ? (
+                            <CodexSubscriptionLimitsBadge
+                                limits={codexLimitsState.limits}
+                                isFetching={codexLimitsState.isFetching}
+                                error={codexLimitsState.error}
+                            />
+                        ) : null}
 
-                    <button
-                        type="button"
-                        onClick={handleMenuToggle}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        ref={menuAnchorRef}
-                        aria-haspopup="menu"
-                        aria-expanded={menuOpen}
-                        aria-controls={menuOpen ? menuId : undefined}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                        title={t('session.more')}
-                    >
-                        <MoreVerticalIcon />
-                    </button>
+                        <button
+                            type="button"
+                            onClick={handleMenuToggle}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            ref={menuAnchorRef}
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
+                            aria-controls={menuOpen ? menuId : undefined}
+                            className="pointer-events-auto flex h-12 w-10 items-center justify-center rounded-[18px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-hint)] shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)]"
+                            title={t('session.more')}
+                        >
+                            <MoreVerticalIcon />
+                        </button>
+                    </div>
                 </div>
             </div>
 

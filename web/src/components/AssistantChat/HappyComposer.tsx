@@ -3,9 +3,9 @@ import { ComposerPrimitive, useAssistantApi, useAssistantState } from '@assistan
 import {
     type ChangeEvent as ReactChangeEvent,
     type ClipboardEvent as ReactClipboardEvent,
-    type FocusEvent as ReactFocusEvent,
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
+    type PointerEvent as ReactPointerEvent,
     type SyntheticEvent as ReactSyntheticEvent,
     useCallback,
     useEffect,
@@ -21,7 +21,6 @@ import { useActiveWord } from '@/hooks/useActiveWord'
 import { useActiveSuggestions } from '@/hooks/useActiveSuggestions'
 import { applySuggestion } from '@/utils/applySuggestion'
 import { usePlatform } from '@/hooks/usePlatform'
-import { usePWAInstall } from '@/hooks/usePWAInstall'
 import { supportsEffort, supportsModelChange, PI_THINKING_LEVEL_LABELS } from '@hapi/protocol'
 import type { PiThinkingLevel } from '@hapi/protocol'
 import { markSkillUsed } from '@/lib/recent-skills'
@@ -337,8 +336,6 @@ export function HappyComposer(props: {
     const [settingsPanel, setSettingsPanel] = useState<SettingsPanel>('main')
     const [showPiModelPanel, setShowPiModelPanel] = useState(false)
     const [showPiThinkingPanel, setShowPiThinkingPanel] = useState(false)
-    const [composerHasFocus, setComposerHasFocus] = useState(false)
-    const [composerExpandSettled, setComposerExpandSettled] = useState(false)
     const [isAborting, setIsAborting] = useState(false)
     const [isSwitching, setIsSwitching] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
@@ -409,9 +406,7 @@ export function HappyComposer(props: {
     }, [controlledByUser])
 
     const { haptic: platformHaptic } = usePlatform()
-    const { isStandalone, isIOS } = usePWAInstall()
-    const isIOSPWA = isIOS && isStandalone
-    const bottomPaddingClass = isIOSPWA ? 'pb-0' : 'pb-3'
+    const bottomPaddingClass = 'pb-0'
     const activeWord = useActiveWord(inputState.text, inputState.selection, autocompletePrefixes)
     const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions] = useActiveSuggestions(
         activeWord,
@@ -429,17 +424,23 @@ export function HappyComposer(props: {
         }
     }, [platformHaptic])
 
-    const handleComposerFocus = useCallback(() => {
-        setComposerHasFocus(true)
-    }, [])
+    const focusComposerInput = useCallback(() => {
+        const el = textareaRef.current
+        if (!el || controlsDisabled) return
+        try {
+            el.focus({ preventScroll: true })
+        } catch {
+            el.focus()
+        }
+    }, [controlsDisabled])
 
-    const handleComposerBlur = useCallback((event: ReactFocusEvent<HTMLDivElement>) => {
-        const nextTarget = event.relatedTarget
-        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+    const handleComposerPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+        const target = event.target
+        if (target instanceof Element && target.closest('button,a,input,select,[role="button"],[contenteditable="true"]')) {
             return
         }
-        setComposerHasFocus(false)
-    }, [])
+        focusComposerInput()
+    }, [focusComposerInput])
 
     const handleSuggestionSelect = useCallback((index: number) => {
         const suggestion = suggestions[index]
@@ -869,34 +870,16 @@ export function HappyComposer(props: {
     )
     const showAbortButton = true
     const voiceEnabled = Boolean(onVoiceToggle)
-    const composerExpanded = Boolean(
-        composerHasFocus
-        || hasText
-        || hasAttachments
-        || pendingSchedule
-        || sendError
-        || showSettings
-        || showPiModelPanel
-        || showPiThinkingPanel
-        || suggestions.length > 0
-        || props.scratchlistMode
-    )
-    const composerCompact = !composerExpanded
-    const reserveAnchoredComposerHeight = compactTopAnchor && (composerCompact || !composerExpandSettled)
-    const expandedHeightClass = composerExpandSettled
-        ? 'min-h-[132px] max-h-[360px]'
-        : 'h-[132px] max-h-[132px]'
-
-    useEffect(() => {
-        if (!composerExpanded) {
-            setComposerExpandSettled(false)
-            return
-        }
-
-        setComposerExpandSettled(false)
-        const timeout = window.setTimeout(() => setComposerExpandSettled(true), 720)
-        return () => window.clearTimeout(timeout)
-    }, [composerExpanded])
+    // Keep the session composer expanded by default; the compact pill state
+    // hides controls and makes the bottom input jump after blur.
+    const composerCompact = false
+    // Keep the anchored composer slot stable during and after expansion.
+    // Dropping this reserved height after the transition causes a second
+    // layout pass, which shows up as a small upward twitch on mobile.
+    const reserveAnchoredComposerHeight = compactTopAnchor
+    const expandedHeightClass = compactTopAnchor
+        ? 'h-[88px] max-h-[88px]'
+        : 'min-h-[88px] max-h-[316px]'
 
     const currentModelLabel = useMemo(() => {
         if (selectedModelBase !== undefined) {
@@ -1323,10 +1306,9 @@ export function HappyComposer(props: {
     ])
 
     return (
-        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[height,margin] duration-[700ms] ease-in-out ${compactTopAnchor ? '-mt-4' : ''} ${reserveAnchoredComposerHeight ? 'h-[152px]' : ''}`}>
+        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[height,margin] duration-[700ms] ease-in-out ${compactTopAnchor ? '-mt-7' : ''} ${reserveAnchoredComposerHeight ? 'h-[96px]' : ''}`}>
             <div
                 className="mx-auto w-full max-w-content"
-                onBlur={handleComposerBlur}
             >
                 <ComposerPrimitive.Root className="relative" onSubmit={handleSubmit}>
                     {overlays}
@@ -1376,7 +1358,7 @@ export function HappyComposer(props: {
                         className={`relative flex overflow-hidden rounded-[22px] border shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition-[min-height,max-height,height,border-color,box-shadow,background-color] duration-[700ms] ease-in-out ${
                             composerCompact
                                 ? 'h-12 min-h-12 max-h-12 border-[var(--app-border)] bg-[var(--app-bg)]'
-                                : `${expandedHeightClass} flex-col border-[#BBD7FF] bg-[linear-gradient(180deg,#F8FBFF_0%,var(--app-bg)_72%)] shadow-[0_14px_36px_rgba(37,99,235,0.12)]`
+                                : `${expandedHeightClass} flex-col border-[var(--app-composer-expanded-border)] [background:var(--app-composer-expanded-bg)] [box-shadow:var(--app-composer-expanded-shadow)]`
                         } ${
                             sendError ? 'ring-1 ring-red-500' : ''
                         }`}
@@ -1388,11 +1370,11 @@ export function HappyComposer(props: {
                         ) : null}
 
                         <div
-                            onPointerDownCapture={handleComposerFocus}
+                            onPointerDownCapture={handleComposerPointerDownCapture}
                             className={
                                 composerCompact
                                     ? 'flex h-12 min-w-0 flex-1 items-center px-14 py-0'
-                                    : 'flex min-h-[76px] min-w-0 flex-1 items-start px-4 py-3'
+                                    : 'flex min-h-[38px] min-w-0 flex-1 items-start px-4 py-2'
                             }
                         >
                             <ComposerPrimitive.Input
@@ -1404,13 +1386,12 @@ export function HappyComposer(props: {
                                 cancelOnEscape={false}
                                 onChange={handleChange}
                                 onSelect={handleSelect}
-                                onFocus={handleComposerFocus}
                                 onKeyDown={handleKeyDown}
                                 onPaste={handlePaste}
                                 className={`flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
                                     composerCompact
                                         ? 'h-6 max-h-6 overflow-hidden leading-6'
-                                        : 'min-h-[56px] leading-snug'
+                                        : 'min-h-[22px] leading-snug'
                                 }`}
                             />
                         </div>

@@ -1,6 +1,7 @@
 import type { SyntaxHighlighterProps } from '@assistant-ui/react-markdown'
 import type { CSSProperties } from 'react'
 import { useShikiHighlighter } from '@/lib/shiki'
+import { GitCodeBlockCard, parseGitCodeBlock } from '@/components/assistant-ui/git-codeblock'
 
 function countCodeLines(code: string): number {
     if (code.length === 0) return 1
@@ -12,6 +13,11 @@ function countCodeLines(code: string): number {
 }
 
 export function SyntaxHighlighter(props: SyntaxHighlighterProps) {
+    const gitSummary = parseGitCodeBlock(props.code, props.language)
+    if (gitSummary) {
+        return <GitCodeBlockCard summary={gitSummary} code={props.code} />
+    }
+
     const highlighted = useShikiHighlighter(props.code, props.language)
     const lineCount = countCodeLines(props.code)
     const lineNumberWidth = Math.max(String(lineCount).length, 3)

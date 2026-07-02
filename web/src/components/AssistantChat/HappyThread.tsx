@@ -123,7 +123,8 @@ export function ScrollToBottomButton(props: {
     const hasNewMessages = props.count > 0
     const newMessageLabel = t('misc.newMessage', { n: props.count, s: props.count === 1 ? '' : 's' })
     const label = hasNewMessages ? newMessageLabel : t('misc.backToBottom')
-    const bottomOffset = (props.bottomInset ?? 0) + (props.bottomAccessoryVisible ? 8 : 0)
+    const bottomOffsetPx = (props.bottomInset ?? 0) + (props.bottomAccessoryVisible ? 8 : 0)
+    const bottomOffset = `${bottomOffsetPx}px`
     const contentClass = hasNewMessages
         ? 'inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--app-button)] px-3.5 text-sm font-medium text-[var(--app-button-text)] shadow-lg animate-bounce-in'
         : 'flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_10px_30px_rgba(15,23,42,0.16)] animate-bounce-in'
@@ -301,6 +302,7 @@ export function HappyThread(props: {
     outlineOpen: boolean
     outlineTitle: string
     outlineItems: readonly ConversationOutlineItem[]
+    topInset?: number
     bottomInset?: number
     bottomAccessoryVisible?: boolean
     bottomAccessoryExpanded?: boolean
@@ -747,7 +749,12 @@ export function HappyThread(props: {
                         <div
                             ref={contentRef}
                             className="mx-auto w-full max-w-content min-w-0 p-3"
-                            style={props.bottomInset ? { paddingBottom: props.bottomInset + 12 } : undefined}
+                            style={{
+                                paddingTop: props.topInset
+                                    ? `calc(env(safe-area-inset-top) + ${props.topInset + 12}px)`
+                                    : undefined,
+                                paddingBottom: props.bottomInset ? `${props.bottomInset + 12}px` : undefined
+                            }}
                         >
                             <div ref={topSentinelRef} className="h-px w-full" aria-hidden="true" />
                             {showSkeleton ? (

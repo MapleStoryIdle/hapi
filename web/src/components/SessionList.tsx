@@ -318,46 +318,6 @@ function CopyPathButton({ path, className }: { path: string; className?: string 
 }
 
 
-function SearchIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-        </svg>
-    )
-}
-
-function XIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
-        </svg>
-    )
-}
-
 function PlusIcon(props: { className?: string }) {
     return (
         <svg
@@ -557,51 +517,6 @@ export function getVisibleSessionPreview(
     return visible
 }
 
-function SessionListBottomBar(props: {
-    value: string
-    onChange: (value: string) => void
-    onNewSession: () => void
-}) {
-    const { t } = useTranslation()
-    return (
-        <div className="sticky bottom-0 z-30 mt-auto px-5 pb-[calc(env(safe-area-inset-bottom)+18px)] pt-3">
-            <div className="mx-auto flex w-full max-w-[520px] items-center gap-3">
-                <div className="relative min-w-0 flex-1">
-                    <div className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-[#111827]">
-                        <SearchIcon className="h-5 w-5" />
-                    </div>
-                    <input
-                        type="search"
-                        value={props.value}
-                        onChange={(event) => props.onChange(event.target.value)}
-                        placeholder={t('sessions.search.placeholder')}
-                        className="h-14 w-full appearance-none rounded-[28px] border border-[#e8e8e8] bg-[var(--app-bg)] pl-12 pr-11 text-[18px] text-[var(--app-fg)] shadow-[0_6px_24px_rgba(0,0,0,0.10)] outline-none transition-colors placeholder:text-[#9ca3af] focus:border-[#0A84FF] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
-                    />
-                    {props.value ? (
-                        <button
-                            type="button"
-                            onClick={() => props.onChange('')}
-                            className="absolute inset-y-0 right-4 flex items-center rounded-full p-1 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
-                            title={t('sessions.search.clear')}
-                        >
-                            <XIcon className="h-4 w-4" />
-                        </button>
-                    ) : null}
-                </div>
-                <button
-                    type="button"
-                    onClick={props.onNewSession}
-                    className="flex h-14 shrink-0 items-center gap-2 rounded-[28px] bg-[#0A84FF] px-6 text-[18px] font-semibold text-white shadow-[0_8px_22px_rgba(10,132,255,0.32)] transition-transform active:scale-[0.98]"
-                    title={t('sessions.new')}
-                >
-                    <ComposeIcon className="h-6 w-6" />
-                    <span>{t('sessions.chat')}</span>
-                </button>
-            </div>
-        </div>
-    )
-}
-
 function SessionItem(props: {
     session: SessionSummary
     onSelect: (sessionId: string) => void
@@ -692,7 +607,7 @@ function SessionItem(props: {
                         statusClassName="bg-[#34C759]"
                     />
                     <div className="min-w-0 flex-1">
-                        <div className="truncate text-[20px] font-normal leading-7 tracking-normal text-[var(--app-fg)]">
+                        <div className="truncate text-[18px] font-normal leading-6 tracking-normal text-[var(--app-fg)]">
                             {sessionName}
                         </div>
                         {showPath ? (
@@ -704,7 +619,7 @@ function SessionItem(props: {
                 </div>
                 <div className="flex h-8 shrink-0 items-center justify-end gap-2 text-[var(--app-hint)]">
                     {s.active && s.thinking ? (
-                        <LoaderIcon className="h-7 w-7 animate-spin-slow text-[#1f2937]" />
+                        <LoaderIcon className="h-7 w-7 animate-spin-slow text-[var(--app-fg)]" />
                     ) : attention ? (
                         <SessionAttentionIndicator
                             attention={attention}
@@ -821,9 +736,6 @@ export function SessionList(props: {
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
-    const [searchQuery, setSearchQuery] = useState('')
-    const normalizedQuery = normalizeSearch(searchQuery)
-    const isSearching = normalizedQuery.length > 0
 
     const resolveMachineLabel = (machineId: string | null): string => {
         if (machineId && machineLabelsById[machineId]) {
@@ -842,30 +754,15 @@ export function SessionList(props: {
         },
         [props.sessions, selectedSessionId, showActiveSessionsOnly]
     )
-    const visibleSessions = useMemo(
-        () => isSearching
-            ? allSessions.filter(session => sessionMatchesQuery(
-                session,
-                normalizedQuery,
-                resolveMachineLabel(session.metadata?.machineId ?? null)
-            ))
-            : allSessions,
-        [allSessions, isSearching, normalizedQuery, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
-    )
     const allGroups = useMemo(
         () => groupSessionsByDirectory(allSessions),
         [allSessions]
-    )
-    const groups = useMemo(
-        () => groupSessionsByDirectory(visibleSessions),
-        [visibleSessions]
     )
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
     const autoExpandedSelectedSessionKeyRef = useRef<string | null>(null)
     const isGroupCollapsed = (group: SessionGroup): boolean => {
-        if (isSearching) return false
         const override = collapseOverrides.get(group.key)
         if (override !== undefined) return override
         const hasSelectedSession = selectedSessionId
@@ -914,7 +811,6 @@ export function SessionList(props: {
         return getVisibleSessionPreview(
             group.sessions,
             {
-                expanded: isSearching,
                 selectedSessionId,
                 limit: getGroupVisibleCount(group)
             }
@@ -922,12 +818,11 @@ export function SessionList(props: {
     }
 
     const machineGroups = useMemo(
-        () => groupByMachine(groups, resolveMachineLabel),
-        [groups, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
+        () => groupByMachine(allGroups, resolveMachineLabel),
+        [allGroups, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
 
     const isMachineCollapsed = (mg: MachineGroup): boolean => {
-        if (isSearching) return false
         const key = `machine::${mg.machineId ?? UNKNOWN_MACHINE_ID}`
         const override = collapseOverrides.get(key)
         if (override !== undefined) return override
@@ -1009,13 +904,11 @@ export function SessionList(props: {
     }, [allGroups])
 
     return (
-        <div className="mx-auto flex min-h-full w-full max-w-[620px] flex-col">
+        <div className="mx-auto flex h-full min-h-0 w-full max-w-[620px] flex-1 flex-col">
             {renderHeader ? (
                 <div className="flex items-center justify-between px-8 pb-2 pt-1">
                     <div className="text-sm text-[var(--app-hint)]">
-                        {isSearching
-                            ? t('sessions.search.count', { n: visibleSessions.length, total: allSessions.length })
-                            : t('sessions.count', { n: allSessions.length, m: allGroups.length })}
+                        {t('sessions.count', { n: allSessions.length, m: allGroups.length })}
                     </div>
                     <button
                         type="button"
@@ -1035,15 +928,9 @@ export function SessionList(props: {
                 />
             )}
 
-            {props.sessions.length > 0 && isSearching && visibleSessions.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
-                    {t('sessions.search.noResults')}
-                </div>
-            ) : null}
-
-            <div className="flex flex-1 flex-col px-8 pb-28 pt-2">
+            <div className="app-scroll-y desktop-scrollbar-left flex min-h-0 flex-1 flex-col px-8 pb-6 pt-2">
                 {props.sessions.length > 0 ? (
-                    <div className="pb-7 pt-2 text-[24px] font-semibold leading-none text-[var(--app-fg)]">
+                    <div className="pb-7 pt-2 text-[22px] font-semibold leading-none text-[var(--app-fg)]">
                         {t('sessions.projects')}
                     </div>
                 ) : null}
@@ -1082,7 +969,7 @@ export function SessionList(props: {
                                                     title={group.directory}
                                                 >
                                                     <FolderIcon open={!isCollapsed} className="h-8 w-8 shrink-0 text-[var(--app-fg)]" />
-                                                    <span className="min-w-0 max-w-[min(18rem,calc(100%-8rem))] truncate text-[22px] font-semibold leading-8 text-[var(--app-fg)]">
+                                                    <span className="min-w-0 max-w-[min(18rem,calc(100%-8rem))] truncate text-[20px] font-semibold leading-7 text-[var(--app-fg)]">
                                                         {group.displayName}
                                                     </span>
                                                     <ChevronIcon className="h-4 w-4 shrink-0 text-[#8e8e93]" collapsed={isCollapsed} />
@@ -1122,7 +1009,7 @@ export function SessionList(props: {
                                                                 showDetailedStatus={showDetailedStatus}
                                                             />
                                                         ))}
-                                                        {!isSearching && group.sessions.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canCollapseSessions) ? (
+                                                        {group.sessions.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canCollapseSessions) ? (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => hiddenSessionCount > 0
@@ -1150,11 +1037,6 @@ export function SessionList(props: {
                     )
                 })}
             </div>
-            <SessionListBottomBar
-                value={searchQuery}
-                onChange={setSearchQuery}
-                onNewSession={props.onNewSession}
-            />
         </div>
     )
 }

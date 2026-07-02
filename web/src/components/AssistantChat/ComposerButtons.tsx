@@ -6,7 +6,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { ScheduleIcon } from '@/components/icons'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { RemoteServerContextMenuContent, ServerIcon, useRemoteServerContextSelection } from '@/components/RemoteServers'
 
 function ChevronIcon() {
@@ -462,7 +462,17 @@ function ToolbarMenu(props: {
     children: ReactNode
 }) {
     const panelRef = useRef<HTMLDivElement>(null)
-    const [position, setPosition] = useState<{ top: number; left: number; maxHeight: number; arrowLeft: number } | null>(null)
+    const [position, setPosition] = useState<{
+        top: number
+        left: number
+        maxHeight: number
+        arrowLeft: number
+        enterY: string
+        bounceY: string
+        settleY: string
+        transformOrigin: string
+    } | null>(null)
+    const [entered, setEntered] = useState(false)
 
     useLayoutEffect(() => {
         function measure() {
@@ -485,12 +495,22 @@ function ToolbarMenu(props: {
             const left = clamp(preferredLeft, minLeft, Math.max(minLeft, maxLeft))
             const aboveTop = rect.top - gap - fullHeight
             const belowTop = rect.bottom + gap
-            const top = aboveTop >= viewportTop + margin
+            const opensAbove = aboveTop >= viewportTop + margin
+            const top = opensAbove
                 ? aboveTop
                 : clamp(belowTop, viewportTop + margin, viewportTop + viewportHeight - margin - fullHeight)
             const maxHeight = Math.max(120, Math.min(fullHeight, viewportTop + viewportHeight - margin - top))
             const arrowLeft = clamp(rect.left + rect.width / 2 - left - 6, 20, panelWidth - 20)
-            setPosition({ top, left, maxHeight, arrowLeft })
+            setPosition({
+                top,
+                left,
+                maxHeight,
+                arrowLeft,
+                enterY: opensAbove ? '8px' : '-8px',
+                bounceY: opensAbove ? '-3px' : '3px',
+                settleY: opensAbove ? '1px' : '-1px',
+                transformOrigin: `${arrowLeft + 6}px ${opensAbove ? 'bottom' : 'top'}`
+            })
         }
 
         measure()
@@ -505,6 +525,26 @@ function ToolbarMenu(props: {
             window.visualViewport?.removeEventListener('scroll', measure)
         }
     }, [props.anchorRef, props.align, props.width, props.maxHeight])
+
+    const isPositioned = position !== null
+
+    useEffect(() => {
+        if (!isPositioned) {
+            setEntered(false)
+            return
+        }
+
+        setEntered(false)
+        let firstFrame = 0
+        let secondFrame = 0
+        firstFrame = window.requestAnimationFrame(() => {
+            secondFrame = window.requestAnimationFrame(() => setEntered(true))
+        })
+        return () => {
+            window.cancelAnimationFrame(firstFrame)
+            window.cancelAnimationFrame(secondFrame)
+        }
+    }, [isPositioned])
 
     useEffect(() => {
         function handlePointerDown(event: PointerEvent) {
@@ -521,13 +561,26 @@ function ToolbarMenu(props: {
         <div
             ref={panelRef}
             style={position
-                ? { position: 'fixed', top: position.top, left: position.left, width: props.width ?? 220, maxHeight: position.maxHeight }
+                ? {
+                    position: 'fixed',
+                    top: position.top,
+                    left: position.left,
+                    width: props.width ?? 220,
+                    maxHeight: position.maxHeight,
+                    transformOrigin: position.transformOrigin,
+                    opacity: entered ? 1 : 0,
+                    transform: entered ? 'translateY(0) scale(1)' : `translateY(${position.enterY}) scale(0.88)`,
+                    willChange: 'opacity, transform',
+                    '--hapi-menu-enter-y': position.enterY,
+                    '--hapi-menu-bounce-y': position.bounceY,
+                    '--hapi-menu-settle-y': position.settleY
+                } as CSSProperties
                 : { position: 'fixed', visibility: 'hidden', width: props.width ?? 220 }
             }
             className={
                 props.surface === 'permission'
-                    ? 'pointer-events-auto z-50 overflow-visible'
-                    : 'pointer-events-auto z-50 overflow-hidden rounded-xl border border-[var(--app-divider)] bg-[var(--app-bg)] shadow-lg'
+                    ? `pointer-events-auto z-50 overflow-visible ${entered ? 'animate-menu-pop' : ''}`
+                    : `pointer-events-auto z-50 overflow-hidden rounded-xl border border-[var(--app-divider)] bg-[var(--app-bg)] shadow-lg ${entered ? 'animate-menu-pop' : ''}`
             }
             onPointerDown={(event) => event.stopPropagation()}
         >
@@ -797,7 +850,7 @@ export function UnifiedButton(props: {
             disabled={isDisabled}
             aria-label={ariaLabel}
             title={ariaLabel}
-            className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[18px] [&_svg]:w-[18px] ${className}`}
+            className={`flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px] ${className}`}
         >
             {icon}
         </button>

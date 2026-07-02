@@ -20,6 +20,7 @@ import remarkNonHttpsAutolink from '@/lib/remark-non-https-autolink'
 import { cn, encodeBase64 } from '@/lib/utils'
 import { SyntaxHighlighter } from '@/components/assistant-ui/shiki-highlighter'
 import { MermaidDiagram } from '@/components/assistant-ui/mermaid-diagram'
+import { parseGitCodeBlock } from '@/components/assistant-ui/git-codeblock'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
@@ -363,6 +364,11 @@ export function UriConfirmProvider({ children }: { children: ReactNode }) {
 
 function CodeHeader(props: CodeHeaderProps) {
     const { copied, copy } = useCopyToClipboard()
+
+    if (parseGitCodeBlock(props.code, props.language)) {
+        return null
+    }
+
     const language = props.language && props.language !== 'unknown' ? props.language : 'text'
 
     return (

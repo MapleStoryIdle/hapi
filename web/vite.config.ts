@@ -31,35 +31,25 @@ function getVendorChunkName(id: string): string | undefined {
         id.includes('/node_modules/react/')
         || id.includes('/node_modules/react-dom/')
         || id.includes('/node_modules/scheduler/')
-    ) {
-        return 'vendor-react'
-    }
-
-    if (id.includes('/node_modules/zod/')) {
-        return 'vendor-zod'
-    }
-
-    if (
-        id.includes('/node_modules/@radix-ui/')
+        || id.includes('/node_modules/@assistant-ui/')
+        || id.includes('/node_modules/remark-gfm/')
+        || id.includes('/node_modules/hast-util-to-jsx-runtime/')
+        || id.includes('/node_modules/@radix-ui/')
         || id.includes('/node_modules/aria-hidden/')
         || id.includes('/node_modules/react-remove-scroll')
         || id.includes('/node_modules/react-style-singleton/')
         || id.includes('/node_modules/use-callback-ref/')
         || id.includes('/node_modules/use-sidecar/')
     ) {
-        return 'vendor-ui'
+        return 'vendor-react-ui'
+    }
+
+    if (id.includes('/node_modules/zod/')) {
+        return 'vendor-zod'
     }
 
     if (id.includes('/node_modules/@xterm/')) {
         return 'vendor-terminal'
-    }
-
-    if (
-        id.includes('/node_modules/@assistant-ui/')
-        || id.includes('/node_modules/remark-gfm/')
-        || id.includes('/node_modules/hast-util-to-jsx-runtime/')
-    ) {
-        return 'vendor-assistant'
     }
 
     if (id.includes('/node_modules/@elevenlabs/react/')) {
