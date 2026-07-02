@@ -66,6 +66,18 @@ export function hasActiveToolBlock(blocks: ChatBlock[]): boolean {
     ))
 }
 
+export function getRunScopedPlanStatus(
+    plan: PlanStatusSummaryData | null,
+    options: {
+        runActive: boolean
+        clearedSourceBlockId: string | null
+    }
+): PlanStatusSummaryData | null {
+    if (!options.runActive || !plan) return null
+    if (plan.sourceBlockId === options.clearedSourceBlockId) return null
+    return plan
+}
+
 export function removeChatBlockById(blocks: ChatBlock[], blockId: string): ChatBlock[] {
     let changed = false
     const next: ChatBlock[] = []
@@ -118,9 +130,6 @@ export function PlanStatusSummary(props: {
     const { t } = useTranslation()
     const [expanded, setExpanded] = useState(false)
     const rootRef = useRef<HTMLDivElement>(null)
-    const currentText = props.plan
-        ? (props.plan.currentStep.text.trim() || t('planStatus.emptyStep'))
-        : null
 
     useEffect(() => {
         props.onExpandedChange?.(expanded)
@@ -156,7 +165,7 @@ export function PlanStatusSummary(props: {
 
     const visibleSteps = useMemo(() => props.plan?.steps ?? [], [props.plan?.steps])
 
-    if (!props.plan || currentText === null) return null
+    if (!props.plan) return null
 
     return (
         <div ref={rootRef} className="relative mx-auto mb-3 flex w-full max-w-content justify-center px-3">
@@ -223,7 +232,7 @@ export function PlanStatusSummary(props: {
                 <span className="shrink-0 text-[var(--app-hint)]">
                     {t('planStatus.counter', { current: props.plan.currentIndex + 1, total: props.plan.total })}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[var(--app-tool-card-subtitle)]">{currentText}</span>
+                <span className="shrink-0 text-[var(--app-hint)]">{t('planStatus.stepUnit')}</span>
                 <ArrowDownIcon className={cn(
                     'h-3.5 w-3.5 shrink-0 text-[var(--app-hint)] transition-transform',
                     expanded ? 'rotate-180' : ''

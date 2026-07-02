@@ -317,6 +317,7 @@ export default {
   'planStatus.progress': '{completed}/{total} complete',
   'planStatus.steps': '{total} steps',
   'planStatus.counter': '{current}/{total}',
+  'planStatus.stepUnit': 'steps',
   'planStatus.collapse': 'Collapse',
   'planStatus.emptyStep': '(empty)',
   'planStatus.status.completed': 'Done',

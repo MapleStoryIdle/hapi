@@ -33,6 +33,7 @@ import { GitDiffSummary, summarizeGitStatusFiles } from '@/components/AssistantC
 import {
     PlanStatusSummary,
     extractLatestPlanStatus,
+    getRunScopedPlanStatus,
     hasActiveToolBlock,
     removeChatBlockById
 } from '@/components/AssistantChat/PlanStatusSummary'
@@ -443,6 +444,7 @@ function SessionChatInner(props: SessionChatProps) {
     const bottomOverlayRef = useRef<HTMLDivElement | null>(null)
     const [bottomOverlayHeight, setBottomOverlayHeight] = useState(0)
     const [bottomAccessoryExpanded, setBottomAccessoryExpanded] = useState(false)
+    const [clearedPlanSourceBlockId, setClearedPlanSourceBlockId] = useState<string | null>(null)
     const scrollButtonPositionReady = bottomOverlayHeight > 0 && !(gitSessionId && gitStatusLoading)
     const lastGitRefreshUpdatedAtRef = useRef(props.session.updatedAt)
     useEffect(() => {
@@ -921,17 +923,26 @@ function SessionChatInner(props: SessionChatProps) {
         [reconciled.blocks]
     )
     const runActive = props.isSending || props.session.thinking || hasRunningChildAgent || hasActiveTool
-    const planStatusVisible = runActive && latestPlanStatus !== null
+    const activePlanStatus = getRunScopedPlanStatus(latestPlanStatus, {
+        runActive,
+        clearedSourceBlockId: clearedPlanSourceBlockId
+    })
+    const planStatusVisible = activePlanStatus !== null
     const gitDiffAccessoryVisible = !runActive && gitDiffSummaryVisible
     const bottomAccessoryVisible = planStatusVisible || gitDiffAccessoryVisible
     const displayBlocks = useMemo(
         () => (
-            planStatusVisible && latestPlanStatus
-                ? removeChatBlockById(reconciled.blocks, latestPlanStatus.sourceBlockId)
+            activePlanStatus
+                ? removeChatBlockById(reconciled.blocks, activePlanStatus.sourceBlockId)
                 : reconciled.blocks
         ),
-        [latestPlanStatus, planStatusVisible, reconciled.blocks]
+        [activePlanStatus, reconciled.blocks]
     )
+
+    useEffect(() => {
+        if (runActive) return
+        setClearedPlanSourceBlockId(latestPlanStatus?.sourceBlockId ?? null)
+    }, [latestPlanStatus?.sourceBlockId, runActive])
 
     useEffect(() => {
         blocksByIdRef.current = reconciled.byId
@@ -1372,7 +1383,7 @@ function SessionChatInner(props: SessionChatProps) {
                         <div className="pointer-events-auto">
                             {planStatusVisible ? (
                                 <PlanStatusSummary
-                                    plan={latestPlanStatus}
+                                    plan={activePlanStatus}
                                     onExpandedChange={handleBottomAccessoryExpandedChange}
                                 />
                             ) : (

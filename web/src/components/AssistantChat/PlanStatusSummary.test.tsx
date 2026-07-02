@@ -5,6 +5,7 @@ import { I18nProvider } from '@/lib/i18n-context'
 import {
     PlanStatusSummary,
     extractLatestPlanStatus,
+    getRunScopedPlanStatus,
     hasActiveToolBlock,
     removeChatBlockById
 } from '@/components/AssistantChat/PlanStatusSummary'
@@ -109,6 +110,37 @@ describe('PlanStatusSummary helpers', () => {
         expect(hasActiveToolBlock([parent])).toBe(true)
     })
 
+    // 验证运行结束后被清理过的 plan 不会在下一轮运行开始时重新冒出来。
+    it('hides a cleared plan until a new update_plan block appears', () => {
+        const oldPlan = extractLatestPlanStatus([
+            makeToolBlock('plan-old', 'update_plan', {
+                plan: [
+                    { step: '旧计划', status: 'completed' }
+                ]
+            })
+        ])
+        const newPlan = extractLatestPlanStatus([
+            makeToolBlock('plan-new', 'update_plan', {
+                plan: [
+                    { step: '新计划', status: 'in_progress' }
+                ]
+            })
+        ])
+
+        expect(getRunScopedPlanStatus(oldPlan, {
+            runActive: true,
+            clearedSourceBlockId: 'plan-old'
+        })).toBeNull()
+        expect(getRunScopedPlanStatus(newPlan, {
+            runActive: true,
+            clearedSourceBlockId: 'plan-old'
+        })?.sourceBlockId).toBe('plan-new')
+        expect(getRunScopedPlanStatus(newPlan, {
+            runActive: false,
+            clearedSourceBlockId: null
+        })).toBeNull()
+    })
+
     // 验证底部 plan 胶囊展示时，当前 plan block 可以从消息流中临时移除，避免重复展示。
     it('removes a matching chat block without mutating unrelated blocks', () => {
         const blocks: ChatBlock[] = [
@@ -128,9 +160,9 @@ describe('PlanStatusSummary', () => {
     it('renders the plan pill and expands a scrollable dialog', () => {
         renderSummary()
 
-        expect(screen.getByRole('button', { name: /计划 2\/3 实现路由懒加载/ })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /计划 2\/3 步/ })).toBeInTheDocument()
 
-        fireEvent.click(screen.getByRole('button', { name: /计划 2\/3 实现路由懒加载/ }))
+        fireEvent.click(screen.getByRole('button', { name: /计划 2\/3 步/ }))
 
         const dialog = screen.getByRole('dialog', { name: '当前计划' })
         expect(dialog).toBeInTheDocument()
@@ -163,7 +195,7 @@ describe('PlanStatusSummary', () => {
             </I18nProvider>
         )
 
-        fireEvent.click(screen.getByRole('button', { name: /计划 1\/1 实现计划胶囊/ }))
+        fireEvent.click(screen.getByRole('button', { name: /计划 1\/1 步/ }))
 
         expect(onExpandedChange).toHaveBeenCalledWith(true)
     })

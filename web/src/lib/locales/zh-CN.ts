@@ -321,6 +321,7 @@ export default {
   'planStatus.progress': '已完成 {completed}/{total}',
   'planStatus.steps': '{total} 步',
   'planStatus.counter': '{current}/{total}',
+  'planStatus.stepUnit': '步',
   'planStatus.collapse': '收起',
   'planStatus.emptyStep': '（空）',
   'planStatus.status.completed': '已完成',
