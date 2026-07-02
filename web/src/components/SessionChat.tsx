@@ -1681,6 +1681,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 }
                                 sendError={props.sendError ?? null}
                                 onClearSendError={props.onClearSendError}
+                                compactTopAnchor={bottomAccessoryVisible}
                             />
                         </div>
                     </div>

@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ComposerButtons, UnifiedButton } from './ComposerButtons'
 
@@ -82,6 +82,33 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
         const btn = getButton('Send')
         expect(btn.className).not.toContain('bg-amber-500')
     })
+
+    /**
+     * Voice is temporarily hidden from the composer entry point. Empty input
+     * should render the regular disabled send button, not the voice launcher.
+     */
+    it('shows disabled send instead of voice when empty input and voice is enabled', () => {
+        const onVoiceToggle = vi.fn()
+
+        renderInProviders(
+            <UnifiedButton
+                canSend={false}
+                voiceStatus="disconnected"
+                voiceEnabled
+                controlsDisabled={false}
+                onSend={noop}
+                onVoiceToggle={onVoiceToggle}
+            />,
+        )
+
+        const btn = getButton('Send')
+        expect(btn).toBeDisabled()
+        expect(screen.queryByRole('button', { name: 'Voice assistant' })).not.toBeInTheDocument()
+
+        fireEvent.click(btn)
+
+        expect(onVoiceToggle).not.toHaveBeenCalled()
+    })
 })
 
 describe('ComposerButtons — permission mode button', () => {
@@ -145,5 +172,170 @@ describe('ComposerButtons — permission mode button', () => {
         expect(safeYoloRow?.querySelector('span')?.className).not.toContain('text-orange-500')
         expect(safeYoloRow?.querySelector('span')?.className).toContain('text-blue-500')
         expect(fullAccessRow?.querySelector('span')?.className).toContain('text-orange-500')
+    })
+})
+
+describe('ComposerButtons — plan mode status control', () => {
+    const noop = () => {}
+
+    afterEach(() => {
+        cleanup()
+    })
+
+    /**
+     * Active plan mode is represented in the composer status bar. The status
+     * icon is also the exit action and sits before the abort control.
+     */
+    it('renders active plan mode as a status-bar icon before abort', () => {
+        const onPlanModeToggle = vi.fn()
+
+        renderInProviders(
+            <ComposerButtons
+                canSend={false}
+                controlsDisabled={false}
+                showSettingsButton={false}
+                onSettingsToggle={noop}
+                showPlanModeButton
+                planModeActive
+                onPlanModeToggle={onPlanModeToggle}
+                showTerminalButton={false}
+                terminalDisabled={false}
+                terminalLabel="Terminal"
+                onTerminal={noop}
+                showAbortButton
+                abortDisabled={false}
+                isAborting={false}
+                onAbort={noop}
+                showSwitchButton={false}
+                switchDisabled={false}
+                isSwitching={false}
+                onSwitch={noop}
+                voiceEnabled={false}
+                voiceStatus="disconnected"
+                onVoiceToggle={noop}
+                onSend={noop}
+            />
+        )
+
+        const exitPlanButton = screen.getByRole('button', { name: 'Exit Plan Mode' })
+        const abortButton = screen.getByRole('button', { name: 'Abort' })
+        const buttons = screen.getAllByRole('button')
+        expect(buttons.indexOf(exitPlanButton)).toBeLessThan(buttons.indexOf(abortButton))
+
+        fireEvent.click(exitPlanButton)
+
+        expect(onPlanModeToggle).toHaveBeenCalledTimes(1)
+    })
+})
+
+describe('ComposerButtons — compact composer layout', () => {
+    const noop = () => {}
+
+    afterEach(() => {
+        cleanup()
+    })
+
+    /**
+     * Collapsed composer mode is intentionally sparse: the full status/action
+     * row is hidden until the composer expands.
+     */
+    it('renders only the compact entry actions while collapsed', () => {
+        renderInProviders(
+            <ComposerButtons
+                compact
+                canSend={false}
+                controlsDisabled={false}
+                showSettingsButton
+                onSettingsToggle={noop}
+                settingsLabel="Settings"
+                showPlanModeButton
+                planModeActive={false}
+                onPlanModeToggle={noop}
+                showTerminalButton
+                terminalDisabled={false}
+                terminalLabel="Terminal"
+                onTerminal={noop}
+                showAbortButton
+                abortDisabled={false}
+                isAborting={false}
+                onAbort={noop}
+                showSwitchButton
+                switchDisabled={false}
+                isSwitching={false}
+                onSwitch={noop}
+                voiceEnabled={false}
+                voiceStatus="disconnected"
+                onVoiceToggle={noop}
+                onSend={noop}
+            />
+        )
+
+        expect(screen.getByRole('button', { name: 'More tools' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Abort' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument()
+    })
+})
+
+describe('ComposerButtons — context usage popover', () => {
+    const noop = () => {}
+
+    afterEach(() => {
+        cleanup()
+    })
+
+    it('opens the context usage popover from the hollow ring indicator', () => {
+        renderInProviders(
+            <ComposerButtons
+                canSend={false}
+                controlsDisabled={false}
+                showSettingsButton={false}
+                onSettingsToggle={noop}
+                contextUsagePercent={4}
+                contextUsageLabel="ctx 10.2K/258.4K (96% left)"
+                contextUsageDetails={{
+                    usedTokens: 10_200,
+                    windowTokens: 258_400,
+                    cacheReadTokens: 12_400,
+                    source: 'model',
+                    usedLabel: '10.2K',
+                    remainingLabel: '248.2K',
+                    windowLabel: '258.4K',
+                    cacheReadLabel: '12.4K',
+                    remainingPercent: 96
+                }}
+                showTerminalButton={false}
+                terminalDisabled={false}
+                terminalLabel="Terminal"
+                onTerminal={noop}
+                showAbortButton={false}
+                abortDisabled={false}
+                isAborting={false}
+                onAbort={noop}
+                showSwitchButton={false}
+                switchDisabled={false}
+                isSwitching={false}
+                onSwitch={noop}
+                voiceEnabled={false}
+                voiceStatus="disconnected"
+                onVoiceToggle={noop}
+                onSend={noop}
+            />
+        )
+
+        const trigger = screen.getByRole('button', { name: /ctx 10\.2K\/258\.4K/ })
+        expect(trigger).toHaveAttribute('aria-expanded', 'false')
+
+        fireEvent.click(trigger)
+
+        expect(trigger).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByText('Context')).toBeInTheDocument()
+        expect(screen.getByText('Model window · 258.4K')).toBeInTheDocument()
+        expect(screen.getByText('10.2K')).toBeInTheDocument()
+        expect(screen.getByText('248.2K')).toBeInTheDocument()
+        expect(screen.getByText('258.4K')).toBeInTheDocument()
+        expect(screen.getByText('96% remaining')).toBeInTheDocument()
+        expect(screen.getByText('Cached 12.4K')).toBeInTheDocument()
     })
 })

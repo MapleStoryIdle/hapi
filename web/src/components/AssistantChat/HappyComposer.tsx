@@ -3,6 +3,7 @@ import { ComposerPrimitive, useAssistantApi, useAssistantState } from '@assistan
 import {
     type ChangeEvent as ReactChangeEvent,
     type ClipboardEvent as ReactClipboardEvent,
+    type FocusEvent as ReactFocusEvent,
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
     type SyntheticEvent as ReactSyntheticEvent,
@@ -29,7 +30,7 @@ import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { shouldShowComposerStatusBar, StatusBar } from '@/components/AssistantChat/StatusBar'
-import { ComposerButtons } from '@/components/AssistantChat/ComposerButtons'
+import { ComposerButtons, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
@@ -104,6 +105,15 @@ function formatCompactModelLabel(label: string): string {
 function formatTokenCount(value: number): string {
     if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
     if (value >= 1_000) return `${Math.round(value / 1_000)}k`
+    return String(value)
+}
+
+function formatDetailedTokenCount(value: number): string {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+    if (value >= 1_000) {
+        const rounded = (value / 1_000).toFixed(1)
+        return `${rounded.replace(/\.0$/, '')}K`
+    }
     return String(value)
 }
 
@@ -232,6 +242,7 @@ export function HappyComposer(props: {
         session: Session
         onChanged: () => void
     }
+    compactTopAnchor?: boolean
 }) {
     const { t, locale } = useTranslation()
     const {
@@ -283,7 +294,8 @@ export function HappyComposer(props: {
         sendError = null,
         onClearSendError,
         showStatusBar = true,
-        remoteServerContext
+        remoteServerContext,
+        compactTopAnchor = false
     } = props
 
     // Use ?? so missing values fall back to default (destructuring defaults only handle undefined)
@@ -325,6 +337,8 @@ export function HappyComposer(props: {
     const [settingsPanel, setSettingsPanel] = useState<SettingsPanel>('main')
     const [showPiModelPanel, setShowPiModelPanel] = useState(false)
     const [showPiThinkingPanel, setShowPiThinkingPanel] = useState(false)
+    const [composerHasFocus, setComposerHasFocus] = useState(false)
+    const [composerExpandSettled, setComposerExpandSettled] = useState(false)
     const [isAborting, setIsAborting] = useState(false)
     const [isSwitching, setIsSwitching] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
@@ -394,7 +408,7 @@ export function HappyComposer(props: {
         prevControlledByUser.current = controlledByUser
     }, [controlledByUser])
 
-    const { haptic: platformHaptic, isTouch } = usePlatform()
+    const { haptic: platformHaptic } = usePlatform()
     const { isStandalone, isIOS } = usePWAInstall()
     const isIOSPWA = isIOS && isStandalone
     const bottomPaddingClass = isIOSPWA ? 'pb-0' : 'pb-3'
@@ -414,6 +428,18 @@ export function HappyComposer(props: {
             platformHaptic.notification('error')
         }
     }, [platformHaptic])
+
+    const handleComposerFocus = useCallback(() => {
+        setComposerHasFocus(true)
+    }, [])
+
+    const handleComposerBlur = useCallback((event: ReactFocusEvent<HTMLDivElement>) => {
+        const nextTarget = event.relatedTarget
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+            return
+        }
+        setComposerHasFocus(false)
+    }, [])
 
     const handleSuggestionSelect = useCallback((index: number) => {
         const suggestion = suggestions[index]
@@ -843,6 +869,35 @@ export function HappyComposer(props: {
     )
     const showAbortButton = true
     const voiceEnabled = Boolean(onVoiceToggle)
+    const composerExpanded = Boolean(
+        composerHasFocus
+        || hasText
+        || hasAttachments
+        || pendingSchedule
+        || sendError
+        || showSettings
+        || showPiModelPanel
+        || showPiThinkingPanel
+        || suggestions.length > 0
+        || props.scratchlistMode
+    )
+    const composerCompact = !composerExpanded
+    const reserveAnchoredComposerHeight = compactTopAnchor && (composerCompact || !composerExpandSettled)
+    const expandedHeightClass = composerExpandSettled
+        ? 'min-h-[132px] max-h-[360px]'
+        : 'h-[132px] max-h-[132px]'
+
+    useEffect(() => {
+        if (!composerExpanded) {
+            setComposerExpandSettled(false)
+            return
+        }
+
+        setComposerExpandSettled(false)
+        const timeout = window.setTimeout(() => setComposerExpandSettled(true), 720)
+        return () => window.clearTimeout(timeout)
+    }, [composerExpanded])
+
     const currentModelLabel = useMemo(() => {
         if (selectedModelBase !== undefined) {
             const match = modelOptions.find((option) => option.value === selectedModelBase)
@@ -885,6 +940,34 @@ export function HappyComposer(props: {
             label: `ctx ${formatTokenCount(contextSize)}/${formatTokenCount(maxContextSize)} (${percentageLeft}% left)`
         }
     }, [contextSize, contextWindow, model, agentFlavor])
+    const contextUsageDetails = useMemo<ContextUsageDetails | null>(() => {
+        if (contextSize === undefined) return null
+        const maxContextSize = contextWindow ?? getContextBudgetTokens(model, agentFlavor)
+        const remainingTokens = maxContextSize
+            ? Math.max(0, maxContextSize - contextSize)
+            : null
+        const remainingPercent = maxContextSize
+            ? Math.max(0, Math.min(100, (remainingTokens ?? 0) / maxContextSize * 100))
+            : null
+
+        return {
+            usedTokens: contextSize,
+            windowTokens: maxContextSize,
+            cacheReadTokens: contextCacheRead,
+            source: contextWindow
+                ? 'model'
+                : maxContextSize
+                    ? 'estimated'
+                    : 'unknown',
+            usedLabel: formatDetailedTokenCount(contextSize),
+            remainingLabel: remainingTokens === null ? null : formatDetailedTokenCount(remainingTokens),
+            windowLabel: maxContextSize === null ? null : formatDetailedTokenCount(maxContextSize),
+            cacheReadLabel: contextCacheRead && contextCacheRead > 0
+                ? formatDetailedTokenCount(contextCacheRead)
+                : null,
+            remainingPercent
+        }
+    }, [agentFlavor, contextCacheRead, contextSize, contextWindow, model])
 
     const handleSend = useCallback(() => {
         api.composer().send()
@@ -1240,8 +1323,11 @@ export function HappyComposer(props: {
     ])
 
     return (
-        <div className={`px-3 ${bottomPaddingClass} pt-2`}>
-            <div className="mx-auto w-full max-w-content">
+        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[height,margin] duration-[700ms] ease-in-out ${compactTopAnchor ? '-mt-4' : ''} ${reserveAnchoredComposerHeight ? 'h-[152px]' : ''}`}>
+            <div
+                className="mx-auto w-full max-w-content"
+                onBlur={handleComposerBlur}
+            >
                 <ComposerPrimitive.Root className="relative" onSubmit={handleSubmit}>
                     {overlays}
 
@@ -1287,7 +1373,11 @@ export function HappyComposer(props: {
                     ) : null}
 
                     <div
-                        className={`overflow-hidden rounded-[22px] border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_10px_30px_rgba(15,23,42,0.08)] ${
+                        className={`relative flex overflow-hidden rounded-[22px] border shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition-[min-height,max-height,height,border-color,box-shadow,background-color] duration-[700ms] ease-in-out ${
+                            composerCompact
+                                ? 'h-12 min-h-12 max-h-12 border-[var(--app-border)] bg-[var(--app-bg)]'
+                                : `${expandedHeightClass} flex-col border-[#BBD7FF] bg-[linear-gradient(180deg,#F8FBFF_0%,var(--app-bg)_72%)] shadow-[0_14px_36px_rgba(37,99,235,0.12)]`
+                        } ${
                             sendError ? 'ring-1 ring-red-500' : ''
                         }`}
                     >
@@ -1297,10 +1387,16 @@ export function HappyComposer(props: {
                             </div>
                         ) : null}
 
-                        <div className="flex items-center px-4 py-3">
+                        <div
+                            onPointerDownCapture={handleComposerFocus}
+                            className={
+                                composerCompact
+                                    ? 'flex h-12 min-w-0 flex-1 items-center px-14 py-0'
+                                    : 'flex min-h-[76px] min-w-0 flex-1 items-start px-4 py-3'
+                            }
+                        >
                             <ComposerPrimitive.Input
                                 ref={textareaRef}
-                                autoFocus={!controlsDisabled && !isTouch}
                                 placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
                                 disabled={controlsDisabled}
                                 maxRows={5}
@@ -1308,9 +1404,14 @@ export function HappyComposer(props: {
                                 cancelOnEscape={false}
                                 onChange={handleChange}
                                 onSelect={handleSelect}
+                                onFocus={handleComposerFocus}
                                 onKeyDown={handleKeyDown}
                                 onPaste={handlePaste}
-                                className="flex-1 resize-none bg-transparent text-base leading-snug text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                className={`flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                                    composerCompact
+                                        ? 'h-6 max-h-6 overflow-hidden leading-6'
+                                        : 'min-h-[56px] leading-snug'
+                                }`}
                             />
                         </div>
 
@@ -1325,6 +1426,7 @@ export function HappyComposer(props: {
                             settingsOpen={showSettings}
                             contextUsagePercent={contextUsage?.percentage ?? null}
                             contextUsageLabel={contextUsage?.label}
+                            contextUsageDetails={contextUsageDetails}
                             permissionMode={permissionMode}
                             permissionLabel={permissionLabel}
                             permissionModeOptions={permissionModeOptions}
@@ -1369,6 +1471,7 @@ export function HappyComposer(props: {
                             scratchlistCount={props.scratchlistCount}
                             onScratchlistToggle={props.onScratchlistToggle}
                             remoteServerContext={remoteServerContext}
+                            compact={composerCompact}
                         />
                     </div>
                 </ComposerPrimitive.Root>

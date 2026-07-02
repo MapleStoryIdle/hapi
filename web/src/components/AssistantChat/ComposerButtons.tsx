@@ -31,29 +31,6 @@ function PlusIcon() {
     )
 }
 
-function VoiceAssistantIcon() {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-        >
-            {/* 三条声波线，代表语音助手的输出 */}
-            <path d="M12 6v12" />
-            <path d="M8 9v6" />
-            <path d="M16 9v6" />
-            <path d="M4 11v2" />
-            <path d="M20 11v2" />
-        </svg>
-    )
-}
-
 function SpeakerIcon(props: { muted?: boolean }) {
     if (props.muted) {
         // Speaker with X (muted)
@@ -549,8 +526,8 @@ function ToolbarMenu(props: {
             }
             className={
                 props.surface === 'permission'
-                    ? 'z-50 overflow-visible'
-                    : 'z-50 overflow-hidden rounded-xl border border-[var(--app-divider)] bg-[var(--app-bg)] shadow-lg'
+                    ? 'pointer-events-auto z-50 overflow-visible'
+                    : 'pointer-events-auto z-50 overflow-hidden rounded-xl border border-[var(--app-divider)] bg-[var(--app-bg)] shadow-lg'
             }
             onPointerDown={(event) => event.stopPropagation()}
         >
@@ -575,7 +552,95 @@ function ToolbarMenu(props: {
     )
 }
 
-function ContextUsageIndicator(props: { percentage: number | null | undefined; label?: string }) {
+export type ContextUsageDetails = {
+    usedTokens: number
+    windowTokens: number | null
+    cacheReadTokens?: number
+    source: 'model' | 'estimated' | 'unknown'
+    usedLabel: string
+    remainingLabel: string | null
+    windowLabel: string | null
+    cacheReadLabel: string | null
+    remainingPercent: number | null
+}
+
+function ContextUsagePanel(props: { details: ContextUsageDetails | null }) {
+    const { t } = useTranslation()
+
+    if (!props.details) {
+        return (
+            <div className="px-4 py-4 text-sm text-[var(--app-hint)]">
+                {t('contextUsage.empty')}
+            </div>
+        )
+    }
+
+    const details = props.details
+    const usedPercent = details.remainingPercent === null
+        ? 0
+        : Math.min(100, Math.max(0, 100 - details.remainingPercent))
+    const windowCopy = details.source === 'model'
+        ? t('contextUsage.modelWindow', { value: details.windowLabel ?? '-' })
+        : details.source === 'estimated'
+            ? t('contextUsage.estimatedWindow', { value: details.windowLabel ?? '-' })
+            : t('contextUsage.unknownWindow')
+
+    return (
+        <div className="px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+                <div className="text-[15px] font-semibold text-[var(--app-fg)]">
+                    {t('contextUsage.title')}
+                </div>
+                <div className="shrink-0 text-xs font-medium text-[var(--app-hint)]">
+                    {windowCopy}
+                </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-3">
+                <div>
+                    <div className="text-[11px] font-medium text-[var(--app-hint)]">{t('contextUsage.used')}</div>
+                    <div className="mt-1 text-sm font-semibold text-[var(--app-fg)]">{details.usedLabel}</div>
+                </div>
+                <div>
+                    <div className="text-[11px] font-medium text-[var(--app-hint)]">{t('contextUsage.remaining')}</div>
+                    <div className="mt-1 text-sm font-semibold text-[var(--app-fg)]">{details.remainingLabel ?? '-'}</div>
+                </div>
+                <div>
+                    <div className="text-[11px] font-medium text-[var(--app-hint)]">{t('contextUsage.window')}</div>
+                    <div className="mt-1 text-sm font-semibold text-[var(--app-fg)]">{details.windowLabel ?? '-'}</div>
+                </div>
+            </div>
+
+            {details.remainingPercent !== null ? (
+                <div className="mt-4">
+                    <div className="h-2 overflow-hidden rounded-full bg-[var(--app-subtle-bg)]">
+                        <div
+                            className="h-full rounded-full bg-[rgb(88,88,88)]"
+                            style={{ width: `${usedPercent}%` }}
+                        />
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-4 text-xs font-medium text-[var(--app-hint)]">
+                        <div>
+                            {details.cacheReadLabel ? t('contextUsage.cacheRead', { value: details.cacheReadLabel }) : null}
+                        </div>
+                        <div className="shrink-0">
+                            {t('contextUsage.remainingPercent', { percent: Math.round(details.remainingPercent) })}
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+        </div>
+    )
+}
+
+function ContextUsageIndicator(props: {
+    percentage: number | null | undefined
+    label?: string
+    details?: ContextUsageDetails | null
+    active?: boolean
+    buttonRef?: RefObject<HTMLButtonElement | null>
+    onClick?: () => void
+}) {
     if (props.percentage == null) return null
 
     const percentage = Math.min(100, Math.max(0, props.percentage))
@@ -585,10 +650,16 @@ function ContextUsageIndicator(props: { percentage: number | null | undefined; l
     const progressColor = `rgb(${shade}, ${shade}, ${shade})`
 
     return (
-        <span
-            className="flex h-8 w-5 shrink-0 items-center justify-center"
+        <button
+            ref={props.buttonRef}
+            type="button"
+            className={`flex h-[42px] w-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--app-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                props.active ? 'bg-[var(--app-bg)]' : ''
+            }`}
             aria-label={props.label}
             title={props.label}
+            aria-expanded={props.active ? true : false}
+            onClick={props.onClick}
         >
             <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
                 <circle cx="8" cy="8" r={radius} fill="none" stroke="rgb(229, 231, 235)" strokeWidth="2" />
@@ -605,7 +676,7 @@ function ContextUsageIndicator(props: { percentage: number | null | undefined; l
                     transform="rotate(-90 8 8)"
                 />
             </svg>
-        </span>
+        </button>
     )
 }
 
@@ -630,14 +701,14 @@ function RemoteServerSelectedButton(props: {
             aria-label={`远程服务器: ${selected.name}`}
             title={`远程服务器: ${selected.name}`}
             disabled={props.controlsDisabled}
-            className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                 props.active
                     ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
                     : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
             }`}
             onClick={props.onClick}
         >
-            <ServerIcon className="h-[18px] w-[18px]" />
+            <ServerIcon className="h-[22px] w-[22px]" />
         </button>
     )
 }
@@ -678,8 +749,6 @@ export function UnifiedButton(props: {
             props.onVoiceToggle() // Stop voice
         } else if (hasText) {
             props.onSend() // Send message (or scratchlist add — wrapper decides)
-        } else if (props.voiceEnabled && !routesToScratchlist) {
-            props.onVoiceToggle() // Start voice (suppressed in scratchlist mode)
         }
     }
 
@@ -706,25 +775,19 @@ export function UnifiedButton(props: {
         icon = <SendIcon />
         className = 'bg-black text-white'
         ariaLabel = t('composer.send')
-    } else if (props.voiceEnabled) {
-        icon = <VoiceAssistantIcon />
-        className = 'bg-black text-white'
-        ariaLabel = t('composer.voice')
     } else {
         icon = <SendIcon />
         className = 'bg-[#C0C0C0] text-white'
         ariaLabel = t('composer.send')
     }
 
-    // When the submission routes to scratchlist the send button is the
-    // only path that does anything useful, so it must be enabled whenever
-    // there is text - we deliberately do NOT fall back to voice-toggle-on-
-    // empty-text. (When attachments / schedule force a chat fallback the
-    // normal chat-send disable rules apply.)
+    // Voice launch is hidden from the composer for now. Empty input keeps
+    // the regular disabled send affordance; connected voice sessions still
+    // expose the stop state above so users can end an existing session.
     const isDisabled = props.controlsDisabled || (
         routesToScratchlist
             ? !hasText
-            : !hasText && !props.voiceEnabled && !isVoiceActive
+            : !hasText && !isVoiceActive
     )
 
     return (
@@ -734,7 +797,7 @@ export function UnifiedButton(props: {
             disabled={isDisabled}
             aria-label={ariaLabel}
             title={ariaLabel}
-            className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+            className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[18px] [&_svg]:w-[18px] ${className}`}
         >
             {icon}
         </button>
@@ -752,6 +815,7 @@ export function ComposerButtons(props: {
     settingsOpen?: boolean
     contextUsagePercent?: number | null
     contextUsageLabel?: string
+    contextUsageDetails?: ContextUsageDetails | null
     permissionMode?: PermissionMode
     permissionLabel?: string
     permissionModeOptions?: Array<{ mode: PermissionMode; label: string }>
@@ -809,6 +873,7 @@ export function ComposerButtons(props: {
         session: Session
         onChanged: () => void
     }
+    compact?: boolean
 }) {
     const { t } = useTranslation()
     const isVoiceConnected = props.voiceStatus === 'connected'
@@ -816,10 +881,12 @@ export function ComposerButtons(props: {
     const [showToolsMenu, setShowToolsMenu] = useState(false)
     const [showPermissionMenu, setShowPermissionMenu] = useState(false)
     const [showRemoteServerMenu, setShowRemoteServerMenu] = useState(false)
+    const [showContextUsageMenu, setShowContextUsageMenu] = useState(false)
     const [remoteServerAnchor, setRemoteServerAnchor] = useState<'tools' | 'button'>('tools')
     const toolsButtonRef = useRef<HTMLButtonElement>(null)
     const permissionButtonRef = useRef<HTMLButtonElement>(null)
     const remoteServerButtonRef = useRef<HTMLButtonElement>(null)
+    const contextUsageButtonRef = useRef<HTMLButtonElement>(null)
     const hasRemoteServerContext = Boolean(props.remoteServerContext)
 
     const hasSchedule = props.pendingSchedule != null
@@ -829,7 +896,227 @@ export function ComposerButtons(props: {
         ?? props.permissionModeOptions?.find((option) => option.mode === props.permissionMode)?.label
         ?? props.permissionMode
         ?? t('misc.permissionMode')
-    const toolMenuItemClass = 'flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)] disabled:cursor-not-allowed disabled:opacity-45'
+    const toolMenuItemClass = 'flex w-full items-center gap-2 px-3 py-3 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)] disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:h-[22px] [&_svg]:w-[22px]'
+    const routesToScratchlist = (props.scratchlistMode ?? false)
+        && !hasAttachments
+        && props.pendingSchedule == null
+    const toolsMenuContent = (
+        <div className="py-1">
+            {props.showPlanModeButton && props.onPlanModeToggle ? (
+                <button
+                    type="button"
+                    aria-label={t('composer.planMode')}
+                    title={t('composer.planMode')}
+                    disabled={props.controlsDisabled}
+                    onClick={() => {
+                        setShowToolsMenu(false)
+                        props.onPlanModeToggle?.()
+                    }}
+                    className={toolMenuItemClass}
+                >
+                    <PlanModeIcon />
+                    <span className="flex-1">{t('composer.planMode')}</span>
+                </button>
+            ) : null}
+
+            {props.showGoalModeButton && props.onGoalModeOpen ? (
+                <button
+                    type="button"
+                    aria-label={t('composer.goalMode')}
+                    title={t('composer.goalMode')}
+                    disabled={props.controlsDisabled}
+                    onClick={() => {
+                        setShowToolsMenu(false)
+                        props.onGoalModeOpen?.()
+                    }}
+                    className={toolMenuItemClass}
+                >
+                    <GoalModeIcon />
+                    <span className="flex-1">{t('composer.goalMode')}</span>
+                    {props.goalModeActive ? <span className="text-[var(--app-hint)]">✓</span> : null}
+                </button>
+            ) : null}
+
+            {(props.showPlanModeButton || props.showGoalModeButton) ? (
+                <div className="my-1 h-px bg-[var(--app-divider)]" />
+            ) : null}
+
+            {hasRemoteServerContext ? (
+                <button
+                    type="button"
+                    aria-label="远程服务器"
+                    title="远程服务器"
+                    disabled={props.controlsDisabled}
+                    onClick={() => {
+                        setShowToolsMenu(false)
+                        setShowPermissionMenu(false)
+                        setShowSchedulePicker(false)
+                        setRemoteServerAnchor('tools')
+                        setShowRemoteServerMenu(true)
+                    }}
+                    className={toolMenuItemClass}
+                >
+                    <ServerIcon className="h-[22px] w-[22px]" />
+                    <span className="flex-1">远程服务器</span>
+                </button>
+            ) : null}
+
+            <ComposerPrimitive.AddAttachment
+                aria-label={t('composer.attach')}
+                title={t('composer.attach')}
+                disabled={props.controlsDisabled || hasSchedule}
+                onClick={() => setShowToolsMenu(false)}
+                className={toolMenuItemClass}
+            >
+                <AttachmentIcon />
+                <span className="flex-1">{t('composer.attach')}</span>
+            </ComposerPrimitive.AddAttachment>
+
+            {props.showTerminalButton ? (
+                <button
+                    type="button"
+                    aria-label={props.terminalLabel}
+                    title={props.terminalLabel}
+                    className={toolMenuItemClass}
+                    onClick={() => {
+                        setShowToolsMenu(false)
+                        props.onTerminal()
+                    }}
+                    disabled={props.terminalDisabled}
+                >
+                    <TerminalIcon />
+                    <span className="flex-1">{props.terminalLabel}</span>
+                </button>
+            ) : null}
+
+            {props.onSchedule ? (
+                <button
+                    type="button"
+                    aria-label={t('composer.scheduleSend')}
+                    title={t('composer.scheduleSend')}
+                    disabled={props.controlsDisabled || hasAttachments}
+                    onClick={() => {
+                        setShowToolsMenu(false)
+                        if (hasSchedule && props.onClearSchedule) {
+                            props.onClearSchedule()
+                            return
+                        }
+                        setShowSchedulePicker(true)
+                    }}
+                    className={toolMenuItemClass}
+                >
+                    <ScheduleIcon className="h-[22px] w-[22px]" />
+                    <span className="flex-1">{t('composer.scheduleSend')}</span>
+                    {hasSchedule ? <span className="text-[var(--app-hint)]">✓</span> : null}
+                </button>
+            ) : null}
+
+            {props.onScratchlistToggle ? (
+                <button
+                    type="button"
+                    aria-label={t('scratchlist.toggleAriaLabel')}
+                    title={t('scratchlist.toggleTooltip')}
+                    aria-pressed={props.scratchlistMode ? true : false}
+                    disabled={props.controlsDisabled}
+                    onClick={() => {
+                        setShowToolsMenu(false)
+                        props.onScratchlistToggle?.()
+                    }}
+                    className={toolMenuItemClass}
+                >
+                    <ScratchlistToggleIcon />
+                    <span className="flex-1">{t('scratchlist.title')}</span>
+                    {props.scratchlistMode ? <span className="text-amber-500">✓</span> : null}
+                    {!props.scratchlistMode && (props.scratchlistCount ?? 0) > 0 ? (
+                        <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                            {(props.scratchlistCount ?? 0) > 99 ? '99+' : props.scratchlistCount}
+                        </span>
+                    ) : null}
+                </button>
+            ) : null}
+        </div>
+    )
+
+    if (props.compact) {
+        return (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-between px-3">
+                <button
+                    ref={toolsButtonRef}
+                    type="button"
+                    aria-label={t('composer.moreTools')}
+                    title={t('composer.moreTools')}
+                    className="pointer-events-auto flex h-[42px] w-[42px] items-center justify-center rounded-full text-[var(--app-fg)]/80 transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] [&_svg]:h-[22px] [&_svg]:w-[22px]"
+                    onPointerDown={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                    }}
+                    onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        setShowToolsMenu((open) => !open)
+                        setShowPermissionMenu(false)
+                        setShowSchedulePicker(false)
+                        setShowRemoteServerMenu(false)
+                        setShowContextUsageMenu(false)
+                    }}
+                >
+                    <PlusIcon />
+                </button>
+
+                <div className="pointer-events-auto">
+                    <UnifiedButton
+                        canSend={props.canSend}
+                        voiceStatus={props.voiceStatus}
+                        voiceEnabled={props.voiceEnabled}
+                        controlsDisabled={props.controlsDisabled}
+                        onSend={props.onSend}
+                        onVoiceToggle={props.onVoiceToggle}
+                        routesToScratchlist={routesToScratchlist}
+                    />
+                </div>
+                {showToolsMenu ? (
+                    <ToolbarMenu
+                        anchorRef={toolsButtonRef}
+                        align="left"
+                        width={220}
+                        maxHeight={280}
+                        onClose={() => setShowToolsMenu(false)}
+                    >
+                        {toolsMenuContent}
+                    </ToolbarMenu>
+                ) : null}
+
+                {showSchedulePicker && props.onSchedule ? (
+                    <ScheduleTimePicker
+                        anchorRef={toolsButtonRef}
+                        onSchedule={(pending) => {
+                            props.onSchedule!(pending)
+                            setShowSchedulePicker(false)
+                        }}
+                        onClose={() => setShowSchedulePicker(false)}
+                        pendingSchedule={props.pendingSchedule}
+                    />
+                ) : null}
+
+                {showRemoteServerMenu && props.remoteServerContext ? (
+                    <ToolbarMenu
+                        anchorRef={toolsButtonRef}
+                        align="left"
+                        width={300}
+                        maxHeight={320}
+                        onClose={() => setShowRemoteServerMenu(false)}
+                    >
+                        <RemoteServerContextMenuContent
+                            api={props.remoteServerContext.api}
+                            session={props.remoteServerContext.session}
+                            onChanged={props.remoteServerContext.onChanged}
+                            onClose={() => setShowRemoteServerMenu(false)}
+                        />
+                    </ToolbarMenu>
+                ) : null}
+            </div>
+        )
+    }
 
     return (
         <div className="flex items-center justify-between px-2 pb-2">
@@ -839,16 +1126,23 @@ export function ComposerButtons(props: {
                     type="button"
                     aria-label={t('composer.moreTools')}
                     title={t('composer.moreTools')}
-                    className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+                    className={`flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors [&_svg]:h-[22px] [&_svg]:w-[22px] ${
                         showToolsMenu
                             ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
                             : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
                     }`}
-                    onClick={() => {
+                    onPointerDown={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                    }}
+                    onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
                         setShowToolsMenu((open) => !open)
                         setShowPermissionMenu(false)
                         setShowSchedulePicker(false)
                         setShowRemoteServerMenu(false)
+                        setShowContextUsageMenu(false)
                     }}
                 >
                     <PlusIcon />
@@ -861,7 +1155,7 @@ export function ComposerButtons(props: {
                         aria-label={`${t('misc.permissionMode')}: ${permissionLabel}`}
                         title={`${t('misc.permissionMode')}: ${permissionLabel}`}
                         disabled={props.controlsDisabled}
-                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                        className={`flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px] ${
                             showPermissionMenu
                                 ? `bg-[var(--app-bg)] ${getPermissionToneClass(props.permissionMode)}`
                                 : `${getPermissionToneClass(props.permissionMode)} hover:bg-[var(--app-bg)]`
@@ -871,6 +1165,7 @@ export function ComposerButtons(props: {
                             setShowToolsMenu(false)
                             setShowSchedulePicker(false)
                             setShowRemoteServerMenu(false)
+                            setShowContextUsageMenu(false)
                         }}
                     >
                         <PermissionModeIcon mode={props.permissionMode} />
@@ -889,6 +1184,7 @@ export function ComposerButtons(props: {
                             setShowToolsMenu(false)
                             setShowPermissionMenu(false)
                             setShowSchedulePicker(false)
+                            setShowContextUsageMenu(false)
                         }}
                     />
                 ) : null}
@@ -901,141 +1197,7 @@ export function ComposerButtons(props: {
                         maxHeight={280}
                         onClose={() => setShowToolsMenu(false)}
                     >
-                        <div className="py-1">
-                            {props.showPlanModeButton && props.onPlanModeToggle ? (
-                                <button
-                                    type="button"
-                                    aria-label={t('composer.planMode')}
-                                    title={t('composer.planMode')}
-                                    disabled={props.controlsDisabled}
-                                    onClick={() => {
-                                        setShowToolsMenu(false)
-                                        props.onPlanModeToggle?.()
-                                    }}
-                                    className={toolMenuItemClass}
-                                >
-                                    <PlanModeIcon />
-                                    <span className="flex-1">{t('composer.planMode')}</span>
-                                    {props.planModeActive ? <span className="text-[var(--app-hint)]">✓</span> : null}
-                                </button>
-                            ) : null}
-
-                            {props.showGoalModeButton && props.onGoalModeOpen ? (
-                                <button
-                                    type="button"
-                                    aria-label={t('composer.goalMode')}
-                                    title={t('composer.goalMode')}
-                                    disabled={props.controlsDisabled}
-                                    onClick={() => {
-                                        setShowToolsMenu(false)
-                                        props.onGoalModeOpen?.()
-                                    }}
-                                    className={toolMenuItemClass}
-                                >
-                                    <GoalModeIcon />
-                                    <span className="flex-1">{t('composer.goalMode')}</span>
-                                    {props.goalModeActive ? <span className="text-[var(--app-hint)]">✓</span> : null}
-                                </button>
-                            ) : null}
-
-                            {(props.showPlanModeButton || props.showGoalModeButton) ? (
-                                <div className="my-1 h-px bg-[var(--app-divider)]" />
-                            ) : null}
-
-                            {hasRemoteServerContext ? (
-                                <button
-                                    type="button"
-                                    aria-label="远程服务器"
-                                    title="远程服务器"
-                                    disabled={props.controlsDisabled}
-                                    onClick={() => {
-                                        setShowToolsMenu(false)
-                                        setShowPermissionMenu(false)
-                                        setShowSchedulePicker(false)
-                                        setRemoteServerAnchor('tools')
-                                        setShowRemoteServerMenu(true)
-                                    }}
-                                    className={toolMenuItemClass}
-                                >
-                                    <ServerIcon className="h-[18px] w-[18px]" />
-                                    <span className="flex-1">远程服务器</span>
-                                </button>
-                            ) : null}
-
-                            <ComposerPrimitive.AddAttachment
-                                aria-label={t('composer.attach')}
-                                title={t('composer.attach')}
-                                disabled={props.controlsDisabled || hasSchedule}
-                                onClick={() => setShowToolsMenu(false)}
-                                className={toolMenuItemClass}
-                            >
-                                <AttachmentIcon />
-                                <span className="flex-1">{t('composer.attach')}</span>
-                            </ComposerPrimitive.AddAttachment>
-
-                            {props.showTerminalButton ? (
-                                <button
-                                    type="button"
-                                    aria-label={props.terminalLabel}
-                                    title={props.terminalLabel}
-                                    className={toolMenuItemClass}
-                                    onClick={() => {
-                                        setShowToolsMenu(false)
-                                        props.onTerminal()
-                                    }}
-                                    disabled={props.terminalDisabled}
-                                >
-                                    <TerminalIcon />
-                                    <span className="flex-1">{props.terminalLabel}</span>
-                                </button>
-                            ) : null}
-
-                            {props.onSchedule ? (
-                                <button
-                                    type="button"
-                                    aria-label={t('composer.scheduleSend')}
-                                    title={t('composer.scheduleSend')}
-                                    disabled={props.controlsDisabled || hasAttachments}
-                                    onClick={() => {
-                                        setShowToolsMenu(false)
-                                        if (hasSchedule && props.onClearSchedule) {
-                                            props.onClearSchedule()
-                                            return
-                                        }
-                                        setShowSchedulePicker(true)
-                                    }}
-                                    className={toolMenuItemClass}
-                                >
-                                    <ScheduleIcon className="h-[18px] w-[18px]" />
-                                    <span className="flex-1">{t('composer.scheduleSend')}</span>
-                                    {hasSchedule ? <span className="text-[var(--app-hint)]">✓</span> : null}
-                                </button>
-                            ) : null}
-
-                            {props.onScratchlistToggle ? (
-                                <button
-                                    type="button"
-                                    aria-label={t('scratchlist.toggleAriaLabel')}
-                                    title={t('scratchlist.toggleTooltip')}
-                                    aria-pressed={props.scratchlistMode ? true : false}
-                                    disabled={props.controlsDisabled}
-                                    onClick={() => {
-                                        setShowToolsMenu(false)
-                                        props.onScratchlistToggle?.()
-                                    }}
-                                    className={toolMenuItemClass}
-                                >
-                                    <ScratchlistToggleIcon />
-                                    <span className="flex-1">{t('scratchlist.title')}</span>
-                                    {props.scratchlistMode ? <span className="text-amber-500">✓</span> : null}
-                                    {!props.scratchlistMode && (props.scratchlistCount ?? 0) > 0 ? (
-                                        <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
-                                            {(props.scratchlistCount ?? 0) > 99 ? '99+' : props.scratchlistCount}
-                                        </span>
-                                    ) : null}
-                                </button>
-                            ) : null}
-                        </div>
+                        {toolsMenuContent}
                     </ToolbarMenu>
                 ) : null}
 
@@ -1064,7 +1226,7 @@ export function ComposerButtons(props: {
                                             setShowPermissionMenu(false)
                                         }}
                                     >
-                                        <span className={`flex h-7 w-7 shrink-0 items-center justify-center ${getPermissionToneClass(option.mode)}`}>
+                                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center [&_svg]:h-[22px] [&_svg]:w-[22px] ${getPermissionToneClass(option.mode)}`}>
                                             <PermissionModeIcon mode={option.mode} />
                                         </span>
                                         <span className="min-w-0 flex-1">
@@ -1075,8 +1237,8 @@ export function ComposerButtons(props: {
                                                 {copy.description}
                                             </span>
                                         </span>
-                                        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-[var(--app-fg)]">
-                                            {selected ? <PermissionCheckIcon className="h-4 w-4" /> : null}
+                                        <span className="flex h-9 w-9 shrink-0 items-center justify-center text-[var(--app-fg)]">
+                                            {selected ? <PermissionCheckIcon className="h-5 w-5" /> : null}
                                         </span>
                                     </button>
                                 )
@@ -1102,7 +1264,7 @@ export function ComposerButtons(props: {
                         type="button"
                         aria-label={props.piModelLabel}
                         title={props.piModelLabel}
-                        className={`flex h-8 items-center gap-1 rounded-full px-3 text-xs font-medium transition-colors ${
+                        className={`flex h-[42px] items-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors ${
                             props.piModelOpen
                                 ? 'bg-[var(--app-secondary-bg)] text-[var(--app-link)]'
                                 : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
@@ -1120,7 +1282,7 @@ export function ComposerButtons(props: {
                         type="button"
                         aria-label={props.piThinkingLabel}
                         title={props.piThinkingLabel}
-                        className={`flex h-8 items-center gap-1 rounded-full px-3 text-xs font-medium transition-colors ${
+                        className={`flex h-[42px] items-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors ${
                             props.piThinkingOpen
                                 ? 'bg-[var(--app-secondary-bg)] text-[var(--app-link)]'
                                 : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
@@ -1133,13 +1295,26 @@ export function ComposerButtons(props: {
                     </button>
                 ) : null}
 
+                {props.planModeActive && props.onPlanModeToggle ? (
+                    <button
+                        type="button"
+                        aria-label={t('tool.exitPlan')}
+                        title={t('tool.exitPlan')}
+                        disabled={props.controlsDisabled}
+                        className="flex h-[42px] w-[42px] items-center justify-center rounded-full bg-[#EAF2FF] text-[#1D4ED8] transition-colors hover:bg-[#DBEAFE] disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px]"
+                        onClick={props.onPlanModeToggle}
+                    >
+                        <PlanModeIcon />
+                    </button>
+                ) : null}
+
                 {props.showAbortButton ? (
                     <button
                         type="button"
                         aria-label={t('composer.abort')}
                         title={t('composer.abort')}
                         disabled={props.abortDisabled}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex h-[42px] w-[42px] items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px]"
                         onClick={props.onAbort}
                     >
                         <AbortIcon spinning={props.isAborting} />
@@ -1152,7 +1327,7 @@ export function ComposerButtons(props: {
                         aria-label={t('composer.switchRemote')}
                         title={t('composer.switchRemote')}
                         disabled={props.switchDisabled}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex h-[42px] w-[42px] items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-blue-500 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px]"
                         onClick={props.onSwitch}
                     >
                         <SwitchToRemoteIcon />
@@ -1164,14 +1339,37 @@ export function ComposerButtons(props: {
                 <ContextUsageIndicator
                     percentage={props.contextUsagePercent}
                     label={props.contextUsageLabel}
+                    details={props.contextUsageDetails}
+                    active={showContextUsageMenu}
+                    buttonRef={contextUsageButtonRef}
+                    onClick={() => {
+                        setShowContextUsageMenu((open) => !open)
+                        setShowToolsMenu(false)
+                        setShowPermissionMenu(false)
+                        setShowSchedulePicker(false)
+                        setShowRemoteServerMenu(false)
+                    }}
                 />
+
+                {showContextUsageMenu ? (
+                    <ToolbarMenu
+                        anchorRef={contextUsageButtonRef}
+                        align="right"
+                        width={292}
+                        maxHeight={280}
+                        showArrow
+                        onClose={() => setShowContextUsageMenu(false)}
+                    >
+                        <ContextUsagePanel details={props.contextUsageDetails ?? null} />
+                    </ToolbarMenu>
+                ) : null}
 
                 {props.showSettingsButton ? (
                     <button
                         type="button"
                         aria-label={t('composer.settings')}
                         title={t('composer.settings')}
-                        className={`settings-button flex h-8 items-center gap-1.5 rounded-full px-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                        className={`settings-button flex h-[42px] items-center gap-2 rounded-full px-3 text-base transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                             props.settingsOpen
                                 ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
                                 : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
@@ -1181,6 +1379,7 @@ export function ComposerButtons(props: {
                             setShowPermissionMenu(false)
                             setShowSchedulePicker(false)
                             setShowRemoteServerMenu(false)
+                            setShowContextUsageMenu(false)
                             props.onSettingsToggle()
                         }}
                         disabled={props.controlsDisabled}
@@ -1221,7 +1420,7 @@ export function ComposerButtons(props: {
                         type="button"
                         aria-label={props.voiceMicMuted ? t('voice.unmute') : t('voice.mute')}
                         title={props.voiceMicMuted ? t('voice.unmute') : t('voice.mute')}
-                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+                        className={`flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors [&_svg]:h-[22px] [&_svg]:w-[22px] ${
                             props.voiceMicMuted
                                 ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
                                 : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
@@ -1250,9 +1449,7 @@ export function ComposerButtons(props: {
                      * where the user's content is going.
                      */
                     routesToScratchlist={
-                        (props.scratchlistMode ?? false)
-                        && !hasAttachments
-                        && props.pendingSchedule == null
+                        routesToScratchlist
                     }
                 />
             </div>
