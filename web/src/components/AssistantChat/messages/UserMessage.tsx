@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type MouseEvent } from 'react'
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
@@ -9,12 +9,12 @@ import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { getConversationMessageAnchorId } from '@/chat/outline'
-import { MessageMetadata } from '@/components/AssistantChat/messages/MessageMetadata'
-import { MessageTimestamp } from '@/components/AssistantChat/messages/MessageTimestamp'
+import { MessageDetailsFooter, shouldIgnoreMessageDetailsToggle } from '@/components/AssistantChat/messages/MessageDetails'
 
 export function HappyUserMessage() {
     const ctx = useHappyChatContext()
     const { copied, copy } = useCopyToClipboard()
+    const [detailsVisible, setDetailsVisible] = useState(false)
     const [showMetadata, setShowMetadata] = useState(false)
     const role = useAssistantState(({ message }) => message.role)
     const messageId = useAssistantState(({ message }) => message.id)
@@ -55,6 +55,15 @@ export function HappyUserMessage() {
 
     const hasMetadata = invokedAt != null
 
+    const toggleDetailsVisible = (event: MouseEvent<HTMLElement>) => {
+        if (shouldIgnoreMessageDetailsToggle(event)) return
+        setDetailsVisible((visible) => {
+            const next = !visible
+            if (!next) setShowMetadata(false)
+            return next
+        })
+    }
+
     if (role !== 'user') return null
     const canRetry = status === 'failed' && typeof localId === 'string' && Boolean(ctx.onRetryMessage)
     const onRetry = canRetry ? () => ctx.onRetryMessage!(localId) : undefined
@@ -65,25 +74,18 @@ export function HappyUserMessage() {
             <MessagePrimitive.Root
                 id={getConversationMessageAnchorId(messageId)}
                 className="scroll-mt-4 px-1 min-w-0 max-w-full overflow-x-hidden"
+                onClick={toggleDetailsVisible}
             >
                 <div className="ml-auto w-full max-w-[92%]">
                     <CliOutputBlock text={cliText} />
-                    <div className="mt-1 flex items-center justify-end gap-2">
-                        <MessageTimestamp className="text-[10px] leading-none text-[var(--app-hint)]" />
-                        {hasMetadata && (
-                            <button
-                                type="button"
-                                onClick={() => setShowMetadata((open) => !open)}
-                                aria-expanded={showMetadata}
-                                className="text-[10px] text-[var(--app-hint)] underline-offset-2 hover:text-[var(--app-fg)] hover:underline"
-                            >
-                                {showMetadata ? 'Hide info' : 'Show info'}
-                            </button>
-                        )}
-                    </div>
-                    {showMetadata && invokedAt != null && (
-                        <MessageMetadata invokedAt={invokedAt} />
-                    )}
+                    <MessageDetailsFooter
+                        visible={detailsVisible}
+                        align="right"
+                        hasMetadata={hasMetadata}
+                        metadataOpen={showMetadata}
+                        onMetadataToggle={() => setShowMetadata((open) => !open)}
+                        invokedAt={invokedAt}
+                    />
                 </div>
             </MessagePrimitive.Root>
         )
@@ -96,6 +98,7 @@ export function HappyUserMessage() {
         <MessagePrimitive.Root
             id={getConversationMessageAnchorId(messageId)}
             className={`${getUserBubbleClassName(status)} group/msg scroll-mt-4`}
+            onClick={toggleDetailsVisible}
         >
             <div className="flex flex-col gap-1">
                 <div className="flex items-start gap-2">
@@ -104,7 +107,7 @@ export function HappyUserMessage() {
                         {hasAttachments ? <MessageAttachments attachments={attachments} /> : null}
                         {remoteServer ? (
                             <div className="mt-1 flex justify-end">
-                                <span className="max-w-full truncate rounded-full bg-[var(--app-chat-user-chip-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--app-hint)]">
+                                <span className="max-w-full truncate rounded-full bg-[var(--app-chat-user-chip-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--app-chat-user-chip-fg)]">
                                     远程服务器 · {remoteServer.name} · {remoteServer.alias} · {remoteServer.user}@{remoteServer.host}
                                 </span>
                             </div>
@@ -121,29 +124,21 @@ export function HappyUserMessage() {
                                 >
                                     {copied
                                         ? <CheckIcon className="h-3.5 w-3.5 text-green-500" />
-                                        : <CopyIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />}
+                                        : <CopyIcon className="h-3.5 w-3.5 text-[var(--app-chat-user-fg)] opacity-70" />}
                                 </button>
                             )}
                             {showStatus ? <MessageStatusIndicator status={status} onRetry={onRetry} /> : null}
                         </div>
                     )}
                 </div>
-                <div className="flex justify-end items-center gap-2">
-                    <MessageTimestamp className="text-[10px] leading-none text-[var(--app-hint)]" />
-                    {hasMetadata && (
-                        <button
-                            type="button"
-                            onClick={() => setShowMetadata((open) => !open)}
-                            aria-expanded={showMetadata}
-                            className="text-[10px] text-[var(--app-hint)] underline-offset-2 hover:text-[var(--app-fg)] hover:underline"
-                        >
-                            {showMetadata ? 'Hide info' : 'Show info'}
-                        </button>
-                    )}
-                </div>
-                {showMetadata && invokedAt != null && (
-                    <MessageMetadata invokedAt={invokedAt} />
-                )}
+                <MessageDetailsFooter
+                    visible={detailsVisible}
+                    align="right"
+                    hasMetadata={hasMetadata}
+                    metadataOpen={showMetadata}
+                    onMetadataToggle={() => setShowMetadata((open) => !open)}
+                    invokedAt={invokedAt}
+                />
             </div>
         </MessagePrimitive.Root>
     )

@@ -420,6 +420,8 @@ function buildCollabAgentOutput(item: Record<string, unknown>, toolName: string)
 }
 
 export class AppServerEventConverter {
+    private readonly now: () => number;
+    private readonly messageSnapshotThrottleMs: number;
     private readonly agentMessageBuffers = new Map<string, string>();
     private readonly reasoningBuffers = new Map<string, string>();
     private readonly commandOutputBuffers = new Map<string, string>();
@@ -431,6 +433,25 @@ export class AppServerEventConverter {
     private readonly lastAgentMessageDeltaByItemId = new Map<string, string>();
     private readonly lastReasoningDeltaByItemId = new Map<string, string>();
     private readonly lastCommandOutputDeltaByItemId = new Map<string, string>();
+    private readonly lastAgentMessageSnapshotAtByItemId = new Map<string, number>();
+
+    constructor(options: { now?: () => number; messageSnapshotThrottleMs?: number } = {}) {
+        this.now = options.now ?? Date.now;
+        this.messageSnapshotThrottleMs = options.messageSnapshotThrottleMs ?? 100;
+    }
+
+    private shouldEmitAgentMessageSnapshot(itemId: string, now: number): boolean {
+        const lastAt = this.lastAgentMessageSnapshotAtByItemId.get(itemId);
+        if (lastAt === undefined) {
+            this.lastAgentMessageSnapshotAtByItemId.set(itemId, now);
+            return true;
+        }
+        if (now - lastAt < this.messageSnapshotThrottleMs) {
+            return false;
+        }
+        this.lastAgentMessageSnapshotAtByItemId.set(itemId, now);
+        return true;
+    }
 
     private handleWrappedCodexEvent(paramsRecord: Record<string, unknown>): ConvertedEvent[] | null {
         const msg = asRecord(paramsRecord.msg);
@@ -722,7 +743,16 @@ export class AppServerEventConverter {
                 }
                 this.lastAgentMessageDeltaByItemId.set(itemId, delta);
                 const prev = this.agentMessageBuffers.get(itemId) ?? '';
-                this.agentMessageBuffers.set(itemId, prev + delta);
+                const message = prev + delta;
+                this.agentMessageBuffers.set(itemId, message);
+                if (this.shouldEmitAgentMessageSnapshot(itemId, this.now())) {
+                    events.push(scoped({
+                        type: 'agent_message_snapshot',
+                        stream_id: itemId,
+                        item_id: itemId,
+                        message
+                    }));
+                }
             }
             return events;
         }
@@ -790,9 +820,16 @@ export class AppServerEventConverter {
                     }
                     const text = extractItemText(item) ?? this.agentMessageBuffers.get(itemId);
                     if (text) {
-                        events.push(scoped({ type: 'agent_message', message: text }));
+                        events.push(scoped({
+                            type: 'agent_message',
+                            stream_id: itemId,
+                            item_id: itemId,
+                            message: text,
+                            final: true
+                        }));
                         this.completedAgentMessageItems.add(itemId);
                         this.agentMessageBuffers.delete(itemId);
+                        this.lastAgentMessageSnapshotAtByItemId.delete(itemId);
                     }
                     this.lastAgentMessageDeltaByItemId.delete(itemId);
                 }
@@ -992,5 +1029,6 @@ export class AppServerEventConverter {
         this.lastAgentMessageDeltaByItemId.clear();
         this.lastReasoningDeltaByItemId.clear();
         this.lastCommandOutputDeltaByItemId.clear();
+        this.lastAgentMessageSnapshotAtByItemId.clear();
     }
 }

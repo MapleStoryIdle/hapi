@@ -117,6 +117,8 @@ function areUserTextBlocksEqual(left: UserTextBlock, right: UserTextBlock): bool
 
 function areAgentTextBlocksEqual(left: AgentTextBlock, right: AgentTextBlock): boolean {
     return left.text === right.text
+        && left.streamId === right.streamId
+        && left.final === right.final
         && left.localId === right.localId
         && left.createdAt === right.createdAt
         && left.meta === right.meta

@@ -1306,7 +1306,7 @@ export function HappyComposer(props: {
     ])
 
     return (
-        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[height,margin] duration-[700ms] ease-in-out ${compactTopAnchor ? '-mt-7' : ''} ${reserveAnchoredComposerHeight ? 'h-[96px]' : ''}`}>
+        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[height,margin] duration-[700ms] ease-in-out ${reserveAnchoredComposerHeight ? 'h-[96px]' : ''}`}>
             <div
                 className="mx-auto w-full max-w-content"
             >

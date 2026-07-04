@@ -295,6 +295,50 @@ describe('reduceTimeline', () => {
         })
     })
 
+    it('collapses assistant text snapshots with the same stream id', () => {
+        // 验证 throttle 快照和最终 completed 事件复用同一气泡，并把最终态写回该气泡。
+        const first: TracedMessage = {
+            id: 'text-row-1',
+            localId: null,
+            createdAt: 1_700_000_000_000,
+            role: 'agent',
+            content: [{
+                type: 'text',
+                text: 'Hel',
+                uuid: 'text-row-1',
+                streamId: 'message-stream-1',
+                parentUUID: null
+            }],
+            isSidechain: false
+        } as TracedMessage
+        const second: TracedMessage = {
+            id: 'text-row-2',
+            localId: null,
+            createdAt: 1_700_000_000_100,
+            role: 'agent',
+            content: [{
+                type: 'text',
+                text: 'Hello',
+                uuid: 'text-row-2',
+                streamId: 'message-stream-1',
+                final: true,
+                parentUUID: null
+            }],
+            isSidechain: false
+        } as TracedMessage
+
+        const { blocks } = reduceTimeline([first, second], makeContext())
+        const textBlocks = blocks.filter((block) => block.kind === 'agent-text')
+
+        expect(textBlocks).toHaveLength(1)
+        expect(textBlocks[0]).toMatchObject({
+            id: 'text-row-1:0',
+            text: 'Hello',
+            streamId: 'message-stream-1',
+            final: true
+        })
+    })
+
     it('falls back to the last duration-bearing block when targetMessageId resolves to a non-duration block', () => {
         // Regression: the matcher used to take the first id-prefix match and
         // then silently drop the duration when that block was not duration-

@@ -46,46 +46,59 @@ function formatSessionAgentInfo(session: Session): string {
     return parts.join(' · ')
 }
 
-function MoreVerticalIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            className={props.className}
-        >
-            <circle cx="12" cy="5" r="2" />
-            <circle cx="12" cy="12" r="2" />
-            <circle cx="12" cy="19" r="2" />
-        </svg>
-    )
-}
-
 function SessionHeaderDetailRow(props: {
     label: string
     value: string
     copied: boolean
     onCopy: () => void
 }) {
+    const agentParts = props.label === 'Agent 信息'
+        ? props.value.split(' · ').map((part) => part.trim()).filter(Boolean)
+        : []
+
     return (
-        <div className="flex min-w-0 items-center gap-2 rounded-[14px] border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
-            <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-medium text-[var(--app-hint)]">{props.label}</div>
-                <div className="mt-0.5 break-words text-sm leading-5 text-[var(--app-fg)]">{props.value}</div>
+        <div className="min-w-0 rounded-[16px] border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2.5">
+            <div className="mb-1.5 flex items-center justify-between gap-3">
+                <div className="text-[11px] font-semibold leading-4 tracking-wide text-[var(--app-hint)]">{props.label}</div>
+                <button
+                    type="button"
+                    onClick={props.onCopy}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    aria-label={`复制${props.label}`}
+                    title={`复制${props.label}`}
+                >
+                    {props.copied
+                        ? <CheckIcon className="h-4 w-4 text-green-500" />
+                        : <CopyIcon className="h-4 w-4" />}
+                </button>
             </div>
-            <button
-                type="button"
-                onClick={props.onCopy}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                aria-label={`复制${props.label}`}
-                title={`复制${props.label}`}
-            >
-                {props.copied
-                    ? <CheckIcon className="h-4 w-4 text-green-500" />
-                    : <CopyIcon className="h-4 w-4" />}
-            </button>
+
+            {agentParts.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                    {agentParts.map((part, index) => {
+                        const [rawKey, ...rest] = part.split(':')
+                        const hasValue = rest.length > 0
+                        const isAgentFlavor = !hasValue && index === 0
+                        const key = hasValue ? rawKey.trim() : isAgentFlavor ? 'agent' : ''
+                        const value = hasValue ? rest.join(':').trim() : part
+                        return (
+                            <span
+                                // The agent info string is derived from session metadata;
+                                // index keeps duplicate keys copy-safe without changing text.
+                                key={`${part}-${index}`}
+                                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-xs leading-4 text-[var(--app-fg)]"
+                            >
+                                {key ? (
+                                    <span className="shrink-0 font-medium text-[var(--app-hint)]">{key}:</span>
+                                ) : null}
+                                <span className="min-w-0 truncate font-semibold">{value}</span>
+                            </span>
+                        )
+                    })}
+                </div>
+            ) : (
+                <div className="break-words text-sm font-medium leading-5 text-[var(--app-fg)]">{props.value}</div>
+            )}
         </div>
     )
 }
@@ -439,17 +452,20 @@ export function SessionHeader(props: {
     }
 
     const headerShellClass = props.floating
-        ? 'relative z-20 shrink-0 bg-transparent pt-[env(safe-area-inset-top)] backdrop-blur-xl'
+        ? 'pointer-events-none absolute inset-x-0 top-0 z-20 bg-transparent pt-[env(safe-area-inset-top)]'
         : 'bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]'
     const headerSurfaceClass = props.floating
         ? 'border-[color-mix(in_srgb,var(--app-border)_70%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_24%,transparent)] shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl'
         : 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+    const menuButtonSurfaceClass = props.floating
+        ? 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.08)]'
+        : headerSurfaceClass
 
     return (
         <>
             <div className={headerShellClass}>
                 <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3">
-                    <div className={`${props.floating ? 'pointer-events-auto' : ''} flex min-w-0 items-center gap-2 rounded-[20px] border px-1.5 py-1.5 ${headerSurfaceClass}`}>
+                    <div className={`${props.floating ? 'pointer-events-auto' : ''} flex min-w-0 items-center gap-0.5 rounded-[20px] border px-1.5 py-1.5 ${headerSurfaceClass}`}>
                         {/* Back button */}
                         <button
                             type="button"
@@ -471,17 +487,11 @@ export function SessionHeader(props: {
                             </svg>
                         </button>
 
-                        <AgentFlavorStatusIcon
-                            flavor={session.metadata?.flavor ?? 'claude'}
-                            className="h-5 w-5 shrink-0"
-                            showStatus={Boolean(props.status)}
-                            statusClassName={getStatusDotClass(props.status)}
-                        />
                         <div ref={titleDetailsRef} className="relative min-w-0">
                             <button
                                 type="button"
                                 onClick={() => setDetailsOpen((open) => !open)}
-                                className="block max-w-full truncate rounded-full px-1 pr-1 text-left font-semibold transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                className="block max-w-full truncate rounded-full px-0.5 pr-1 text-left font-semibold transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                 aria-haspopup="dialog"
                                 aria-expanded={detailsOpen}
                                 aria-controls={detailsOpen ? detailsId : undefined}
@@ -531,10 +541,15 @@ export function SessionHeader(props: {
                             aria-haspopup="menu"
                             aria-expanded={menuOpen}
                             aria-controls={menuOpen ? menuId : undefined}
-                            className={`pointer-events-auto flex h-12 w-10 items-center justify-center rounded-[18px] border text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] ${headerSurfaceClass}`}
+                            className={`pointer-events-auto flex h-12 w-12 items-center justify-center rounded-[18px] border text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] ${menuButtonSurfaceClass}`}
                             title={t('session.more')}
                         >
-                            <MoreVerticalIcon />
+                            <AgentFlavorStatusIcon
+                                flavor={session.metadata?.flavor ?? 'claude'}
+                                className="h-5 w-5 shrink-0"
+                                showStatus={Boolean(props.status)}
+                                statusClassName={getStatusDotClass(props.status)}
+                            />
                         </button>
                     </div>
                 </div>

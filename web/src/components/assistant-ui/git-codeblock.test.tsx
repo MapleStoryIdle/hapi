@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import { GitCodeBlockCard, parseGitCodeBlock } from '@/components/assistant-ui/git-codeblock'
@@ -69,7 +69,8 @@ describe('git-codeblock parser', () => {
 })
 
 describe('GitCodeBlockCard', () => {
-    it('renders localized status labels instead of raw git symbols', () => {
+    it('collapses file rows by default and expands on summary click', () => {
+        // 验证 git 摘要卡片默认只占一行摘要空间，点击摘要后才展开文件列表。
         const summary = parseGitCodeBlock('?? design-qa.md\nM web/src/components/SessionChat.tsx', 'text')
         expect(summary).not.toBeNull()
 
@@ -79,7 +80,13 @@ describe('GitCodeBlockCard', () => {
             </I18nProvider>
         )
 
-        expect(screen.getByText('Modified 2 file(s)')).toBeInTheDocument()
+        const summaryButton = screen.getByText('Modified 2 file(s)').closest('button')
+        expect(summaryButton).not.toBeNull()
+        expect(screen.queryByText('Untracked')).not.toBeInTheDocument()
+        expect(screen.queryByText('Modified')).not.toBeInTheDocument()
+
+        fireEvent.click(summaryButton!)
+
         expect(screen.getByText('Untracked')).toBeInTheDocument()
         expect(screen.getByText('Modified')).toBeInTheDocument()
         expect(screen.queryByText('??')).not.toBeInTheDocument()

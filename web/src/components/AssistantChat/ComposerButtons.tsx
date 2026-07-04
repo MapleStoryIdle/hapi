@@ -605,6 +605,26 @@ function ToolbarMenu(props: {
     )
 }
 
+function ToolbarMenuSection(props: { title: string; children: ReactNode }) {
+    return (
+        <div className="py-1">
+            <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                {props.title}
+            </div>
+            {props.children}
+        </div>
+    )
+}
+
+function ContextUsageRingIcon() {
+    return (
+        <span
+            className="h-[22px] w-[22px] rounded-full border-2 border-[var(--app-border)]"
+            aria-hidden="true"
+        />
+    )
+}
+
 export type ContextUsageDetails = {
     usedTokens: number
     windowTokens: number | null
@@ -733,6 +753,11 @@ function ContextUsageIndicator(props: {
     )
 }
 
+export function getRemoteServerButtonAlias(server: { alias?: string | null; name: string }): string {
+    const alias = server.alias?.trim()
+    return alias && alias.length > 0 ? alias : server.name
+}
+
 function RemoteServerSelectedButton(props: {
     context: {
         api: ApiClient
@@ -747,21 +772,24 @@ function RemoteServerSelectedButton(props: {
     const { selected } = useRemoteServerContextSelection(props.context.api, props.context.session)
     if (!selected) return null
 
+    const alias = getRemoteServerButtonAlias(selected)
+    const details = `${selected.name} · ${selected.user}@${selected.host}`
+
     return (
         <button
             ref={props.buttonRef}
             type="button"
-            aria-label={`远程服务器: ${selected.name}`}
-            title={`远程服务器: ${selected.name}`}
+            aria-label={`远程服务器: ${alias}`}
+            title={`远程服务器: ${alias} (${details})`}
             disabled={props.controlsDisabled}
-            className={`flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`flex h-8 max-w-[6.5rem] shrink-0 items-center rounded-full border border-[var(--app-border)] px-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                 props.active
                     ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
-                    : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                    : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]/75 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
             }`}
             onClick={props.onClick}
         >
-            <ServerIcon className="h-[22px] w-[22px]" />
+            <span className="min-w-0 truncate">{alias}</span>
         </button>
     )
 }
@@ -859,6 +887,42 @@ export function UnifiedButton(props: {
     )
 }
 
+const COMPOSER_TOOLBAR_HORIZONTAL_PADDING_PX = 16
+const COMPOSER_TOOLBAR_GAP_PX = 4
+const COMPOSER_ICON_BUTTON_WIDTH_PX = 42
+const COMPOSER_OPTIONAL_CONTROL_SLOT_PX = COMPOSER_ICON_BUTTON_WIDTH_PX + COMPOSER_TOOLBAR_GAP_PX
+const COMPOSER_MIN_STATUS_SPACE_PX = 40
+
+export function getComposerOptionalControlsVisibility(
+    toolbarWidth: number | null,
+    requiredControlsWidth = 0,
+    hasStatusControls = false
+): {
+    permission: boolean
+    contextUsage: boolean
+} {
+    // Unknown width happens before first layout/ResizeObserver tick; show by
+    // default so wide toolbars do not flash as artificially collapsed.
+    if (toolbarWidth === null) {
+        return { permission: true, contextUsage: true }
+    }
+
+    const requiredWidth = COMPOSER_TOOLBAR_HORIZONTAL_PADDING_PX
+        + COMPOSER_ICON_BUTTON_WIDTH_PX
+        + requiredControlsWidth
+        + (COMPOSER_TOOLBAR_GAP_PX * 2)
+        + (hasStatusControls ? COMPOSER_MIN_STATUS_SPACE_PX : 0)
+    const remainingWidth = toolbarWidth - requiredWidth
+
+    return {
+        // Context usage is the higher-value signal in the constrained row.
+        // Keep it before permission mode; permission remains available in
+        // the overflow tools menu when the inline row is tight.
+        contextUsage: remainingWidth >= COMPOSER_OPTIONAL_CONTROL_SLOT_PX,
+        permission: remainingWidth >= COMPOSER_OPTIONAL_CONTROL_SLOT_PX * 2
+    }
+}
+
 export function ComposerButtons(props: {
     canSend: boolean
     controlsDisabled: boolean
@@ -938,6 +1002,12 @@ export function ComposerButtons(props: {
     const [showRemoteServerMenu, setShowRemoteServerMenu] = useState(false)
     const [showContextUsageMenu, setShowContextUsageMenu] = useState(false)
     const [remoteServerAnchor, setRemoteServerAnchor] = useState<'tools' | 'button'>('tools')
+    const [permissionAnchor, setPermissionAnchor] = useState<'tools' | 'button'>('tools')
+    const [contextUsageAnchor, setContextUsageAnchor] = useState<'tools' | 'button'>('button')
+    const [toolbarWidth, setToolbarWidth] = useState<number | null>(null)
+    const [requiredControlsWidth, setRequiredControlsWidth] = useState(0)
+    const toolbarRef = useRef<HTMLDivElement>(null)
+    const requiredControlsRef = useRef<HTMLDivElement>(null)
     const toolsButtonRef = useRef<HTMLButtonElement>(null)
     const permissionButtonRef = useRef<HTMLButtonElement>(null)
     const remoteServerButtonRef = useRef<HTMLButtonElement>(null)
@@ -946,151 +1016,328 @@ export function ComposerButtons(props: {
 
     const hasSchedule = props.pendingSchedule != null
     const hasAttachments = props.hasAttachments ?? false
+    const scratchlistCount = props.scratchlistCount ?? 0
+    const routesToScratchlist = (props.scratchlistMode ?? false)
+        && !hasAttachments
+        && props.pendingSchedule == null
+    const showRunningStopButton = props.showAbortButton && (!props.abortDisabled || props.isAborting)
+    const showScratchlistStatus = Boolean(props.onScratchlistToggle && (props.scratchlistMode || scratchlistCount > 0))
+    const showPlanStatus = Boolean(props.planModeActive && props.onPlanModeToggle)
+    const showScheduleStatus = Boolean(hasSchedule && props.onSchedule)
+    const hasStatusControls = hasRemoteServerContext || showPlanStatus || showScheduleStatus || showScratchlistStatus
+    const optionalControlsVisibility = getComposerOptionalControlsVisibility(toolbarWidth, requiredControlsWidth, hasStatusControls)
     const showPermissionButton = Boolean(props.onPermissionModeChange && props.permissionModeOptions?.length)
+    const showInlinePermissionButton = showPermissionButton && optionalControlsVisibility.permission
+    const showInlineContextUsageButton = props.contextUsagePercent != null && optionalControlsVisibility.contextUsage
     const permissionLabel = props.permissionLabel
         ?? props.permissionModeOptions?.find((option) => option.mode === props.permissionMode)?.label
         ?? props.permissionMode
         ?? t('misc.permissionMode')
     const toolMenuItemClass = 'flex w-full items-center gap-2 px-3 py-3 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)] disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:h-[22px] [&_svg]:w-[22px]'
-    const routesToScratchlist = (props.scratchlistMode ?? false)
-        && !hasAttachments
-        && props.pendingSchedule == null
+    const showExecutionTools = Boolean(
+        props.showPlanModeButton
+        || props.showGoalModeButton
+        || showPermissionButton
+        || hasRemoteServerContext
+        || props.piThinkingLabel
+    )
+    const showSessionTools = Boolean(
+        props.showTerminalButton
+        || props.showSwitchButton
+        || props.contextUsagePercent != null
+    )
+    const openPermissionMenuFromTools = () => {
+        setShowToolsMenu(false)
+        setShowRemoteServerMenu(false)
+        setShowSchedulePicker(false)
+        setShowContextUsageMenu(false)
+        setPermissionAnchor('tools')
+        setShowPermissionMenu(true)
+    }
+    const openContextUsageFromTools = () => {
+        setShowToolsMenu(false)
+        setShowPermissionMenu(false)
+        setShowRemoteServerMenu(false)
+        setShowSchedulePicker(false)
+        setContextUsageAnchor('tools')
+        setShowContextUsageMenu(true)
+    }
     const toolsMenuContent = (
         <div className="py-1">
-            {props.showPlanModeButton && props.onPlanModeToggle ? (
-                <button
-                    type="button"
-                    aria-label={t('composer.planMode')}
-                    title={t('composer.planMode')}
-                    disabled={props.controlsDisabled}
-                    onClick={() => {
-                        setShowToolsMenu(false)
-                        props.onPlanModeToggle?.()
-                    }}
+            <ToolbarMenuSection title={t('composer.menu.input')}>
+                <ComposerPrimitive.AddAttachment
+                    aria-label={t('composer.attach')}
+                    title={t('composer.attach')}
+                    disabled={props.controlsDisabled || hasSchedule}
+                    onClick={() => setShowToolsMenu(false)}
                     className={toolMenuItemClass}
                 >
-                    <PlanModeIcon />
-                    <span className="flex-1">{t('composer.planMode')}</span>
-                </button>
-            ) : null}
+                    <AttachmentIcon />
+                    <span className="flex-1">{t('composer.attach')}</span>
+                </ComposerPrimitive.AddAttachment>
 
-            {props.showGoalModeButton && props.onGoalModeOpen ? (
-                <button
-                    type="button"
-                    aria-label={t('composer.goalMode')}
-                    title={t('composer.goalMode')}
-                    disabled={props.controlsDisabled}
-                    onClick={() => {
-                        setShowToolsMenu(false)
-                        props.onGoalModeOpen?.()
-                    }}
-                    className={toolMenuItemClass}
-                >
-                    <GoalModeIcon />
-                    <span className="flex-1">{t('composer.goalMode')}</span>
-                    {props.goalModeActive ? <span className="text-[var(--app-hint)]">✓</span> : null}
-                </button>
-            ) : null}
+                {props.onSchedule ? (
+                    <button
+                        type="button"
+                        aria-label={t('composer.scheduleSend')}
+                        title={t('composer.scheduleSend')}
+                        disabled={props.controlsDisabled || hasAttachments}
+                        onClick={() => {
+                            setShowToolsMenu(false)
+                            if (hasSchedule && props.onClearSchedule) {
+                                props.onClearSchedule()
+                                return
+                            }
+                            setShowSchedulePicker(true)
+                        }}
+                        className={toolMenuItemClass}
+                    >
+                        <ScheduleIcon className="h-[22px] w-[22px]" />
+                        <span className="flex-1">{t('composer.scheduleSend')}</span>
+                        {hasSchedule ? <span className="text-[var(--app-hint)]">✓</span> : null}
+                    </button>
+                ) : null}
 
-            {(props.showPlanModeButton || props.showGoalModeButton) ? (
-                <div className="my-1 h-px bg-[var(--app-divider)]" />
-            ) : null}
+                {props.onScratchlistToggle ? (
+                    <button
+                        type="button"
+                        aria-label={t('scratchlist.toggleAriaLabel')}
+                        title={t('scratchlist.toggleTooltip')}
+                        aria-pressed={props.scratchlistMode ? true : false}
+                        disabled={props.controlsDisabled}
+                        onClick={() => {
+                            setShowToolsMenu(false)
+                            props.onScratchlistToggle?.()
+                        }}
+                        className={toolMenuItemClass}
+                    >
+                        <ScratchlistToggleIcon />
+                        <span className="flex-1">{t('scratchlist.title')}</span>
+                        {props.scratchlistMode ? <span className="text-amber-500">✓</span> : null}
+                        {!props.scratchlistMode && (props.scratchlistCount ?? 0) > 0 ? (
+                            <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                                {(props.scratchlistCount ?? 0) > 99 ? '99+' : props.scratchlistCount}
+                            </span>
+                        ) : null}
+                    </button>
+                ) : null}
+            </ToolbarMenuSection>
 
-            {hasRemoteServerContext ? (
-                <button
-                    type="button"
-                    aria-label="远程服务器"
-                    title="远程服务器"
-                    disabled={props.controlsDisabled}
-                    onClick={() => {
-                        setShowToolsMenu(false)
-                        setShowPermissionMenu(false)
-                        setShowSchedulePicker(false)
-                        setRemoteServerAnchor('tools')
-                        setShowRemoteServerMenu(true)
-                    }}
-                    className={toolMenuItemClass}
-                >
-                    <ServerIcon className="h-[22px] w-[22px]" />
-                    <span className="flex-1">远程服务器</span>
-                </button>
-            ) : null}
-
-            <ComposerPrimitive.AddAttachment
-                aria-label={t('composer.attach')}
-                title={t('composer.attach')}
-                disabled={props.controlsDisabled || hasSchedule}
-                onClick={() => setShowToolsMenu(false)}
-                className={toolMenuItemClass}
-            >
-                <AttachmentIcon />
-                <span className="flex-1">{t('composer.attach')}</span>
-            </ComposerPrimitive.AddAttachment>
-
-            {props.showTerminalButton ? (
-                <button
-                    type="button"
-                    aria-label={props.terminalLabel}
-                    title={props.terminalLabel}
-                    className={toolMenuItemClass}
-                    onClick={() => {
-                        setShowToolsMenu(false)
-                        props.onTerminal()
-                    }}
-                    disabled={props.terminalDisabled}
-                >
-                    <TerminalIcon />
-                    <span className="flex-1">{props.terminalLabel}</span>
-                </button>
-            ) : null}
-
-            {props.onSchedule ? (
-                <button
-                    type="button"
-                    aria-label={t('composer.scheduleSend')}
-                    title={t('composer.scheduleSend')}
-                    disabled={props.controlsDisabled || hasAttachments}
-                    onClick={() => {
-                        setShowToolsMenu(false)
-                        if (hasSchedule && props.onClearSchedule) {
-                            props.onClearSchedule()
-                            return
-                        }
-                        setShowSchedulePicker(true)
-                    }}
-                    className={toolMenuItemClass}
-                >
-                    <ScheduleIcon className="h-[22px] w-[22px]" />
-                    <span className="flex-1">{t('composer.scheduleSend')}</span>
-                    {hasSchedule ? <span className="text-[var(--app-hint)]">✓</span> : null}
-                </button>
-            ) : null}
-
-            {props.onScratchlistToggle ? (
-                <button
-                    type="button"
-                    aria-label={t('scratchlist.toggleAriaLabel')}
-                    title={t('scratchlist.toggleTooltip')}
-                    aria-pressed={props.scratchlistMode ? true : false}
-                    disabled={props.controlsDisabled}
-                    onClick={() => {
-                        setShowToolsMenu(false)
-                        props.onScratchlistToggle?.()
-                    }}
-                    className={toolMenuItemClass}
-                >
-                    <ScratchlistToggleIcon />
-                    <span className="flex-1">{t('scratchlist.title')}</span>
-                    {props.scratchlistMode ? <span className="text-amber-500">✓</span> : null}
-                    {!props.scratchlistMode && (props.scratchlistCount ?? 0) > 0 ? (
-                        <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
-                            {(props.scratchlistCount ?? 0) > 99 ? '99+' : props.scratchlistCount}
-                        </span>
+            {showExecutionTools ? (
+                <ToolbarMenuSection title={t('composer.menu.execution')}>
+                    {props.showPlanModeButton && props.onPlanModeToggle ? (
+                        <button
+                            type="button"
+                            aria-label={t('composer.planMode')}
+                            title={t('composer.planMode')}
+                            disabled={props.controlsDisabled}
+                            onClick={() => {
+                                setShowToolsMenu(false)
+                                props.onPlanModeToggle?.()
+                            }}
+                            className={toolMenuItemClass}
+                        >
+                            <PlanModeIcon />
+                            <span className="flex-1">{t('composer.planMode')}</span>
+                            {props.planModeActive ? <span className="text-[var(--app-hint)]">✓</span> : null}
+                        </button>
                     ) : null}
-                </button>
+
+                    {props.showGoalModeButton && props.onGoalModeOpen ? (
+                        <button
+                            type="button"
+                            aria-label={t('composer.goalMode')}
+                            title={t('composer.goalMode')}
+                            disabled={props.controlsDisabled}
+                            onClick={() => {
+                                setShowToolsMenu(false)
+                                props.onGoalModeOpen?.()
+                            }}
+                            className={toolMenuItemClass}
+                        >
+                            <GoalModeIcon />
+                            <span className="flex-1">{t('composer.goalMode')}</span>
+                            {props.goalModeActive ? <span className="text-[var(--app-hint)]">✓</span> : null}
+                        </button>
+                    ) : null}
+
+                    {showPermissionButton ? (
+                        <button
+                            type="button"
+                            aria-label={`${t('misc.permissionMode')}: ${permissionLabel}`}
+                            title={`${t('misc.permissionMode')}: ${permissionLabel}`}
+                            disabled={props.controlsDisabled}
+                            onClick={openPermissionMenuFromTools}
+                            className={toolMenuItemClass}
+                        >
+                            <PermissionModeIcon mode={props.permissionMode} />
+                            <span className="flex-1">{t('misc.permissionMode')}</span>
+                            <span className="text-[var(--app-hint)]">{permissionLabel}</span>
+                        </button>
+                    ) : null}
+
+                    {hasRemoteServerContext ? (
+                        <button
+                            type="button"
+                            aria-label="远程服务器"
+                            title="远程服务器"
+                            disabled={props.controlsDisabled}
+                            onClick={() => {
+                                setShowToolsMenu(false)
+                                setShowPermissionMenu(false)
+                                setShowSchedulePicker(false)
+                                setShowContextUsageMenu(false)
+                                setRemoteServerAnchor('tools')
+                                setShowRemoteServerMenu(true)
+                            }}
+                            className={toolMenuItemClass}
+                        >
+                            <ServerIcon className="h-[22px] w-[22px]" />
+                            <span className="flex-1">远程服务器</span>
+                        </button>
+                    ) : null}
+
+                    {props.piThinkingLabel ? (
+                        <button
+                            type="button"
+                            aria-label={props.piThinkingLabel}
+                            title={props.piThinkingLabel}
+                            disabled={props.piThinkingDisabled}
+                            onClick={() => {
+                                setShowToolsMenu(false)
+                                props.onPiThinkingToggle?.()
+                            }}
+                            className={toolMenuItemClass}
+                        >
+                            <PermissionGearIcon className="h-[22px] w-[22px]" />
+                            <span className="flex-1">{props.piThinkingLabel}</span>
+                        </button>
+                    ) : null}
+                </ToolbarMenuSection>
+            ) : null}
+
+            {showSessionTools ? (
+                <ToolbarMenuSection title={t('composer.menu.session')}>
+                    {props.showTerminalButton ? (
+                        <button
+                            type="button"
+                            aria-label={props.terminalLabel}
+                            title={props.terminalLabel}
+                            className={toolMenuItemClass}
+                            onClick={() => {
+                                setShowToolsMenu(false)
+                                props.onTerminal()
+                            }}
+                            disabled={props.terminalDisabled}
+                        >
+                            <TerminalIcon />
+                            <span className="flex-1">{props.terminalLabel}</span>
+                        </button>
+                    ) : null}
+
+                    {props.showSwitchButton ? (
+                        <button
+                            type="button"
+                            aria-label={t('composer.switchRemote')}
+                            title={t('composer.switchRemote')}
+                            disabled={props.switchDisabled}
+                            className={toolMenuItemClass}
+                            onClick={() => {
+                                setShowToolsMenu(false)
+                                props.onSwitch()
+                            }}
+                        >
+                            <SwitchToRemoteIcon />
+                            <span className="flex-1">{t('composer.switchRemote')}</span>
+                        </button>
+                    ) : null}
+
+                    {props.contextUsagePercent != null ? (
+                        <button
+                            type="button"
+                            aria-label={props.contextUsageLabel ?? t('contextUsage.title')}
+                            title={props.contextUsageLabel ?? t('contextUsage.title')}
+                            className={toolMenuItemClass}
+                            onClick={openContextUsageFromTools}
+                        >
+                            <ContextUsageRingIcon />
+                            <span className="flex-1">{t('contextUsage.title')}</span>
+                            {props.contextUsageDetails?.remainingLabel ? (
+                                <span className="text-[var(--app-hint)]">{props.contextUsageDetails.remainingLabel}</span>
+                            ) : null}
+                        </button>
+                    ) : null}
+                </ToolbarMenuSection>
             ) : null}
         </div>
     )
+    const permissionMenuContent = props.permissionModeOptions ? (
+        <div className="py-2">
+            {props.permissionModeOptions.map((option) => {
+                const selected = option.mode === props.permissionMode
+                const copy = getPermissionCopy(option.mode, option.label, t)
+                return (
+                    <button
+                        key={option.mode}
+                        type="button"
+                        disabled={props.controlsDisabled}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--app-secondary-bg)] disabled:cursor-not-allowed disabled:opacity-45"
+                        onClick={() => {
+                            props.onPermissionModeChange?.(option.mode)
+                            setShowPermissionMenu(false)
+                        }}
+                    >
+                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center [&_svg]:h-[22px] [&_svg]:w-[22px] ${getPermissionToneClass(option.mode)}`}>
+                            <PermissionModeIcon mode={option.mode} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                            <span className="block text-[15px] font-semibold leading-5 text-[var(--app-fg)]">
+                                {copy.title}
+                            </span>
+                            <span className="mt-0.5 block text-xs leading-4 text-[var(--app-hint)]">
+                                {copy.description}
+                            </span>
+                        </span>
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center text-[var(--app-fg)]">
+                            {selected ? <PermissionCheckIcon className="h-5 w-5" /> : null}
+                        </span>
+                    </button>
+                )
+            })}
+        </div>
+    ) : null
+    const scratchlistStatusLabel = props.scratchlistMode
+        ? t('scratchlist.title')
+        : t(scratchlistCount === 1 ? 'scratchlist.count.one' : 'scratchlist.count.other', { n: scratchlistCount })
+
+    useLayoutEffect(() => {
+        const toolbar = toolbarRef.current
+        if (!toolbar) return
+
+        const measure = () => {
+            const width = Math.round(toolbar.getBoundingClientRect().width)
+            setToolbarWidth(width > 0 ? width : null)
+            const requiredControls = requiredControlsRef.current
+            const requiredWidth = requiredControls
+                ? Math.ceil(requiredControls.getBoundingClientRect().width)
+                : 0
+            setRequiredControlsWidth(requiredWidth)
+        }
+
+        measure()
+
+        if (typeof ResizeObserver === 'undefined') {
+            window.addEventListener('resize', measure, { passive: true })
+            return () => window.removeEventListener('resize', measure)
+        }
+
+        const observer = new ResizeObserver(measure)
+        observer.observe(toolbar)
+        if (requiredControlsRef.current) {
+            observer.observe(requiredControlsRef.current)
+        }
+        return () => observer.disconnect()
+    }, [])
 
     if (props.compact) {
         return (
@@ -1169,64 +1416,92 @@ export function ComposerButtons(props: {
                         />
                     </ToolbarMenu>
                 ) : null}
+
+                {showPermissionMenu && permissionMenuContent ? (
+                    <ToolbarMenu
+                        anchorRef={toolsButtonRef}
+                        align="left"
+                        width={336}
+                        maxHeight={360}
+                        surface="permission"
+                        showArrow
+                        onClose={() => setShowPermissionMenu(false)}
+                    >
+                        {permissionMenuContent}
+                    </ToolbarMenu>
+                ) : null}
+
+                {showContextUsageMenu ? (
+                    <ToolbarMenu
+                        anchorRef={toolsButtonRef}
+                        align="left"
+                        width={292}
+                        maxHeight={280}
+                        showArrow
+                        onClose={() => setShowContextUsageMenu(false)}
+                    >
+                        <ContextUsagePanel details={props.contextUsageDetails ?? null} />
+                    </ToolbarMenu>
+                ) : null}
             </div>
         )
     }
 
     return (
-        <div className="flex items-center justify-between px-2 pb-2">
-            <div className="flex items-center gap-1">
+        <div ref={toolbarRef} className="flex flex-nowrap items-center gap-1 px-2 pb-2">
+            <button
+                ref={toolsButtonRef}
+                type="button"
+                aria-label={t('composer.moreTools')}
+                title={t('composer.moreTools')}
+                className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition-colors [&_svg]:h-[22px] [&_svg]:w-[22px] ${
+                    showToolsMenu
+                        ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
+                        : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                }`}
+                onPointerDown={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                }}
+                onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setShowToolsMenu((open) => !open)
+                    setShowPermissionMenu(false)
+                    setShowSchedulePicker(false)
+                    setShowRemoteServerMenu(false)
+                    setShowContextUsageMenu(false)
+                }}
+            >
+                <PlusIcon />
+            </button>
+
+            {showInlinePermissionButton ? (
                 <button
-                    ref={toolsButtonRef}
+                    ref={permissionButtonRef}
                     type="button"
-                    aria-label={t('composer.moreTools')}
-                    title={t('composer.moreTools')}
-                    className={`flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors [&_svg]:h-[22px] [&_svg]:w-[22px] ${
-                        showToolsMenu
-                            ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
-                            : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                    aria-label={`${t('misc.permissionMode')}: ${permissionLabel}`}
+                    title={`${t('misc.permissionMode')}: ${permissionLabel}`}
+                    disabled={props.controlsDisabled}
+                    className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px] ${
+                        showPermissionMenu && permissionAnchor === 'button'
+                            ? `bg-[var(--app-bg)] ${getPermissionToneClass(props.permissionMode)}`
+                            : `${getPermissionToneClass(props.permissionMode)} hover:bg-[var(--app-bg)]`
                     }`}
-                    onPointerDown={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                    }}
-                    onClick={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        setShowToolsMenu((open) => !open)
-                        setShowPermissionMenu(false)
+                    onClick={() => {
+                        setPermissionAnchor('button')
+                        setShowPermissionMenu((open) => !(open && permissionAnchor === 'button'))
+                        setShowToolsMenu(false)
                         setShowSchedulePicker(false)
                         setShowRemoteServerMenu(false)
                         setShowContextUsageMenu(false)
                     }}
                 >
-                    <PlusIcon />
+                    <PermissionModeIcon mode={props.permissionMode} />
                 </button>
+            ) : null}
 
-                {showPermissionButton ? (
-                    <button
-                        ref={permissionButtonRef}
-                        type="button"
-                        aria-label={`${t('misc.permissionMode')}: ${permissionLabel}`}
-                        title={`${t('misc.permissionMode')}: ${permissionLabel}`}
-                        disabled={props.controlsDisabled}
-                        className={`flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px] ${
-                            showPermissionMenu
-                                ? `bg-[var(--app-bg)] ${getPermissionToneClass(props.permissionMode)}`
-                                : `${getPermissionToneClass(props.permissionMode)} hover:bg-[var(--app-bg)]`
-                        }`}
-                        onClick={() => {
-                            setShowPermissionMenu((open) => !open)
-                            setShowToolsMenu(false)
-                            setShowSchedulePicker(false)
-                            setShowRemoteServerMenu(false)
-                            setShowContextUsageMenu(false)
-                        }}
-                    >
-                        <PermissionModeIcon mode={props.permissionMode} />
-                    </button>
-                ) : null}
-
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {props.remoteServerContext ? (
                     <RemoteServerSelectedButton
                         context={props.remoteServerContext}
@@ -1244,270 +1519,240 @@ export function ComposerButtons(props: {
                     />
                 ) : null}
 
-                {showToolsMenu ? (
-                    <ToolbarMenu
-                        anchorRef={toolsButtonRef}
-                        align="left"
-                        width={220}
-                        maxHeight={280}
-                        onClose={() => setShowToolsMenu(false)}
-                    >
-                        {toolsMenuContent}
-                    </ToolbarMenu>
-                ) : null}
-
-                {showPermissionMenu && props.permissionModeOptions ? (
-                    <ToolbarMenu
-                        anchorRef={permissionButtonRef}
-                        align="left"
-                        width={336}
-                        maxHeight={360}
-                        surface="permission"
-                        showArrow
-                        onClose={() => setShowPermissionMenu(false)}
-                    >
-                        <div className="py-2">
-                            {props.permissionModeOptions.map((option) => {
-                                const selected = option.mode === props.permissionMode
-                                const copy = getPermissionCopy(option.mode, option.label, t)
-                                return (
-                                    <button
-                                        key={option.mode}
-                                        type="button"
-                                        disabled={props.controlsDisabled}
-                                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--app-secondary-bg)] disabled:cursor-not-allowed disabled:opacity-45"
-                                        onClick={() => {
-                                            props.onPermissionModeChange?.(option.mode)
-                                            setShowPermissionMenu(false)
-                                        }}
-                                    >
-                                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center [&_svg]:h-[22px] [&_svg]:w-[22px] ${getPermissionToneClass(option.mode)}`}>
-                                            <PermissionModeIcon mode={option.mode} />
-                                        </span>
-                                        <span className="min-w-0 flex-1">
-                                            <span className="block text-[15px] font-semibold leading-5 text-[var(--app-fg)]">
-                                                {copy.title}
-                                            </span>
-                                            <span className="mt-0.5 block text-xs leading-4 text-[var(--app-hint)]">
-                                                {copy.description}
-                                            </span>
-                                        </span>
-                                        <span className="flex h-9 w-9 shrink-0 items-center justify-center text-[var(--app-fg)]">
-                                            {selected ? <PermissionCheckIcon className="h-5 w-5" /> : null}
-                                        </span>
-                                    </button>
-                                )
-                            })}
-                        </div>
-                    </ToolbarMenu>
-                ) : null}
-
-                {showSchedulePicker && props.onSchedule ? (
-                    <ScheduleTimePicker
-                        anchorRef={toolsButtonRef}
-                        onSchedule={(pending) => {
-                            props.onSchedule!(pending)
-                            setShowSchedulePicker(false)
-                        }}
-                        onClose={() => setShowSchedulePicker(false)}
-                        pendingSchedule={props.pendingSchedule}
-                    />
-                ) : null}
-
-                {props.piModelLabel ? (
-                    <button
-                        type="button"
-                        aria-label={props.piModelLabel}
-                        title={props.piModelLabel}
-                        className={`flex h-[42px] items-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors ${
-                            props.piModelOpen
-                                ? 'bg-[var(--app-secondary-bg)] text-[var(--app-link)]'
-                                : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
-                        }`}
-                        onClick={props.onPiModelToggle}
-                        disabled={props.piModelDisabled}
-                    >
-                        {props.piModelLabel}
-                        <ChevronIcon />
-                    </button>
-                ) : null}
-
-                {props.piThinkingLabel ? (
-                    <button
-                        type="button"
-                        aria-label={props.piThinkingLabel}
-                        title={props.piThinkingLabel}
-                        className={`flex h-[42px] items-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors ${
-                            props.piThinkingOpen
-                                ? 'bg-[var(--app-secondary-bg)] text-[var(--app-link)]'
-                                : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
-                        }`}
-                        onClick={props.onPiThinkingToggle}
-                        disabled={props.piThinkingDisabled}
-                    >
-                        {props.piThinkingLabel}
-                        <ChevronIcon />
-                    </button>
-                ) : null}
-
-                {props.planModeActive && props.onPlanModeToggle ? (
+                {showPlanStatus ? (
                     <button
                         type="button"
                         aria-label={t('tool.exitPlan')}
                         title={t('tool.exitPlan')}
                         disabled={props.controlsDisabled}
-                        className="flex h-[42px] w-[42px] items-center justify-center rounded-full bg-[#EAF2FF] text-[#1D4ED8] transition-colors hover:bg-[#DBEAFE] disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px]"
+                        className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-[#EAF2FF] px-2.5 text-xs font-semibold text-[#1D4ED8] transition-colors hover:bg-[#DBEAFE] disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 [&_svg]:h-4 [&_svg]:w-4"
                         onClick={props.onPlanModeToggle}
                     >
                         <PlanModeIcon />
+                        <span>{t('composer.planMode')}</span>
                     </button>
                 ) : null}
 
-                {props.showAbortButton ? (
+                {showScheduleStatus ? (
                     <button
                         type="button"
-                        aria-label={t('composer.abort')}
-                        title={t('composer.abort')}
-                        disabled={props.abortDisabled}
-                        className="flex h-[42px] w-[42px] items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px]"
-                        onClick={props.onAbort}
+                        aria-label={t('composer.scheduleSend')}
+                        title={t('composer.scheduleSend')}
+                        disabled={props.controlsDisabled || hasAttachments}
+                        className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2.5 text-xs font-medium text-[var(--app-fg)]/75 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-4 [&_svg]:w-4"
+                        onClick={() => setShowSchedulePicker(true)}
                     >
-                        <AbortIcon spinning={props.isAborting} />
+                        <ScheduleIcon />
+                        <span>{t('composer.scheduleSend')}</span>
                     </button>
                 ) : null}
 
-                {props.showSwitchButton ? (
+                {showScratchlistStatus ? (
                     <button
                         type="button"
-                        aria-label={t('composer.switchRemote')}
-                        title={t('composer.switchRemote')}
-                        disabled={props.switchDisabled}
-                        className="flex h-[42px] w-[42px] items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-blue-500 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px]"
-                        onClick={props.onSwitch}
+                        aria-label={t('scratchlist.toggleAriaLabel')}
+                        title={t('scratchlist.toggleTooltip')}
+                        aria-pressed={props.scratchlistMode ? true : false}
+                        disabled={props.controlsDisabled}
+                        className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-amber-300/65 bg-amber-500/10 px-2.5 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-400/35 dark:text-amber-300 [&_svg]:h-4 [&_svg]:w-4"
+                        onClick={props.onScratchlistToggle}
                     >
-                        <SwitchToRemoteIcon />
+                        <ScratchlistToggleIcon />
+                        <span>{scratchlistStatusLabel}</span>
                     </button>
                 ) : null}
             </div>
 
-            <div className="flex items-center gap-1">
-                <ContextUsageIndicator
-                    percentage={props.contextUsagePercent}
-                    label={props.contextUsageLabel}
-                    details={props.contextUsageDetails}
-                    active={showContextUsageMenu}
-                    buttonRef={contextUsageButtonRef}
-                    onClick={() => {
-                        setShowContextUsageMenu((open) => !open)
-                        setShowToolsMenu(false)
-                        setShowPermissionMenu(false)
-                        setShowSchedulePicker(false)
-                        setShowRemoteServerMenu(false)
-                    }}
-                />
-
-                {showContextUsageMenu ? (
-                    <ToolbarMenu
-                        anchorRef={contextUsageButtonRef}
-                        align="right"
-                        width={292}
-                        maxHeight={280}
-                        showArrow
-                        onClose={() => setShowContextUsageMenu(false)}
-                    >
-                        <ContextUsagePanel details={props.contextUsageDetails ?? null} />
-                    </ToolbarMenu>
-                ) : null}
-
-                {props.showSettingsButton ? (
-                    <button
-                        type="button"
-                        aria-label={t('composer.settings')}
-                        title={t('composer.settings')}
-                        className={`settings-button flex h-[42px] items-center gap-2 rounded-full px-3 text-base transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                            props.settingsOpen
-                                ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
-                                : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
-                        }`}
+            <div className="flex shrink-0 items-center gap-1">
+                {showInlineContextUsageButton ? (
+                    <ContextUsageIndicator
+                        percentage={props.contextUsagePercent}
+                        label={props.contextUsageLabel}
+                        details={props.contextUsageDetails}
+                        active={showContextUsageMenu}
+                        buttonRef={contextUsageButtonRef}
                         onClick={() => {
+                            setContextUsageAnchor('button')
+                            setShowContextUsageMenu((open) => !open)
                             setShowToolsMenu(false)
                             setShowPermissionMenu(false)
                             setShowSchedulePicker(false)
                             setShowRemoteServerMenu(false)
-                            setShowContextUsageMenu(false)
-                            props.onSettingsToggle()
                         }}
-                        disabled={props.controlsDisabled}
-                    >
-                        {props.settingsModelLabel ? (
-                            <>
-                                <span className="whitespace-nowrap font-bold text-[var(--app-fg)]">{props.settingsModelLabel}</span>
-                                {props.settingsReasoningLabel ? (
-                                    <span className="whitespace-nowrap">{props.settingsReasoningLabel}</span>
-                                ) : null}
-                            </>
-                        ) : (
-                            <span className="whitespace-nowrap font-semibold">{props.settingsLabel ?? t('composer.settings')}</span>
-                        )}
-                        <ChevronIcon />
-                    </button>
+                    />
                 ) : null}
 
-                {showRemoteServerMenu && props.remoteServerContext ? (
-                    <ToolbarMenu
-                        anchorRef={remoteServerAnchor === 'button' ? remoteServerButtonRef : toolsButtonRef}
-                        align="left"
-                        width={300}
-                        maxHeight={320}
-                        onClose={() => setShowRemoteServerMenu(false)}
-                    >
-                        <RemoteServerContextMenuContent
-                            api={props.remoteServerContext.api}
-                            session={props.remoteServerContext.session}
-                            onChanged={props.remoteServerContext.onChanged}
-                            onClose={() => setShowRemoteServerMenu(false)}
-                        />
-                    </ToolbarMenu>
-                ) : null}
+                <div ref={requiredControlsRef} className="flex shrink-0 items-center gap-1">
+                    {props.piModelLabel ? (
+                        <button
+                            type="button"
+                            aria-label={props.piModelLabel}
+                            title={props.piModelLabel}
+                            className={`flex h-[42px] max-w-[42vw] shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-none ${
+                                props.piModelOpen
+                                    ? 'bg-[var(--app-secondary-bg)] text-[var(--app-link)]'
+                                    : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                            }`}
+                            onClick={props.onPiModelToggle}
+                            disabled={props.piModelDisabled}
+                        >
+                            <span className="min-w-0 truncate">{props.piModelLabel}</span>
+                            <ChevronIcon />
+                        </button>
+                    ) : null}
 
-                {isVoiceConnected && props.onVoiceMicToggle ? (
-                    <button
-                        type="button"
-                        aria-label={props.voiceMicMuted ? t('voice.unmute') : t('voice.mute')}
-                        title={props.voiceMicMuted ? t('voice.unmute') : t('voice.mute')}
-                        className={`flex h-[42px] w-[42px] items-center justify-center rounded-full transition-colors [&_svg]:h-[22px] [&_svg]:w-[22px] ${
-                            props.voiceMicMuted
-                                ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                                : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
-                        }`}
-                        onClick={props.onVoiceMicToggle}
-                    >
-                        <SpeakerIcon muted={props.voiceMicMuted} />
-                    </button>
-                ) : null}
+                    {props.showSettingsButton ? (
+                        <button
+                            type="button"
+                            aria-label={t('composer.settings')}
+                            title={t('composer.settings')}
+                            className={`settings-button flex h-[42px] max-w-[46vw] shrink-0 items-center gap-2 rounded-full px-3 text-base transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-none ${
+                                props.settingsOpen
+                                    ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
+                                    : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                            }`}
+                            onClick={() => {
+                                setShowToolsMenu(false)
+                                setShowPermissionMenu(false)
+                                setShowSchedulePicker(false)
+                                setShowRemoteServerMenu(false)
+                                setShowContextUsageMenu(false)
+                                props.onSettingsToggle()
+                            }}
+                            disabled={props.controlsDisabled}
+                        >
+                            {props.settingsModelLabel ? (
+                                <>
+                                    <span className="min-w-0 truncate font-bold text-[var(--app-fg)]">{props.settingsModelLabel}</span>
+                                    {props.settingsReasoningLabel ? (
+                                        <span className="whitespace-nowrap">{props.settingsReasoningLabel}</span>
+                                    ) : null}
+                                </>
+                            ) : (
+                                <span className="min-w-0 truncate font-semibold">{props.settingsLabel ?? t('composer.settings')}</span>
+                            )}
+                            <ChevronIcon />
+                        </button>
+                    ) : null}
 
-                <UnifiedButton
-                    canSend={props.canSend}
-                    voiceStatus={props.voiceStatus}
-                    voiceEnabled={props.voiceEnabled}
-                    controlsDisabled={props.controlsDisabled}
-                    onSend={props.onSend}
-                    onVoiceToggle={props.onVoiceToggle}
-                    /*
-                     * Derived, NOT raw scratchlistMode. Mirror SessionChat's
-                     * shouldRouteToScratchlist so the visible send-button state
-                     * matches the actual routing decision: amber + "Send to
-                     * scratchlist" only when mode is on AND the payload would
-                     * be a pure-text scratchlist add. Attachments or a pending
-                     * schedule force a chat fallback in onSendForComposer; the
-                     * button must reflect that, otherwise the UI lies about
-                     * where the user's content is going.
-                     */
-                    routesToScratchlist={
-                        routesToScratchlist
-                    }
-                />
+                    {showRunningStopButton ? (
+                        <button
+                            type="button"
+                            aria-label={t('composer.abort')}
+                            title={t('composer.abort')}
+                            disabled={props.abortDisabled}
+                            className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400 [&_svg]:h-[22px] [&_svg]:w-[22px]"
+                            onClick={props.onAbort}
+                        >
+                            <AbortIcon spinning={props.isAborting} />
+                        </button>
+                    ) : null}
+
+                    {isVoiceConnected && props.onVoiceMicToggle ? (
+                        <button
+                            type="button"
+                            aria-label={props.voiceMicMuted ? t('voice.unmute') : t('voice.mute')}
+                            title={props.voiceMicMuted ? t('voice.unmute') : t('voice.mute')}
+                            className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition-colors [&_svg]:h-[22px] [&_svg]:w-[22px] ${
+                                props.voiceMicMuted
+                                    ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                                    : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                            }`}
+                            onClick={props.onVoiceMicToggle}
+                        >
+                            <SpeakerIcon muted={props.voiceMicMuted} />
+                        </button>
+                    ) : null}
+
+                    <UnifiedButton
+                        canSend={props.canSend}
+                        voiceStatus={props.voiceStatus}
+                        voiceEnabled={props.voiceEnabled}
+                        controlsDisabled={props.controlsDisabled}
+                        onSend={props.onSend}
+                        onVoiceToggle={props.onVoiceToggle}
+                        /*
+                         * Derived, NOT raw scratchlistMode. Mirror SessionChat's
+                         * shouldRouteToScratchlist so the visible send-button state
+                         * matches the actual routing decision: amber + "Send to
+                         * scratchlist" only when mode is on AND the payload would
+                         * be a pure-text scratchlist add. Attachments or a pending
+                         * schedule force a chat fallback in onSendForComposer; the
+                         * button must reflect that, otherwise the UI lies about
+                         * where the user's content is going.
+                         */
+                        routesToScratchlist={routesToScratchlist}
+                    />
+                </div>
             </div>
+
+            {showToolsMenu ? (
+                <ToolbarMenu
+                    anchorRef={toolsButtonRef}
+                    align="left"
+                    width={240}
+                    maxHeight={360}
+                    onClose={() => setShowToolsMenu(false)}
+                >
+                    {toolsMenuContent}
+                </ToolbarMenu>
+            ) : null}
+
+            {showPermissionMenu && permissionMenuContent ? (
+                <ToolbarMenu
+                    anchorRef={permissionAnchor === 'button' && showInlinePermissionButton ? permissionButtonRef : toolsButtonRef}
+                    align="left"
+                    width={336}
+                    maxHeight={360}
+                    surface="permission"
+                    showArrow
+                    onClose={() => setShowPermissionMenu(false)}
+                >
+                    {permissionMenuContent}
+                </ToolbarMenu>
+            ) : null}
+
+            {showSchedulePicker && props.onSchedule ? (
+                <ScheduleTimePicker
+                    anchorRef={toolsButtonRef}
+                    onSchedule={(pending) => {
+                        props.onSchedule!(pending)
+                        setShowSchedulePicker(false)
+                    }}
+                    onClose={() => setShowSchedulePicker(false)}
+                    pendingSchedule={props.pendingSchedule}
+                />
+            ) : null}
+
+            {showRemoteServerMenu && props.remoteServerContext ? (
+                <ToolbarMenu
+                    anchorRef={remoteServerAnchor === 'button' ? remoteServerButtonRef : toolsButtonRef}
+                    align="left"
+                    width={300}
+                    maxHeight={320}
+                    onClose={() => setShowRemoteServerMenu(false)}
+                >
+                    <RemoteServerContextMenuContent
+                        api={props.remoteServerContext.api}
+                        session={props.remoteServerContext.session}
+                        onChanged={props.remoteServerContext.onChanged}
+                        onClose={() => setShowRemoteServerMenu(false)}
+                    />
+                </ToolbarMenu>
+            ) : null}
+
+            {showContextUsageMenu ? (
+                <ToolbarMenu
+                    anchorRef={contextUsageAnchor === 'button' && showInlineContextUsageButton ? contextUsageButtonRef : toolsButtonRef}
+                    align="right"
+                    width={292}
+                    maxHeight={280}
+                    showArrow
+                    onClose={() => setShowContextUsageMenu(false)}
+                >
+                    <ContextUsagePanel details={props.contextUsageDetails ?? null} />
+                </ToolbarMenu>
+            ) : null}
         </div>
     )
 }

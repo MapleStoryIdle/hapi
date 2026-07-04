@@ -14,12 +14,14 @@ describe('presentMachineHealth', () => {
             load1m: 2.4,
             cpuCount: 8,
             cpuPercent: 72,
-            memoryPercent: 81
+            memoryPercent: 81,
+            disk: { path: '/', totalBytes: 100, freeBytes: 40, usedPercent: 60 }
         }, 'linux')
 
         expect(result?.metrics).toEqual([
             { id: 'cpu', shortLabel: 'CPU', percent: 72, tone: 'ok' },
-            { id: 'ram', shortLabel: 'RAM', percent: 81, tone: 'warn' }
+            { id: 'ram', shortLabel: 'RAM', percent: 81, tone: 'warn' },
+            { id: 'disk', shortLabel: 'DSK', percent: 60, tone: 'ok' }
         ])
         expect(result?.overallTone).toBe('warn')
         expect(result?.status).toBe('elevated')

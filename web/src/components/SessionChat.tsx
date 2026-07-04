@@ -84,19 +84,23 @@ const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSessio
 
 const RUN_SETTLE_DELAY_MS = 1500
 const RUN_ACTIVITY_KEY_LOOKBACK = 12
-export const BOTTOM_FLOATING_CONTROL_GAP_PX = 36
+export const BOTTOM_FLOATING_CONTROL_GAP_PX = 8
+export const BOTTOM_OVERLAY_INSET_PX = 8
 
 /**
- * Keeps all floating bottom controls (plan/git pill and scroll-to-bottom)
- * the same visual distance from the composer once the composer is measured.
+ * The scroll-to-bottom button is the visual reference for bottom spacing;
+ * keep the plan/git pill on that same composer gap. The bottom overlay inset
+ * is part of the visual composer position, so callers include it here instead
+ * of making the button/pill use independent absolute coordinates.
  */
 export function getScrollButtonBottomInset(
     composerOverlayHeight: number,
     bottomOverlayHeight: number,
+    bottomOverlayInset: number = 0,
 ): number {
     return composerOverlayHeight > 0
-        ? composerOverlayHeight + BOTTOM_FLOATING_CONTROL_GAP_PX
-        : bottomOverlayHeight
+        ? composerOverlayHeight + bottomOverlayInset + BOTTOM_FLOATING_CONTROL_GAP_PX
+        : bottomOverlayHeight + bottomOverlayInset
 }
 
 /**
@@ -583,7 +587,8 @@ function SessionChatInner(props: SessionChatProps) {
     const [bottomAccessoryExpanded, setBottomAccessoryExpanded] = useState(false)
     const [clearedPlanSourceBlockId, setClearedPlanSourceBlockId] = useState<string | null>(null)
     const scrollButtonPositionReady = bottomOverlayHeight > 0 && !(gitSessionId && gitStatusLoading)
-    const scrollButtonBottomInset = getScrollButtonBottomInset(composerOverlayHeight, bottomOverlayHeight)
+    const bottomOverlayReservedInset = bottomOverlayHeight + BOTTOM_OVERLAY_INSET_PX
+    const scrollButtonBottomInset = getScrollButtonBottomInset(composerOverlayHeight, bottomOverlayHeight, BOTTOM_OVERLAY_INSET_PX)
     const lastGitRefreshUpdatedAtRef = useRef(props.session.updatedAt)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
@@ -1492,7 +1497,7 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineOpen={outlineOpen}
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
-                        bottomInset={bottomOverlayHeight}
+                        bottomInset={bottomOverlayReservedInset}
                         scrollButtonBottomInset={scrollButtonBottomInset}
                         bottomAccessoryVisible={bottomAccessoryVisible}
                         bottomAccessoryExpanded={bottomAccessoryExpanded}
@@ -1510,7 +1515,8 @@ function SessionChatInner(props: SessionChatProps) {
 
                     <div
                         ref={bottomOverlayRef}
-                        className="pointer-events-none absolute inset-x-0 bottom-0 z-10"
+                        className="pointer-events-none absolute inset-x-0 z-10"
+                        style={{ bottom: BOTTOM_OVERLAY_INSET_PX }}
                     >
                         <div className="pointer-events-auto px-3">
                             {agentFlavor === 'codex' ? (

@@ -520,6 +520,60 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('normalizes Codex message snapshots with a stable stream id', () => {
+        // 验证正文快照进入普通文本流，并保留 streamId 供 timeline 合并同一个气泡。
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message-snapshot',
+                    message: 'partial answer',
+                    streamId: 'item-1'
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+
+        expect(normalized).toMatchObject({
+            role: 'agent',
+            content: [{
+                type: 'text',
+                text: 'partial answer',
+                streamId: 'item-1'
+            }]
+        })
+    })
+
+    it('marks completed Codex message streams as final', () => {
+        // 验证 item/completed 产生的最终正文事件会带 final 标记，避免 Web 误判仍在流式更新。
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: 'complete answer',
+                    streamId: 'item-1',
+                    final: true
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+
+        expect(normalized).toMatchObject({
+            role: 'agent',
+            content: [{
+                type: 'text',
+                text: 'complete answer',
+                streamId: 'item-1',
+                final: true
+            }]
+        })
+    })
+
     it('keeps malformed Codex review-looking messages as text', () => {
         const message = makeMessage({
             role: 'agent',

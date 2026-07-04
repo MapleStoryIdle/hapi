@@ -372,17 +372,17 @@ function CodeHeader(props: CodeHeaderProps) {
     const language = props.language && props.language !== 'unknown' ? props.language : 'text'
 
     return (
-        <div className="aui-code-shell-header flex items-center justify-between gap-3 rounded-t-[22px] border border-b-0 border-[var(--app-border)] bg-[var(--app-code-bg)] px-6 pb-3 pt-5 text-[0.95rem] font-semibold text-[var(--app-fg)]">
+        <div className="aui-code-shell-header flex items-center justify-between gap-2 rounded-t-[18px] border border-b-0 border-[var(--app-border)] bg-[var(--app-code-bg)] px-5 py-2.5 text-[0.88rem] font-semibold leading-5 text-[var(--app-fg)]">
             <div className="min-w-0 flex-1 truncate">
                 {language}
             </div>
             <button
                 type="button"
                 onClick={() => copy(props.code)}
-                className="shrink-0 rounded-md p-1 text-[var(--app-fg)] opacity-75 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:opacity-100"
+                className="shrink-0 rounded-md p-0.5 text-[var(--app-fg)] opacity-75 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:opacity-100"
                 title="Copy"
             >
-                {copied ? <CheckIcon className="h-5 w-5" /> : <CopyIcon className="h-5 w-5" />}
+                {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
             </button>
         </div>
     )
@@ -392,11 +392,11 @@ function Pre(props: ComponentPropsWithoutRef<'pre'>) {
     const { className, ...rest } = props
 
     return (
-        <div className="aui-md-pre-wrapper min-w-0 w-full max-w-full overflow-x-auto overflow-y-hidden rounded-b-[22px] border border-t-0 border-[var(--app-border)] bg-[var(--app-code-bg)]">
+        <div className="aui-md-pre-wrapper min-w-0 w-full max-w-full overflow-x-auto overflow-y-hidden rounded-b-[18px] border border-t-0 border-[var(--app-border)] bg-[var(--app-code-bg)]">
             <pre
                 {...rest}
                 className={cn(
-                    'aui-md-pre m-0 w-max min-w-full bg-transparent px-6 pb-5 pt-0 text-[0.95rem] leading-7',
+                    'aui-md-pre m-0 w-max min-w-full bg-transparent px-5 pb-4 pt-0 text-[0.9rem] leading-5',
                     className
                 )}
             />
@@ -557,7 +557,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
 }
 
 function Paragraph(props: ComponentPropsWithoutRef<'p'>) {
-    return <p {...props} className={cn('aui-md-p my-4 leading-[1.88] first:mt-0 last:mb-0', props.className)} />
+    return <p {...props} className={cn('aui-md-p my-2.5 leading-[1.62] first:mt-0 last:mb-0', props.className)} />
 }
 
 function Blockquote(props: ComponentPropsWithoutRef<'blockquote'>) {
@@ -573,19 +573,19 @@ function Blockquote(props: ComponentPropsWithoutRef<'blockquote'>) {
 }
 
 function UnorderedList(props: ComponentPropsWithoutRef<'ul'>) {
-    return <ul {...props} className={cn('aui-md-ul my-4 list-disc pl-6 marker:text-[var(--app-hint)] [&>li]:mt-2', props.className)} />
+    return <ul {...props} className={cn('aui-md-ul my-2.5 list-none pl-5', props.className)} />
 }
 
 function OrderedList(props: ComponentPropsWithoutRef<'ol'>) {
-    return <ol {...props} className={cn('aui-md-ol my-4 list-decimal pl-6 marker:text-[var(--app-hint)] [&>li]:mt-2', props.className)} />
+    return <ol {...props} className={cn('aui-md-ol my-2.5 list-decimal pl-5 marker:text-[var(--app-hint)] [&>li]:mt-1', props.className)} />
 }
 
 function ListItem(props: ComponentPropsWithoutRef<'li'>) {
-    return <li {...props} className={cn('aui-md-li leading-[1.82]', props.className)} />
+    return <li {...props} className={cn('aui-md-li leading-[1.58]', props.className)} />
 }
 
 function Hr(props: ComponentPropsWithoutRef<'hr'>) {
-    return <hr {...props} className={cn('aui-md-hr my-4 border-[var(--app-divider)]', props.className)} />
+    return <hr {...props} className={cn('aui-md-hr my-3 border-[var(--app-divider)]', props.className)} />
 }
 
 function Table(props: ComponentPropsWithoutRef<'table'>) {

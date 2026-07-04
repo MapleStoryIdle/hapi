@@ -14,7 +14,7 @@ import {
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import { App } from '@/App'
-import { SessionList } from '@/components/SessionList'
+import { SessionList, getSessionWorkspaceTitle } from '@/components/SessionList'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
@@ -38,9 +38,10 @@ import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
-import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
+import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
+import { presentMachineHealth, formatMachineUptimeSeconds } from '@/lib/machineHealth'
 
 const SessionChat = lazy(() => import('@/components/SessionChat').then((module) => ({ default: module.SessionChat })))
 const NewSession = lazy(() => import('@/components/NewSession').then((module) => ({ default: module.NewSession })))
@@ -248,10 +249,218 @@ function LaptopIcon(props: { className?: string }) {
     )
 }
 
+function SwitchWorkspaceIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <path d="M7 7h11" />
+            <path d="m15 4 3 3-3 3" />
+            <path d="M17 17H6" />
+            <path d="m9 14-3 3 3 3" />
+        </svg>
+    )
+}
+
+
 function getMachineTitle(machine: Machine): string {
     if (machine.metadata?.displayName) return machine.metadata.displayName
     if (machine.metadata?.host) return machine.metadata.host
     return machine.id.slice(0, 8)
+}
+
+const SELECTED_RUNNER_STORAGE_KEY = 'hapi:selectedRunnerMachineId'
+
+function loadSelectedRunnerMachineId(): string | null {
+    try {
+        return localStorage.getItem(SELECTED_RUNNER_STORAGE_KEY)
+    } catch {
+        return null
+    }
+}
+
+function saveSelectedRunnerMachineId(machineId: string): void {
+    try {
+        localStorage.setItem(SELECTED_RUNNER_STORAGE_KEY, machineId)
+    } catch {
+        // Ignore storage failures; selection still works for this render tree.
+    }
+}
+
+function getSessionsForMachine(sessions: SessionSummary[], machineId: string | null | undefined): SessionSummary[] {
+    if (!machineId) return sessions
+    return sessions.filter((session) => session.metadata?.machineId === machineId)
+}
+
+function formatBytes(value: number | null | undefined): string {
+    if (!Number.isFinite(value ?? NaN) || value === undefined || value === null) {
+        return '—'
+    }
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+    let scaled = value
+    let unitIndex = 0
+    while (scaled >= 1024 && unitIndex < units.length - 1) {
+        scaled /= 1024
+        unitIndex += 1
+    }
+    const digits = scaled >= 10 || unitIndex === 0 ? 0 : 1
+    return `${scaled.toFixed(digits)} ${units[unitIndex]}`
+}
+
+function formatRunnerTime(value: number | null | undefined): string | null {
+    if (!value) return null
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return null
+    return date.toLocaleString()
+}
+
+function RunnerMetricCard(props: { label: string; value: string; detail?: string; tone?: 'default' | 'ok' | 'warn' }) {
+    const toneClass = props.tone === 'ok'
+        ? 'text-green-600 dark:text-green-400'
+        : props.tone === 'warn'
+            ? 'text-orange-600 dark:text-orange-400'
+            : 'text-[var(--app-fg)]'
+    return (
+        <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
+            <div className="text-[11px] font-medium text-[var(--app-hint)]">{props.label}</div>
+            <div className={`mt-1 text-base font-semibold leading-5 ${toneClass}`}>{props.value}</div>
+            {props.detail ? <div className="mt-0.5 truncate text-[11px] text-[var(--app-hint)]" title={props.detail}>{props.detail}</div> : null}
+        </div>
+    )
+}
+
+function RunnerDetailsPanel(props: { machine: Machine }) {
+    const machine = props.machine
+    const health = machine.health ?? null
+    const presentation = presentMachineHealth(health, machine.metadata?.platform)
+    const cpuMetric = presentation?.metrics.find((metric) => metric.id === 'cpu')
+    const ramMetric = presentation?.metrics.find((metric) => metric.id === 'ram')
+    const diskMetric = presentation?.metrics.find((metric) => metric.id === 'disk')
+    const diskDetail = health?.disk
+        ? `${formatBytes(health.disk.freeBytes)} free / ${formatBytes(health.disk.totalBytes)}`
+        : undefined
+    const networkList = health?.networkInterfaces ?? []
+    const cliList = health?.agentCli ?? []
+    const runnerStartedAt = formatRunnerTime(machine.runnerState?.startedAt)
+    const lastSeenAt = formatRunnerTime(machine.activeAt)
+    const uptimeText = health?.uptimeSeconds !== undefined ? formatMachineUptimeSeconds(health.uptimeSeconds) : null
+
+    return (
+        <div role="dialog" aria-label="Runner 状态" className="absolute left-1/2 top-full z-50 mt-3 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_20px_60px_rgba(15,23,42,0.20)]">
+            <div className="flex items-start gap-3 px-1 pb-3">
+                <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${machine.active ? 'bg-[#22c55e]' : 'bg-[#a3a3a3]'}`} aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                    <div className="truncate text-base font-semibold text-[var(--app-fg)]">{getMachineTitle(machine)}</div>
+                    <div className="mt-0.5 truncate text-xs text-[var(--app-hint)]" title={machine.id}>{machine.id}</div>
+                </div>
+                <div className="rounded-full border border-[var(--app-border)] px-2 py-1 text-[11px] font-medium text-[var(--app-hint)]">
+                    {machine.runnerState?.status ?? (machine.active ? 'online' : 'offline')}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+                <RunnerMetricCard label="CPU" value={cpuMetric ? `${cpuMetric.percent}%` : '—'} detail={presentation?.loadDetail ? `load ${presentation.loadDetail}` : undefined} />
+                <RunnerMetricCard label="内存" value={ramMetric ? `${ramMetric.percent}%` : '—'} />
+                <RunnerMetricCard label="磁盘" value={diskMetric ? `${diskMetric.percent}%` : '—'} detail={diskDetail} />
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
+                    <div className="font-medium text-[var(--app-hint)]">Runner</div>
+                    <div className="mt-1 space-y-1 text-[var(--app-fg)]">
+                        <div>PID: {machine.runnerState?.pid ?? '—'}</div>
+                        <div>端口: {machine.runnerState?.httpPort ?? '—'}</div>
+                        <div>运行: {uptimeText ?? '—'}</div>
+                    </div>
+                </div>
+                <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
+                    <div className="font-medium text-[var(--app-hint)]">系统</div>
+                    <div className="mt-1 space-y-1 text-[var(--app-fg)]">
+                        <div>{machine.metadata?.platform ?? 'unknown'}</div>
+                        <div>HAPI {machine.metadata?.happyCliVersion ?? '—'}</div>
+                        <div title={lastSeenAt ?? undefined}>心跳: {lastSeenAt ?? '—'}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="mt-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-xs font-medium text-[var(--app-hint)]">网络</div>
+                    <div className="text-[11px] text-[var(--app-hint)]">{networkList.length > 0 ? `${networkList.length} 个地址` : '暂无数据'}</div>
+                </div>
+                {networkList.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                        {networkList.map((item) => (
+                            <span key={`${item.name}-${item.address}`} className="rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-[11px] text-[var(--app-fg)]">
+                                {item.name} · {item.address}
+                            </span>
+                        ))}
+                    </div>
+                ) : <div className="text-xs text-[var(--app-hint)]">runner 重启后会开始上报网络接口。</div>}
+            </div>
+
+            <div className="mt-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
+                <div className="mb-2 text-xs font-medium text-[var(--app-hint)]">Agent CLI</div>
+                {cliList.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-1.5">
+                        {cliList.map((cli) => (
+                            <div key={cli.id} className="flex items-center justify-between gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5">
+                                <span className="truncate text-xs font-medium text-[var(--app-fg)]">{cli.label}</span>
+                                <span className={`shrink-0 text-[11px] font-semibold ${cli.available ? 'text-green-600 dark:text-green-400' : 'text-[var(--app-hint)]'}`}>
+                                    {cli.available ? '可用' : '未安装'}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                ) : <div className="text-xs text-[var(--app-hint)]">runner 重启后会开始上报 Agent CLI 探测结果。</div>}
+            </div>
+
+            <div className="mt-3 truncate px-1 text-[11px] text-[var(--app-hint)]" title={runnerStartedAt ?? undefined}>
+                启动时间: {runnerStartedAt ?? '—'}
+            </div>
+        </div>
+    )
+}
+
+function RunnerSwitcherPanel(props: {
+    machines: Machine[]
+    selectedMachineId: string | null
+    onSelect: (machineId: string) => void
+}) {
+    return (
+        <div role="menu" aria-label="切换 runner" className="absolute left-1/2 top-full z-50 mt-3 w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-[22px] border border-[var(--app-border)] bg-[var(--app-bg)] py-1 shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
+            {props.machines.map((machine) => {
+                const selected = machine.id === props.selectedMachineId
+                return (
+                    <button
+                        key={machine.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={selected}
+                        onClick={() => props.onSelect(machine.id)}
+                        className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                    >
+                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${machine.active ? 'bg-[#22c55e]' : 'bg-[#a3a3a3]'}`} aria-hidden="true" />
+                        <LaptopIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)]" />
+                        <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-[var(--app-fg)]">{getMachineTitle(machine)}</span>
+                            <span className="block truncate text-[11px] text-[var(--app-hint)]">{machine.metadata?.platform ?? 'unknown'} · HAPI {machine.metadata?.happyCliVersion ?? '—'}</span>
+                        </span>
+                        {selected ? <span className="text-xs font-semibold text-[var(--app-link)]">当前</span> : null}
+                    </button>
+                )
+            })}
+        </div>
+    )
 }
 
 function SessionsPage() {
@@ -274,7 +483,11 @@ function SessionsPage() {
     const [isDuplicateMergeConfirmOpen, setIsDuplicateMergeConfirmOpen] = useState(false)
     const [isMergingDuplicateSessions, setIsMergingDuplicateSessions] = useState(false)
     const [isSessionsMenuOpen, setIsSessionsMenuOpen] = useState(false)
+    const [selectedRunnerMachineId, setSelectedRunnerMachineId] = useState<string | null>(loadSelectedRunnerMachineId)
+    const [isRunnerDetailsOpen, setIsRunnerDetailsOpen] = useState(false)
+    const [isRunnerSwitcherOpen, setIsRunnerSwitcherOpen] = useState(false)
     const sessionsMenuRef = useRef<HTMLDivElement>(null)
+    const runnerControlRef = useRef<HTMLDivElement>(null)
 
     const handleRefresh = useCallback(() => {
         void refetch()
@@ -304,11 +517,78 @@ function SessionsPage() {
         : null
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
-    const primaryMachine = useMemo(
-        () => machines.find((machine) => machine.active) ?? machines[0] ?? null,
+    const selectableMachines = useMemo(
+        () => {
+            const activeMachines = machines.filter((machine) => machine.active)
+            return activeMachines.length > 0 ? activeMachines : machines
+        },
         [machines]
     )
-    const primaryMachineLabel = primaryMachine ? getMachineTitle(primaryMachine) : t('machine.unknown')
+    const fallbackMachine = selectableMachines[0] ?? null
+    const selectedRunnerMachine = useMemo(
+        () => selectableMachines.find((machine) => machine.id === selectedRunnerMachineId) ?? fallbackMachine,
+        [fallbackMachine, selectableMachines, selectedRunnerMachineId]
+    )
+    const selectedRunnerLabel = selectedRunnerMachine ? getMachineTitle(selectedRunnerMachine) : t('machine.unknown')
+    const sessionsForSelectedRunner = useMemo(
+        () => getSessionsForMachine(sessions, selectedRunnerMachine?.id),
+        [sessions, selectedRunnerMachine?.id]
+    )
+    const currentWorkspaceTitle = getSessionWorkspaceTitle(
+        selectedSessionId ? sessions : sessionsForSelectedRunner,
+        selectedSessionId,
+        t('sessions.workspaceFallback')
+    )
+
+    const selectRunnerMachine = useCallback((machineId: string) => {
+        setSelectedRunnerMachineId(machineId)
+        saveSelectedRunnerMachineId(machineId)
+        setIsRunnerSwitcherOpen(false)
+        setIsRunnerDetailsOpen(false)
+    }, [])
+
+    useEffect(() => {
+        const sessionMachineId = selectedSession?.metadata?.machineId
+        if (!sessionMachineId || sessionMachineId === selectedRunnerMachineId) return
+        if (!selectableMachines.some((machine) => machine.id === sessionMachineId)) return
+        selectRunnerMachine(sessionMachineId)
+    }, [selectRunnerMachine, selectableMachines, selectedRunnerMachineId, selectedSession?.metadata?.machineId])
+
+    useEffect(() => {
+        if (selectableMachines.length === 0) return
+        if (selectedRunnerMachine && selectableMachines.some((machine) => machine.id === selectedRunnerMachine.id)) return
+        selectRunnerMachine(selectableMachines[0].id)
+    }, [selectRunnerMachine, selectableMachines, selectedRunnerMachine])
+
+    useEffect(() => {
+        if (!isRunnerDetailsOpen && !isRunnerSwitcherOpen) return
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target
+            if (target instanceof Node && runnerControlRef.current?.contains(target)) return
+            setIsRunnerDetailsOpen(false)
+            setIsRunnerSwitcherOpen(false)
+        }
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return
+            setIsRunnerDetailsOpen(false)
+            setIsRunnerSwitcherOpen(false)
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown)
+        document.addEventListener('keydown', handleKeyDown)
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown)
+            document.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [isRunnerDetailsOpen, isRunnerSwitcherOpen])
+
+    const goNewSession = useCallback(() => {
+        navigate({
+            to: '/sessions/new',
+            search: selectedRunnerMachine ? { machineId: selectedRunnerMachine.id } : {}
+        })
+    }, [navigate, selectedRunnerMachine])
 
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
@@ -604,13 +884,58 @@ function SessionsPage() {
                             <MenuLinesIcon className="h-6 w-6" />
                         </button>
                         <div className="flex min-w-0 flex-col items-center justify-center px-4 text-center">
-                            <div className="text-[26px] font-semibold leading-8 text-[var(--app-fg)]">
-                                Codex
-                            </div>
-                            <div className="mt-0.5 flex min-w-0 items-center justify-center gap-2 text-[16px] font-medium leading-5 text-[#9ca3af]">
-                                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${primaryMachine?.active ? 'bg-[#22c55e]' : 'bg-[#a3a3a3]'}`} aria-hidden="true" />
-                                <LaptopIcon className="h-5 w-5 shrink-0" />
-                                <span className="truncate">{primaryMachineLabel}</span>
+                            <button
+                                type="button"
+                                onClick={() => navigate({ to: '/browse' })}
+                                aria-label={t('sessions.switchWorkspace')}
+                                title={t('sessions.switchWorkspace')}
+                                className="group flex min-w-0 max-w-full items-center justify-center gap-1.5 rounded-full px-2 py-0.5 text-[24px] font-semibold leading-7 text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                            >
+                                <span className="truncate">{currentWorkspaceTitle}</span>
+                                <SwitchWorkspaceIcon className="h-4 w-4 shrink-0 text-[#9ca3af] transition-colors group-hover:text-[var(--app-fg)]" />
+                            </button>
+                            <div ref={runnerControlRef} className="relative mt-0.5 flex min-w-0 items-center justify-center gap-1.5 text-[16px] font-medium leading-5 text-[#9ca3af]">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsRunnerDetailsOpen((open) => !open)
+                                        setIsRunnerSwitcherOpen(false)
+                                    }}
+                                    className="group/runner flex min-w-0 items-center gap-1.5 rounded-full px-1.5 py-0.5 transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                    title="Runner 状态"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={isRunnerDetailsOpen}
+                                >
+                                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${selectedRunnerMachine?.active ? 'bg-[#22c55e]' : 'bg-[#a3a3a3]'}`} aria-hidden="true" />
+                                    <LaptopIcon className="h-5 w-5 shrink-0" />
+                                    <span className="truncate">{selectedRunnerLabel}</span>
+                                </button>
+                                {selectableMachines.length > 1 ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsRunnerSwitcherOpen((open) => !open)
+                                            setIsRunnerDetailsOpen(false)
+                                        }}
+                                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#9ca3af] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                        title="切换 runner"
+                                        aria-label="切换 runner"
+                                        aria-haspopup="menu"
+                                        aria-expanded={isRunnerSwitcherOpen}
+                                    >
+                                        <SwitchWorkspaceIcon className="h-3.5 w-3.5" />
+                                    </button>
+                                ) : null}
+                                {isRunnerDetailsOpen && selectedRunnerMachine ? (
+                                    <RunnerDetailsPanel machine={selectedRunnerMachine} />
+                                ) : null}
+                                {isRunnerSwitcherOpen && selectableMachines.length > 1 ? (
+                                    <RunnerSwitcherPanel
+                                        machines={selectableMachines}
+                                        selectedMachineId={selectedRunnerMachine?.id ?? null}
+                                        onSelect={selectRunnerMachine}
+                                    />
+                                ) : null}
                             </div>
                         </div>
                         <div ref={sessionsMenuRef} className="relative flex items-center justify-end">
@@ -630,7 +955,7 @@ function SessionsPage() {
                                         type="button"
                                         onClick={() => {
                                             setIsSessionsMenuOpen(false)
-                                            navigate({ to: '/sessions/new' })
+                                            goNewSession()
                                         }}
                                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
                                     >
@@ -683,13 +1008,13 @@ function SessionsPage() {
                         </div>
                     ) : null}
                     <SessionList
-                        sessions={sessions}
+                        sessions={sessionsForSelectedRunner}
                         selectedSessionId={selectedSessionId}
                         onSelect={(sessionId) => navigate({
                             to: '/sessions/$sessionId',
                             params: { sessionId },
                         })}
-                        onNewSession={() => navigate({ to: '/sessions/new' })}
+                        onNewSession={goNewSession}
                         onNewSessionInDirectory={handleNewSessionInDirectory}
                         onBrowse={() => navigate({ to: '/browse' })}
                         onRefresh={handleRefresh}

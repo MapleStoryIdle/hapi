@@ -24,6 +24,11 @@ describe('collectMachineHealth', () => {
         expect(health.memoryPercent).toBeGreaterThanOrEqual(0)
         expect(health.memoryPercent).toBeLessThanOrEqual(100)
         expect(health.uptimeSeconds).toBeGreaterThan(0)
+        if (health.disk) {
+            expect(health.disk.usedPercent).toBeGreaterThanOrEqual(0)
+            expect(health.disk.usedPercent).toBeLessThanOrEqual(100)
+        }
+        expect(health.agentCli?.map((cli) => cli.id)).toEqual(['claude', 'codex', 'cursor', 'gemini', 'opencode'])
     })
 
     it('computes cpu percent after a second sample', async () => {

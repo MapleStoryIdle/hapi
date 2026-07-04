@@ -42,6 +42,8 @@ export default {
   // Sessions page
   'sessions.count': '{n} sessions in {m} projects',
   'sessions.projects': 'Projects',
+  'sessions.workspaceFallback': 'Workspace',
+  'sessions.switchWorkspace': 'Switch workspace',
   'sessions.new': 'New Session',
   'sessions.chat': 'Chat',
   'sessions.empty.title': 'No sessions yet',
@@ -261,6 +263,7 @@ export default {
   'machine.health.metric.cpu': 'CPU across all cores',
   'machine.health.metric.cpuWithCount': 'CPU across all {n} cores',
   'machine.health.metric.ram': 'RAM in use',
+  'machine.health.metric.disk': 'Disk in use',
   'machine.health.tooltip.load': 'Run queue (1 min): {value}',
   'machine.health.tooltip.loadShort': 'Load (1m)',
   'machine.health.tooltip.uptimeShort': 'Uptime',
@@ -268,6 +271,7 @@ export default {
   'machine.health.tooltip.hint': 'Updated every ~20s from the runner on this machine.',
   'machine.health.aria.cpu': 'CPU {n} percent',
   'machine.health.aria.ram': 'RAM {n} percent',
+  'machine.health.aria.disk': 'Disk {n} percent',
   'machine.health.aria.unknown': 'Machine health unavailable',
 
   // Chat
@@ -488,6 +492,9 @@ export default {
   // Composer buttons
   'composer.settings': 'Settings',
   'composer.moreTools': 'More tools',
+  'composer.menu.input': 'Input',
+  'composer.menu.execution': 'Execution',
+  'composer.menu.session': 'Session',
   'composer.planMode': 'Plan mode',
   'composer.goalMode': 'Goal mode',
   'composer.terminal': 'Terminal',

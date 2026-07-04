@@ -92,7 +92,7 @@ type MachineGroup = {
     latestUpdatedAt: number
 }
 
-function getGroupDisplayName(directory: string): string {
+export function getGroupDisplayName(directory: string): string {
     if (directory === 'Other') return directory
     const parts = directory.split(/[\\/]+/).filter(Boolean)
     if (parts.length === 0) return directory
@@ -101,6 +101,36 @@ function getGroupDisplayName(directory: string): string {
 
 export const UNKNOWN_MACHINE_ID = '__unknown__'
 export const GROUP_SESSION_PREVIEW_LIMIT = DEFAULT_SESSION_PREVIEW_LIMIT
+
+export function getSessionWorkspaceDirectory(session: SessionSummary): string | null {
+    const worktreeBasePath = session.metadata?.worktree?.basePath?.trim()
+    if (worktreeBasePath) return worktreeBasePath
+
+    const path = session.metadata?.path?.trim()
+    return path || null
+}
+
+export function getSessionWorkspaceTitle(
+    sessions: SessionSummary[],
+    selectedSessionId?: string | null,
+    fallback = 'Workspace'
+): string {
+    const selectedSession = selectedSessionId
+        ? sessions.find(session => session.id === selectedSessionId)
+        : null
+    const selectedDirectory = selectedSession ? getSessionWorkspaceDirectory(selectedSession) : null
+    if (selectedDirectory) return getGroupDisplayName(selectedDirectory)
+
+    const rankedSessions = [...sessions].sort((a, b) => {
+        const rankA = a.active ? (a.pendingRequestsCount > 0 ? 0 : 1) : 2
+        const rankB = b.active ? (b.pendingRequestsCount > 0 ? 0 : 1) : 2
+        if (rankA !== rankB) return rankA - rankB
+        return b.updatedAt - a.updatedAt
+    })
+    const workspaceSession = rankedSessions.find(session => getSessionWorkspaceDirectory(session))
+    const directory = workspaceSession ? getSessionWorkspaceDirectory(workspaceSession) : null
+    return directory ? getGroupDisplayName(directory) : fallback
+}
 
 export function getSessionDedupKey(session: SessionSummary): string | null {
     const agentId = session.metadata?.agentSessionId?.trim()
@@ -189,7 +219,7 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
     sessions.forEach(session => {
-        const path = session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
+        const path = getSessionWorkspaceDirectory(session) ?? 'Other'
         const machineId = session.metadata?.machineId ?? null
         const key = `${machineId ?? UNKNOWN_MACHINE_ID}::${path}`
         if (!groups.has(key)) {
@@ -353,15 +383,9 @@ function FolderIcon(props: { className?: string; open?: boolean }) {
             className={props.className}
         >
             {props.open ? (
-                <>
-                    <path d="M3.5 9.5a3 3 0 0 1 3-3h3.1l2.1 2.2h5.8a3 3 0 0 1 3 3v1.1" />
-                    <path d="M3.8 12.2h16.7l-1.9 5.2a3 3 0 0 1-2.8 2H6.2a3 3 0 0 1-2.8-4Z" />
-                </>
+                <path d="M6 14l1.5-4A2 2 0 0 1 9.37 8.7H20a2 2 0 0 1 1.9 2.63l-1.5 4A2 2 0 0 1 18.53 17H5a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2h4l2 2h4a2 2 0 0 1 2 2v1.2" />
             ) : (
-                <>
-                    <path d="M3.5 7.5a3 3 0 0 1 3-3h3.2l2.1 2.2h5.7a3 3 0 0 1 3 3v6.8a3 3 0 0 1-3 3h-11a3 3 0 0 1-3-3Z" />
-                    <path d="M3.5 10h17" />
-                </>
+                <path d="M3.5 7.5a2.5 2.5 0 0 1 2.5-2.5h3.3l2.1 2.2H18a2.5 2.5 0 0 1 2.5 2.5v6.8A2.5 2.5 0 0 1 18 19H6a2.5 2.5 0 0 1-2.5-2.5Z" />
             )}
         </svg>
     )
@@ -594,7 +618,7 @@ function SessionItem(props: {
             <button
                 type="button"
                 {...longPressHandlers}
-                className={`session-list-item group/session-row flex w-full items-center justify-between gap-4 rounded-xl px-0 py-3.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${selected ? 'text-[var(--app-fg)]' : ''}`}
+                className={`session-list-item group/session-row flex w-full items-center justify-between gap-3 rounded-xl px-0 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${selected ? 'text-[var(--app-fg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
                 aria-describedby={describedBy}
@@ -602,24 +626,24 @@ function SessionItem(props: {
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                     <AgentFlavorStatusIcon
                         flavor={s.metadata?.flavor}
-                        className="h-5 w-5"
+                        className="h-[18px] w-[18px]"
                         showStatus={s.active}
                         statusClassName="bg-[#34C759]"
                     />
                     <div className="min-w-0 flex-1">
-                        <div className="truncate text-[18px] font-normal leading-6 tracking-normal text-[var(--app-fg)]">
+                        <div className="truncate text-base font-normal leading-5 tracking-normal text-[var(--app-fg)]">
                             {sessionName}
                         </div>
                         {showPath ? (
-                            <div className="mt-0.5 truncate text-sm text-[var(--app-hint)]">
+                            <div className="mt-0.5 truncate text-xs leading-4 text-[var(--app-hint)]">
                                 {s.metadata?.path ?? s.id}
                             </div>
                         ) : null}
                     </div>
                 </div>
-                <div className="flex h-8 shrink-0 items-center justify-end gap-2 text-[var(--app-hint)]">
+                <div className="flex h-6 shrink-0 items-center justify-end gap-2 text-[var(--app-hint)]">
                     {s.active && s.thinking ? (
-                        <LoaderIcon className="h-7 w-7 animate-spin-slow text-[var(--app-fg)]" />
+                        <LoaderIcon className="h-6 w-6 animate-spin-slow text-[var(--app-fg)]" />
                     ) : attention ? (
                         <SessionAttentionIndicator
                             attention={attention}
@@ -929,11 +953,6 @@ export function SessionList(props: {
             )}
 
             <div className="app-scroll-y desktop-scrollbar-left flex min-h-0 flex-1 flex-col px-8 pb-6 pt-2">
-                {props.sessions.length > 0 ? (
-                    <div className="pb-7 pt-2 text-[22px] font-semibold leading-none text-[var(--app-fg)]">
-                        {t('sessions.projects')}
-                    </div>
-                ) : null}
                 {machineGroups.map((mg) => {
                     const machineCollapsed = isMachineCollapsed(mg)
                     const showMachineHeading = machineGroups.length > 1
@@ -997,7 +1016,7 @@ export function SessionList(props: {
                                                 {/* Level 3: Sessions */}
                                                 <div className="collapsible-panel" data-open={!isCollapsed || undefined}>
                                                     <div className="collapsible-inner">
-                                                    <div className="flex flex-col py-3 pl-4">
+                                                    <div className="flex flex-col py-2 pl-4">
                                                         {visibleGroupSessions.map((s) => (
                                                             <SessionItem
                                                                 key={s.id}

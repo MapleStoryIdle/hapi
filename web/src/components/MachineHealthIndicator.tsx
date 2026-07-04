@@ -94,7 +94,7 @@ function MachineHealthTooltipBody(props: {
                         metric={metric}
                         label={metric.id === 'cpu'
                             ? getCpuMetricTooltipLabel(presentation.cpuCount, t)
-                            : t(`machine.health.metric.${metric.id}`, { n: metric.percent })}
+                            : t(`machine.health.metric.${metric.id}`)}
                     />
                 ))}
                 {presentation.loadDetail ? (

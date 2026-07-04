@@ -79,11 +79,11 @@
     --app-secondary-bg: var(--tg-theme-secondary-bg-color, #f3f4f6);
 
     --app-dialog-bg: #ffffff;
-    --app-chat-user-bg: #f2f4f6;
+    --app-chat-user-bg: #1f2937;
     --app-chat-user-surface-bg: var(--app-chat-user-bg);
-    --app-chat-user-fg: #24292f;
-    --app-chat-user-chip-bg: #DBEAFE;
-    --app-chat-user-chip-fg: #1447E6;
+    --app-chat-user-fg: #ffffff;
+    --app-chat-user-chip-bg: rgba(255, 255, 255, 0.14);
+    --app-chat-user-chip-fg: #ffffff;
     --app-tool-card-bg: #f2f4f6;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #e9edf2;
@@ -164,11 +164,11 @@
     --app-secondary-bg: var(--tg-theme-secondary-bg-color, #2C2C2E);
 
     --app-dialog-bg: #202226;
-    --app-chat-user-bg: #2b2f34;
+    --app-chat-user-bg: #3a414a;
     --app-chat-user-surface-bg: var(--app-chat-user-bg);
-    --app-chat-user-fg: #f5f7fa;
-    --app-chat-user-chip-bg: rgba(37, 99, 235, 0.22);
-    --app-chat-user-chip-fg: #93c5fd;
+    --app-chat-user-fg: #f8fafc;
+    --app-chat-user-chip-bg: rgba(255, 255, 255, 0.12);
+    --app-chat-user-chip-fg: #f8fafc;
     --app-tool-card-bg: #2b2f34;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #343a41;
@@ -245,11 +245,11 @@
     --app-secondary-bg: #0a0a0b;
 
     --app-dialog-bg: #0c0c0e;
-    --app-chat-user-bg: #141414;
+    --app-chat-user-bg: #252a32;
     --app-chat-user-surface-bg: var(--app-chat-user-bg);
-    --app-chat-user-fg: #f5f7fa;
-    --app-chat-user-chip-bg: rgba(78, 161, 255, 0.18);
-    --app-chat-user-chip-fg: #8fc4ff;
+    --app-chat-user-fg: #f8fafc;
+    --app-chat-user-chip-bg: rgba(255, 255, 255, 0.12);
+    --app-chat-user-chip-fg: #f8fafc;
     --app-tool-card-bg: #0e0e10;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #161618;
@@ -509,15 +509,15 @@ select {
 
 .happy-assistant-message :where(.aui-md) {
     font-size: 0.98rem;
-    line-height: 1.82rem;
+    line-height: 1.62rem;
 }
 
 .happy-assistant-message :where(.aui-code-shell-header, .aui-code-surface) {
-    margin-top: 1.25rem;
+    margin-top: 0.8rem;
 }
 
 .happy-assistant-message :where(.aui-md-codeblock, .aui-md-pre-wrapper, .aui-code-surface) {
-    margin-bottom: 1.25rem;
+    margin-bottom: 0.8rem;
 }
 
 .tool-result-quote :where(.aui-md, .aui-md-p, .aui-md-li, .aui-md-td, .aui-md-th, .aui-md-strong, .aui-md-em, .aui-md-h1, .aui-md-h2, .aui-md-h3, .aui-md-h4, .aui-md-h5, .aui-md-h6) {
@@ -544,6 +544,25 @@ select {
     padding-left: 0;
 }
 
+.aui-md-ul:not(.contains-task-list) > .aui-md-li {
+    position: relative;
+    margin-top: 0.25rem;
+}
+
+.aui-md-ul:not(.contains-task-list) > .aui-md-li::before {
+    content: '├─';
+    position: absolute;
+    left: -1.25rem;
+    color: var(--app-hint);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.85em;
+    line-height: inherit;
+}
+
+.aui-md-ul:not(.contains-task-list) > .aui-md-li:last-child::before {
+    content: '└─';
+}
+
 .aui-md :where(input[type="checkbox"]) {
     margin-right: 0.55rem;
 }
@@ -560,7 +579,7 @@ select {
 }
 
 .aui-md :where(p + ul, p + ol, p + blockquote, p + .aui-md-table-wrapper) {
-    margin-top: 1.15rem;
+    margin-top: 0.65rem;
 }
 
 .aui-mermaid-diagram svg {

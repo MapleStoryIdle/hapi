@@ -592,7 +592,8 @@ export function normalizeAgentRecord(
             }
         }
 
-        if (data.type === 'message' && typeof data.message === 'string') {
+        if ((data.type === 'message' || data.type === 'message-snapshot') && typeof data.message === 'string') {
+            const final = data.final === true || data.completed === true
             const review = parseCodexReviewMessage(data.message)
             if (review) {
                 return {
@@ -611,7 +612,14 @@ export function normalizeAgentRecord(
                 createdAt,
                 role: 'agent',
                 isSidechain: false,
-                content: [{ type: 'text', text: data.message, uuid: messageId, parentUUID: null }],
+                content: [{
+                    type: 'text',
+                    text: data.message,
+                    uuid: messageId,
+                    streamId: asString(data.streamId ?? data.stream_id ?? data.itemId ?? data.item_id) ?? undefined,
+                    final: final ? true : undefined,
+                    parentUUID: null
+                }],
                 meta
             }
         }

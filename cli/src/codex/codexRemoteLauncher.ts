@@ -1489,6 +1489,13 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 updateActivity(formatActivity('Writing', message), 'writing');
                 return;
             }
+            if (msgType === 'agent_message_snapshot') {
+                const message = asString(msg.message);
+                if (message) {
+                    updateActivity(formatActivity('Writing', message), 'writing');
+                }
+                return;
+            }
             if (msgType === 'exec_command_begin' || msgType === 'exec_approval_request') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
@@ -2203,9 +2210,28 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'agent_message') {
                 const message = asString(msg.message);
                 if (message) {
+                    const itemId = asString(msg.item_id ?? msg.itemId);
+                    const streamId = asString(msg.stream_id ?? msg.streamId) ?? itemId;
                     session.sendAgentMessage({
                         type: 'message',
                         message,
+                        streamId: streamId ?? undefined,
+                        itemId: itemId ?? undefined,
+                        final: Boolean(msg.final),
+                        id: randomUUID()
+                    });
+                }
+            }
+            if (msgType === 'agent_message_snapshot') {
+                const message = asString(msg.message);
+                const itemId = asString(msg.item_id ?? msg.itemId);
+                const streamId = asString(msg.stream_id ?? msg.streamId) ?? itemId;
+                if (message && streamId) {
+                    session.sendAgentMessage({
+                        type: 'message-snapshot',
+                        message,
+                        streamId,
+                        itemId: itemId ?? undefined,
                         id: randomUUID()
                     });
                 }

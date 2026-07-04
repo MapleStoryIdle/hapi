@@ -1,8 +1,21 @@
-import type { ReactElement } from 'react'
+import type { ComponentProps, ReactElement } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
-import { ComposerButtons, UnifiedButton } from './ComposerButtons'
+
+vi.mock('@assistant-ui/react', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@assistant-ui/react')>()
+    const React = await import('react')
+    return {
+        ...actual,
+        ComposerPrimitive: {
+            ...actual.ComposerPrimitive,
+            AddAttachment: ({ children, ...props }: ComponentProps<'button'>) => React.createElement('button', props, children)
+        }
+    }
+})
+
+import { ComposerButtons, UnifiedButton, getComposerOptionalControlsVisibility, getRemoteServerButtonAlias } from './ComposerButtons'
 
 function renderInProviders(ui: ReactElement) {
     return render(<I18nProvider>{ui}</I18nProvider>)
@@ -111,6 +124,63 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
     })
 })
 
+describe('getRemoteServerButtonAlias', () => {
+    /**
+     * The composer status chip is space-constrained. It should display only
+     * the operator-defined alias, not the longer server name / host tuple.
+     */
+    it('uses alias as the selected server display label', () => {
+        expect(getRemoteServerButtonAlias({ alias: 'prod', name: 'Production Server' })).toBe('prod')
+    })
+
+    /**
+     * Defensive fallback: persisted servers should always have aliases, but a
+     * blank alias must not render an empty pill.
+     */
+    it('falls back to name when alias is blank', () => {
+        expect(getRemoteServerButtonAlias({ alias: '   ', name: 'Production Server' })).toBe('Production Server')
+    })
+})
+
+describe('getComposerOptionalControlsVisibility', () => {
+    /**
+     * Before ResizeObserver reports a real width, optional controls stay
+     * visible so desktop/wide toolbars do not start in an artificial
+     * "mobile" collapsed state.
+     */
+    it('shows optional controls before the toolbar is measured', () => {
+        expect(getComposerOptionalControlsVisibility(null, 160, true)).toEqual({
+            permission: true,
+            contextUsage: true
+        })
+    })
+
+    /**
+     * Optional composer controls are gated by measured toolbar width, not a
+     * viewport breakpoint. Context usage appears first because it is the
+     * highest-value inline status signal; permission can fall back to the
+     * grouped tools menu.
+     */
+    it('hides optional controls only when measured toolbar width is too tight', () => {
+        expect(getComposerOptionalControlsVisibility(260, 160)).toEqual({
+            permission: false,
+            contextUsage: false
+        })
+        expect(getComposerOptionalControlsVisibility(280, 160)).toEqual({
+            permission: false,
+            contextUsage: true
+        })
+        expect(getComposerOptionalControlsVisibility(330, 160)).toEqual({
+            permission: true,
+            contextUsage: true
+        })
+        expect(getComposerOptionalControlsVisibility(330, 160, true)).toEqual({
+            permission: false,
+            contextUsage: true
+        })
+    })
+})
+
 describe('ComposerButtons — permission mode button', () => {
     const noop = () => {}
 
@@ -119,10 +189,10 @@ describe('ComposerButtons — permission mode button', () => {
     })
 
     /**
-     * Verifies the composer permission control stays icon-only while the
-     * expanded menu carries the readable mode labels and descriptions.
+     * Permission mode is visible when the toolbar has room, and remains inside
+     * the grouped "+" menu for the mobile fallback.
      */
-    it('renders the permission mode trigger as icon-only and shows rich menu rows', () => {
+    it('shows permission mode when space is available and keeps it in the grouped tools menu', () => {
         renderInProviders(
             <ComposerButtons
                 canSend={false}
@@ -157,11 +227,23 @@ describe('ComposerButtons — permission mode button', () => {
             />
         )
 
-        const trigger = screen.getByRole('button', { name: /Permission Mode: Yolo/ })
-        expect(trigger.textContent).toBe('')
-        expect(screen.queryByText('Yolo')).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Permission Mode: Yolo/ })).toBeInTheDocument()
+        const buttonsBeforeMenu = screen.getAllByRole('button')
+        expect(buttonsBeforeMenu.indexOf(screen.getByRole('button', { name: 'More tools' }))).toBeLessThan(
+            buttonsBeforeMenu.indexOf(screen.getByRole('button', { name: /Permission Mode: Yolo/ })),
+        )
+        expect(buttonsBeforeMenu.indexOf(screen.getByRole('button', { name: /Permission Mode: Yolo/ }))).toBeLessThan(
+            buttonsBeforeMenu.indexOf(screen.getByRole('button', { name: 'Send' })),
+        )
 
-        fireEvent.click(trigger)
+        fireEvent.click(screen.getByRole('button', { name: 'More tools' }))
+
+        expect(screen.getByText('Input')).toBeInTheDocument()
+        expect(screen.getByText('Execution')).toBeInTheDocument()
+
+        const triggers = screen.getAllByRole('button', { name: /Permission Mode: Yolo/ })
+        expect(triggers.length).toBeGreaterThanOrEqual(2)
+        fireEvent.click(triggers[1]!)
 
         expect(screen.getByText('Full Access')).toBeInTheDocument()
         expect(screen.getByText('Full computer access (higher risk)')).toBeInTheDocument()
@@ -219,6 +301,7 @@ describe('ComposerButtons — plan mode status control', () => {
 
         const exitPlanButton = screen.getByRole('button', { name: 'Exit Plan Mode' })
         const abortButton = screen.getByRole('button', { name: 'Abort' })
+        expect(abortButton.className).toContain('text-red')
         const buttons = screen.getAllByRole('button')
         expect(buttons.indexOf(exitPlanButton)).toBeLessThan(buttons.indexOf(abortButton))
 

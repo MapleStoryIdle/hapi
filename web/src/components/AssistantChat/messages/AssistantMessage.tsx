@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
 import { MarkdownText } from '@/components/assistant-ui/markdown-text'
 import { Reasoning, ReasoningGroup } from '@/components/assistant-ui/reasoning'
@@ -16,9 +16,8 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { getAssistantCopyText } from '@/components/AssistantChat/messages/assistantCopyText'
 import { getConversationMessageAnchorId } from '@/chat/outline'
-import { MessageMetadata } from '@/components/AssistantChat/messages/MessageMetadata'
 import { CodexReviewCard } from '@/components/AssistantChat/messages/CodexReviewCard'
-import { MessageTimestamp } from '@/components/AssistantChat/messages/MessageTimestamp'
+import { MessageDetailsFooter, shouldIgnoreMessageDetailsToggle } from '@/components/AssistantChat/messages/MessageDetails'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
@@ -35,57 +34,6 @@ const MESSAGE_PART_COMPONENTS = {
 } as const
 
 const COPY_BUTTON_CLASS = 'flex h-7 w-7 items-center justify-center rounded-full border border-transparent text-[var(--app-hint)] opacity-80 transition-colors hover:border-[var(--app-border)] hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] hover:shadow-sm'
-
-function formatAssistantDuration(durationMs: number, locale: string): string {
-    const totalSeconds = Math.max(0, Math.round(durationMs / 1000))
-    const hours = Math.floor(totalSeconds / 3600)
-    const minutes = Math.floor((totalSeconds % 3600) / 60)
-    const seconds = totalSeconds % 60
-
-    if (locale === 'zh-CN') {
-        if (hours > 0) {
-            return minutes > 0 ? `${hours} 小时 ${minutes} 分钟` : `${hours} 小时`
-        }
-        if (minutes > 0) {
-            return seconds > 0 ? `${minutes} 分钟 ${seconds} 秒` : `${minutes} 分钟`
-        }
-        return `${seconds} 秒`
-    }
-
-    if (hours > 0) {
-        return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
-    }
-    if (minutes > 0) {
-        return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
-    }
-    return `${seconds}s`
-}
-
-function AssistantMetaBar(props: {
-    durationMs?: number
-    invokedAt?: number | null
-    expanded: boolean
-    onToggle: () => void
-}) {
-    const { t, locale } = useTranslation()
-    const label = typeof props.durationMs === 'number' && props.durationMs >= 0
-        ? t('message.elapsed', { duration: formatAssistantDuration(props.durationMs, locale) })
-        : props.invokedAt != null
-            ? new Date(props.invokedAt).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' })
-            : t('message.details')
-
-    return (
-        <button
-            type="button"
-            onClick={props.onToggle}
-            aria-expanded={props.expanded}
-            className="mb-4 flex w-full items-center gap-1.5 border-b border-[var(--app-divider)] pb-2 text-left text-[0.95rem] font-medium leading-6 text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]"
-        >
-            <span>{label}</span>
-            <span aria-hidden="true" className="text-lg leading-none">›</span>
-        </button>
-    )
-}
 
 function isToolGroupArtifact(value: unknown): value is ToolGroupBlock {
     if (!value || typeof value !== 'object') return false
@@ -146,6 +94,7 @@ function AssistantToolGroupMetaBar(props: {
 export function HappyAssistantMessage() {
     const ctx = useHappyChatContext()
     const { copied, copy } = useCopyToClipboard()
+    const [detailsVisible, setDetailsVisible] = useState(false)
     const [showMetadata, setShowMetadata] = useState(false)
     const [compactToolGroupOpen, setCompactToolGroupOpen] = useState(false)
     const messageId = useAssistantState(({ message }) => message.id)
@@ -230,35 +179,34 @@ export function HappyAssistantMessage() {
         setCompactToolGroupOpen((open) => !open)
     }
 
+    const toggleDetailsVisible = (event: MouseEvent<HTMLElement>) => {
+        if (shouldIgnoreMessageDetailsToggle(event)) return
+        setDetailsVisible((visible) => {
+            const next = !visible
+            if (!next) setShowMetadata(false)
+            return next
+        })
+    }
+
     if (isCliOutput) {
         return (
             <MessagePrimitive.Root
                 id={getConversationMessageAnchorId(messageId)}
                 className="scroll-mt-4 px-1 min-w-0 max-w-full overflow-x-hidden"
+                onClick={toggleDetailsVisible}
             >
                 <CliOutputBlock text={cliText} />
-                <div className="mt-2 flex items-center gap-2">
-                    <MessageTimestamp className="text-[10px] leading-none text-[var(--app-hint)]" />
-                    {hasMetadata && (
-                        <button
-                            type="button"
-                            onClick={() => setShowMetadata((open) => !open)}
-                            aria-expanded={showMetadata}
-                            className="text-[10px] text-[var(--app-hint)] underline-offset-2 hover:text-[var(--app-fg)] hover:underline"
-                        >
-                            {showMetadata ? 'Hide info' : 'Show info'}
-                        </button>
-                    )}
-                </div>
-                {showMetadata && (
-                    <MessageMetadata
-                        invokedAt={invokedAt}
-                        durationMs={durationMs}
-                        usage={usage}
-                        model={messageModel ?? null}
-                        turnCount={turnCount}
-                    />
-                )}
+                <MessageDetailsFooter
+                    visible={detailsVisible}
+                    hasMetadata={hasMetadata}
+                    metadataOpen={showMetadata}
+                    onMetadataToggle={() => setShowMetadata((open) => !open)}
+                    invokedAt={invokedAt}
+                    durationMs={durationMs}
+                    usage={usage}
+                    model={messageModel ?? null}
+                    turnCount={turnCount}
+                />
             </MessagePrimitive.Root>
         )
     }
@@ -268,32 +216,22 @@ export function HappyAssistantMessage() {
             <MessagePrimitive.Root
                 id={getConversationMessageAnchorId(messageId)}
                 className={`${rootClass} ${copyText ? 'group/msg' : ''} scroll-mt-4`}
+                onClick={toggleDetailsVisible}
             >
                 <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
                         <CodexReviewCard review={codexReview} />
-                        <div className="mt-2 flex items-center gap-2">
-                            <MessageTimestamp className="text-[10px] leading-none text-[var(--app-hint)]" />
-                            {hasMetadata && (
-                                <button
-                                    type="button"
-                                    onClick={() => setShowMetadata((open) => !open)}
-                                    aria-expanded={showMetadata}
-                                    className="text-[10px] text-[var(--app-hint)] underline-offset-2 hover:text-[var(--app-fg)] hover:underline"
-                                >
-                                    {showMetadata ? 'Hide info' : 'Show info'}
-                                </button>
-                            )}
-                        </div>
-                        {showMetadata && (
-                            <MessageMetadata
-                                invokedAt={invokedAt}
-                                durationMs={durationMs}
-                                usage={usage}
-                                model={messageModel ?? null}
-                                turnCount={turnCount}
-                            />
-                        )}
+                        <MessageDetailsFooter
+                            visible={detailsVisible}
+                            hasMetadata={hasMetadata}
+                            metadataOpen={showMetadata}
+                            onMetadataToggle={() => setShowMetadata((open) => !open)}
+                            invokedAt={invokedAt}
+                            durationMs={durationMs}
+                            usage={usage}
+                            model={messageModel ?? null}
+                            turnCount={turnCount}
+                        />
                     </div>
                     {copyText ? (
                         <div className="happy-message-actions-first-line hidden sm:flex shrink-0 opacity-0 transition-opacity group-hover/msg:opacity-100">
@@ -319,31 +257,21 @@ export function HappyAssistantMessage() {
             <MessagePrimitive.Root
                 id={getConversationMessageAnchorId(messageId)}
                 className={`${rootClass} ${copyText ? 'group/msg' : ''} scroll-mt-4`}
+                onClick={toggleDetailsVisible}
             >
                 <div className="min-w-0">
                     <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />
-                    <div className="mt-2 flex items-center gap-2">
-                        <MessageTimestamp className="text-[10px] leading-none text-[var(--app-hint)]" />
-                        {hasMetadata && (
-                            <button
-                                type="button"
-                                onClick={() => setShowMetadata((open) => !open)}
-                                aria-expanded={showMetadata}
-                                className="text-[10px] text-[var(--app-hint)] underline-offset-2 hover:text-[var(--app-fg)] hover:underline"
-                            >
-                                {showMetadata ? 'Hide info' : 'Show info'}
-                            </button>
-                        )}
-                    </div>
-                    {showMetadata && (
-                        <MessageMetadata
-                            invokedAt={invokedAt}
-                            durationMs={durationMs}
-                            usage={usage}
-                            model={messageModel ?? null}
-                            turnCount={turnCount}
-                        />
-                    )}
+                    <MessageDetailsFooter
+                        visible={detailsVisible}
+                        hasMetadata={hasMetadata}
+                        metadataOpen={showMetadata}
+                        onMetadataToggle={() => setShowMetadata((open) => !open)}
+                        invokedAt={invokedAt}
+                        durationMs={durationMs}
+                        usage={usage}
+                        model={messageModel ?? null}
+                        turnCount={turnCount}
+                    />
                 </div>
             </MessagePrimitive.Root>
         )
@@ -353,6 +281,7 @@ export function HappyAssistantMessage() {
         <MessagePrimitive.Root
             id={getConversationMessageAnchorId(messageId)}
             className={`${rootClass} ${copyText ? 'group/msg' : ''} scroll-mt-4`}
+            onClick={toggleDetailsVisible}
         >
             {showCompactToolGroupHeader && firstToolGroup ? (
                 <AssistantToolGroupMetaBar
@@ -360,28 +289,23 @@ export function HappyAssistantMessage() {
                     expanded={compactToolGroupOpen}
                     onToggle={toggleCompactToolGroup}
                 />
-            ) : hasMetadata ? (
-                <AssistantMetaBar
-                    durationMs={durationMs}
-                    invokedAt={invokedAt}
-                    expanded={showMetadata}
-                    onToggle={() => setShowMetadata((open) => !open)}
-                />
             ) : null}
             <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
                     <ToolGroupCompactHeaderProvider value={compactToolGroupContext}>
                         <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />
                     </ToolGroupCompactHeaderProvider>
-                    {showMetadata && (
-                        <MessageMetadata
-                            invokedAt={invokedAt}
-                            durationMs={durationMs}
-                            usage={usage}
-                            model={messageModel ?? null}
-                            turnCount={turnCount}
-                        />
-                    )}
+                    <MessageDetailsFooter
+                        visible={detailsVisible}
+                        hasMetadata={hasMetadata}
+                        metadataOpen={showMetadata}
+                        onMetadataToggle={() => setShowMetadata((open) => !open)}
+                        invokedAt={invokedAt}
+                        durationMs={durationMs}
+                        usage={usage}
+                        model={messageModel ?? null}
+                        turnCount={turnCount}
+                    />
                 </div>
                 {copyText ? (
                     <div className="happy-message-actions-first-line hidden sm:flex shrink-0 opacity-0 transition-opacity group-hover/msg:opacity-100">

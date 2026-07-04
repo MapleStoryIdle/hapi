@@ -189,12 +189,20 @@ function normalizeTraceMessage(
         } as TracedMessage]
     }
 
-    if (data.type === 'message' && typeof data.message === 'string') {
+    if ((data.type === 'message' || data.type === 'message-snapshot') && typeof data.message === 'string') {
+        const final = data.final === true || data.completed === true
         return [{
             ...base,
             id: traceId,
             role: 'agent',
-            content: [{ type: 'text', text: data.message, uuid: traceId, parentUUID: null }]
+            content: [{
+                type: 'text',
+                text: data.message,
+                uuid: traceId,
+                streamId: asString(data.streamId ?? data.stream_id ?? data.itemId ?? data.item_id) ?? undefined,
+                final: final ? true : undefined,
+                parentUUID: null
+            }]
         } as TracedMessage]
     }
 
@@ -282,6 +290,7 @@ export function reduceTimeline(
     const agentRunCardByAgentId = new Map<string, string>()
     const agentRunTraceMessagesByCardId = new Map<string, TracedMessage[]>()
     const pendingAgentRunCardByFingerprint = new Map<string, string>()
+    const textBlocksByStreamId = new Map<string, AgentTextBlock>()
     const reasoningBlocksByStreamId = new Map<string, AgentReasoningBlock>()
     let hasReadyEvent = false
 
@@ -733,7 +742,21 @@ export function reduceTimeline(
                         }))
                         continue
                     }
-                    blocks.push({
+                    const streamId = asString(c.streamId) ?? undefined
+                    if (streamId) {
+                        const existing = textBlocksByStreamId.get(streamId)
+                        if (existing) {
+                            existing.text = c.text
+                            existing.usage = msg.usage
+                            existing.model = msg.model
+                            existing.meta = msg.meta
+                            existing.invokedAt = msg.invokedAt
+                            if (c.final === true) existing.final = true
+                            continue
+                        }
+                    }
+
+                    const block: AgentTextBlock = {
                         kind: 'agent-text',
                         id: `${msg.id}:${idx}`,
                         localId: msg.localId,
@@ -742,8 +765,14 @@ export function reduceTimeline(
                         usage: msg.usage,
                         model: msg.model,
                         text: c.text,
+                        streamId,
+                        final: c.final === true ? true : undefined,
                         meta: msg.meta
-                    })
+                    }
+                    blocks.push(block)
+                    if (streamId) {
+                        textBlocksByStreamId.set(streamId, block)
+                    }
                     continue
                 }
 

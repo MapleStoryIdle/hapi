@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
     BOTTOM_FLOATING_CONTROL_GAP_PX,
+    BOTTOM_OVERLAY_INSET_PX,
     buildGoalStateMessages,
     getScrollButtonBottomInset,
     isScratchlistHotkeyBlockedTarget,
@@ -83,12 +84,19 @@ describe('shouldAutoClearPendingSchedule', () => {
  * thread still needs the full bottom overlay height so content is not covered.
  */
 describe('getScrollButtonBottomInset', () => {
+    it('uses the scroll-to-bottom button gap as the shared bottom-control gap', () => {
+        expect(BOTTOM_FLOATING_CONTROL_GAP_PX).toBe(8)
+        expect(BOTTOM_OVERLAY_INSET_PX).toBe(8)
+    })
+
     it('uses the shared floating-control gap once the composer height is known', () => {
-        expect(getScrollButtonBottomInset(128, 320)).toBe(128 + BOTTOM_FLOATING_CONTROL_GAP_PX)
+        expect(getScrollButtonBottomInset(128, 320, BOTTOM_OVERLAY_INSET_PX)).toBe(
+            128 + BOTTOM_OVERLAY_INSET_PX + BOTTOM_FLOATING_CONTROL_GAP_PX
+        )
     })
 
     it('falls back to the full bottom overlay height before composer measurement', () => {
-        expect(getScrollButtonBottomInset(0, 320)).toBe(320)
+        expect(getScrollButtonBottomInset(0, 320, BOTTOM_OVERLAY_INSET_PX)).toBe(320 + BOTTOM_OVERLAY_INSET_PX)
     })
 })
 

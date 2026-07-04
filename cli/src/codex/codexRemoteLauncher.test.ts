@@ -42,6 +42,7 @@ const harness = vi.hoisted(() => ({
     emitSecondChildMessage: false,
     emitLateChildCommandAfterParentTool: false,
     emitParentUsageEvents: false,
+    emitParentMessageSnapshots: false,
     emitParentGoalDuplicateEvents: false,
     emitChildNestedAgentTool: false,
     emitParentTitleChange: false,
@@ -321,6 +322,22 @@ vi.mock('./codexAppServerClient', () => {
                 };
                 harness.notifications.push({ method: 'item/completed', params: commandEnd });
                 this.notificationHandler?.('item/completed', commandEnd);
+
+                if (harness.emitParentMessageSnapshots) {
+                    this.notificationHandler?.('item/agentMessage/delta', {
+                        itemId: 'parent-msg-1',
+                        delta: 'Hel'
+                    });
+                    const messageCompleted = {
+                        item: {
+                            id: 'parent-msg-1',
+                            type: 'agentMessage',
+                            content: [{ type: 'text', text: 'Hello' }]
+                        }
+                    };
+                    harness.notifications.push({ method: 'item/completed', params: messageCompleted });
+                    this.notificationHandler?.('item/completed', messageCompleted);
+                }
 
                 if (harness.emitParentUsageEvents) {
                     const parentUsage = {
@@ -974,6 +991,7 @@ describe('codexRemoteLauncher', () => {
         harness.emitSecondChildMessage = false;
         harness.emitLateChildCommandAfterParentTool = false;
         harness.emitParentUsageEvents = false;
+        harness.emitParentMessageSnapshots = false;
         harness.emitParentGoalDuplicateEvents = false;
         harness.emitChildNestedAgentTool = false;
         harness.emitParentTitleChange = false;
@@ -1023,6 +1041,43 @@ describe('codexRemoteLauncher', () => {
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
         expect(thinkingChanges).toContain(true);
         expect(session.thinking).toBe(false);
+    });
+
+    it('forwards parent agent message snapshots and final messages with the same stream id', async () => {
+        // 验证 launcher 层把 app-server 正文快照和 completed 正文转成 Web 可合并的同一 streamId。
+        harness.emitParentMessageSnapshots = true;
+        const { session, codexMessages } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        const snapshotIndex = codexMessages.findIndex((message) => {
+            return typeof message === 'object'
+                && message !== null
+                && (message as Record<string, unknown>).type === 'message-snapshot'
+                && (message as Record<string, unknown>).streamId === 'parent-msg-1';
+        });
+        const finalIndex = codexMessages.findIndex((message) => {
+            return typeof message === 'object'
+                && message !== null
+                && (message as Record<string, unknown>).type === 'message'
+                && (message as Record<string, unknown>).streamId === 'parent-msg-1';
+        });
+
+        expect(snapshotIndex).toBeGreaterThanOrEqual(0);
+        expect(finalIndex).toBeGreaterThan(snapshotIndex);
+        expect(codexMessages[snapshotIndex]).toMatchObject({
+            type: 'message-snapshot',
+            message: 'Hel',
+            streamId: 'parent-msg-1',
+            itemId: 'parent-msg-1'
+        });
+        expect(codexMessages[finalIndex]).toMatchObject({
+            type: 'message',
+            message: 'Hello',
+            streamId: 'parent-msg-1',
+            itemId: 'parent-msg-1',
+            final: true
+        });
     });
 
     it('uses live permission mode for app-server MCP elicitation handlers', async () => {

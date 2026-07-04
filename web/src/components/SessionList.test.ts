@@ -6,6 +6,8 @@ import {
     filterActiveSessionsOnly,
     getNextSessionVisibleCount,
     getSessionDedupKey,
+    getSessionWorkspaceDirectory,
+    getSessionWorkspaceTitle,
     getVisibleSessionPreview,
     isSidebarEmptySessionStub,
     normalizeSearch,
@@ -33,6 +35,41 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         ...overrides
     }
 }
+
+describe('workspace title helpers', () => {
+    it('uses the worktree base path before the transient session path', () => {
+        const session = makeSession({
+            id: 'worktree',
+            metadata: {
+                path: '/tmp/worktrees/hapi-feature',
+                worktree: { basePath: '/repo/hapi', branch: 'feature', name: 'feature' }
+            }
+        })
+
+        // 验证 worktree 会话按主 workspace 分组，而不是临时 worktree 目录。
+        expect(getSessionWorkspaceDirectory(session)).toBe('/repo/hapi')
+    })
+
+    it('prefers the selected session workspace in the page header title', () => {
+        const sessions = [
+            makeSession({ id: 'old', updatedAt: 200, metadata: { path: '/repo/older' } }),
+            makeSession({ id: 'selected', updatedAt: 100, metadata: { path: '/repo/hapi' } }),
+        ]
+
+        // 验证详情页/列表页切换时，标题跟随当前选中的会话 workspace。
+        expect(getSessionWorkspaceTitle(sessions, 'selected')).toBe('hapi')
+    })
+
+    it('falls back to the hottest workspace when no session is selected', () => {
+        const sessions = [
+            makeSession({ id: 'recent-idle', updatedAt: 300, metadata: { path: '/repo/idle' } }),
+            makeSession({ id: 'pending', active: true, pendingRequestsCount: 1, updatedAt: 100, metadata: { path: '/repo/hapi' } }),
+        ]
+
+        // 验证会话列表首页优先展示需要注意的活跃 workspace。
+        expect(getSessionWorkspaceTitle(sessions, null)).toBe('hapi')
+    })
+})
 
 describe('deduplicateSessionsByAgentId', () => {
     it('deduplicates sessions with the same agentSessionId', () => {

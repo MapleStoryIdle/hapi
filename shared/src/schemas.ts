@@ -344,13 +344,36 @@ export const RunnerStateSchema = z.object({
 
 export type RunnerState = z.infer<typeof RunnerStateSchema>
 
+export const MachineHealthDiskSchema = z.object({
+    path: z.string(),
+    totalBytes: z.number().nonnegative(),
+    freeBytes: z.number().nonnegative(),
+    usedPercent: z.number().min(0).max(100)
+}).strict()
+
+export const MachineHealthNetworkInterfaceSchema = z.object({
+    name: z.string(),
+    address: z.string(),
+    family: z.string()
+}).strict()
+
+export const MachineAgentCliStatusSchema = z.object({
+    id: z.string(),
+    label: z.string(),
+    command: z.string(),
+    available: z.boolean()
+}).strict()
+
 export const MachineHealthSchema = z.object({
     collectedAt: z.number(),
     cpuCount: z.number().int().positive().optional(),
     load1m: z.number().nonnegative().optional(),
     cpuPercent: z.number().min(0).max(100).optional(),
     memoryPercent: z.number().min(0).max(100).optional(),
-    uptimeSeconds: z.number().nonnegative().optional()
+    uptimeSeconds: z.number().nonnegative().optional(),
+    disk: MachineHealthDiskSchema.optional(),
+    networkInterfaces: z.array(MachineHealthNetworkInterfaceSchema).optional(),
+    agentCli: z.array(MachineAgentCliStatusSchema).optional()
 }).strict()
 
 export type MachineHealth = z.infer<typeof MachineHealthSchema>

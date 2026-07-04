@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { FileDiffIcon } from '@/components/ToolCard/icons'
@@ -265,13 +265,19 @@ export function GitCodeBlockCard(props: {
     code: string
 }) {
     const { t } = useTranslation()
+    const [expanded, setExpanded] = useState(false)
     const visibleFiles = useMemo(() => props.summary.files.slice(0, VISIBLE_ROW_LIMIT), [props.summary.files])
     const hiddenCount = props.summary.files.length - visibleFiles.length
     const hasLineCounts = props.summary.added > 0 || props.summary.removed > 0
 
     return (
         <div className="aui-md-gitblock min-w-0 w-full max-w-full overflow-hidden rounded-[16px] border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_8px_22px_rgba(15,23,42,0.06)]">
-            <div className="flex items-start justify-between gap-3 px-4 pb-3 pt-4">
+            <button
+                type="button"
+                className="flex w-full items-start justify-between gap-3 px-4 pb-3 pt-4 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--app-link)]"
+                aria-expanded={expanded}
+                onClick={() => setExpanded((value) => !value)}
+            >
                 <div className="flex min-w-0 items-start gap-3">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--app-subtle-bg)] text-[var(--app-hint)]">
                         <FileDiffIcon className="h-5 w-5" />
@@ -288,35 +294,46 @@ export function GitCodeBlockCard(props: {
                         ) : null}
                     </div>
                 </div>
-            </div>
+                <span
+                    className={cn(
+                        'mt-2 shrink-0 text-[var(--app-hint)] transition-transform',
+                        expanded ? 'rotate-90' : ''
+                    )}
+                    aria-hidden="true"
+                >
+                    ›
+                </span>
+            </button>
 
-            <div className="border-t border-[var(--app-border)] py-1">
-                {visibleFiles.map((file, index) => (
-                    <div
-                        key={`${file.status}:${file.path}:${index}`}
-                        className="grid min-w-0 grid-cols-[4.35rem_minmax(0,1fr)_auto] items-center gap-2 px-4 py-1.5 text-[0.92rem] leading-5"
-                    >
-                        <span className={cn('inline-flex h-6 items-center justify-center rounded-md px-2 text-xs font-semibold', statusTone(file.status))}>
-                            {t(`gitCodeBlock.status.${file.status}`)}
-                        </span>
-                        <span className="min-w-0 truncate font-mono text-[var(--app-fg)]">
-                            <span className="text-[var(--app-hint)]">{parentPath(file.path)}</span>
-                            {fileName(file.path)}
-                        </span>
-                        {file.added > 0 || file.removed > 0 ? (
-                            <span className="flex shrink-0 items-center gap-1.5 font-mono text-[0.88rem] font-semibold">
-                                <span className="text-[var(--app-git-staged-color)]">+{file.added}</span>
-                                <span className="text-[var(--app-git-deleted-color)]">-{file.removed}</span>
+            {expanded ? (
+                <div className="border-t border-[var(--app-border)] py-1">
+                    {visibleFiles.map((file, index) => (
+                        <div
+                            key={`${file.status}:${file.path}:${index}`}
+                            className="grid min-w-0 grid-cols-[4.35rem_minmax(0,1fr)_auto] items-center gap-2 px-4 py-1.5 text-[0.92rem] leading-5"
+                        >
+                            <span className={cn('inline-flex h-6 items-center justify-center rounded-md px-2 text-xs font-semibold', statusTone(file.status))}>
+                                {t(`gitCodeBlock.status.${file.status}`)}
                             </span>
-                        ) : null}
-                    </div>
-                ))}
-                {hiddenCount > 0 ? (
-                    <div className="px-4 py-2 text-[0.82rem] text-[var(--app-hint)]">
-                        {t('gitDiff.summary.moreFiles', { count: hiddenCount })}
-                    </div>
-                ) : null}
-            </div>
+                            <span className="min-w-0 truncate font-mono text-[var(--app-fg)]">
+                                <span className="text-[var(--app-hint)]">{parentPath(file.path)}</span>
+                                {fileName(file.path)}
+                            </span>
+                            {file.added > 0 || file.removed > 0 ? (
+                                <span className="flex shrink-0 items-center gap-1.5 font-mono text-[0.88rem] font-semibold">
+                                    <span className="text-[var(--app-git-staged-color)]">+{file.added}</span>
+                                    <span className="text-[var(--app-git-deleted-color)]">-{file.removed}</span>
+                                </span>
+                            ) : null}
+                        </div>
+                    ))}
+                    {hiddenCount > 0 ? (
+                        <div className="px-4 py-2 text-[0.82rem] text-[var(--app-hint)]">
+                            {t('gitDiff.summary.moreFiles', { count: hiddenCount })}
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
         </div>
     )
 }

@@ -84,7 +84,40 @@ describe('AppServerEventConverter', () => {
             item: { id: 'msg-1', type: 'agentMessage' }
         });
 
-        expect(completed).toEqual([{ type: 'agent_message', message: 'Hello world' }]);
+        expect(completed).toEqual([{
+            type: 'agent_message',
+            stream_id: 'msg-1',
+            item_id: 'msg-1',
+            message: 'Hello world',
+            final: true
+        }]);
+    });
+
+    it('emits throttled agent message snapshots with a stable stream id', () => {
+        // 验证 Codex 正文流只按节流窗口输出快照；同一 itemId 始终作为稳定 stream_id。
+        let now = 0;
+        const converter = new AppServerEventConverter({
+            now: () => now,
+            messageSnapshotThrottleMs: 100
+        });
+
+        expect(converter.handleNotification('item/agentMessage/delta', { itemId: 'msg-1', delta: 'Hel' })).toEqual([{
+            type: 'agent_message_snapshot',
+            stream_id: 'msg-1',
+            item_id: 'msg-1',
+            message: 'Hel'
+        }]);
+
+        now = 50;
+        expect(converter.handleNotification('item/agentMessage/delta', { itemId: 'msg-1', delta: 'lo' })).toEqual([]);
+
+        now = 100;
+        expect(converter.handleNotification('item/agentMessage/delta', { itemId: 'msg-1', delta: ' world' })).toEqual([{
+            type: 'agent_message_snapshot',
+            stream_id: 'msg-1',
+            item_id: 'msg-1',
+            message: 'Hello world'
+        }]);
     });
 
     it('preserves thread and turn scope on item events', () => {
@@ -106,6 +139,9 @@ describe('AppServerEventConverter', () => {
             type: 'agent_message',
             thread_id: 'child-thread',
             turn_id: 'child-turn',
+            stream_id: 'msg-1',
+            item_id: 'msg-1',
+            final: true,
             message: 'child output'
         }]);
     });
@@ -121,7 +157,13 @@ describe('AppServerEventConverter', () => {
             item: { id: 'msg-1', type: 'agentMessage' }
         });
 
-        expect(first).toEqual([{ type: 'agent_message', message: 'Hello' }]);
+        expect(first).toEqual([{
+            type: 'agent_message',
+            stream_id: 'msg-1',
+            item_id: 'msg-1',
+            message: 'Hello',
+            final: true
+        }]);
         expect(second).toEqual([]);
     });
 
@@ -570,7 +612,13 @@ describe('AppServerEventConverter', () => {
             }
         });
 
-        expect(completed).toEqual([{ type: 'agent_message', message: 'Hello world' }]);
+        expect(completed).toEqual([{
+            type: 'agent_message',
+            stream_id: 'msg-1',
+            item_id: 'msg-1',
+            message: 'Hello world',
+            final: true
+        }]);
     });
 
     it('preserves nested scope on wrapped item lifecycle events', () => {
@@ -609,6 +657,9 @@ describe('AppServerEventConverter', () => {
             type: 'agent_message',
             thread_id: 'child-thread',
             turn_id: 'child-turn',
+            stream_id: 'msg-1',
+            item_id: 'msg-1',
+            final: true,
             message: 'child output'
         }]);
     });

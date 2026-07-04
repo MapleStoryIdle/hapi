@@ -88,6 +88,8 @@ export type NormalizedAgentContent =
         type: 'text'
         text: string
         uuid: string
+        streamId?: string
+        final?: boolean
         parentUUID: string | null
     }
     | {
@@ -180,6 +182,8 @@ export type AgentTextBlock = {
     usage?: UsageData
     model?: string | null
     text: string
+    streamId?: string
+    final?: boolean
     meta?: unknown
 }
 
