@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 
 const COMPACT_ELAPSED_INTERVAL_MS = 1000
-const COMPACT_DONE_DURATION_VISIBLE_MS = 5000
 
 type ToolGroupCompactHeaderState = {
     groupId: string
@@ -83,8 +82,7 @@ export function formatToolGroupCompactTitle(
 ): string {
     const active = isToolGroupActive(block)
     const durationMs = getToolGroupDurationMs(block, now)
-    const compactDuration = formatCompactDuration(durationMs)
-    const renderedDuration = active || durationMs > COMPACT_DONE_DURATION_VISIBLE_MS ? compactDuration : ''
+    const renderedDuration = formatCompactDuration(durationMs)
     const singleTool = !block.forceGenericCompactTitle && block.tools.length === 1 ? block.tools[0] : null
     if (singleTool) {
         const status = active ? 'processing' : 'processed'

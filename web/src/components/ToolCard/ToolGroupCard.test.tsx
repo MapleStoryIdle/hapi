@@ -258,11 +258,11 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /^ran$/i })).toHaveAttribute('aria-expanded', 'false')
+        expect(within(view.container).getByRole('button', { name: /ran 2s/i })).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByText('Processed 2s')).not.toBeInTheDocument()
     })
 
-    it('keeps completed compact durations only when the work took more than five seconds', () => {
+    it('keeps long completed compact durations', () => {
         const tools = [
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
                 createdAt: 0,
@@ -372,7 +372,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const toggle = within(view.container).getByRole('button', { name: /^processed$/i })
+        const toggle = within(view.container).getByRole('button', { name: /processed 2s/i })
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByText('Ran 2s')).not.toBeInTheDocument()
 
@@ -430,7 +430,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        fireEvent.click(within(view.container).getByRole('button', { name: /^processed$/i }))
+        fireEvent.click(within(view.container).getByRole('button', { name: /processed 2s/i }))
 
         const text = view.container.textContent ?? ''
         expect(text.indexOf('First process note')).toBeGreaterThanOrEqual(0)

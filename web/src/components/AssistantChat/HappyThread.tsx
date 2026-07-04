@@ -725,6 +725,7 @@ export function HappyThread(props: {
     }, [props.isLoadingMoreMessages, settlePendingLoad])
 
     const showSkeleton = props.isLoadingMessages && props.rawMessagesCount === 0 && props.pendingCount === 0
+    const firstMessageTopPadding = props.rawMessagesCount > 0 ? '50dvh' : undefined
 
     return (
         <HappyChatProvider value={{
@@ -805,7 +806,10 @@ export function HappyThread(props: {
                                     ) : null}
                                 </>
                             )}
-                            <div className="happy-thread-messages flex flex-col gap-4">
+                            <div
+                                className="happy-thread-messages flex flex-col gap-4"
+                                style={{ paddingTop: firstMessageTopPadding }}
+                            >
                                 <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
                             </div>
                         </div>

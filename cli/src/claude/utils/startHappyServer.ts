@@ -5,14 +5,14 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createServer, type IncomingMessage } from "node:http";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { AddressInfo } from "node:net";
 import { z } from "zod";
 import { logger } from "@/ui/logger";
 import { ApiSessionClient } from "@/api/apiSession";
 import { randomUUID } from "node:crypto";
-import { detectImageMimeType, registerGeneratedImage } from "@/modules/common/generatedImages";
+import { detectImageMimeType, readImageHeader, registerGeneratedImage } from "@/modules/common/generatedImages";
 
 type StartHappyServerOptions = {
     emitTitleSummary?: boolean;
@@ -110,8 +110,8 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
                 throw new Error('Image is too large to display inline');
             }
 
-            const bytes = await readFile(args.path);
-            const mimeType = detectImageMimeType(bytes);
+            const header = await readImageHeader(args.path);
+            const mimeType = detectImageMimeType(header);
             if (!mimeType) {
                 throw new Error('Unsupported image content');
             }
@@ -121,7 +121,8 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
                 path: args.path,
                 fileName: args.title,
                 mimeType,
-                bytes
+                size: info.size,
+                mtimeMs: info.mtimeMs
             });
 
             client.sendAgentMessage({

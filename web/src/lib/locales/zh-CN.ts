@@ -240,9 +240,13 @@ export default {
   'newSession.opencodeModel.empty': '未在此目录发现 OpenCode 模型',
   'newSession.opencodeModel.default': '默认',
   'newSession.reasoningEffort': '推理强度',
+  'newSession.runConfig': '运行配置',
   'newSession.yolo': 'YOLO 模式',
+  'newSession.yolo.default': '默认',
+  'newSession.yolo.mode': 'YOLO',
   'newSession.yolo.title': '跳过审批和沙箱',
   'newSession.yolo.desc': '启动时使用危险的代理标志。',
+  'newSession.yolo.short': '启用',
   'newSession.create': '创建',
   'newSession.creating': '创建中…',
 
@@ -794,6 +798,10 @@ export default {
   'misc.permissionRequired': '需要权限',
   'misc.percentLeft': '剩余 {percent}%',
   'misc.online': '在线',
+  'subagents.badgeAria': '{count} 个活跃 subagent',
+  'subagents.title': 'Subagent 列表',
+  'subagents.drawerTitle': 'Subagent 会话',
+  'subagents.noLoadedEvents': '当前已加载消息里还没有这个 subagent 的内容。',
 
   // Web Share Target 分享面板
   'share.title': '分享到 HAPI',

@@ -1,6 +1,6 @@
 import React from 'react';
 import { randomUUID } from 'node:crypto';
-import { lstat, readFile } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 
 import { CodexAppServerClient } from './codexAppServerClient';
 import { CodexPermissionHandler } from './utils/permissionHandler';
@@ -14,7 +14,7 @@ import type { CodexSession } from './session';
 import type { EnhancedMode } from './loop';
 import { hasCodexCliOverrides } from './utils/codexCliOverrides';
 import { AppServerEventConverter } from './utils/appServerEventConverter';
-import { detectImageMimeType, registerGeneratedImage } from '@/modules/common/generatedImages';
+import { detectImageMimeType, readImageHeader, registerGeneratedImage } from '@/modules/common/generatedImages';
 import { registerAppServerPermissionHandlers } from './utils/appServerPermissionAdapter';
 import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerConfig';
 import type { ThreadGoal, ThreadGoalStatus } from './appServerTypes';
@@ -37,8 +37,8 @@ async function registerGeneratedImageFromPath(args: { id: string; path: string; 
         if (info.size > maxImageBytes) {
             throw new Error('Image is too large to display inline');
         }
-        const bytes = await readFile(args.path);
-        const mimeType = detectImageMimeType(bytes);
+        const header = await readImageHeader(args.path);
+        const mimeType = detectImageMimeType(header);
         if (!mimeType) {
             throw new Error('Unsupported image content');
         }
@@ -47,7 +47,8 @@ async function registerGeneratedImageFromPath(args: { id: string; path: string; 
             path: args.path,
             fileName: args.fileName,
             mimeType,
-            bytes
+            size: info.size,
+            mtimeMs: info.mtimeMs
         });
     } catch (error) {
         logger.debug('[CodexRemoteLauncher] Failed to register generated image:', error instanceof Error ? error.message : String(error));
@@ -73,8 +74,26 @@ type ChildAgentRuntime = {
     blockedNestedAgent: boolean;
 };
 
+type CodexSubagentSnapshot = {
+    id: string;
+    cardId?: string;
+    threadId?: string;
+    turnId?: string;
+    type?: string;
+    title?: string;
+    summary?: string;
+    status: string;
+    statusText?: string;
+    activity?: string;
+    activityKind?: string;
+    startedAt: number;
+    updatedAt: number;
+    completedAt?: number;
+};
+
 const AGENT_RUN_UPDATE_THROTTLE_MS = 300;
 const AGENT_RUN_START_TIMEOUT_MS = 30 * 1000;
+const SUBAGENT_STATE_FLUSH_DEBOUNCE_MS = 250;
 const THROTTLED_AGENT_RUN_ACTIVITY_KINDS = new Set(['thinking']);
 const CODEX_SPAWN_AGENT_FULL_HISTORY_ARGUMENT_ERROR =
     'Full-history forked agents inherit the parent agent type, model, and reasoning effort; ' +
@@ -506,6 +525,12 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             return agentType ? `${agentType} agent` : null;
         };
 
+        const extractAgentType = (input: unknown): string | null => {
+            const record = asRecord(input);
+            if (!record) return null;
+            return asString(record.agent_type ?? record.agentType ?? record.subagent_type ?? record.subagentType ?? record.type);
+        };
+
         const getPatchFiles = (changes: unknown): string[] => {
             const record = asRecord(changes);
             if (!record) return [];
@@ -611,11 +636,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const agentStatusByAgentId = new Map<string, string>();
         const agentStartedAtByCardId = new Map<string, number>();
         const agentStartedAtByAgentId = new Map<string, number>();
+        const agentTypeByCardId = new Map<string, string>();
+        const agentTypeByAgentId = new Map<string, string>();
         const pendingAgentStartCardIds = new Set<string>();
         const pendingAgentUpdatesByAgentId = new Map<string, Record<string, unknown>[]>();
         const pendingAgentTracesByAgentId = new Map<string, unknown[]>();
         const pendingAgentToolInputByCallId = new Map<string, { name: string; input: unknown }>();
         const childAgentRuntimeById = new Map<string, ChildAgentRuntime>();
+        const subagentSnapshotById = new Map<string, CodexSubagentSnapshot>();
         const lastAgentRunUpdateAtByAgentId = new Map<string, number>();
         const lastAgentRunUpdateSignatureByAgentId = new Map<string, string>();
         const pendingThrottledAgentUpdateByAgentId = new Map<string, {
@@ -624,6 +652,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         }>();
         const pendingThrottledAgentUpdateTimerByAgentId = new Map<string, ReturnType<typeof setTimeout>>();
         const pendingAgentStartTimersByCardId = new Map<string, ReturnType<typeof setTimeout>>();
+        let subagentStateFlushTimer: ReturnType<typeof setTimeout> | null = null;
         this.permissionHandler = permissionHandler;
         this.reasoningProcessor = reasoningProcessor;
         this.diffProcessor = diffProcessor;
@@ -651,6 +680,108 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 || status === 'cancelled'
                 || status === 'notFound'
                 || status === 'not_found';
+        };
+
+        const flushSubagentState = (): void => {
+            if (subagentStateFlushTimer) {
+                clearTimeout(subagentStateFlushTimer);
+                subagentStateFlushTimer = null;
+            }
+            if (subagentSnapshotById.size === 0) {
+                return;
+            }
+
+            const subagents = Object.fromEntries(
+                Array.from(subagentSnapshotById.entries()).map(([agentId, snapshot]) => [agentId, { ...snapshot }])
+            );
+            const activeSubagentId = Array.from(subagentSnapshotById.values())
+                .filter((snapshot) => !isTerminalAgentRunStatus(snapshot.status))
+                .sort((a, b) => b.updatedAt - a.updatedAt)[0]?.id ?? null;
+            const updatedAt = Date.now();
+            const updateAgentState = (session as unknown as {
+                updateAgentState?: CodexSession['updateAgentState'];
+            }).updateAgentState;
+            if (!updateAgentState) {
+                return;
+            }
+
+            updateAgentState.call(session, (state) => ({
+                ...state,
+                codex: {
+                    ...(state.codex ?? {}),
+                    activeSubagentId,
+                    subagents,
+                    updatedAt
+                }
+            }));
+        };
+
+        const scheduleSubagentStateFlush = (immediate = false): void => {
+            if (immediate) {
+                flushSubagentState();
+                return;
+            }
+            if (subagentStateFlushTimer) return;
+            subagentStateFlushTimer = setTimeout(flushSubagentState, SUBAGENT_STATE_FLUSH_DEBOUNCE_MS);
+            subagentStateFlushTimer.unref?.();
+        };
+
+        const upsertSubagentSnapshot = (
+            agentId: string,
+            event: Record<string, unknown>,
+            flushImmediately: boolean
+        ): void => {
+            const now = Date.now();
+            const existing = subagentSnapshotById.get(agentId);
+            const status = asString(event.status) ?? existing?.status ?? 'running';
+            const cardId = asString(event.cardId ?? event.card_id) ?? existing?.cardId ?? agentCardByAgentId.get(agentId);
+            const startedAt = typeof event.startedAt === 'number'
+                ? event.startedAt
+                : existing?.startedAt ?? agentStartedAtByAgentId.get(agentId) ?? now;
+            const completedAt = typeof event.completedAt === 'number'
+                ? event.completedAt
+                : existing?.completedAt;
+            const summary = asString(event.summary) ?? existing?.summary ?? agentSummaryByAgentId.get(agentId);
+            const type = existing?.type ?? agentTypeByAgentId.get(agentId);
+            const statusText = asString(event.statusText ?? event.status_text) ?? existing?.statusText;
+            const activity = asString(event.activity) ?? existing?.activity;
+            const activityKind = asString(event.activityKind ?? event.activity_kind) ?? existing?.activityKind;
+            const threadId = asString(event.threadId ?? event.thread_id) ?? existing?.threadId ?? agentId;
+            const turnId = asString(event.turnId ?? event.turn_id) ?? existing?.turnId ?? this.activeChildTurns.get(threadId);
+
+            subagentSnapshotById.set(agentId, {
+                id: agentId,
+                ...(cardId ? { cardId } : {}),
+                ...(threadId ? { threadId } : {}),
+                ...(turnId ? { turnId } : {}),
+                ...(type ? { type } : {}),
+                ...(summary ? { title: summary, summary } : {}),
+                status,
+                ...(statusText ? { statusText } : {}),
+                ...(activity ? { activity } : {}),
+                ...(activityKind ? { activityKind } : {}),
+                startedAt,
+                updatedAt: now,
+                ...(completedAt ? { completedAt } : {})
+            });
+
+            scheduleSubagentStateFlush(flushImmediately);
+        };
+
+        const markAllActiveSubagents = (status: string, statusText: string): void => {
+            for (const snapshot of subagentSnapshotById.values()) {
+                if (isTerminalAgentRunStatus(snapshot.status)) continue;
+                subagentSnapshotById.set(snapshot.id, {
+                    ...snapshot,
+                    status,
+                    statusText,
+                    activity: statusText,
+                    activityKind: status,
+                    updatedAt: Date.now(),
+                    completedAt: Date.now()
+                });
+            }
+            flushSubagentState();
         };
 
         const isCloseAgentCleanupUpdate = (update: Record<string, unknown>): boolean => {
@@ -737,6 +868,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             childAgentActivityInCurrentTurn = true;
             const startedAt = Date.now();
             agentStartedAtByCardId.set(cardId, startedAt);
+            const agentType = extractAgentType(input);
+            if (agentType) {
+                agentTypeByCardId.set(cardId, agentType);
+            }
             const summary = summarizeAgentInput(input);
             if (summary) {
                 agentSummaryByCardId.set(cardId, summary);
@@ -791,6 +926,19 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (summary) {
                 agentSummaryByAgentId.set(agentId, summary);
             }
+            const agentType = agentTypeByCardId.get(cardId);
+            if (agentType) {
+                agentTypeByAgentId.set(agentId, agentType);
+            }
+            upsertSubagentSnapshot(agentId, {
+                status: agentStatusByAgentId.get(agentId) ?? 'starting',
+                statusText: 'Starting',
+                activity: 'Starting',
+                activityKind: 'starting',
+                cardId,
+                startedAt,
+                ...(summary ? { summary } : {})
+            }, false);
             flushPendingAgentTraces(agentId);
         };
 
@@ -975,6 +1123,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
             lastAgentRunUpdateSignatureByAgentId.set(agentId, signature);
             lastAgentRunUpdateAtByAgentId.set(agentId, Date.now());
+            upsertSubagentSnapshot(agentId, event, isTerminalAgentRunStatus(nextStatus));
             emitAgentRunEvent(event);
             flushPendingAgentTraces(agentId);
         };
@@ -3183,6 +3332,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
         failPendingAgentStarts('spawn_agent did not return an agent id before the Codex session ended');
         cancelAllPendingThrottledAgentRunUpdates();
+        markAllActiveSubagents('canceled', 'Session ended');
     }
 
     protected async cleanup(): Promise<void> {

@@ -618,7 +618,7 @@ function SessionItem(props: {
             <button
                 type="button"
                 {...longPressHandlers}
-                className={`session-list-item group/session-row flex w-full items-center justify-between gap-3 rounded-xl px-0 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${selected ? 'text-[var(--app-fg)]' : ''}`}
+                className={`session-list-item group/session-row flex w-full items-center justify-between gap-3 rounded-xl px-0 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${selected ? 'text-[var(--app-fg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
                 aria-describedby={describedBy}
@@ -631,7 +631,7 @@ function SessionItem(props: {
                         statusClassName="bg-[#34C759]"
                     />
                     <div className="min-w-0 flex-1">
-                        <div className="truncate text-base font-normal leading-5 tracking-normal text-[var(--app-fg)]">
+                        <div className="truncate text-sm font-normal leading-[18px] tracking-normal text-[var(--app-fg)]">
                             {sessionName}
                         </div>
                         {showPath ? (

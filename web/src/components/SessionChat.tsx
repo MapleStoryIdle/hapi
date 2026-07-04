@@ -29,6 +29,7 @@ import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimeP
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { QueuedMessagesBar } from '@/components/AssistantChat/QueuedMessagesBar'
 import { ScratchlistDrawer } from '@/components/AssistantChat/ScratchlistPanel'
+import { SubagentDock } from '@/components/AssistantChat/SubagentDock'
 import { GitDiffSummary, summarizeGitStatusFiles } from '@/components/AssistantChat/GitDiffSummary'
 import {
     PlanStatusSummary,
@@ -366,16 +367,21 @@ function getOutlineTitle(session: Session): string {
     return session.id.slice(0, 8)
 }
 
-function hasAbortableAgentRun(blocks: readonly ChatBlock[]): boolean {
+function isBlockInTurnScope(block: ChatBlock, minCreatedAt: number | null): boolean {
+    return minCreatedAt === null || block.createdAt >= minCreatedAt
+}
+
+function hasAbortableAgentRun(blocks: readonly ChatBlock[], minCreatedAt: number | null = null): boolean {
     for (const block of blocks) {
         if (block.kind === 'tool-call') {
             if (
                 block.tool.name === 'CodexAgent'
                 && (block.tool.state === 'running' || block.tool.state === 'pending')
+                && isBlockInTurnScope(block, minCreatedAt)
             ) {
                 return true
             }
-            if (hasAbortableAgentRun(block.children)) {
+            if (hasAbortableAgentRun(block.children, minCreatedAt)) {
                 return true
             }
         }
@@ -450,6 +456,11 @@ export function getLatestTurnCompletionKey(messages: readonly NormalizedMessage[
         completionKey = `${message.id}:${message.createdAt}:${message.content.type}`
     }
     return completionKey
+}
+
+export function getLatestUserTurnCreatedAt(messages: readonly NormalizedMessage[]): number | null {
+    const latestUserIndex = messages.findLastIndex((message) => message.role === 'user')
+    return latestUserIndex >= 0 ? messages[latestUserIndex]!.createdAt : null
 }
 
 function useSettledRunActive(
@@ -1053,26 +1064,30 @@ function SessionChatInner(props: SessionChatProps) {
         () => reconcileChatBlocks(reduced.blocks, blocksByIdRef.current),
         [reduced.blocks]
     )
+    const latestUserTurnCreatedAt = useMemo(
+        () => getLatestUserTurnCreatedAt(normalizedMessages),
+        [normalizedMessages]
+    )
+    const turnCompletionKey = useMemo(
+        () => getLatestTurnCompletionKey(normalizedMessages),
+        [normalizedMessages]
+    )
     const hasRunningChildAgent = useMemo(
-        () => hasAbortableAgentRun(reduced.blocks),
-        [reduced.blocks]
+        () => turnCompletionKey === null && hasAbortableAgentRun(reduced.blocks, latestUserTurnCreatedAt),
+        [latestUserTurnCreatedAt, reduced.blocks, turnCompletionKey]
     )
     const latestPlanStatus = useMemo(
-        () => extractLatestPlanStatus(reconciled.blocks),
-        [reconciled.blocks]
+        () => extractLatestPlanStatus(reconciled.blocks, { minCreatedAt: latestUserTurnCreatedAt }),
+        [latestUserTurnCreatedAt, reconciled.blocks]
     )
     const hasActiveTool = useMemo(
-        () => hasActiveToolBlock(reconciled.blocks),
-        [reconciled.blocks]
+        () => turnCompletionKey === null && hasActiveToolBlock(reconciled.blocks, { minCreatedAt: latestUserTurnCreatedAt }),
+        [latestUserTurnCreatedAt, reconciled.blocks, turnCompletionKey]
     )
     const rawRunActive = props.isSending || props.session.thinking || hasRunningChildAgent || hasActiveTool
     const runActivityKey = useMemo(
         () => getChatActivityKey(reconciled.blocks),
         [reconciled.blocks]
-    )
-    const turnCompletionKey = useMemo(
-        () => getLatestTurnCompletionKey(normalizedMessages),
-        [normalizedMessages]
     )
     const runActive = useSettledRunActive(rawRunActive, runActivityKey, turnCompletionKey)
     const activePlanStatus = getRunScopedPlanStatus(latestPlanStatus, {
@@ -1574,7 +1589,14 @@ function SessionChatInner(props: SessionChatProps) {
                         </div>
 
                         <div ref={composerOverlayRef} className="pointer-events-auto">
-                            <HappyComposer
+                            <div className="relative">
+                                {agentFlavor === 'codex' ? (
+                                    <SubagentDock
+                                        subagents={props.session.agentState?.codex?.subagents}
+                                        messages={visibleMessages}
+                                    />
+                                ) : null}
+                                <HappyComposer
                                 key={`composer-${props.session.id}`}
                                 sessionId={props.session.id}
                                 disabled={props.isSending}
@@ -1718,6 +1740,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 onClearSendError={props.onClearSendError}
                                 compactTopAnchor={bottomAccessoryVisible}
                             />
+                            </div>
                         </div>
                     </div>
                 </DragDropZone>

@@ -1,10 +1,13 @@
 import { basename } from 'path'
+import { open } from 'fs/promises'
 
 export type GeneratedImageMetadata = {
     id: string
     fileName: string
-    content: Buffer
+    path: string
     mimeType: string
+    size: number
+    mtimeMs: number
     createdAt: number
 }
 
@@ -55,30 +58,49 @@ export function detectImageMimeType(bytes: Uint8Array): string | null {
     return null
 }
 
+export async function readImageHeader(path: string): Promise<Uint8Array> {
+    const file = await open(path, 'r')
+    try {
+        const buffer = Buffer.alloc(16)
+        const result = await file.read(buffer, 0, buffer.length, 0)
+        return buffer.subarray(0, result.bytesRead)
+    } finally {
+        await file.close()
+    }
+}
+
 function ascii(bytes: Uint8Array, start: number, end: number): string {
     return String.fromCharCode(...bytes.subarray(start, end))
 }
 
-export function registerGeneratedImage(args: { id: string; path: string; mimeType: string; bytes: Uint8Array; fileName?: string | null }): GeneratedImageMetadata {
-    const content = Buffer.from(args.bytes)
-    if (content.byteLength > MAX_GENERATED_IMAGE_BYTES) {
+export function registerGeneratedImage(args: {
+    id: string
+    path: string
+    mimeType: string
+    size: number
+    mtimeMs: number
+    fileName?: string | null
+}): GeneratedImageMetadata {
+    if (args.size > MAX_GENERATED_IMAGE_BYTES) {
         throw new Error('Image is too large to display inline')
     }
 
     const previous = generatedImages.get(args.id)
     if (previous) {
-        generatedImageBytes -= previous.content.byteLength
+        generatedImageBytes -= previous.size
     }
 
     const metadata: GeneratedImageMetadata = {
         id: args.id,
         fileName: args.fileName || basename(args.path) || `${args.id}.png`,
-        content,
+        path: args.path,
         mimeType: args.mimeType,
+        size: args.size,
+        mtimeMs: args.mtimeMs,
         createdAt: Date.now()
     }
     generatedImages.set(args.id, metadata)
-    generatedImageBytes += content.byteLength
+    generatedImageBytes += metadata.size
 
     evictOldGeneratedImages()
 
@@ -91,7 +113,7 @@ function evictOldGeneratedImages(): void {
         if (!oldestId) break
         const oldest = generatedImages.get(oldestId)
         if (oldest) {
-            generatedImageBytes -= oldest.content.byteLength
+            generatedImageBytes -= oldest.size
         }
         generatedImages.delete(oldestId)
     }

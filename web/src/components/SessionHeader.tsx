@@ -505,7 +505,7 @@ export function SessionHeader(props: {
                                     id={detailsId}
                                     role="dialog"
                                     aria-label="会话详情"
-                                    className="fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+4.25rem)] z-50 rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)] sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 sm:w-[22rem]"
+                                    className="fixed left-3 top-[calc(env(safe-area-inset-top)+4.25rem)] z-50 w-[min(calc(100vw-1.5rem),22rem)] rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
                                 >
                                     <div className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">会话详情</div>
                                     <div className="flex flex-col gap-2">

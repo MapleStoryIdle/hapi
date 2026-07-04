@@ -32,8 +32,7 @@ describe('generated images route', () => {
 
         expect(response.status).toBe(200)
         const cacheControl = response.headers.get('cache-control') ?? ''
-        // Generated images are content-addressed by an immutable random id, so they must be
-        // cacheable; `no-store` forces a full RPC round-trip on every remount (issue #927).
+        // Browser caching stays enabled; `no-store` forces a full RPC round-trip on every remount.
         expect(cacheControl).toContain('immutable')
         expect(cacheControl).not.toContain('no-store')
         expect(response.headers.get('etag')).toBe('"img-1"')

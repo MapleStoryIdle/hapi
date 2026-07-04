@@ -268,7 +268,7 @@ describe('ComposerButtons — plan mode status control', () => {
      * Active plan mode is represented in the composer status bar. The status
      * icon is also the exit action and sits before the abort control.
      */
-    it('renders active plan mode as a status-bar icon before abort', () => {
+    it('renders active plan mode as a status-bar icon before the unified abort button', () => {
         const onPlanModeToggle = vi.fn()
 
         renderInProviders(
@@ -301,7 +301,7 @@ describe('ComposerButtons — plan mode status control', () => {
 
         const exitPlanButton = screen.getByRole('button', { name: 'Exit Plan Mode' })
         const abortButton = screen.getByRole('button', { name: 'Abort' })
-        expect(abortButton.className).toContain('text-red')
+        expect(abortButton.querySelector('span')?.className).toContain('bg-red')
         const buttons = screen.getAllByRole('button')
         expect(buttons.indexOf(exitPlanButton)).toBeLessThan(buttons.indexOf(abortButton))
 
@@ -354,9 +354,9 @@ describe('ComposerButtons — compact composer layout', () => {
         )
 
         expect(screen.getByRole('button', { name: 'More tools' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Abort' })).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: 'Abort' })).not.toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument()
     })
 })

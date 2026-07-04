@@ -841,6 +841,11 @@ function SessionsPage() {
         t
     ])
 
+    const sessionsMenuItemClass =
+        'group flex h-11 w-full items-center gap-3 rounded-2xl px-3 text-left text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
+    const sessionsMenuIconClass =
+        'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)] transition-colors group-hover:bg-[var(--app-bg)] group-hover:text-[var(--app-fg)]'
+
     useEffect(() => {
         if (!isSessionsMenuOpen) return
 
@@ -944,55 +949,77 @@ function SessionsPage() {
                                 onClick={() => setIsSessionsMenuOpen((open) => !open)}
                                 aria-label={t('session.more')}
                                 aria-expanded={isSessionsMenuOpen}
-                                className="flex h-[52px] w-[52px] items-center justify-center rounded-full border border-[#eeeeee] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                aria-haspopup="menu"
+                                className={`flex h-[52px] w-[52px] items-center justify-center rounded-full border text-[var(--app-fg)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors ${
+                                    isSessionsMenuOpen
+                                        ? 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
+                                        : 'border-[var(--app-border)] bg-[var(--app-bg)] hover:bg-[var(--app-subtle-bg)]'
+                                }`}
                                 title={t('session.more')}
                             >
                                 <MoreHorizontalIcon className="h-7 w-7" />
                             </button>
                             {isSessionsMenuOpen ? (
-                                <div className="absolute right-0 top-full z-50 mt-3 w-48 overflow-hidden rounded-2xl border border-[var(--app-divider)] bg-[var(--app-bg)] py-1 shadow-xl">
+                                <div
+                                    role="menu"
+                                    aria-label={t('session.more')}
+                                    className="absolute right-0 top-full z-50 mt-3 w-56 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
+                                >
                                     <button
                                         type="button"
+                                        role="menuitem"
                                         onClick={() => {
                                             setIsSessionsMenuOpen(false)
                                             goNewSession()
                                         }}
-                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                                        className={sessionsMenuItemClass}
                                     >
-                                        <PlusIcon className="h-4 w-4" />
+                                        <span className={sessionsMenuIconClass}>
+                                            <PlusIcon className="h-4 w-4" />
+                                        </span>
                                         <span>{t('sessions.new')}</span>
                                     </button>
+                                    <div className="my-1 h-px bg-[var(--app-divider)]" aria-hidden="true" />
                                     <button
                                         type="button"
+                                        role="menuitem"
                                         onClick={() => {
                                             setIsSessionsMenuOpen(false)
                                             navigate({ to: '/browse' })
                                         }}
-                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                                        className={sessionsMenuItemClass}
                                     >
-                                        <FolderOpenIcon className="h-4 w-4" />
+                                        <span className={sessionsMenuIconClass}>
+                                            <FolderOpenIcon className="h-4 w-4" />
+                                        </span>
                                         <span>{t('browse.nav')}</span>
                                     </button>
                                     <button
                                         type="button"
+                                        role="menuitem"
                                         onClick={() => {
                                             setIsSessionsMenuOpen(false)
                                             navigate({ to: '/remote-servers' })
                                         }}
-                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                                        className={sessionsMenuItemClass}
                                     >
-                                        <ServerIcon className="h-4 w-4" />
+                                        <span className={sessionsMenuIconClass}>
+                                            <ServerIcon className="h-4 w-4" />
+                                        </span>
                                         <span>远程服务器</span>
                                     </button>
                                     <button
                                         type="button"
+                                        role="menuitem"
                                         onClick={() => {
                                             setIsSessionsMenuOpen(false)
                                             navigate({ to: '/settings' })
                                         }}
-                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                                        className={sessionsMenuItemClass}
                                     >
-                                        <SettingsIcon className="h-4 w-4" />
+                                        <span className={sessionsMenuIconClass}>
+                                            <SettingsIcon className="h-4 w-4" />
+                                        </span>
                                         <span>{t('settings.title')}</span>
                                     </button>
                                 </div>
@@ -1492,17 +1519,19 @@ function NewSessionPage() {
 
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-bg)] p-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
-                {!isTelegramApp() && (
-                    <button
-                        type="button"
-                        onClick={goBack}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                    >
-                        <BackIcon />
-                    </button>
-                )}
-                <div className="flex-1 font-semibold">{t('newSession.title')}</div>
+            <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
+                <div className="mx-auto flex w-full max-w-2xl items-center gap-2 px-3 py-3">
+                    {!isTelegramApp() && (
+                        <button
+                            type="button"
+                            onClick={goBack}
+                            className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-hint)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
+                        >
+                            <BackIcon />
+                        </button>
+                    )}
+                    <div className="flex-1 text-lg font-semibold leading-6 text-[var(--app-fg)]">{t('newSession.title')}</div>
+                </div>
             </div>
 
             <div

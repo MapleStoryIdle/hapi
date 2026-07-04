@@ -880,6 +880,7 @@ export function HappyComposer(props: {
     const expandedHeightClass = compactTopAnchor
         ? 'h-[88px] max-h-[88px]'
         : 'min-h-[88px] max-h-[316px]'
+    const composerInputMaxRows = compactTopAnchor ? 1 : 4
 
     const currentModelLabel = useMemo(() => {
         if (selectedModelBase !== undefined) {
@@ -1374,14 +1375,16 @@ export function HappyComposer(props: {
                             className={
                                 composerCompact
                                     ? 'flex h-12 min-w-0 flex-1 items-center px-14 py-0'
-                                    : 'flex min-h-[38px] min-w-0 flex-1 items-start px-4 py-2'
+                                    : compactTopAnchor
+                                        ? 'flex h-[38px] min-h-[38px] max-h-[38px] min-w-0 flex-none items-start px-4 py-2'
+                                        : 'flex min-h-[38px] max-h-[8.5rem] min-w-0 flex-none items-start px-4 py-2'
                             }
                         >
                             <ComposerPrimitive.Input
                                 ref={textareaRef}
                                 placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
                                 disabled={controlsDisabled}
-                                maxRows={5}
+                                maxRows={composerInputMaxRows}
                                 submitOnEnter={false}
                                 cancelOnEscape={false}
                                 onChange={handleChange}
@@ -1391,7 +1394,9 @@ export function HappyComposer(props: {
                                 className={`flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
                                     composerCompact
                                         ? 'h-6 max-h-6 overflow-hidden leading-6'
-                                        : 'min-h-[22px] leading-snug'
+                                        : compactTopAnchor
+                                            ? 'h-[22px] max-h-[22px] overflow-y-auto overscroll-contain leading-snug'
+                                            : 'min-h-[22px] max-h-[7.5rem] overflow-y-auto overscroll-contain leading-snug'
                                 }`}
                             />
                         </div>

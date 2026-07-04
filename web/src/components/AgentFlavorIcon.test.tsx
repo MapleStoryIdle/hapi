@@ -13,7 +13,7 @@ describe('AgentFlavorIcon', () => {
         // These flavors have official icon components in @lobehub/icons; the
         // UI should no longer render the old two-letter text badge for them.
         const cases: Array<{ flavor: string; title: string; oldLabel: string }> = [
-            { flavor: 'claude', title: 'Claude', oldLabel: 'Cl' },
+            { flavor: 'claude', title: 'Claude Code', oldLabel: 'Cl' },
             { flavor: 'codex', title: 'Codex', oldLabel: 'Cx' },
             { flavor: 'cursor', title: 'Cursor', oldLabel: 'Cu' },
             { flavor: 'gemini', title: 'Gemini CLI', oldLabel: 'Gm' },
@@ -85,17 +85,17 @@ describe('AgentFlavorIcon', () => {
         expect(container.querySelector('path[fill="#fff"]')).toBeNull()
     })
 
-    it('uses the orange Claude avatar mark for Claude sessions', () => {
-        // Claude uses the product avatar treatment: orange rounded square with a
-        // white vector mark, matching the official app icon style.
+    it('uses a visible orange Claude glyph for Claude sessions', () => {
+        // Claude must render as a visible glyph, not the previous solid orange
+        // square that hid the monochrome mark in compact picker buttons.
         const { container } = render(<AgentFlavorIcon flavor="claude" />)
         const badge = getBadge(container)
         const svg = badge.querySelector('svg')
 
         expect(svg).toBeTruthy()
-        expect(badge.title).toBe('Claude')
-        expect(badge.className).toContain('bg-[#D97757]')
-        expect(badge.className).toContain('text-white')
+        expect(badge.title).toBe('Claude Code')
+        expect(badge.className).toContain('text-[#D97757]')
+        expect(badge.className).not.toContain('bg-[#D97757]')
         expect(svg?.getAttribute('fill')).toBe('currentColor')
     })
 

@@ -14,11 +14,21 @@ export type PlanStatusSummaryData = {
     currentStep: ChecklistItem
 }
 
-function collectToolBlocks(blocks: ChatBlock[], target: ToolCallBlock[] = []): ToolCallBlock[] {
+type ToolBlockScope = {
+    minCreatedAt?: number | null
+}
+
+function isBlockInScope(block: ChatBlock, scope?: ToolBlockScope): boolean {
+    return scope?.minCreatedAt == null || block.createdAt >= scope.minCreatedAt
+}
+
+function collectToolBlocks(blocks: ChatBlock[], target: ToolCallBlock[] = [], scope?: ToolBlockScope): ToolCallBlock[] {
     for (const block of blocks) {
         if (block.kind !== 'tool-call') continue
-        target.push(block)
-        collectToolBlocks(block.children, target)
+        if (isBlockInScope(block, scope)) {
+            target.push(block)
+        }
+        collectToolBlocks(block.children, target, scope)
     }
     return target
 }
@@ -46,8 +56,8 @@ function summarizePlanBlock(block: ToolCallBlock): PlanStatusSummaryData | null 
     }
 }
 
-export function extractLatestPlanStatus(blocks: ChatBlock[]): PlanStatusSummaryData | null {
-    const planBlocks = collectToolBlocks(blocks)
+export function extractLatestPlanStatus(blocks: ChatBlock[], scope?: ToolBlockScope): PlanStatusSummaryData | null {
+    const planBlocks = collectToolBlocks(blocks, [], scope)
         .filter((block) => block.tool.name === 'update_plan')
 
     for (let index = planBlocks.length - 1; index >= 0; index -= 1) {
@@ -58,8 +68,8 @@ export function extractLatestPlanStatus(blocks: ChatBlock[]): PlanStatusSummaryD
     return null
 }
 
-export function hasActiveToolBlock(blocks: ChatBlock[]): boolean {
-    return collectToolBlocks(blocks).some((block) => (
+export function hasActiveToolBlock(blocks: ChatBlock[], scope?: ToolBlockScope): boolean {
+    return collectToolBlocks(blocks, [], scope).some((block) => (
         block.tool.state === 'running'
         || block.tool.state === 'pending'
         || block.tool.permission?.status === 'pending'

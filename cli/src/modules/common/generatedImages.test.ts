@@ -19,45 +19,53 @@ describe('generatedImages', () => {
             id: 'test-image',
             path: '/tmp/example.png',
             mimeType: 'image/png',
-            bytes: Buffer.from('original image bytes')
+            size: 123,
+            mtimeMs: 456
         })
 
         expect(image.mimeType).toBe('image/png')
+        expect(image.path).toBe('/tmp/example.png')
+        expect(image.size).toBe(123)
+        expect('content' in image).toBe(false)
         clearGeneratedImages()
     })
 
-    it('snapshots image bytes at registration time', () => {
-        const source = Buffer.from('original image bytes')
+    it('keeps a path reference instead of copying image bytes', () => {
         const image = registerGeneratedImage({
-            id: 'snapshot-image',
+            id: 'path-image',
             path: '/tmp/example.png',
             mimeType: 'image/png',
-            bytes: source
+            size: 20,
+            mtimeMs: 100
         })
-        source.fill(0)
 
-        expect(image.content.toString()).toBe('original image bytes')
-        expect(getGeneratedImage('snapshot-image')?.content.toString()).toBe('original image bytes')
+        expect(getGeneratedImage('path-image')).toMatchObject({
+            path: '/tmp/example.png',
+            size: 20,
+            mtimeMs: 100
+        })
         clearGeneratedImages()
     })
 
-    it('rejects oversized image snapshots', () => {
+    it('rejects oversized image references', () => {
         expect(() => registerGeneratedImage({
             id: 'too-large-image',
             path: '/tmp/large.png',
             mimeType: 'image/png',
-            bytes: new Uint8Array(25 * 1024 * 1024 + 1)
+            size: 25 * 1024 * 1024 + 1,
+            mtimeMs: 1
         })).toThrow('Image is too large to display inline')
         clearGeneratedImages()
     })
 
-    it('evicts oldest image snapshots when the count limit is exceeded', () => {
+    it('evicts oldest image references when the count limit is exceeded', () => {
         for (let i = 0; i < 101; i += 1) {
             registerGeneratedImage({
                 id: `image-${i}`,
                 path: `/tmp/image-${i}.png`,
                 mimeType: 'image/png',
-                bytes: Buffer.from(`image-${i}`)
+                size: 1,
+                mtimeMs: i
             })
         }
 

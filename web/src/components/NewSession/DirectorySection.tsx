@@ -1,8 +1,9 @@
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { useTranslation } from '@/lib/use-translation'
+import type { SessionType } from './types'
 
 function FolderIcon(props: { className?: string }) {
     return (
@@ -18,6 +19,9 @@ export function DirectorySection(props: {
     selectedIndex: number
     isDisabled: boolean
     recentPaths: string[]
+    sessionType: SessionType
+    worktreeName: string
+    worktreeInputRef: RefObject<HTMLInputElement | null>
     statusMessage?: string | null
     statusTone?: 'warning' | 'error' | null
     onDirectoryChange: (value: string) => void
@@ -26,15 +30,56 @@ export function DirectorySection(props: {
     onDirectoryKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void
     onSuggestionSelect: (index: number) => void
     onPathClick: (path: string) => void
+    onSessionTypeChange: (value: SessionType) => void
+    onWorktreeNameChange: (value: string) => void
     onChooseFolder?: () => void
 }) {
     const { t } = useTranslation()
 
     return (
-        <div className="flex flex-col gap-1.5 px-3 py-3">
-            <label className="text-xs font-medium text-[var(--app-hint)]">
-                {t('newSession.directory')}
-            </label>
+        <div className="flex flex-col gap-3 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-[0_1px_4px_rgba(0,0,0,0.03)]">
+            <div className="flex items-center justify-between gap-3">
+                <label className="text-xs font-medium text-[var(--app-hint)]">
+                    {t('newSession.directory')}
+                </label>
+                <div
+                    role="radiogroup"
+                    aria-label={t('newSession.type')}
+                    className="inline-flex shrink-0 items-center rounded-full border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-0.5"
+                >
+                    {(['simple', 'worktree'] as const).map((type) => {
+                        const checked = props.sessionType === type
+                        return (
+                            <label
+                                key={type}
+                                className={[
+                                    'inline-flex h-7 cursor-pointer items-center rounded-full px-3 text-xs font-medium transition-colors',
+                                    checked
+                                        ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm'
+                                        : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]',
+                                    props.isDisabled ? 'cursor-not-allowed opacity-50' : ''
+                                ].filter(Boolean).join(' ')}
+                                title={type === 'simple'
+                                    ? t('newSession.type.simple.desc')
+                                    : t('newSession.type.worktree.desc')}
+                            >
+                                <input
+                                    type="radio"
+                                    name="sessionType"
+                                    value={type}
+                                    checked={checked}
+                                    onChange={() => props.onSessionTypeChange(type)}
+                                    disabled={props.isDisabled}
+                                    className="sr-only"
+                                />
+                                {type === 'simple'
+                                    ? t('newSession.type.simple')
+                                    : t('newSession.type.worktree')}
+                            </label>
+                        )
+                    })}
+                </div>
+            </div>
             <div className="flex items-start gap-2">
                 <div className="relative flex-1 min-w-0">
                     <input
@@ -46,7 +91,7 @@ export function DirectorySection(props: {
                         onFocus={props.onDirectoryFocus}
                         onBlur={props.onDirectoryBlur}
                         disabled={props.isDisabled}
-                        className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
+                        className="h-11 w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
                     />
                     {props.suggestions.length > 0 && (
                         <div className="absolute top-full left-0 right-0 z-10 mt-1">
@@ -65,7 +110,7 @@ export function DirectorySection(props: {
                         type="button"
                         onClick={props.onChooseFolder}
                         disabled={props.isDisabled}
-                        className="shrink-0 flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 py-2 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)] transition-colors disabled:opacity-50"
+                        className="flex h-11 shrink-0 items-center gap-1.5 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 text-xs font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)] disabled:opacity-50"
                         title={t('newSession.browse')}
                     >
                         <FolderIcon className="h-3.5 w-3.5" />
@@ -73,9 +118,25 @@ export function DirectorySection(props: {
                     </button>
                 )}
             </div>
+            {props.sessionType === 'worktree' ? (
+                <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-medium text-[var(--app-hint)]">
+                        {t('newSession.type.worktree')}
+                    </label>
+                    <input
+                        ref={props.worktreeInputRef}
+                        type="text"
+                        placeholder={t('newSession.type.worktree.placeholder')}
+                        value={props.worktreeName}
+                        onChange={(event) => props.onWorktreeNameChange(event.target.value)}
+                        disabled={props.isDisabled}
+                        className="h-10 w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-60"
+                    />
+                </div>
+            ) : null}
 
             {props.recentPaths.length > 0 && (
-                <div className="flex flex-col gap-1 mt-1">
+                <div className="flex flex-col gap-1">
                     <span className="text-xs text-[var(--app-hint)]">{t('newSession.recent')}:</span>
                     <div className="flex flex-wrap gap-1">
                         {props.recentPaths.map((path) => (
@@ -84,10 +145,12 @@ export function DirectorySection(props: {
                                 type="button"
                                 onClick={() => props.onPathClick(path)}
                                 disabled={props.isDisabled}
-                                className="rounded bg-[var(--app-subtle-bg)] px-2 py-1 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)] transition-colors truncate max-w-[200px] disabled:opacity-50"
+                                className="max-w-full truncate rounded-xl bg-[var(--app-subtle-bg)] px-2 py-1 text-left text-xs text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)] disabled:opacity-50 sm:max-w-[22rem]"
                                 title={path}
                             >
-                                {path}
+                                <span className="block truncate" dir="rtl">
+                                    <span dir="ltr">{path}</span>
+                                </span>
                             </button>
                         ))}
                     </div>
@@ -96,7 +159,7 @@ export function DirectorySection(props: {
 
             {props.statusMessage ? (
                 <div
-                    className={`mt-1 rounded-md px-2 py-1 text-xs ${
+                    className={`rounded-xl px-2 py-1.5 text-xs ${
                         props.statusTone === 'error'
                             ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
                             : 'bg-amber-500/10 text-[var(--app-hint)]'

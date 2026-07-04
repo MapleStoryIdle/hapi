@@ -236,9 +236,13 @@ export default {
   'newSession.opencodeModel.empty': 'No OpenCode models discovered for this directory',
   'newSession.opencodeModel.default': 'Default',
   'newSession.reasoningEffort': 'Reasoning effort',
+  'newSession.runConfig': 'Run config',
   'newSession.yolo': 'YOLO mode',
+  'newSession.yolo.default': 'Default',
+  'newSession.yolo.mode': 'YOLO',
   'newSession.yolo.title': 'Bypass approvals and sandbox',
   'newSession.yolo.desc': 'Uses dangerous agent flags when spawning.',
+  'newSession.yolo.short': 'Enable',
   'newSession.create': 'Create',
   'newSession.creating': 'Creating…',
 
@@ -790,6 +794,10 @@ export default {
   'misc.permissionRequired': 'permission required',
   'misc.percentLeft': '{percent}% left',
   'misc.online': 'online',
+  'subagents.badgeAria': '{count} active subagents',
+  'subagents.title': 'Subagents',
+  'subagents.drawerTitle': 'Subagent conversation',
+  'subagents.noLoadedEvents': 'No loaded messages for this subagent yet.',
 
   // Web Share Target picker
   'share.title': 'Share to HAPI',

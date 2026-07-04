@@ -37,6 +37,13 @@ function getServerFromUrlParams(): string | null {
     return null
 }
 
+function shouldClearStoredLoginFromUrl(): boolean {
+    if (!import.meta.env.DEV) return false
+    if (typeof window === 'undefined') return false
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') return false
+    return new URLSearchParams(window.location.search).get('clearAuth') === '1'
+}
+
 function readStoredServerUrl(): string | null {
     try {
         const stored = localStorage.getItem(HUB_URL_KEY)
@@ -77,6 +84,11 @@ export function useServerUrl(): {
     clearServerUrl: () => void
 } {
     const [serverUrl, setServerUrlState] = useState<string | null>(() => {
+        if (shouldClearStoredLoginFromUrl()) {
+            clearStoredServerUrl()
+            return null
+        }
+
         // Priority: URL params > localStorage
         const fromUrl = getServerFromUrlParams()
         if (fromUrl) {

@@ -13,19 +13,12 @@ export function ActionButtons(props: {
     const { t } = useTranslation()
 
     return (
-        <div className="flex gap-2 px-3 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
-            <Button
-                variant="secondary"
-                onClick={props.onCancel}
-                disabled={props.isDisabled}
-            >
-                {t('button.cancel')}
-            </Button>
+        <div className="flex flex-col gap-2 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-1">
             <Button
                 onClick={props.onCreate}
                 disabled={!props.canCreate}
                 aria-busy={props.isPending}
-                className="gap-2"
+                className="h-12 w-full rounded-2xl px-5 text-base gap-2"
             >
                 {props.isPending ? (
                     <>
@@ -35,6 +28,14 @@ export function ActionButtons(props: {
                 ) : (
                     (props.createLabel ?? t('newSession.create'))
                 )}
+            </Button>
+            <Button
+                variant="secondary"
+                onClick={props.onCancel}
+                disabled={props.isDisabled}
+                className="h-12 w-full rounded-2xl px-4 text-base"
+            >
+                {t('button.cancel')}
             </Button>
         </div>
     )

@@ -50,6 +50,7 @@ export type {
     AgentState,
     AttachmentMetadata,
     CodexCollaborationMode,
+    CodexSubagentState,
     Metadata,
     PermissionMode,
     Machine,

@@ -110,6 +110,51 @@ describe('PlanStatusSummary helpers', () => {
         expect(hasActiveToolBlock([parent])).toBe(true)
     })
 
+    // 验证新一轮用户消息开始后，旧 run 遗留的 running/pending tool 不会继续把底部 plan 胶囊卡住。
+    it('ignores active tool blocks before the current turn scope', () => {
+        const stale = makeToolBlock('stale-1', 'Bash', { command: 'sleep 1' }, {
+            createdAt: 10,
+            tool: {
+                id: 'stale-1',
+                name: 'Bash',
+                state: 'running',
+                input: { command: 'sleep 1' },
+                createdAt: 10,
+                startedAt: 10,
+                completedAt: null,
+                description: null
+            }
+        })
+        const current = makeToolBlock('current-1', 'Read', { file_path: 'README.md' }, {
+            createdAt: 30,
+            tool: {
+                id: 'current-1',
+                name: 'Read',
+                state: 'pending',
+                input: { file_path: 'README.md' },
+                createdAt: 30,
+                startedAt: null,
+                completedAt: null,
+                description: null
+            }
+        })
+
+        expect(hasActiveToolBlock([stale], { minCreatedAt: 20 })).toBe(false)
+        expect(hasActiveToolBlock([stale, current], { minCreatedAt: 20 })).toBe(true)
+    })
+
+    // 验证新一轮用户消息开始后，旧 plan 不会作为当前 run 的底部进度继续展示。
+    it('extracts only plan updates inside the current turn scope', () => {
+        const summary = extractLatestPlanStatus([
+            makeToolBlock('plan-old', 'update_plan', {
+                plan: [{ step: '旧计划', status: 'in_progress' }]
+            }, { createdAt: 10 }),
+            makeToolBlock('read-1', 'Read', { file_path: 'README.md' }, { createdAt: 30 })
+        ], { minCreatedAt: 20 })
+
+        expect(summary).toBeNull()
+    })
+
     // 验证运行结束后被清理过的 plan 不会在下一轮运行开始时重新冒出来。
     it('hides a cleared plan until a new update_plan block appears', () => {
         const oldPlan = extractLatestPlanStatus([

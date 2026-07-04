@@ -38,7 +38,7 @@ export function loadNewSessionFormDraft(): NewSessionFormDraft | null {
         // agent's model is not carried into the Claude fallback.
         const restoredAgent: AgentType = (NEW_SESSION_AGENT_OPTIONS as readonly string[]).includes(parsed.agent)
             ? (parsed.agent as AgentType)
-            : 'claude'
+            : 'codex'
         const agentPreserved = restoredAgent === parsed.agent
         return {
             agent: restoredAgent,

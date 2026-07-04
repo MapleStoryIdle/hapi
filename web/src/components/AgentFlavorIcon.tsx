@@ -9,9 +9,8 @@ import type { IconType } from '@lobehub/icons/es/types'
 const FLAVOR_ICONS: Record<string, { Icon: IconType; title: string; colors?: string; shape?: string; iconClassName?: string }> = {
     claude: {
         Icon: ClaudeIcon,
-        title: 'Claude',
-        colors: 'bg-[#D97757] text-white shadow-[0_1px_2px_rgba(0,0,0,0.16)]',
-        shape: 'rounded-[22%] p-[12.5%]'
+        title: 'Claude Code',
+        colors: 'text-[#D97757]'
     },
     codex: { Icon: OpenAIIcon, title: 'Codex' },
     cursor: { Icon: CursorIcon, title: 'Cursor', colors: 'text-[var(--app-fg)]' },

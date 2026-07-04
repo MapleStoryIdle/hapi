@@ -1,12 +1,12 @@
 import { logger } from '@/ui/logger'
-import { readFile, stat, writeFile } from 'fs/promises'
+import { lstat, readFile, stat, writeFile } from 'fs/promises'
 import { createHash } from 'crypto'
 import { resolve } from 'path'
 import type { FileReadResponse, GeneratedImageResponse } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { validatePath } from '../pathSecurity'
-import { getGeneratedImage } from '../generatedImages'
+import { detectImageMimeType, getGeneratedImage } from '../generatedImages'
 import { getErrorMessage, rpcError } from '../rpcResponses'
 
 interface ReadFileRequest {
@@ -62,9 +62,22 @@ export function registerFileHandlers(rpcHandlerManager: RpcHandlerManager, worki
         }
 
         try {
+            const info = await lstat(image.path)
+            if (!info.isFile()) {
+                return rpcError('Generated image source is unavailable')
+            }
+            if (info.size !== image.size || info.mtimeMs !== image.mtimeMs) {
+                return rpcError('Generated image source changed')
+            }
+
+            const content = await readFile(image.path)
+            if (detectImageMimeType(content) !== image.mimeType) {
+                return rpcError('Generated image source changed')
+            }
+
             return {
                 success: true,
-                content: image.content.toString('base64'),
+                content: content.toString('base64'),
                 mimeType: image.mimeType,
                 fileName: image.fileName
             }

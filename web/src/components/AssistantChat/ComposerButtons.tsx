@@ -801,6 +801,10 @@ export function UnifiedButton(props: {
     controlsDisabled: boolean
     onSend: () => void
     onVoiceToggle: () => void
+    showAbortButton?: boolean
+    abortDisabled?: boolean
+    isAborting?: boolean
+    onAbort?: () => void
     /**
      * When true, the send button repaints amber and the aria-label
      * announces "Send to scratchlist" instead of "Send message". The
@@ -824,9 +828,12 @@ export function UnifiedButton(props: {
     const isVoiceActive = isConnecting || isConnected
     const hasText = props.canSend
     const routesToScratchlist = props.routesToScratchlist ?? false
+    const showAbort = Boolean(props.showAbortButton && (!(props.abortDisabled ?? false) || props.isAborting))
 
     const handleClick = () => {
-        if (isVoiceActive) {
+        if (showAbort) {
+            props.onAbort?.()
+        } else if (isVoiceActive) {
             props.onVoiceToggle() // Stop voice
         } else if (hasText) {
             props.onSend() // Send message (or scratchlist add — wrapper decides)
@@ -837,7 +844,11 @@ export function UnifiedButton(props: {
     let className: string
     let ariaLabel: string
 
-    if (isConnecting) {
+    if (showAbort) {
+        icon = <AbortIcon spinning={props.isAborting ?? false} />
+        className = 'bg-red-600 text-white shadow-[0_0_0_3px_rgba(239,68,68,0.12)] hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-400'
+        ariaLabel = t('composer.abort')
+    } else if (isConnecting) {
         icon = <LoadingIcon />
         className = 'bg-black text-white'
         ariaLabel = t('voice.connecting')
@@ -865,11 +876,13 @@ export function UnifiedButton(props: {
     // Voice launch is hidden from the composer for now. Empty input keeps
     // the regular disabled send affordance; connected voice sessions still
     // expose the stop state above so users can end an existing session.
-    const isDisabled = props.controlsDisabled || (
-        routesToScratchlist
-            ? !hasText
-            : !hasText && !isVoiceActive
-    )
+    const isDisabled = showAbort
+        ? (props.abortDisabled ?? false)
+        : props.controlsDisabled || (
+            routesToScratchlist
+                ? !hasText
+                : !hasText && !isVoiceActive
+        )
 
     return (
         <button
@@ -1373,6 +1386,10 @@ export function ComposerButtons(props: {
                         controlsDisabled={props.controlsDisabled}
                         onSend={props.onSend}
                         onVoiceToggle={props.onVoiceToggle}
+                        showAbortButton={showRunningStopButton}
+                        abortDisabled={props.abortDisabled}
+                        isAborting={props.isAborting}
+                        onAbort={props.onAbort}
                         routesToScratchlist={routesToScratchlist}
                     />
                 </div>
@@ -1635,19 +1652,6 @@ export function ComposerButtons(props: {
                         </button>
                     ) : null}
 
-                    {showRunningStopButton ? (
-                        <button
-                            type="button"
-                            aria-label={t('composer.abort')}
-                            title={t('composer.abort')}
-                            disabled={props.abortDisabled}
-                            className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full text-red-600 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400 [&_svg]:h-[22px] [&_svg]:w-[22px]"
-                            onClick={props.onAbort}
-                        >
-                            <AbortIcon spinning={props.isAborting} />
-                        </button>
-                    ) : null}
-
                     {isVoiceConnected && props.onVoiceMicToggle ? (
                         <button
                             type="button"
@@ -1671,6 +1675,10 @@ export function ComposerButtons(props: {
                         controlsDisabled={props.controlsDisabled}
                         onSend={props.onSend}
                         onVoiceToggle={props.onVoiceToggle}
+                        showAbortButton={showRunningStopButton}
+                        abortDisabled={props.abortDisabled}
+                        isAborting={props.isAborting}
+                        onAbort={props.onAbort}
                         /*
                          * Derived, NOT raw scratchlistMode. Mirror SessionChat's
                          * shouldRouteToScratchlist so the visible send-button state

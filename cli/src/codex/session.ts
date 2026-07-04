@@ -4,7 +4,7 @@ import { AgentSessionBase } from '@/agent/sessionBase';
 import type { EnhancedMode, PermissionMode } from './loop';
 import type { CodexCliOverrides } from './utils/codexCliOverrides';
 import type { LocalLaunchExitReason } from '@/agent/localLaunchPolicy';
-import type { Metadata, SessionModel, SessionModelReasoningEffort } from '@/api/types';
+import type { AgentState, Metadata, SessionModel, SessionModelReasoningEffort } from '@/api/types';
 
 type LocalLaunchFailure = {
     message: string;
@@ -138,6 +138,10 @@ export class CodexSession extends AgentSessionBase<EnhancedMode> {
 
     sendAgentMessage = (message: unknown): void => {
         this.client.sendAgentMessage(message);
+    };
+
+    updateAgentState = (handler: (state: AgentState) => AgentState): void => {
+        this.client.updateAgentState(handler);
     };
 
     sendUserMessage = (text: string): void => {

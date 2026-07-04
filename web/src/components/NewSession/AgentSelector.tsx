@@ -19,15 +19,15 @@ export function AgentSelector(props: {
     const { t } = useTranslation()
 
     return (
-        <div className="flex flex-col gap-1.5 px-3 py-3">
+        <div className="flex flex-col gap-2 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-[0_1px_4px_rgba(0,0,0,0.03)]">
             <label className="text-xs font-medium text-[var(--app-hint)]">
                 {t('newSession.agent')}
             </label>
-            <div className="-mx-3 overflow-x-auto px-3">
+            <div className="overflow-x-auto">
                 <div
                     role="radiogroup"
                     aria-label={t('newSession.agent')}
-                    className="inline-flex w-max flex-nowrap items-center gap-1 rounded-xl bg-[var(--app-secondary-bg)] p-1"
+                    className="inline-flex w-max flex-nowrap items-center gap-1 rounded-[18px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-1"
                 >
                     {NEW_SESSION_AGENT_OPTIONS.map((agentType) => {
                         const label = getAgentTabLabel(agentType)
@@ -39,7 +39,7 @@ export function AgentSelector(props: {
                                 aria-label={label}
                                 title={label}
                                 className={[
-                                    'inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors',
+                                    'inline-flex h-10 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-2xl px-3 text-sm font-medium transition-colors',
                                     checked
                                         ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm ring-1 ring-[var(--app-border)]'
                                         : 'bg-transparent text-[var(--app-hint)] hover:text-[var(--app-fg)]',

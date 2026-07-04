@@ -27,6 +27,13 @@ function getTokenFromUrlParams(): string | null {
     return query.get('token')
 }
 
+function shouldClearStoredLoginFromUrl(): boolean {
+    if (!import.meta.env.DEV) return false
+    if (typeof window === 'undefined') return false
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') return false
+    return new URLSearchParams(window.location.search).get('clearAuth') === '1'
+}
+
 function getAccessTokenKey(baseUrl: string): string {
     return `${ACCESS_TOKEN_PREFIX}${baseUrl}`
 }
@@ -55,6 +62,23 @@ function clearStoredAccessToken(key: string): void {
     }
 }
 
+function clearAllStoredAccessTokens(): void {
+    try {
+        const keys: string[] = []
+        for (let index = 0; index < localStorage.length; index += 1) {
+            const key = localStorage.key(index)
+            if (key?.startsWith(ACCESS_TOKEN_PREFIX)) {
+                keys.push(key)
+            }
+        }
+        for (const key of keys) {
+            localStorage.removeItem(key)
+        }
+    } catch {
+        // Ignore storage errors
+    }
+}
+
 export function useAuthSource(baseUrl: string): {
     authSource: AuthSource | null
     isLoading: boolean
@@ -74,6 +98,12 @@ export function useAuthSource(baseUrl: string): {
         setAuthSource(null)
         setIsTelegram(false)
         setIsLoading(true)
+
+        if (shouldClearStoredLoginFromUrl()) {
+            clearAllStoredAccessTokens()
+            setIsLoading(false)
+            return
+        }
 
         const telegramInitData = getTelegramInitData()
 

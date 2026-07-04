@@ -106,10 +106,38 @@ export const AgentStateCompletedRequestSchema = z.object({
 
 export type AgentStateCompletedRequest = z.infer<typeof AgentStateCompletedRequestSchema>
 
+export const CodexSubagentStateSchema = z.object({
+    id: z.string(),
+    cardId: z.string().optional(),
+    threadId: z.string().optional(),
+    turnId: z.string().optional(),
+    type: z.string().optional(),
+    title: z.string().optional(),
+    summary: z.string().optional(),
+    status: z.string(),
+    statusText: z.string().optional(),
+    activity: z.string().optional(),
+    activityKind: z.string().optional(),
+    startedAt: z.number(),
+    updatedAt: z.number(),
+    completedAt: z.number().optional()
+})
+
+export type CodexSubagentState = z.infer<typeof CodexSubagentStateSchema>
+
+export const CodexAgentStateSchema = z.object({
+    activeSubagentId: z.string().nullable().optional(),
+    subagents: z.record(z.string(), CodexSubagentStateSchema).optional(),
+    updatedAt: z.number().optional()
+})
+
+export type CodexAgentState = z.infer<typeof CodexAgentStateSchema>
+
 export const AgentStateSchema = z.object({
     controlledByUser: z.boolean().nullish(),
     requests: z.record(z.string(), AgentStateRequestSchema).nullish(),
-    completedRequests: z.record(z.string(), AgentStateCompletedRequestSchema).nullish()
+    completedRequests: z.record(z.string(), AgentStateCompletedRequestSchema).nullish(),
+    codex: CodexAgentStateSchema.optional()
 })
 
 export type AgentState = z.infer<typeof AgentStateSchema>

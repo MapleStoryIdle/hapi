@@ -9,6 +9,7 @@ export type OpencodeModelSelectorProps = {
     availableModels: OpencodeModelSummary[]
     currentModelId: string | null
     selectedModel: string | null
+    inline?: boolean
     onModelChange: (modelId: string | null) => void
     onRetry?: () => void
 }
@@ -21,7 +22,10 @@ export function OpencodeModelSelector(props: OpencodeModelSelectorProps) {
     }
 
     return (
-        <div className="flex flex-col gap-2 px-3 py-3">
+        <div className={props.inline
+            ? 'flex min-w-0 flex-col gap-2 sm:col-span-2'
+            : 'flex flex-col gap-2 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-[0_1px_4px_rgba(0,0,0,0.03)]'}
+        >
             <label className="text-xs font-medium text-[var(--app-hint)]">
                 {t('newSession.model')}{' '}
                 <span className="font-normal">({t('newSession.model.optional')})</span>

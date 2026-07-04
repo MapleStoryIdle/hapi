@@ -30,7 +30,7 @@ vi.mock('@assistant-ui/react', () => ({
     }),
 }))
 
-import { ScratchlistDrawerHost, getChatActivityKey, getLatestTurnCompletionKey } from './SessionChat'
+import { ScratchlistDrawerHost, getChatActivityKey, getLatestTurnCompletionKey, getLatestUserTurnCreatedAt } from './SessionChat'
 
 function makeEntry(overrides: Partial<ScratchlistEntry> & { id: string }): ScratchlistEntry {
     return { text: 'note', createdAt: 1000, ...overrides }
@@ -145,6 +145,7 @@ describe('SessionChat run-state helpers', () => {
         })
 
         expect(getLatestTurnCompletionKey(messages)).toBe('duration-2:4:turn-duration')
+        expect(getLatestUserTurnCreatedAt(messages)).toBe(3)
     })
 
     it('changes the activity key when streaming assistant text grows', () => {

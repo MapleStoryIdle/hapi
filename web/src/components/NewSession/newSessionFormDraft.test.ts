@@ -81,7 +81,7 @@ describe('newSessionFormDraft', () => {
         expect(newSessionDraftMatchesMachine(draft, 'machine-b')).toBe(false)
     })
 
-    it('coerces a hidden agent to claude and resets dependent fields', () => {
+    it('coerces a hidden agent to codex and resets dependent fields', () => {
         saveNewSessionFormDraft({
             agent: 'cursor',
             model: 'composer-2.5[fast=false]',
@@ -95,8 +95,8 @@ describe('newSessionFormDraft', () => {
         })
 
         const loaded = loadNewSessionFormDraft()!
-        expect(loaded.agent).toBe('claude')
-        // agent-dependent fields reset so a hidden agent model isn't carried into Claude
+        expect(loaded.agent).toBe('codex')
+        // Agent-dependent fields reset so a hidden agent model isn't carried into Codex.
         expect(loaded.model).toBe('auto')
         expect(loaded.cursorSelectedBase).toBe('auto')
         expect(loaded.effort).toBe('auto')
