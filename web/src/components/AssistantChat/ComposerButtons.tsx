@@ -904,12 +904,12 @@ const COMPOSER_TOOLBAR_HORIZONTAL_PADDING_PX = 16
 const COMPOSER_TOOLBAR_GAP_PX = 4
 const COMPOSER_ICON_BUTTON_WIDTH_PX = 42
 const COMPOSER_OPTIONAL_CONTROL_SLOT_PX = COMPOSER_ICON_BUTTON_WIDTH_PX + COMPOSER_TOOLBAR_GAP_PX
-const COMPOSER_MIN_STATUS_SPACE_PX = 40
 
 export function getComposerOptionalControlsVisibility(
     toolbarWidth: number | null,
     requiredControlsWidth = 0,
-    hasStatusControls = false
+    statusControlsWidth = 0,
+    hasContextUsageControl = true
 ): {
     permission: boolean
     contextUsage: boolean
@@ -917,22 +917,24 @@ export function getComposerOptionalControlsVisibility(
     // Unknown width happens before first layout/ResizeObserver tick; show by
     // default so wide toolbars do not flash as artificially collapsed.
     if (toolbarWidth === null) {
-        return { permission: true, contextUsage: true }
+        return { permission: true, contextUsage: hasContextUsageControl }
     }
 
     const requiredWidth = COMPOSER_TOOLBAR_HORIZONTAL_PADDING_PX
         + COMPOSER_ICON_BUTTON_WIDTH_PX
         + requiredControlsWidth
         + (COMPOSER_TOOLBAR_GAP_PX * 2)
-        + (hasStatusControls ? COMPOSER_MIN_STATUS_SPACE_PX : 0)
+        + statusControlsWidth
     const remainingWidth = toolbarWidth - requiredWidth
+    const hasFirstOptionalSlotSpace = remainingWidth >= COMPOSER_OPTIONAL_CONTROL_SLOT_PX
+    const hasSecondOptionalSlotSpace = remainingWidth >= COMPOSER_OPTIONAL_CONTROL_SLOT_PX * 2
 
     return {
-        // Context usage is the higher-value signal in the constrained row.
-        // Keep it before permission mode; permission remains available in
-        // the overflow tools menu when the inline row is tight.
-        contextUsage: remainingWidth >= COMPOSER_OPTIONAL_CONTROL_SLOT_PX,
-        permission: remainingWidth >= COMPOSER_OPTIONAL_CONTROL_SLOT_PX * 2
+        // Permission mode directly changes execution risk, so keep its icon in
+        // the first optional slot. Context usage remains available in the "+"
+        // menu when there is no second optional slot for both icons.
+        permission: hasFirstOptionalSlotSpace,
+        contextUsage: hasContextUsageControl && hasSecondOptionalSlotSpace
     }
 }
 
@@ -1019,8 +1021,10 @@ export function ComposerButtons(props: {
     const [contextUsageAnchor, setContextUsageAnchor] = useState<'tools' | 'button'>('button')
     const [toolbarWidth, setToolbarWidth] = useState<number | null>(null)
     const [requiredControlsWidth, setRequiredControlsWidth] = useState(0)
+    const [statusControlsWidth, setStatusControlsWidth] = useState(0)
     const toolbarRef = useRef<HTMLDivElement>(null)
     const requiredControlsRef = useRef<HTMLDivElement>(null)
+    const statusControlsRef = useRef<HTMLDivElement>(null)
     const toolsButtonRef = useRef<HTMLButtonElement>(null)
     const permissionButtonRef = useRef<HTMLButtonElement>(null)
     const remoteServerButtonRef = useRef<HTMLButtonElement>(null)
@@ -1037,11 +1041,16 @@ export function ComposerButtons(props: {
     const showScratchlistStatus = Boolean(props.onScratchlistToggle && (props.scratchlistMode || scratchlistCount > 0))
     const showPlanStatus = Boolean(props.planModeActive && props.onPlanModeToggle)
     const showScheduleStatus = Boolean(hasSchedule && props.onSchedule)
-    const hasStatusControls = hasRemoteServerContext || showPlanStatus || showScheduleStatus || showScratchlistStatus
-    const optionalControlsVisibility = getComposerOptionalControlsVisibility(toolbarWidth, requiredControlsWidth, hasStatusControls)
+    const hasContextUsageControl = props.contextUsagePercent != null
+    const optionalControlsVisibility = getComposerOptionalControlsVisibility(
+        toolbarWidth,
+        requiredControlsWidth,
+        statusControlsWidth,
+        hasContextUsageControl
+    )
     const showPermissionButton = Boolean(props.onPermissionModeChange && props.permissionModeOptions?.length)
     const showInlinePermissionButton = showPermissionButton && optionalControlsVisibility.permission
-    const showInlineContextUsageButton = props.contextUsagePercent != null && optionalControlsVisibility.contextUsage
+    const showInlineContextUsageButton = hasContextUsageControl && optionalControlsVisibility.contextUsage
     const permissionLabel = props.permissionLabel
         ?? props.permissionModeOptions?.find((option) => option.mode === props.permissionMode)?.label
         ?? props.permissionMode
@@ -1335,6 +1344,11 @@ export function ComposerButtons(props: {
                 ? Math.ceil(requiredControls.getBoundingClientRect().width)
                 : 0
             setRequiredControlsWidth(requiredWidth)
+            const statusControls = statusControlsRef.current
+            const statusWidth = statusControls
+                ? Math.ceil(statusControls.getBoundingClientRect().width)
+                : 0
+            setStatusControlsWidth(statusWidth)
         }
 
         measure()
@@ -1348,6 +1362,9 @@ export function ComposerButtons(props: {
         observer.observe(toolbar)
         if (requiredControlsRef.current) {
             observer.observe(requiredControlsRef.current)
+        }
+        if (statusControlsRef.current) {
+            observer.observe(statusControlsRef.current)
         }
         return () => observer.disconnect()
     }, [])
@@ -1518,66 +1535,68 @@ export function ComposerButtons(props: {
                 </button>
             ) : null}
 
-            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {props.remoteServerContext ? (
-                    <RemoteServerSelectedButton
-                        context={props.remoteServerContext}
-                        buttonRef={remoteServerButtonRef}
-                        active={showRemoteServerMenu && remoteServerAnchor === 'button'}
-                        controlsDisabled={props.controlsDisabled}
-                        onClick={() => {
-                            setRemoteServerAnchor('button')
-                            setShowRemoteServerMenu((open) => !(open && remoteServerAnchor === 'button'))
-                            setShowToolsMenu(false)
-                            setShowPermissionMenu(false)
-                            setShowSchedulePicker(false)
-                            setShowContextUsageMenu(false)
-                        }}
-                    />
-                ) : null}
+            <div className="flex min-w-0 flex-1 items-center overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div ref={statusControlsRef} className="flex w-max items-center gap-1">
+                    {props.remoteServerContext ? (
+                        <RemoteServerSelectedButton
+                            context={props.remoteServerContext}
+                            buttonRef={remoteServerButtonRef}
+                            active={showRemoteServerMenu && remoteServerAnchor === 'button'}
+                            controlsDisabled={props.controlsDisabled}
+                            onClick={() => {
+                                setRemoteServerAnchor('button')
+                                setShowRemoteServerMenu((open) => !(open && remoteServerAnchor === 'button'))
+                                setShowToolsMenu(false)
+                                setShowPermissionMenu(false)
+                                setShowSchedulePicker(false)
+                                setShowContextUsageMenu(false)
+                            }}
+                        />
+                    ) : null}
 
-                {showPlanStatus ? (
-                    <button
-                        type="button"
-                        aria-label={t('tool.exitPlan')}
-                        title={t('tool.exitPlan')}
-                        disabled={props.controlsDisabled}
-                        className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-[#EAF2FF] px-2.5 text-xs font-semibold text-[#1D4ED8] transition-colors hover:bg-[#DBEAFE] disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 [&_svg]:h-4 [&_svg]:w-4"
-                        onClick={props.onPlanModeToggle}
-                    >
-                        <PlanModeIcon />
-                        <span>{t('composer.planMode')}</span>
-                    </button>
-                ) : null}
+                    {showPlanStatus ? (
+                        <button
+                            type="button"
+                            aria-label={t('tool.exitPlan')}
+                            title={t('tool.exitPlan')}
+                            disabled={props.controlsDisabled}
+                            className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-[#EAF2FF] px-2.5 text-xs font-semibold text-[#1D4ED8] transition-colors hover:bg-[#DBEAFE] disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 [&_svg]:h-4 [&_svg]:w-4"
+                            onClick={props.onPlanModeToggle}
+                        >
+                            <PlanModeIcon />
+                            <span>{t('composer.planMode')}</span>
+                        </button>
+                    ) : null}
 
-                {showScheduleStatus ? (
-                    <button
-                        type="button"
-                        aria-label={t('composer.scheduleSend')}
-                        title={t('composer.scheduleSend')}
-                        disabled={props.controlsDisabled || hasAttachments}
-                        className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2.5 text-xs font-medium text-[var(--app-fg)]/75 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-4 [&_svg]:w-4"
-                        onClick={() => setShowSchedulePicker(true)}
-                    >
-                        <ScheduleIcon />
-                        <span>{t('composer.scheduleSend')}</span>
-                    </button>
-                ) : null}
+                    {showScheduleStatus ? (
+                        <button
+                            type="button"
+                            aria-label={t('composer.scheduleSend')}
+                            title={t('composer.scheduleSend')}
+                            disabled={props.controlsDisabled || hasAttachments}
+                            className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2.5 text-xs font-medium text-[var(--app-fg)]/75 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-4 [&_svg]:w-4"
+                            onClick={() => setShowSchedulePicker(true)}
+                        >
+                            <ScheduleIcon />
+                            <span>{t('composer.scheduleSend')}</span>
+                        </button>
+                    ) : null}
 
-                {showScratchlistStatus ? (
-                    <button
-                        type="button"
-                        aria-label={t('scratchlist.toggleAriaLabel')}
-                        title={t('scratchlist.toggleTooltip')}
-                        aria-pressed={props.scratchlistMode ? true : false}
-                        disabled={props.controlsDisabled}
-                        className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-amber-300/65 bg-amber-500/10 px-2.5 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-400/35 dark:text-amber-300 [&_svg]:h-4 [&_svg]:w-4"
-                        onClick={props.onScratchlistToggle}
-                    >
-                        <ScratchlistToggleIcon />
-                        <span>{scratchlistStatusLabel}</span>
-                    </button>
-                ) : null}
+                    {showScratchlistStatus ? (
+                        <button
+                            type="button"
+                            aria-label={t('scratchlist.toggleAriaLabel')}
+                            title={t('scratchlist.toggleTooltip')}
+                            aria-pressed={props.scratchlistMode ? true : false}
+                            disabled={props.controlsDisabled}
+                            className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-amber-300/65 bg-amber-500/10 px-2.5 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-400/35 dark:text-amber-300 [&_svg]:h-4 [&_svg]:w-4"
+                            onClick={props.onScratchlistToggle}
+                        >
+                            <ScratchlistToggleIcon />
+                            <span>{scratchlistStatusLabel}</span>
+                        </button>
+                    ) : null}
+                </div>
             </div>
 
             <div className="flex shrink-0 items-center gap-1">

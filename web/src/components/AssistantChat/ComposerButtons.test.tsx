@@ -149,7 +149,7 @@ describe('getComposerOptionalControlsVisibility', () => {
      * "mobile" collapsed state.
      */
     it('shows optional controls before the toolbar is measured', () => {
-        expect(getComposerOptionalControlsVisibility(null, 160, true)).toEqual({
+        expect(getComposerOptionalControlsVisibility(null, 160)).toEqual({
             permission: true,
             contextUsage: true
         })
@@ -157,9 +157,8 @@ describe('getComposerOptionalControlsVisibility', () => {
 
     /**
      * Optional composer controls are gated by measured toolbar width, not a
-     * viewport breakpoint. Context usage appears first because it is the
-     * highest-value inline status signal; permission can fall back to the
-     * grouped tools menu.
+     * viewport breakpoint. Permission appears first because it directly changes
+     * execution risk; context usage can fall back to the grouped tools menu.
      */
     it('hides optional controls only when measured toolbar width is too tight', () => {
         expect(getComposerOptionalControlsVisibility(260, 160)).toEqual({
@@ -167,16 +166,48 @@ describe('getComposerOptionalControlsVisibility', () => {
             contextUsage: false
         })
         expect(getComposerOptionalControlsVisibility(280, 160)).toEqual({
-            permission: false,
-            contextUsage: true
+            permission: true,
+            contextUsage: false
         })
         expect(getComposerOptionalControlsVisibility(330, 160)).toEqual({
             permission: true,
             contextUsage: true
         })
-        expect(getComposerOptionalControlsVisibility(330, 160, true)).toEqual({
+        expect(getComposerOptionalControlsVisibility(330, 160, 40)).toEqual({
+            permission: true,
+            contextUsage: false
+        })
+    })
+
+    /**
+     * When context usage is unavailable, permission should take the first
+     * optional slot. Otherwise the row can show a wide blank middle while the
+     * permission icon waits for space for a non-rendered context icon.
+     */
+    it('lets permission use the first optional slot when context usage is absent', () => {
+        expect(getComposerOptionalControlsVisibility(260, 160, 0, false)).toEqual({
             permission: false,
+            contextUsage: false
+        })
+        expect(getComposerOptionalControlsVisibility(280, 160, 0, false)).toEqual({
+            permission: true,
+            contextUsage: false
+        })
+    })
+
+    /**
+     * Status chips should consume their measured content width, not a fake
+     * boolean reserve. If the status content is narrow, optional icons can use
+     * the rest of the row.
+     */
+    it('uses measured status width when deciding which optional icons fit', () => {
+        expect(getComposerOptionalControlsVisibility(330, 160, 12)).toEqual({
+            permission: true,
             contextUsage: true
+        })
+        expect(getComposerOptionalControlsVisibility(330, 160, 72)).toEqual({
+            permission: false,
+            contextUsage: false
         })
     })
 })

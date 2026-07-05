@@ -544,23 +544,90 @@ select {
     padding-left: 0;
 }
 
+.aui-md-ul:not(.contains-task-list) {
+    --aui-tree-accent: #64748b;
+    --aui-tree-line: color-mix(in srgb, var(--aui-tree-accent) 34%, transparent);
+    --aui-tree-line-soft: color-mix(in srgb, var(--aui-tree-accent) 18%, transparent);
+    list-style: none;
+    position: relative;
+    padding-left: 1.22rem;
+}
+
+.aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 1) {
+    --aui-tree-accent: #64748b;
+}
+
+.aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 2) {
+    --aui-tree-accent: #5b8a72;
+}
+
+.aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 3) {
+    --aui-tree-accent: #7c6aa8;
+}
+
+.aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 4) {
+    --aui-tree-accent: #a06d4f;
+}
+
+html[data-theme="dark"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 1),
+html[data-theme="oled"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 1) {
+    --aui-tree-accent: #94a3b8;
+}
+
+html[data-theme="dark"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 2),
+html[data-theme="oled"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 2) {
+    --aui-tree-accent: #86b79d;
+}
+
+html[data-theme="dark"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 3),
+html[data-theme="oled"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 3) {
+    --aui-tree-accent: #a99ad6;
+}
+
+html[data-theme="dark"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 4),
+html[data-theme="oled"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-type(4n + 4) {
+    --aui-tree-accent: #d6a27f;
+}
+
+.aui-md-ul:not(.contains-task-list)::before {
+    content: '';
+    position: absolute;
+    left: 0.32rem;
+    top: 0.38rem;
+    bottom: 0.72rem;
+    width: 1px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, var(--aui-tree-line), var(--aui-tree-line-soft));
+}
+
 .aui-md-ul:not(.contains-task-list) > .aui-md-li {
     position: relative;
-    margin-top: 0.25rem;
+    margin-top: 0.2rem;
+    padding-left: 0.2rem;
 }
 
 .aui-md-ul:not(.contains-task-list) > .aui-md-li::before {
-    content: '├─';
+    content: '';
     position: absolute;
-    left: -1.25rem;
-    color: var(--app-hint);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 0.85em;
-    line-height: inherit;
+    left: -0.9rem;
+    top: 0.82em;
+    width: 0.68rem;
+    height: 0.56rem;
+    border-bottom: 1px solid var(--aui-tree-line);
+    border-left: 1px solid var(--aui-tree-line);
+    border-bottom-left-radius: 0.38rem;
+    transform: translateY(-0.56rem);
 }
 
-.aui-md-ul:not(.contains-task-list) > .aui-md-li:last-child::before {
-    content: '└─';
+.aui-md-ul:not(.contains-task-list) > .aui-md-li::after {
+    content: '';
+    position: absolute;
+    left: -0.23rem;
+    top: calc(0.82em - 0.5px);
+    width: 0.28rem;
+    height: 1px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--aui-tree-accent) 42%, transparent);
 }
 
 .aui-md :where(input[type="checkbox"]) {
@@ -613,9 +680,18 @@ select {
     color: inherit;
 }
 
+.happy-user-bubble .aui-md-a {
+    color: var(--app-chat-user-fg);
+    text-decoration-color: color-mix(in srgb, var(--app-chat-user-fg) 70%, transparent);
+}
+
+.happy-user-bubble .aui-md-a:hover {
+    text-decoration-color: var(--app-chat-user-fg);
+}
+
 .aui-md-codeblock pre.shiki {
     margin: 0;
-    padding: 0 1.5rem 1.25rem;
+    padding: 0 1.5rem 0.5rem;
     background-color: transparent !important;
     font-size: 0.9rem;
     line-height: 1.65rem;

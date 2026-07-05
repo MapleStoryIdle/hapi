@@ -101,6 +101,21 @@ describe('PwaUpdateBanner', () => {
         expect(screen.getByTestId('pwa-update-banner')).toHaveClass('top-12')
     })
 
+    it('can anchor its default offset below the session title bar', () => {
+        usePwaUpdateMock.mockReturnValue({
+            needRefresh: true,
+            reload: vi.fn(),
+        })
+
+        render(
+            <I18nProvider>
+                <PwaUpdateBanner offsetFromTitleBar />
+            </I18nProvider>,
+        )
+
+        expect(screen.getByTestId('pwa-update-banner')).toHaveClass('top-[calc(env(safe-area-inset-top)+4.75rem)]')
+    })
+
     it('offsets below voice error banners when shown inside the voice provider', () => {
         usePwaUpdateMock.mockReturnValue({
             needRefresh: true,
@@ -118,6 +133,21 @@ describe('PwaUpdateBanner', () => {
         )
 
         expect(screen.getByTestId('pwa-update-banner')).toHaveClass('top-12')
+    })
+
+    it('keeps the status-banner gap when anchored below the session title bar', () => {
+        usePwaUpdateMock.mockReturnValue({
+            needRefresh: true,
+            reload: vi.fn(),
+        })
+
+        render(
+            <I18nProvider>
+                <PwaUpdateBannerWithStatusOffset isSyncing isReconnecting={false} offsetFromTitleBar />
+            </I18nProvider>,
+        )
+
+        expect(screen.getByTestId('pwa-update-banner')).toHaveClass('top-[calc(env(safe-area-inset-top)+7.25rem)]')
     })
 
     it('expands the rationale section when the disclosure is opened', () => {

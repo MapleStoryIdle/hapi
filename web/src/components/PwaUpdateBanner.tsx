@@ -4,7 +4,23 @@ import { usePwaUpdateContext } from '@/lib/pwa-update-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useVoiceOptional } from '@/lib/voice-context'
 
-export function PwaUpdateBanner({ topClassName }: { topClassName?: string } = {}) {
+const TITLE_BAR_ANCHORED_TOP_CLASS = 'top-[calc(env(safe-area-inset-top)+4.75rem)]'
+const TITLE_BAR_ANCHORED_STATUS_TOP_CLASS = 'top-[calc(env(safe-area-inset-top)+7.25rem)]'
+
+function getDefaultTopClass(isOnline: boolean, offsetFromTitleBar: boolean): string {
+    if (offsetFromTitleBar) {
+        return isOnline ? TITLE_BAR_ANCHORED_TOP_CLASS : TITLE_BAR_ANCHORED_STATUS_TOP_CLASS
+    }
+    return isOnline ? 'top-2' : 'top-10'
+}
+
+export function PwaUpdateBanner({
+    topClassName,
+    offsetFromTitleBar = false,
+}: {
+    topClassName?: string
+    offsetFromTitleBar?: boolean
+} = {}) {
     const { t } = useTranslation()
     const { needRefresh, reload } = usePwaUpdateContext()
     const isOnline = useOnlineStatus()
@@ -14,7 +30,7 @@ export function PwaUpdateBanner({ topClassName }: { topClassName?: string } = {}
         return null
     }
 
-    const topClass = topClassName ?? (isOnline ? 'top-2' : 'top-10')
+    const topClass = topClassName ?? getDefaultTopClass(isOnline, offsetFromTitleBar)
 
     return (
         <div
@@ -57,9 +73,11 @@ export function PwaUpdateBanner({ topClassName }: { topClassName?: string } = {}
 export function PwaUpdateBannerWithStatusOffset({
     isSyncing,
     isReconnecting,
+    offsetFromTitleBar = false,
 }: {
     isSyncing: boolean
     isReconnecting: boolean
+    offsetFromTitleBar?: boolean
 }) {
     const voice = useVoiceOptional()
     const hasTopStatusBanner =
@@ -68,6 +86,12 @@ export function PwaUpdateBannerWithStatusOffset({
         Boolean(voice && voice.status === 'error' && voice.errorMessage)
 
     return (
-        <PwaUpdateBanner topClassName={hasTopStatusBanner ? 'top-12' : undefined} />
+        <PwaUpdateBanner
+            topClassName={hasTopStatusBanner
+                ? offsetFromTitleBar ? TITLE_BAR_ANCHORED_STATUS_TOP_CLASS : 'top-12'
+                : undefined
+            }
+            offsetFromTitleBar={offsetFromTitleBar}
+        />
     )
 }

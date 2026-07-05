@@ -31,11 +31,11 @@ export function SyntaxHighlighter(props: SyntaxHighlighterProps) {
             <div className="grid w-max min-w-full font-mono text-[0.95rem] leading-7" style={codeGridStyle}>
                 <pre
                     aria-hidden="true"
-                    className="m-0 select-none px-5 pb-5 pt-0 text-left text-[var(--app-hint)]/65"
+                    className="m-0 select-none px-5 pb-2 pt-0 text-left text-[var(--app-hint)]/65"
                 >
                     {lineNumbers}
                 </pre>
-                <pre className="shiki m-0 px-6 pb-5 pt-0">
+                <pre className="shiki m-0 px-6 pb-2 pt-0">
                     <code className="block">{highlighted ?? props.code}</code>
                 </pre>
             </div>

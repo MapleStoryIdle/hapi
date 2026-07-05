@@ -438,6 +438,7 @@ function AppInner() {
                 <PwaUpdateBannerWithStatusOffset
                     isSyncing={isSyncing}
                     isReconnecting={sseDisconnected && !isSyncing}
+                    offsetFromTitleBar={Boolean(selectedSessionId)}
                 />
                 <SyncingBanner isSyncing={isSyncing} />
                 <ReconnectingBanner
