@@ -38,6 +38,16 @@ async function runRpc<T>(fn: () => Promise<T>): Promise<T | { success: false; er
 // A generated-image id represents a validated local-file snapshot. Keep browser caching enabled
 // so remounts don't force a CLI RPC; the CLI rejects uncached requests if the source file changed.
 const GENERATED_IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable'
+const SESSION_FILE_BYTES_CACHE_CONTROL = 'private, max-age=0, must-revalidate'
+
+function inlineContentDisposition(fileName: string | null | undefined, fallback: string): string {
+    const resolved = fileName || fallback
+    const asciiFallback = resolved
+        .replace(/[^\x20-\x7E]+/g, '_')
+        .replace(/["\\;]/g, '_')
+        .trim() || fallback
+    return `inline; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(resolved)}`
+}
 
 // Weak comparison of an If-None-Match header against our ETag (handles lists, `*`, and W/ prefixes).
 function ifNoneMatchMatches(header: string | undefined, etag: string): boolean {
@@ -150,6 +160,40 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         return c.json(result)
     })
 
+    app.get('/sessions/:id/file-blob', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const sessionPath = sessionResult.session.metadata?.path
+        if (!sessionPath) {
+            return c.json({ success: false, error: 'Session path not available' })
+        }
+
+        const parsed = filePathSchema.safeParse(c.req.query())
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid file path' }, 400)
+        }
+
+        const result = await runRpc(() => engine.readSessionFileBytes(sessionResult.sessionId, parsed.data.path))
+        if (!result.success) {
+            const status = /invalid/i.test(result.error) ? 400 : 404
+            return c.json({ success: false, error: result.error }, status)
+        }
+
+        return c.body(Uint8Array.from(result.bytes), 200, {
+            'Content-Type': result.mimeType ?? 'application/octet-stream',
+            'Content-Disposition': inlineContentDisposition(result.fileName, 'file'),
+            'Cache-Control': SESSION_FILE_BYTES_CACHE_CONTROL
+        })
+    })
+
     app.get('/sessions/:id/generated-images/:imageId', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {
@@ -176,17 +220,16 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             })
         }
 
-        const result = await runRpc(() => engine.readGeneratedImage(sessionResult.sessionId, parsed.data.imageId))
-        if (!result.success || !result.content) {
+        const result = await runRpc(() => engine.readGeneratedImageBytes(sessionResult.sessionId, parsed.data.imageId))
+        if (!result.success) {
             return c.json({ success: false, error: result.error ?? 'Generated image not found' }, 404)
         }
 
-        const bytes = Uint8Array.from(Buffer.from(result.content, 'base64'))
         // Cache aggressively in the browser. HAPI no longer stores an extra image copy on disk;
         // uncached loads read the original file through the CLI path registry.
-        return c.body(bytes, 200, {
+        return c.body(Uint8Array.from(result.bytes), 200, {
             'Content-Type': result.mimeType ?? 'application/octet-stream',
-            'Content-Disposition': `inline; filename="${encodeURIComponent(result.fileName ?? 'generated-image')}"`,
+            'Content-Disposition': inlineContentDisposition(result.fileName, 'generated-image'),
             'Cache-Control': GENERATED_IMAGE_CACHE_CONTROL,
             ETag: etag
         })

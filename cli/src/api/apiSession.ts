@@ -11,6 +11,8 @@ import type { RawJSONLines } from '@/claude/types'
 import { configuration } from '@/configuration'
 import { AGENT_MESSAGE_PAYLOAD_TYPE, VerifyRemoteServerCandidateResponseSchema } from "@hapi/protocol"
 import type {
+    BinaryFileReadRequest,
+    BinaryFileReadResponse,
     SessionEndReason,
     VerifyRemoteServerCandidateRequest,
     VerifyRemoteServerCandidateResponse
@@ -36,6 +38,7 @@ import type {
 import { AgentStateSchema, CliMessagesResponseSchema, MetadataSchema, UserMessageSchema } from './types'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
+import { readGeneratedImageBytes, readSessionFileBytes } from '../modules/common/handlers/files'
 import { cleanupUploadDir } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
@@ -236,6 +239,25 @@ export class ApiSessionClient extends EventEmitter {
 
         this.socket.on('rpc-request', async (data: { method: string; params: string }, callback: (response: string) => void) => {
             callback(await this.rpcHandlerManager.handleRequest(data))
+        })
+
+        this.socket.on('file:read-bytes', async (data: BinaryFileReadRequest, callback: (response: BinaryFileReadResponse) => void) => {
+            try {
+                if (data.type === 'generated-image') {
+                    callback(await readGeneratedImageBytes(data.imageId))
+                    return
+                }
+
+                const workingDirectory = this.metadata?.path
+                if (!workingDirectory) {
+                    callback({ success: false, error: 'Session path not available' })
+                    return
+                }
+
+                callback(await readSessionFileBytes(data.path, workingDirectory))
+            } catch (error) {
+                callback({ success: false, error: error instanceof Error ? error.message : String(error) })
+            }
         })
 
         this.socket.on('disconnect', (reason) => {

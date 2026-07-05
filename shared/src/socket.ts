@@ -69,6 +69,27 @@ export const TerminalErrorPayloadSchema = z.object({
 })
 
 export type TerminalErrorPayload = z.infer<typeof TerminalErrorPayloadSchema>
+
+export type BinaryFileReadRequest = {
+    type: 'session-file'
+    path: string
+} | {
+    type: 'generated-image'
+    imageId: string
+}
+
+export type BinaryFileReadResponse = {
+    success: true
+    bytes: Uint8Array | ArrayBuffer
+    mimeType?: string | null
+    fileName?: string | null
+    size?: number
+    mtimeMs?: number
+} | {
+    success: false
+    error: string
+}
+
 export const UpdateNewMessageBodySchema = z.object({
     t: z.literal('new-message'),
     sid: z.string(),
@@ -192,6 +213,7 @@ export type MachineUpdateStateAck = {
 export interface ServerToClientEvents {
     update: (data: Update, ack?: (response: CancelQueuedMessageAck) => void) => void
     'rpc-request': (data: { method: string; params: string }, callback: (response: string) => void) => void
+    'file:read-bytes': (data: BinaryFileReadRequest, callback: (response: BinaryFileReadResponse) => void) => void
     'terminal:open': (data: TerminalOpenPayload) => void
     'terminal:write': (data: TerminalWritePayload) => void
     'terminal:resize': (data: TerminalResizePayload) => void

@@ -1,7 +1,7 @@
 import { logger } from '@/ui/logger'
 import { lstat, readFile, stat, writeFile } from 'fs/promises'
 import { createHash } from 'crypto'
-import { resolve } from 'path'
+import { basename, resolve } from 'path'
 import type { FileReadResponse, GeneratedImageResponse } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
@@ -33,57 +33,99 @@ interface WriteFileResponse {
     error?: string
 }
 
+export type ReadFileBytesResult = {
+    success: true
+    bytes: Buffer
+    mimeType: string | null
+    fileName: string
+    size: number
+    mtimeMs: number
+} | {
+    success: false
+    error: string
+}
+
+export async function readSessionFileBytes(path: string, workingDirectory: string): Promise<ReadFileBytesResult> {
+    const validation = validatePath(path, workingDirectory)
+    if (!validation.valid) {
+        return rpcError(validation.error ?? 'Invalid file path')
+    }
+
+    try {
+        const resolvedPath = resolve(workingDirectory, path)
+        const bytes = await readFile(resolvedPath)
+        const info = await stat(resolvedPath)
+        return {
+            success: true,
+            bytes,
+            mimeType: detectImageMimeType(bytes),
+            fileName: basename(path) || 'file',
+            size: info.size,
+            mtimeMs: info.mtimeMs
+        }
+    } catch (error) {
+        logger.debug('Failed to read file:', error)
+        return rpcError(getErrorMessage(error, 'Failed to read file'))
+    }
+}
+
+export async function readGeneratedImageBytes(id: string): Promise<ReadFileBytesResult> {
+    const image = getGeneratedImage(id)
+    if (!image) {
+        return rpcError('Generated image not found')
+    }
+
+    try {
+        const info = await lstat(image.path)
+        if (!info.isFile()) {
+            return rpcError('Generated image source is unavailable')
+        }
+        if (info.size !== image.size || info.mtimeMs !== image.mtimeMs) {
+            return rpcError('Generated image source changed')
+        }
+
+        const bytes = await readFile(image.path)
+        if (detectImageMimeType(bytes) !== image.mimeType) {
+            return rpcError('Generated image source changed')
+        }
+
+        return {
+            success: true,
+            bytes,
+            mimeType: image.mimeType,
+            fileName: image.fileName,
+            size: image.size,
+            mtimeMs: image.mtimeMs
+        }
+    } catch (error) {
+        logger.debug('Failed to read generated image:', error)
+        return rpcError(getErrorMessage(error, 'Failed to read generated image'))
+    }
+}
+
 export function registerFileHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
     rpcHandlerManager.registerHandler<ReadFileRequest, ReadFileResponse>(RPC_METHODS.ReadFile, async (data) => {
         logger.debug('Read file request:', data.path)
 
-        const validation = validatePath(data.path, workingDirectory)
-        if (!validation.valid) {
-            return rpcError(validation.error ?? 'Invalid file path')
+        const result = await readSessionFileBytes(data.path, workingDirectory)
+        if (!result.success) {
+            return result
         }
-
-        try {
-            const resolvedPath = resolve(workingDirectory, data.path)
-            const buffer = await readFile(resolvedPath)
-            const content = buffer.toString('base64')
-            return { success: true, content }
-        } catch (error) {
-            logger.debug('Failed to read file:', error)
-            return rpcError(getErrorMessage(error, 'Failed to read file'))
-        }
+        return { success: true, content: result.bytes.toString('base64') }
     })
 
     rpcHandlerManager.registerHandler<ReadGeneratedImageRequest, ReadGeneratedImageResponse>(RPC_METHODS.ReadGeneratedImage, async (data) => {
         logger.debug('Read generated image request:', data.id)
 
-        const image = getGeneratedImage(data.id)
-        if (!image) {
-            return rpcError('Generated image not found')
+        const result = await readGeneratedImageBytes(data.id)
+        if (!result.success) {
+            return result
         }
-
-        try {
-            const info = await lstat(image.path)
-            if (!info.isFile()) {
-                return rpcError('Generated image source is unavailable')
-            }
-            if (info.size !== image.size || info.mtimeMs !== image.mtimeMs) {
-                return rpcError('Generated image source changed')
-            }
-
-            const content = await readFile(image.path)
-            if (detectImageMimeType(content) !== image.mimeType) {
-                return rpcError('Generated image source changed')
-            }
-
-            return {
-                success: true,
-                content: content.toString('base64'),
-                mimeType: image.mimeType,
-                fileName: image.fileName
-            }
-        } catch (error) {
-            logger.debug('Failed to read generated image:', error)
-            return rpcError(getErrorMessage(error, 'Failed to read generated image'))
+        return {
+            success: true,
+            content: result.bytes.toString('base64'),
+            mimeType: result.mimeType ?? undefined,
+            fileName: result.fileName
         }
     })
 

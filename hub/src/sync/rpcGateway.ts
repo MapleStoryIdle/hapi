@@ -1,5 +1,6 @@
 import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+import type { BinaryFileReadRequest, BinaryFileReadResponse } from '@hapi/protocol'
 import type {
     CodexSubscriptionLimitsResponse,
     GetCodexSubscriptionLimitsRequest,
@@ -63,6 +64,17 @@ export type RpcListCursorModelsResponse = CursorModelsResponse
 export type RpcOpencodeModel = OpencodeModelSummary
 export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
+export type RpcFileBytesResponse = {
+    success: true
+    bytes: Uint8Array
+    mimeType?: string | null
+    fileName?: string | null
+    size?: number
+    mtimeMs?: number
+} | {
+    success: false
+    error: string
+}
 
 export class RpcGateway {
     constructor(
@@ -225,8 +237,22 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, RPC_METHODS.ReadFile, { path }) as RpcReadFileResponse
     }
 
+    async readSessionFileBytes(sessionId: string, path: string): Promise<RpcFileBytesResponse> {
+        return await this.binaryFileCall(`${sessionId}:${RPC_METHODS.ReadFile}`, {
+            type: 'session-file',
+            path
+        })
+    }
+
     async readGeneratedImage(sessionId: string, imageId: string): Promise<RpcGeneratedImageResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.ReadGeneratedImage, { id: imageId }) as RpcGeneratedImageResponse
+    }
+
+    async readGeneratedImageBytes(sessionId: string, imageId: string): Promise<RpcFileBytesResponse> {
+        return await this.binaryFileCall(`${sessionId}:${RPC_METHODS.ReadGeneratedImage}`, {
+            type: 'generated-image',
+            imageId
+        })
     }
 
     async listDirectory(sessionId: string, path: string): Promise<RpcListDirectoryResponse> {
@@ -359,4 +385,66 @@ export class RpcGateway {
             return response
         }
     }
+
+    private async binaryFileCall(
+        method: string,
+        request: BinaryFileReadRequest,
+        timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS
+    ): Promise<RpcFileBytesResponse> {
+        const socketId = this.rpcRegistry.getSocketIdForMethod(method)
+        if (!socketId) {
+            throw new RpcTargetMissingError(method, 'handler-not-registered')
+        }
+
+        const socket = this.io.of('/cli').sockets.get(socketId)
+        if (!socket) {
+            throw new RpcTargetMissingError(method, 'socket-disconnected')
+        }
+
+        const response = await socket.timeout(timeoutMs).emitWithAck('file:read-bytes', request) as BinaryFileReadResponse | unknown
+        if (!response || typeof response !== 'object') {
+            return { success: false, error: 'Unexpected binary file response' }
+        }
+
+        const record = response as Record<string, unknown>
+        if (record.success !== true) {
+            return {
+                success: false,
+                error: typeof record.error === 'string' ? record.error : 'Failed to read file bytes'
+            }
+        }
+
+        const bytes = normalizeBinaryBytes(record.bytes)
+        if (!bytes) {
+            return { success: false, error: 'Invalid binary file response' }
+        }
+
+        return {
+            success: true,
+            bytes,
+            mimeType: typeof record.mimeType === 'string' ? record.mimeType : null,
+            fileName: typeof record.fileName === 'string' ? record.fileName : null,
+            size: typeof record.size === 'number' ? record.size : undefined,
+            mtimeMs: typeof record.mtimeMs === 'number' ? record.mtimeMs : undefined
+        }
+    }
+}
+
+function normalizeBinaryBytes(value: unknown): Uint8Array | null {
+    if (value instanceof Uint8Array) {
+        return value
+    }
+    if (value instanceof ArrayBuffer) {
+        return new Uint8Array(value)
+    }
+    if (Array.isArray(value) && value.every((item) => typeof item === 'number')) {
+        return Uint8Array.from(value)
+    }
+    if (value && typeof value === 'object') {
+        const data = (value as { data?: unknown }).data
+        if (Array.isArray(data) && data.every((item) => typeof item === 'number')) {
+            return Uint8Array.from(data)
+        }
+    }
+    return null
 }

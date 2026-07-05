@@ -57,13 +57,17 @@ function DownloadIcon(props: { className?: string }) {
     )
 }
 
-function triggerDownload(fileName: string, base64Content: string, mimeType: string | null) {
+function triggerBase64Download(fileName: string, base64Content: string, mimeType: string | null) {
     const byteChars = atob(base64Content)
     const byteArray = new Uint8Array(byteChars.length)
     for (let i = 0; i < byteChars.length; i++) {
         byteArray[i] = byteChars.charCodeAt(i)
     }
     const blob = new Blob([byteArray], { type: mimeType ?? 'application/octet-stream' })
+    triggerBlobDownload(fileName, blob)
+}
+
+function triggerBlobDownload(fileName: string, blob: Blob) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -202,7 +206,7 @@ export default function FilePage() {
             }
             return await api.getGitDiffFile(sessionId, filePath, staged)
         },
-        enabled: Boolean(api && sessionId && filePath)
+        enabled: Boolean(api && sessionId && filePath && !imageMimeType)
     })
 
     const fileQuery = useQuery({
@@ -213,7 +217,18 @@ export default function FilePage() {
             }
             return await api.readSessionFile(sessionId, filePath)
         },
-        enabled: Boolean(api && sessionId && filePath)
+        enabled: Boolean(api && sessionId && filePath && !imageMimeType)
+    })
+
+    const imageBlobQuery = useQuery({
+        queryKey: queryKeys.sessionFileBlob(sessionId, filePath),
+        queryFn: async () => {
+            if (!api || !sessionId || !filePath) {
+                throw new Error('Missing session or path')
+            }
+            return await api.getSessionFileBlob(sessionId, filePath)
+        },
+        enabled: Boolean(api && sessionId && filePath && imageMimeType)
     })
 
     const diffContent = diffQuery.data?.success ? (diffQuery.data.stdout ?? '') : ''
@@ -229,9 +244,20 @@ export default function FilePage() {
     const binaryFile = fileContentResult?.success
         ? !decodedContentResult.ok || isBinaryContent(decodedContent)
         : false
-    const imagePreviewUrl = fileContentResult?.success && fileContentResult.content && imageMimeType
-        ? `data:${imageMimeType};base64,${fileContentResult.content}`
-        : null
+    const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
+
+    useEffect(() => {
+        if (!imageBlobQuery.data) {
+            setImagePreviewUrl(null)
+            return
+        }
+
+        const url = URL.createObjectURL(imageBlobQuery.data)
+        setImagePreviewUrl(url)
+        return () => {
+            URL.revokeObjectURL(url)
+        }
+    }, [imageBlobQuery.data])
 
     const language = useMemo(() => imageMimeType ? undefined : resolveLanguage(filePath), [filePath, imageMimeType])
     const highlighted = useShikiHighlighter(imageMimeType ? '' : decodedContent, language)
@@ -244,7 +270,9 @@ export default function FilePage() {
         && decodedContent.length > 0
         && contentSizeBytes <= MAX_COPYABLE_FILE_BYTES
 
-    const canDownload = fileContentResult?.success === true && Boolean(fileContentResult.content)
+    const canDownload = imageMimeType
+        ? Boolean(imageBlobQuery.data)
+        : fileContentResult?.success === true && Boolean(fileContentResult.content)
 
     const [displayMode, setDisplayMode] = useState<'diff' | 'file'>('diff')
 
@@ -262,10 +290,15 @@ export default function FilePage() {
         }
     }, [diffSuccess, diffFailed, diffContent, imageMimeType])
 
-    const loading = diffQuery.isLoading || fileQuery.isLoading
-    const fileError = fileContentResult && !fileContentResult.success
-        ? (fileContentResult.error ?? 'Failed to read file')
+    const loading = diffQuery.isLoading || (imageMimeType ? imageBlobQuery.isLoading : fileQuery.isLoading)
+    const imageBlobError = imageBlobQuery.error
+        ? (imageBlobQuery.error instanceof Error ? imageBlobQuery.error.message : String(imageBlobQuery.error))
         : null
+    const fileError = imageMimeType
+        ? imageBlobError
+        : fileContentResult && !fileContentResult.success
+            ? (fileContentResult.error ?? 'Failed to read file')
+            : null
     const missingPath = !filePath
     const diffErrorMessage = diffError ? formatDiffError(diffError, t) : null
     const fileErrorMessage = fileError ? formatReadFileError(fileError, t) : null
@@ -303,7 +336,15 @@ export default function FilePage() {
                     {canDownload ? (
                         <button
                             type="button"
-                            onClick={() => triggerDownload(fileName, fileContentResult!.content!, imageMimeType)}
+                            onClick={() => {
+                                if (imageMimeType && imageBlobQuery.data) {
+                                    triggerBlobDownload(fileName, imageBlobQuery.data)
+                                    return
+                                }
+                                if (fileContentResult?.success && fileContentResult.content) {
+                                    triggerBase64Download(fileName, fileContentResult.content, imageMimeType)
+                                }
+                            }}
                             className="shrink-0 rounded p-1 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] transition-colors"
                             title={t('file.page.download')}
                         >
