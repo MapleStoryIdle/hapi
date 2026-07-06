@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeFilePathHref, remarkFilePathLinks } from '@/lib/remark-file-path-links'
+import { decodeFilePathHref, decodeFilePathLinkHref, remarkFilePathLinks } from '@/lib/remark-file-path-links'
 
 type TestNode = {
     type: string
@@ -28,6 +28,22 @@ describe('remarkFilePathLinks', () => {
 
         expect(link?.children?.[0]?.value).toBe('web/src/router.tsx:42')
         expect(linkedPath(link!)).toBe('web/src/router.tsx')
+        expect(decodeFilePathLinkHref(link!.url!)).toEqual({
+            path: 'web/src/router.tsx',
+            line: 42
+        })
+    })
+
+    it('links relative code paths with line and column targets', () => {
+        const nodes = transform('Open web/src/router.tsx:42:7 please')
+        const link = nodes.find((node) => node.type === 'link')
+
+        expect(link?.children?.[0]?.value).toBe('web/src/router.tsx:42:7')
+        expect(decodeFilePathLinkHref(link!.url!)).toEqual({
+            path: 'web/src/router.tsx',
+            line: 42,
+            column: 7
+        })
     })
 
     it('links image and markdown filenames for preview', () => {

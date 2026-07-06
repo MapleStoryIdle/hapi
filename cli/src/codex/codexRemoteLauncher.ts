@@ -2404,6 +2404,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         sourceImageId,
                         fileName: image.fileName,
                         mimeType: image.mimeType,
+                        sourcePath: image.path,
+                        sourceMachineId: session.client.getMachineId() ?? undefined,
+                        size: image.size,
+                        mtimeMs: image.mtimeMs,
                         id: randomUUID()
                     });
                 }

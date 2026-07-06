@@ -14,6 +14,15 @@ import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-libra
 import React from 'react'
 import { defaultComponents, classifyScheme, denyOnlyTransform, UriConfirmProvider } from '@/components/assistant-ui/markdown-text'
 import { I18nProvider } from '@/lib/i18n-context'
+import { HappyChatProvider } from '@/components/AssistantChat/context'
+
+const routerMocks = vi.hoisted(() => ({
+    navigate: vi.fn(),
+}))
+
+vi.mock('@tanstack/react-router', () => ({
+    useNavigate: () => routerMocks.navigate,
+}))
 
 // defaultComponents.a is the memoized A component.
 const AnchorComponent = (defaultComponents as Record<string, unknown>).a as React.ComponentType<
@@ -34,11 +43,34 @@ function renderA(props: React.ComponentPropsWithoutRef<'a'>) {
     )
 }
 
+function renderAInChat(props: React.ComponentPropsWithoutRef<'a'>) {
+    return render(
+        <I18nProvider>
+            <HappyChatProvider value={{
+                api: {} as never,
+                sessionId: 'session-1',
+                metadata: { path: 'repo', host: 'local' },
+                terminalToolDisplayMode: 'compact',
+                disabled: false,
+                onRefresh: vi.fn(),
+                hasMoreMessages: false,
+                isLoadingMoreMessages: false,
+                loadOlderMessagesPreservingScroll: vi.fn(async () => false),
+            }}>
+                <UriConfirmProvider>
+                    <AnchorComponent {...props} />
+                </UriConfirmProvider>
+            </HappyChatProvider>
+        </I18nProvider>
+    )
+}
+
 const STORAGE_KEY = 'hapi-allowed-schemes'
 
 beforeEach(() => {
     localStorage.clear()
     cleanup()
+    routerMocks.navigate.mockClear()
     vi.clearAllMocks()
 })
 
@@ -114,6 +146,15 @@ describe('denyOnlyTransform', () => {
         'strips %s → ""',
         (url) => expect(denyOnlyTransform(url)).toBe('')
     )
+    it.each([
+        'data:image/png;base64,iVBORw0KGgo=',
+        'data:image/svg+xml,<svg></svg>',
+        'data:text/html,<h1>xss</h1>',
+        'data:application/javascript,alert(1)'
+    ])(
+        'keeps data URL %s stripped',
+        (url) => expect(denyOnlyTransform(url)).toBe('')
+    )
     it.each(['https://example.com', 'http://example.com', 'mailto:a@b.com'])(
         'passes %s through unchanged',
         (url) => expect(denyOnlyTransform(url)).toBe(url)
@@ -186,6 +227,17 @@ describe('markdown <A> component — click handler', () => {
         const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true })
         const preventSpy = vi.spyOn(clickEvent, 'preventDefault')
         document.querySelector('a')!.dispatchEvent(clickEvent)
+        expect(preventSpy).toHaveBeenCalled()
+    })
+
+    it('renders empty href for direct data links', () => {
+        renderA({ href: 'data:image/png;base64,iVBORw0KGgo=', children: 'image link' })
+        const link = document.querySelector('a')!
+        expect(link.getAttribute('href')).toBe('')
+
+        const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true })
+        const preventSpy = vi.spyOn(clickEvent, 'preventDefault')
+        link.dispatchEvent(clickEvent)
         expect(preventSpy).toHaveBeenCalled()
     })
 
@@ -268,6 +320,25 @@ describe('markdown <A> component — relative / no-scheme hrefs navigate normall
 
     it('https://example.com → click not prevented (regression: IANA still passes through)', () => {
         clickAndCheckNotPrevented('https://example.com')
+    })
+})
+
+describe('markdown <A> component — file path links', () => {
+    it('renders file paths as inline chips and keeps line targets in the file URL', () => {
+        const href = `hapi-file:${encodeURIComponent('web/src/router.tsx')}?line=42&column=7`
+
+        renderAInChat({ href, children: 'web/src/router.tsx:42:7' })
+
+        // File path links should look like inline code chips, not generic web links.
+        const link = screen.getByRole('link')
+        expect(link).toHaveClass('aui-md-file-link', 'truncate', 'font-mono', 'no-underline')
+        expect(link).toHaveAttribute('title', 'web/src/router.tsx:42:7')
+
+        const target = new URL(link.getAttribute('href')!, 'http://127.0.0.1')
+        expect(target.pathname).toBe('/sessions/session-1/file')
+        expect(target.searchParams.get('from')).toBe('session')
+        expect(target.searchParams.get('line')).toBe('42')
+        expect(target.searchParams.get('column')).toBe('7')
     })
 })
 

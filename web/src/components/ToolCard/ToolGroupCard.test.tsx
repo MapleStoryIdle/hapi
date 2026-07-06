@@ -333,6 +333,44 @@ describe('ToolGroupCard', () => {
         expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
     })
 
+    it('treats running tools as active even when summary counts are stale', () => {
+        const startedAt = Date.now() - 8_000
+        const tools = [
+            makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+                state: 'running',
+                createdAt: startedAt,
+                startedAt,
+                completedAt: null,
+            }),
+        ]
+        const view = renderCard(makeGroup({
+            tools,
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        const toggle = within(view.container).getByRole('button', { name: /running \d+s/i })
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.queryByText(/Ran \d+s/i)).not.toBeInTheDocument()
+    })
+
     it('uses a generic compact title and renders detail blocks for result detail groups', () => {
         const tools = [
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
@@ -381,6 +419,49 @@ describe('ToolGroupCard', () => {
         const processNote = screen.getByText('Collected process notes')
         expect(processNote).toBeInTheDocument()
         expect(processNote.className).not.toContain('bg-[var(--app-subtle-bg)]')
+    })
+
+    it('labels compact result detail groups when the process text names a skill', () => {
+        const tools = [
+            makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+                createdAt: 0,
+                startedAt: 0,
+                completedAt: 2_000,
+            }),
+        ]
+        const view = renderCard(makeGroup({
+            tools,
+            forceGenericCompactTitle: true,
+            detailBlocks: [{
+                kind: 'agent-text',
+                id: 'detail-1',
+                localId: null,
+                createdAt: 1,
+                text: '我会用 imagegen：这是纯效果图预览，不改代码。',
+            }],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        expect(within(view.container).getByRole('button', { name: /used imagegen 2s/i })).toBeInTheDocument()
+        expect(screen.queryByText(/Processed 2s/i)).not.toBeInTheDocument()
     })
 
     it('renders result detail blocks in chronological order', () => {

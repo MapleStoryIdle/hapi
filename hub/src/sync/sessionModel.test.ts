@@ -1,11 +1,12 @@
 import { describe, expect, it, spyOn } from 'bun:test'
-import { toSessionSummary } from '@hapi/protocol'
+import { AGENT_MESSAGE_PAYLOAD_TYPE, toSessionSummary } from '@hapi/protocol'
 import type { SyncEvent } from '@hapi/protocol/types'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import { registerSessionHandlers } from '../socket/handlers/cli/sessionHandlers'
 import type { EventPublisher } from './eventPublisher'
 import { SessionCache } from './sessionCache'
+import { RpcTargetMissingError } from './rpcGateway'
 import { SyncEngine } from './syncEngine'
 
 function createPublisher(events: SyncEvent[]): EventPublisher {
@@ -51,6 +52,140 @@ describe('session model', () => {
 
         expect(session.effort).toBe('high')
         expect(toSessionSummary(session).effort).toBe('high')
+    })
+
+    it('reads generated images from stored path references when the session socket is gone', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const session = engine.getOrCreateSession(
+                'generated-image-fallback',
+                { path: '/tmp/project', host: 'localhost', flavor: 'codex', machineId: 'machine-1' },
+                null,
+                'default'
+            )
+            store.messages.addMessage(session.id, {
+                role: 'agent',
+                content: {
+                    type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                    data: {
+                        type: 'generated-image',
+                        imageId: 'img-1',
+                        fileName: 'shot.png',
+                        mimeType: 'image/png',
+                        sourcePath: '/tmp/shot.png',
+                        sourceMachineId: 'machine-1',
+                        size: 8,
+                        mtimeMs: 1234,
+                        id: 'event-1'
+                    }
+                }
+            })
+
+            let fallbackCall: unknown
+            ;(engine as any).rpcGateway.readGeneratedImageBytes = async () => {
+                throw new RpcTargetMissingError('generated-image-fallback:readGeneratedImage', 'socket-disconnected')
+            }
+            ;(engine as any).rpcGateway.readGeneratedImageFileBytes = async (machineId: string, reference: unknown) => {
+                fallbackCall = { machineId, reference }
+                return {
+                    success: true,
+                    bytes: new Uint8Array([1, 2, 3]),
+                    mimeType: 'image/png',
+                    fileName: 'shot.png'
+                }
+            }
+
+            const result = await engine.readGeneratedImageBytes(session.id, 'img-1')
+
+            expect(result.success).toBe(true)
+            expect(fallbackCall).toEqual({
+                machineId: 'machine-1',
+                reference: {
+                    machineId: 'machine-1',
+                    path: '/tmp/shot.png',
+                    mimeType: 'image/png',
+                    size: 8,
+                    mtimeMs: 1234,
+                    fileName: 'shot.png'
+                }
+            })
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('falls back to the session machine when the live generated image cache misses', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const session = engine.getOrCreateSession(
+                'generated-image-cache-miss',
+                { path: '/tmp/project', host: 'localhost', flavor: 'codex', machineId: 'machine-1' },
+                null,
+                'default'
+            )
+            store.messages.addMessage(session.id, {
+                role: 'agent',
+                content: {
+                    type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                    data: {
+                        type: 'generated-image',
+                        imageId: 'img-2',
+                        fileName: 'shot.png',
+                        mimeType: 'image/png',
+                        sourcePath: '/tmp/shot.png',
+                        size: 8,
+                        mtimeMs: 1234,
+                        id: 'event-2'
+                    }
+                }
+            })
+
+            let fallbackCall: unknown
+            ;(engine as any).rpcGateway.readGeneratedImageBytes = async () => ({
+                success: false,
+                error: 'Generated image not found'
+            })
+            ;(engine as any).rpcGateway.readGeneratedImageFileBytes = async (machineId: string, reference: unknown) => {
+                fallbackCall = { machineId, reference }
+                return {
+                    success: true,
+                    bytes: new Uint8Array([4, 5, 6]),
+                    mimeType: 'image/png',
+                    fileName: 'shot.png'
+                }
+            }
+
+            const result = await engine.readGeneratedImageBytes(session.id, 'img-2')
+
+            expect(result.success).toBe(true)
+            expect(fallbackCall).toEqual({
+                machineId: 'machine-1',
+                reference: {
+                    machineId: 'machine-1',
+                    path: '/tmp/shot.png',
+                    mimeType: 'image/png',
+                    size: 8,
+                    mtimeMs: 1234,
+                    fileName: 'shot.png'
+                }
+            })
+        } finally {
+            engine.stop()
+        }
     })
 
     it('persists explicit model reasoning effort on Codex sessions', () => {

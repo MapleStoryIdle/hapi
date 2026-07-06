@@ -272,11 +272,11 @@ export default function FilesPage() {
     const handleOpenFile = useCallback((path: string, staged?: boolean) => {
         const fileSearch = staged === undefined
             ? (activeTab === 'directories'
-                ? { path: encodeBase64(path), tab: 'directories' as const }
-                : { path: encodeBase64(path) })
+                ? { path: encodeBase64(path), tab: 'directories' as const, from: 'files' as const }
+                : { path: encodeBase64(path), from: 'files' as const })
             : (activeTab === 'directories'
-                ? { path: encodeBase64(path), staged, tab: 'directories' as const }
-                : { path: encodeBase64(path), staged })
+                ? { path: encodeBase64(path), staged, tab: 'directories' as const, from: 'files' as const }
+                : { path: encodeBase64(path), staged, from: 'files' as const })
         navigate({
             to: '/sessions/$sessionId/file',
             params: { sessionId },

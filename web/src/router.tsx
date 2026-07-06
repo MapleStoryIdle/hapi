@@ -1662,6 +1662,9 @@ type SessionFileSearch = {
     path: string
     staged?: boolean
     tab?: 'changes' | 'directories'
+    from?: 'session' | 'files'
+    line?: number
+    column?: number
 }
 
 const sessionFileRoute = createRoute({
@@ -1681,6 +1684,24 @@ const sessionFileRoute = createRoute({
             : tabValue === 'changes'
                 ? 'changes'
                 : undefined
+        const fromValue = typeof search.from === 'string' ? search.from : undefined
+        const from = fromValue === 'session'
+            ? 'session'
+            : fromValue === 'files'
+                ? 'files'
+                : undefined
+        const parsePositiveInt = (value: unknown): number | undefined => {
+            const text = typeof value === 'number'
+                ? String(value)
+                : typeof value === 'string'
+                    ? value
+                    : ''
+            if (!/^\d+$/.test(text)) return undefined
+            const parsed = Number(text)
+            return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+        }
+        const line = parsePositiveInt(search.line)
+        const column = parsePositiveInt(search.column)
 
         const result: SessionFileSearch = { path }
         if (staged !== undefined) {
@@ -1688,6 +1709,15 @@ const sessionFileRoute = createRoute({
         }
         if (tab !== undefined) {
             result.tab = tab
+        }
+        if (from !== undefined) {
+            result.from = from
+        }
+        if (line !== undefined) {
+            result.line = line
+        }
+        if (column !== undefined) {
+            result.column = column
         }
         return result
     },

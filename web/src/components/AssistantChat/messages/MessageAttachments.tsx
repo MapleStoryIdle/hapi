@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react'
 import type { AttachmentMetadata } from '@/types/api'
 import { FileIcon } from '@/components/FileIcon'
-import { isImageMimeType } from '@/lib/fileAttachments'
+import { isPreviewableImageMimeType } from '@/lib/fileAttachments'
 import { ImagePreview } from '@/components/ImagePreview'
+import { useHappyChatContext } from '@/components/AssistantChat/context'
 
 function formatFileSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`
@@ -11,9 +13,43 @@ function formatFileSize(bytes: number): string {
 
 function ImageAttachment(props: { attachment: AttachmentMetadata }) {
     const { attachment } = props
+    const ctx = useHappyChatContext()
+    const [objectUrl, setObjectUrl] = useState<string | null>(null)
+
+    useEffect(() => {
+        let disposed = false
+        let nextObjectUrl: string | null = null
+        setObjectUrl(null)
+
+        void ctx.api.getUploadedFileBlob(ctx.sessionId, attachment.path)
+            .then((blob) => {
+                if (disposed) return
+                if (!isPreviewableImageMimeType(blob.type)) {
+                    setObjectUrl(null)
+                    return
+                }
+                nextObjectUrl = URL.createObjectURL(blob)
+                setObjectUrl(nextObjectUrl)
+            })
+            .catch(() => {
+                if (!disposed) setObjectUrl(null)
+            })
+
+        return () => {
+            disposed = true
+            if (nextObjectUrl) {
+                URL.revokeObjectURL(nextObjectUrl)
+            }
+        }
+    }, [attachment.path, ctx.api, ctx.sessionId])
+
+    if (!objectUrl) {
+        return <FileAttachment attachment={attachment} />
+    }
+
     return (
         <ImagePreview
-            src={attachment.previewUrl ?? ''}
+            src={objectUrl}
             fileName={attachment.filename}
             label={attachment.filename}
             buttonClassName="relative overflow-hidden rounded-lg text-left cursor-zoom-in"
@@ -50,8 +86,8 @@ export function MessageAttachments(props: { attachments: AttachmentMetadata[] })
     const { attachments } = props
     if (!attachments || attachments.length === 0) return null
 
-    const images = attachments.filter(a => isImageMimeType(a.mimeType) && a.previewUrl)
-    const files = attachments.filter(a => !isImageMimeType(a.mimeType) || !a.previewUrl)
+    const images = attachments.filter(a => isPreviewableImageMimeType(a.mimeType))
+    const files = attachments.filter(a => !isPreviewableImageMimeType(a.mimeType))
 
     return (
         <div className="mt-2 flex flex-col gap-2">

@@ -123,7 +123,8 @@ export class ApiClient {
         if (authToken) {
             headers.set('authorization', `Bearer ${authToken}`)
         }
-        if (init?.body !== undefined && !headers.has('content-type')) {
+        const isFormDataBody = typeof FormData !== 'undefined' && init?.body instanceof FormData
+        if (init?.body !== undefined && !headers.has('content-type') && !isFormDataBody) {
             headers.set('content-type', 'application/json')
         }
 
@@ -376,6 +377,33 @@ export class ApiClient {
         return await res.blob()
     }
 
+    async getUploadedFileBlob(sessionId: string, path: string, attempt: number = 0, overrideToken?: string | null): Promise<Blob> {
+        const headers = new Headers()
+        const liveToken = this.getToken ? this.getToken() : null
+        const authToken = overrideToken !== undefined
+            ? (overrideToken ?? (liveToken ?? this.token))
+            : (liveToken ?? this.token)
+        if (authToken) {
+            headers.set('authorization', `Bearer ${authToken}`)
+        }
+        const params = new URLSearchParams()
+        params.set('path', path)
+        const res = await fetch(this.buildUrl(`/api/sessions/${encodeURIComponent(sessionId)}/upload/blob?${params.toString()}`), {
+            headers
+        })
+        if (res.status === 401 && attempt === 0 && this.onUnauthorized) {
+            const refreshed = await this.onUnauthorized()
+            if (refreshed) {
+                this.token = refreshed
+                return await this.getUploadedFileBlob(sessionId, path, attempt + 1, refreshed)
+            }
+        }
+        if (!res.ok) {
+            throw new ApiError(`HTTP ${res.status}`, res.status, undefined, await res.text().catch(() => undefined))
+        }
+        return await res.blob()
+    }
+
     async readSessionFile(sessionId: string, path: string): Promise<FileReadResponse> {
         const params = new URLSearchParams()
         params.set('path', path)
@@ -394,10 +422,14 @@ export class ApiClient {
         )
     }
 
-    async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<UploadFileResponse> {
+    async uploadFile(sessionId: string, filename: string, file: Blob, mimeType: string): Promise<UploadFileResponse> {
+        const form = new FormData()
+        form.set('file', file, filename)
+        form.set('filename', filename)
+        form.set('mimeType', mimeType)
         return await this.request<UploadFileResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/upload`, {
             method: 'POST',
-            body: JSON.stringify({ filename, content, mimeType })
+            body: form
         })
     }
 

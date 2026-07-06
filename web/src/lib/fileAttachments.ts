@@ -1,3 +1,4 @@
+import { isSafeRasterImageMimeType } from '@hapi/protocol'
 import type { UploadFileResponse } from '@/types/api'
 import { randomId } from '@/lib/randomId'
 
@@ -21,4 +22,8 @@ export function createFileAttachment(file: File): FileAttachment {
 
 export function isImageMimeType(mimeType: string): boolean {
     return mimeType.startsWith('image/')
+}
+
+export function isPreviewableImageMimeType(mimeType: string): boolean {
+    return isSafeRasterImageMimeType(mimeType)
 }

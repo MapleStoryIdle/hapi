@@ -3,6 +3,7 @@ import {
     DeleteUploadRequestSchema,
     getPermissionModesForFlavor,
     isPermissionModeAllowedForFlavor,
+    MAX_UPLOAD_BYTES,
     RenameSessionRequestSchema,
     ResumeSessionRequestSchema,
     SessionCollaborationModeRequestSchema,
@@ -22,8 +23,6 @@ import { Hono, type Context } from 'hono'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
-
-const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 function commandsFromMetadataSlashCommands(names: readonly string[] | undefined): SlashCommand[] {
     if (!names?.length) {
@@ -54,6 +53,29 @@ function estimateBase64Bytes(base64: string): number {
     if (len === 0) return 0
     const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0
     return Math.floor((len * 3) / 4) - padding
+}
+
+type FormFileLike = {
+    name?: string
+    type?: string
+    size?: number
+    arrayBuffer: () => Promise<ArrayBuffer>
+}
+
+function isFormFileLike(value: unknown): value is FormFileLike {
+    return value !== null
+        && typeof value === 'object'
+        && typeof (value as { arrayBuffer?: unknown }).arrayBuffer === 'function'
+}
+
+function inlineContentDisposition(fileName: string | null | undefined, fallback: string): string {
+    const resolved = fileName || fallback
+    const asciiFallback = resolved
+        .replace(/[^\x20-\x7E]+/g, '_')
+        .replace(/["\\;]/g, '_')
+        .trim() || fallback
+    const encoded = encodeURIComponent(resolved)
+    return `inline; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`
 }
 
 export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
@@ -224,6 +246,48 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return sessionResult
         }
 
+        const contentType = c.req.header('content-type')?.toLowerCase() ?? ''
+
+        if (contentType.includes('multipart/form-data')) {
+            const form = await c.req.formData().catch(() => null)
+            const file = form?.get('file')
+            if (!isFormFileLike(file)) {
+                return c.json({ error: 'Invalid body' }, 400)
+            }
+
+            const filenameField = form?.get('filename')
+            const mimeTypeField = form?.get('mimeType')
+            const filename = (typeof filenameField === 'string' && filenameField.trim())
+                ? filenameField
+                : file.name ?? 'upload'
+            const mimeType = (typeof mimeTypeField === 'string' && mimeTypeField.trim())
+                ? mimeTypeField
+                : file.type || 'application/octet-stream'
+            if (typeof file.size === 'number' && file.size > MAX_UPLOAD_BYTES) {
+                return c.json({ success: false, error: 'File too large (max 50MB)' }, 413)
+            }
+            const bytes = new Uint8Array(await file.arrayBuffer())
+
+            if (bytes.length > MAX_UPLOAD_BYTES) {
+                return c.json({ success: false, error: 'File too large (max 50MB)' }, 413)
+            }
+
+            try {
+                const result = await engine.uploadFileBytes(
+                    sessionResult.sessionId,
+                    filename,
+                    bytes,
+                    mimeType
+                )
+                return c.json(result)
+            } catch (error) {
+                return c.json({
+                    success: false,
+                    error: error instanceof Error ? error.message : 'Failed to upload file'
+                }, 500)
+            }
+        }
+
         const body = await c.req.json().catch(() => null)
         const parsed = UploadFileRequestSchema.safeParse(body)
         if (!parsed.success) {
@@ -249,6 +313,35 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 error: error instanceof Error ? error.message : 'Failed to upload file'
             }, 500)
         }
+    })
+
+    app.get('/sessions/:id/upload/blob', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const parsed = DeleteUploadRequestSchema.safeParse(c.req.query())
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid file path' }, 400)
+        }
+
+        const result = await engine.readUploadedFileBytes(sessionResult.sessionId, parsed.data.path)
+        if (!result.success) {
+            const status = /invalid/i.test(result.error) ? 400 : 404
+            return c.json({ success: false, error: result.error }, status)
+        }
+
+        return c.body(Uint8Array.from(result.bytes), 200, {
+            'Content-Type': result.mimeType ?? 'application/octet-stream',
+            'Content-Disposition': inlineContentDisposition(result.fileName, 'upload'),
+            'Cache-Control': 'private, max-age=0, must-revalidate'
+        })
     })
 
     app.post('/sessions/:id/upload/delete', async (c) => {

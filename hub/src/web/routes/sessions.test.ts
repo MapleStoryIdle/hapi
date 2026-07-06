@@ -63,6 +63,8 @@ function createApp(session: Session, opts?: {
     getSessionExport?: (sessionId: string, session: Session) => unknown
     sessionExists?: boolean
     archiveSession?: (sessionId: string) => Promise<void>
+    uploadFileBytes?: SyncEngine['uploadFileBytes']
+    readUploadedFileBytes?: SyncEngine['readUploadedFileBytes']
 }) {
     const applySessionConfigCalls: Array<[string, Record<string, unknown>]> = []
     const applySessionConfig = async (sessionId: string, config: Record<string, unknown>) => {
@@ -139,6 +141,8 @@ function createApp(session: Session, opts?: {
                 messages: []
             }
         })),
+        uploadFileBytes: opts?.uploadFileBytes ?? (async () => ({ success: true, path: '/tmp/upload.png' })),
+        readUploadedFileBytes: opts?.readUploadedFileBytes ?? (async () => ({ success: false, error: 'not found' })),
         listSlashCommands: opts?.listSlashCommands ?? (async () => ({
             success: true,
             commands: []
@@ -156,6 +160,50 @@ function createApp(session: Session, opts?: {
 }
 
 describe('sessions routes', () => {
+    it('uploads files as multipart bytes instead of base64 JSON', async () => {
+        const session = createSession()
+        const captured: Array<{ filename: string; bytes: Uint8Array; mimeType: string }> = []
+        const { app } = createApp(session, {
+            uploadFileBytes: async (_sessionId, filename, bytes, mimeType) => {
+                captured.push({ filename, bytes, mimeType })
+                return { success: true, path: '/tmp/upload/shot.png' }
+            }
+        })
+        const form = new FormData()
+        form.set('file', new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }), 'shot.png')
+
+        const response = await app.request('/api/sessions/session-1/upload', {
+            method: 'POST',
+            body: form
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ success: true, path: '/tmp/upload/shot.png' })
+        expect(captured).toHaveLength(1)
+        const upload = captured[0]!
+        expect(upload.filename).toBe('shot.png')
+        expect(upload.mimeType).toBe('image/png')
+        expect(Array.from(upload.bytes)).toEqual([1, 2, 3])
+    })
+
+    it('serves uploaded attachment previews as blob bytes', async () => {
+        const session = createSession()
+        const { app } = createApp(session, {
+            readUploadedFileBytes: async (_sessionId, path) => ({
+                success: true,
+                bytes: new Uint8Array([4, 5, 6]),
+                mimeType: 'image/png',
+                fileName: path.split('/').pop() ?? 'upload'
+            })
+        })
+
+        const response = await app.request('/api/sessions/session-1/upload/blob?path=%2Ftmp%2Fupload%2Fshot.png')
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toContain('image/png')
+        expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual([4, 5, 6])
+    })
+
     it('exports an empty session conversation payload', async () => {
         const session = createSession()
         const { app } = createApp(session)

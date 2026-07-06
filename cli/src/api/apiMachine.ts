@@ -8,7 +8,7 @@ import { realpathSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
-import type { ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
+import type { BinaryFileReadRequest, BinaryFileReadResponse, ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
 import type { MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RunnerState, Machine, MachineMetadata } from './types'
@@ -26,6 +26,7 @@ import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/
 import { applyVersionedAck } from './versionedUpdate'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
+import { readGeneratedImageFileBytes } from '@/modules/common/handlers/files'
 
 type MachineRpcHandlers = {
     spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>
@@ -442,6 +443,19 @@ export class ApiMachineClient {
 
         this.socket.on('rpc-request', async (data: { method: string; params: string }, callback: (response: string) => void) => {
             callback(await this.rpcHandlerManager.handleRequest(data))
+        })
+
+        this.socket.on('file:read-bytes', async (data: BinaryFileReadRequest, callback: (response: BinaryFileReadResponse) => void) => {
+            try {
+                if (data.type !== 'generated-image-file') {
+                    callback({ success: false, error: 'Unsupported machine file read' })
+                    return
+                }
+
+                callback(await readGeneratedImageFileBytes(data))
+            } catch (error) {
+                callback({ success: false, error: error instanceof Error ? error.message : String(error) })
+            }
         })
 
         this.socket.on('update', (data: Update) => {

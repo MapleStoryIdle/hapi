@@ -1,15 +1,11 @@
 import type { AttachmentAdapter, PendingAttachment, CompleteAttachment, Attachment } from '@assistant-ui/react'
+import { MAX_UPLOAD_BYTES } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import type { AttachmentMetadata } from '@/types/api'
-import { isImageMimeType } from '@/lib/fileAttachments'
 import { randomId } from '@/lib/randomId'
-
-const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-const MAX_PREVIEW_BYTES = 5 * 1024 * 1024
 
 type PendingUploadAttachment = PendingAttachment & {
     path?: string
-    previewUrl?: string
 }
 
 export function createAttachmentAdapter(api: ApiClient, sessionId: string): AttachmentAdapter {
@@ -57,11 +53,6 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                     return
                 }
 
-                const content = await fileToBase64(file)
-                if (cancelledAttachmentIds.has(id)) {
-                    return
-                }
-
                 yield {
                     id,
                     type: 'file',
@@ -71,7 +62,7 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                     status: { type: 'running', reason: 'uploading', progress: 50 }
                 }
 
-                const result = await api.uploadFile(sessionId, file.name, content, contentType)
+                const result = await api.uploadFile(sessionId, file.name, file, contentType)
                 if (cancelledAttachmentIds.has(id)) {
                     if (result.success && result.path) {
                         await deleteUpload(result.path)
@@ -91,12 +82,6 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                     return
                 }
 
-                // Generate preview URL for images under 5MB
-                let previewUrl: string | undefined
-                if (isImageMimeType(contentType) && file.size <= MAX_PREVIEW_BYTES) {
-                    previewUrl = await fileToDataUrl(file)
-                }
-
                 yield {
                     id,
                     type: 'file',
@@ -104,8 +89,7 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                     contentType,
                     file,
                     status: { type: 'requires-action', reason: 'composer-send' },
-                    path: result.path,
-                    previewUrl
+                    path: result.path
                 } as PendingUploadAttachment
             } catch {
                 yield {
@@ -135,8 +119,7 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
                 filename: attachment.name,
                 mimeType: attachment.contentType ?? 'application/octet-stream',
                 size: attachment.file?.size ?? 0,
-                path,
-                previewUrl: pending.previewUrl
+                path
             } : undefined
 
             return {
@@ -150,32 +133,4 @@ export function createAttachmentAdapter(api: ApiClient, sessionId: string): Atta
             }
         }
     }
-}
-
-async function fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => {
-            const result = reader.result as string
-            const base64 = result.split(',')[1]
-            if (!base64) {
-                reject(new Error('Failed to read file'))
-                return
-            }
-            resolve(base64)
-        }
-        reader.onerror = reject
-        reader.readAsDataURL(file)
-    })
-}
-
-async function fileToDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => {
-            resolve(reader.result as string)
-        }
-        reader.onerror = reject
-        reader.readAsDataURL(file)
-    })
 }

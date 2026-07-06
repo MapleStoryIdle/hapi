@@ -18,13 +18,13 @@ import { useNavigate } from '@tanstack/react-router'
 import remarkStripCjkAutolink from '@/lib/remark-strip-cjk-autolink'
 import remarkNonHttpsAutolink from '@/lib/remark-non-https-autolink'
 import { cn, encodeBase64 } from '@/lib/utils'
-import { SyntaxHighlighter } from '@/components/assistant-ui/shiki-highlighter'
+import { SyntaxHighlighter, isPlainTextCodeLanguage } from '@/components/assistant-ui/shiki-highlighter'
 import { MermaidDiagram } from '@/components/assistant-ui/mermaid-diagram'
 import { parseGitCodeBlock } from '@/components/assistant-ui/git-codeblock'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
-import { decodeFilePathHref, remarkFilePathLinks } from '@/lib/remark-file-path-links'
+import { decodeFilePathLinkHref, remarkFilePathLinks, type FilePathLinkTarget } from '@/lib/remark-file-path-links'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
 
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
@@ -75,6 +75,8 @@ export const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
         SyntaxHighlighter: MermaidDiagram,
     },
 } satisfies NonNullable<MarkdownTextPrimitiveProps['componentsByLanguage']>
+
+const CODE_BLOCK_COPY_BUTTON_CLASS = 'rounded-md p-0.5 text-[var(--app-hint)] opacity-70 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)] hover:opacity-100'
 
 // ── URI scheme policy (inlined from url-scheme-policy.ts) ───────────────────
 //
@@ -183,10 +185,8 @@ function hasScheme(href: string): boolean {
 // Relative paths (no colon, or colon only in path/query) have no scheme and
 // are always passed through — they are safe and used for img src etc.
 //
-// Known limitation (FIX 5, deferred): data:image/png;base64,... used in
-// <img src> is also stripped because DENY_SCHEMES includes 'data'. However,
-// react-markdown's own defaultUrlTransform strips all data: URLs identically,
-// so this is not a regression introduced by this PR.
+// data: remains denied. First-party image previews should use HAPI's blob/file
+// routes instead of embedding base64 data URLs in message content.
 export function denyOnlyTransform(url: string): string {
     if (!url) return url
     const trimmed = url.trimStart()
@@ -369,17 +369,21 @@ function CodeHeader(props: CodeHeaderProps) {
         return null
     }
 
+    if (isPlainTextCodeLanguage(props.language)) {
+        return null
+    }
+
     const language = props.language && props.language !== 'unknown' ? props.language : 'text'
 
     return (
-        <div className="aui-code-shell-header flex items-center justify-between gap-2 rounded-t-[18px] border border-b-0 border-[var(--app-border)] bg-[var(--app-code-bg)] px-5 py-2.5 text-[0.88rem] font-semibold leading-5 text-[var(--app-fg)]">
+        <div className="aui-code-shell-header flex items-center justify-between gap-2 rounded-t-[18px] border border-b-0 border-[var(--app-border)] bg-[var(--app-code-bg)] px-4 py-2 text-xs font-medium leading-5 text-[var(--app-hint)]">
             <div className="min-w-0 flex-1 truncate">
                 {language}
             </div>
             <button
                 type="button"
                 onClick={() => copy(props.code)}
-                className="shrink-0 rounded-md p-0.5 text-[var(--app-fg)] opacity-75 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:opacity-100"
+                className={`shrink-0 ${CODE_BLOCK_COPY_BUTTON_CLASS}`}
                 title="Copy"
             >
                 {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
@@ -395,10 +399,7 @@ function Pre(props: ComponentPropsWithoutRef<'pre'>) {
         <div className="aui-md-pre-wrapper min-w-0 w-full max-w-full overflow-x-auto overflow-y-hidden rounded-b-[18px] border border-t-0 border-[var(--app-border)] bg-[var(--app-code-bg)]">
             <pre
                 {...rest}
-                className={cn(
-                    'aui-md-pre m-0 w-max min-w-full bg-transparent px-5 pb-4 pt-0 text-[0.9rem] leading-5',
-                    className
-                )}
+                className={cn('aui-md-pre m-0 w-max min-w-full bg-transparent px-4 py-3 text-[0.93rem] leading-6', className)}
             />
         </div>
     )
@@ -427,32 +428,63 @@ function Code(props: ComponentPropsWithoutRef<'code'>) {
     )
 }
 
-function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: string; sessionId: string }) {
+function formatFileTargetTitle(fileTarget: FilePathLinkTarget): string {
+    if (fileTarget.line === undefined) {
+        return fileTarget.path
+    }
+
+    return `${fileTarget.path}:${fileTarget.line}${fileTarget.column !== undefined ? `:${fileTarget.column}` : ''}`
+}
+
+function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { fileTarget: FilePathLinkTarget; sessionId: string }) {
     const navigate = useNavigate()
-    const rel = props.target === '_blank' ? (props.rel ?? 'noreferrer') : props.rel
-    const search = new URLSearchParams({ path: encodeBase64(props.filePath) }).toString()
-    const href = `/sessions/${encodeURIComponent(props.sessionId)}/file?${search}`
+    const { fileTarget, sessionId, className, title, onClick, target, rel: propRel, ...anchorProps } = props
+    const rel = target === '_blank' ? (propRel ?? 'noreferrer') : propRel
+    const linkTitle = title ?? formatFileTargetTitle(fileTarget)
+    const searchParams = new URLSearchParams({
+        path: encodeBase64(fileTarget.path),
+        from: 'session'
+    })
+    if (fileTarget.line !== undefined) {
+        searchParams.set('line', String(fileTarget.line))
+    }
+    if (fileTarget.column !== undefined) {
+        searchParams.set('column', String(fileTarget.column))
+    }
+    const search = searchParams.toString()
+    const href = `/sessions/${encodeURIComponent(sessionId)}/file?${search}`
 
     const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-        props.onClick?.(event)
+        onClick?.(event)
         if (event.defaultPrevented) return
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
 
         event.preventDefault()
         void navigate({
             to: '/sessions/$sessionId/file',
-            params: { sessionId: props.sessionId },
-            search: { path: encodeBase64(props.filePath) }
+            params: { sessionId },
+            search: {
+                path: encodeBase64(fileTarget.path),
+                from: 'session',
+                ...(fileTarget.line !== undefined ? { line: fileTarget.line } : {}),
+                ...(fileTarget.column !== undefined ? { column: fileTarget.column } : {})
+            }
         })
     }
 
     return (
         <a
-            {...props}
+            {...anchorProps}
             href={href}
+            target={target}
             rel={rel}
+            title={linkTitle}
             onClick={handleClick}
-            className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}
+            data-hapi-file-link="true"
+            className={cn(
+                'aui-md-a aui-md-file-link inline-block max-w-full truncate rounded-md border border-[var(--app-inline-code-border)] bg-[var(--app-inline-code-bg)] px-[0.42em] py-[0.13em] align-bottom font-mono text-[0.86em] font-medium leading-[1.35] text-[var(--app-inline-code-fg)] no-underline decoration-transparent transition-colors hover:border-[var(--app-link-muted)] hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-link)]',
+                className
+            )}
         />
     )
 }
@@ -463,9 +495,8 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
  * - Relative / no-scheme hrefs (/settings, ./foo, #section, ?q=1): passed through
  *   without interception so the browser or SPA router can navigate normally.
  * - IANA safe schemes (https/http/mailto/irc/ircs/xmpp): navigate directly.
- * - Deny schemes (javascript/data/vbscript/file): silently block. denyOnlyTransform
- *   already strips the href to "", so href="" in DOM (belt-and-suspenders onClick
- *   guard also calls preventDefault).
+ * - Deny schemes (javascript/data/vbscript/file): silently block. href="" in DOM
+ *   so middle-click / drag-to-bar cannot bypass the click preventDefault guard.
  * - Custom schemes, NOT yet allowed by user: href="#" in DOM (not the live URL)
  *   so middle-click / drag-to-bar cannot bypass the dialog. Dialog opens on left-click
  *   via the shared UriConfirmContext (single dialog per markdown root).
@@ -486,14 +517,14 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     // Removing it requires tests that render <A> directly to wrap with
     // <UriConfirmProvider> (or supply a mock UriConfirmContext.Provider).
     const ctx = useContext(UriConfirmContext)
-    const filePath = typeof props.href === 'string' ? decodeFilePathHref(props.href) : null
+    const fileTarget = typeof props.href === 'string' ? decodeFilePathLinkHref(props.href) : null
     const rel = props.target === '_blank' ? (props.rel ?? 'noreferrer') : props.rel
 
-    if (filePath) {
+    if (fileTarget) {
         if (!chat) {
             return <>{props.children}</>
         }
-        return <FilePathAnchor {...props} filePath={filePath} sessionId={chat.sessionId} />
+        return <FilePathAnchor {...props} fileTarget={fileTarget} sessionId={chat.sessionId} />
     }
 
     const isAllowed = ctx?.isAllowed ?? (() => false)
@@ -515,7 +546,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
             ? href
             : classification === 'custom'
                 ? '#'
-                : href
+                : ''
 
     const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
         const url = href ?? ''

@@ -5,9 +5,14 @@ const MIN_IMAGE_SCALE = 0.25
 const MAX_IMAGE_SCALE = 8
 const IMAGE_SCALE_STEP = 0.25
 const BACKDROP_CLICK_MAX_MOVEMENT = 4
+const IMAGE_PAN_SCALE_EPSILON = 0.001
 
 function clampImageScale(value: number): number {
     return Math.min(MAX_IMAGE_SCALE, Math.max(MIN_IMAGE_SCALE, value))
+}
+
+function canPanImageAtScale(scale: number): boolean {
+    return Math.abs(scale - 1) > IMAGE_PAN_SCALE_EPSILON
 }
 
 type ImagePoint = { x: number; y: number }
@@ -27,6 +32,7 @@ export function ImagePreview(props: {
     src: string
     fileName: string
     label: string
+    viewerTitle?: string
     buttonClassName?: string
     imageClassName?: string
     caption?: ReactNode
@@ -79,8 +85,12 @@ export function ImagePreview(props: {
     }, [resetView])
 
     const zoomBy = useCallback((delta: number) => {
-        updateScale((current) => clampImageScale(current + delta))
-    }, [updateScale])
+        const nextScale = clampImageScale(scaleRef.current + delta)
+        updateScale(nextScale)
+        if (!canPanImageAtScale(nextScale)) {
+            updateOffset({ x: 0, y: 0 })
+        }
+    }, [updateOffset, updateScale])
 
     const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
         event.preventDefault()
@@ -116,6 +126,11 @@ export function ImagePreview(props: {
             return
         }
 
+        if (!canPanImageAtScale(scaleRef.current)) {
+            dragRef.current = null
+            return
+        }
+
         dragRef.current = {
             pointerId: event.pointerId,
             startX: event.clientX,
@@ -140,15 +155,18 @@ export function ImagePreview(props: {
                 : pinch.startScale
 
             updateScale(nextScale)
-            updateOffset({
-                x: pinch.origin.x + center.x - pinch.startCenter.x,
-                y: pinch.origin.y + center.y - pinch.startCenter.y
-            })
+            updateOffset(canPanImageAtScale(nextScale)
+                ? {
+                    x: pinch.origin.x + center.x - pinch.startCenter.x,
+                    y: pinch.origin.y + center.y - pinch.startCenter.y
+                }
+                : { x: 0, y: 0 })
             return
         }
 
         const drag = dragRef.current
         if (!drag || drag.pointerId !== event.pointerId) return
+        if (!canPanImageAtScale(scaleRef.current)) return
         updateOffset({
             x: drag.originX + event.clientX - drag.startX,
             y: drag.originY + event.clientY - drag.startY
@@ -176,7 +194,7 @@ export function ImagePreview(props: {
         pinchRef.current = null
 
         const remainingPointer = activePointersRef.current.entries().next().value as [number, ImagePoint] | undefined
-        if (remainingPointer) {
+        if (remainingPointer && canPanImageAtScale(scaleRef.current)) {
             dragRef.current = {
                 pointerId: remainingPointer[0],
                 startX: remainingPointer[1].x,
@@ -189,6 +207,10 @@ export function ImagePreview(props: {
             closeViewer()
         }
     }, [closeViewer])
+
+    const imageViewportCursor = canPanImageAtScale(scale)
+        ? 'cursor-grab active:cursor-grabbing'
+        : 'cursor-default'
 
     useEffect(() => {
         if (!viewerOpen) return
@@ -241,7 +263,7 @@ export function ImagePreview(props: {
                     aria-label={props.label}
                 >
                     <div className="flex items-center gap-2 border-b border-white/10 bg-black/50 px-3 py-2">
-                        <div className="min-w-0 flex-1 truncate text-sm font-medium">{props.fileName}</div>
+                        <div className="min-w-0 flex-1 truncate text-sm font-medium">{props.viewerTitle ?? props.fileName}</div>
                         <button
                             type="button"
                             onClick={() => zoomBy(-IMAGE_SCALE_STEP)}
@@ -278,7 +300,7 @@ export function ImagePreview(props: {
                         </button>
                     </div>
                     <div
-                        className="relative min-h-0 flex-1 cursor-grab touch-none overflow-hidden active:cursor-grabbing"
+                        className={`relative min-h-0 flex-1 touch-none overflow-hidden ${imageViewportCursor}`}
                         onWheel={handleWheel}
                         onPointerDown={handlePointerDown}
                         onPointerMove={handlePointerMove}

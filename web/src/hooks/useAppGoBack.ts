@@ -20,15 +20,23 @@ export function useAppGoBack(): () => void {
             return
         }
 
-        // For single file view, go back to files list
+        // For single file view, go back to the source surface when it is explicit.
         if (pathname.match(/^\/sessions\/[^/]+\/file$/)) {
-            const filesPath = pathname.replace(/\/file$/, '/files')
+            const from = (search && typeof search === 'object' && 'from' in search)
+                ? (search as { from?: unknown }).from
+                : undefined
+
+            if (from === 'session') {
+                navigate({ to: pathname.replace(/\/file$/, '') })
+                return
+            }
 
             const tab = (search && typeof search === 'object' && 'tab' in search)
                 ? (search as { tab?: unknown }).tab
                 : undefined
             const nextSearch = tab === 'directories' ? { tab: 'directories' as const } : {}
 
+            const filesPath = pathname.replace(/\/file$/, '/files')
             navigate({ to: filesPath, search: nextSearch })
             return
         }

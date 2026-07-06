@@ -13,6 +13,8 @@ import { AGENT_MESSAGE_PAYLOAD_TYPE, VerifyRemoteServerCandidateResponseSchema }
 import type {
     BinaryFileReadRequest,
     BinaryFileReadResponse,
+    BinaryFileUploadRequest,
+    BinaryFileUploadResponse,
     SessionEndReason,
     VerifyRemoteServerCandidateRequest,
     VerifyRemoteServerCandidateResponse
@@ -38,8 +40,8 @@ import type {
 import { AgentStateSchema, CliMessagesResponseSchema, MetadataSchema, UserMessageSchema } from './types'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
-import { readGeneratedImageBytes, readSessionFileBytes } from '../modules/common/handlers/files'
-import { cleanupUploadDir } from '../modules/common/handlers/uploads'
+import { readGeneratedImageBytes, readGeneratedImageFileBytes, readSessionFileBytes } from '../modules/common/handlers/files'
+import { cleanupUploadDir, readUploadFileBytes, uploadFileBytes } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
@@ -248,6 +250,16 @@ export class ApiSessionClient extends EventEmitter {
                     return
                 }
 
+                if (data.type === 'generated-image-file') {
+                    callback(await readGeneratedImageFileBytes(data))
+                    return
+                }
+
+                if (data.type === 'uploaded-file') {
+                    callback(await readUploadFileBytes(data.path, this.sessionId))
+                    return
+                }
+
                 const workingDirectory = this.metadata?.path
                 if (!workingDirectory) {
                     callback({ success: false, error: 'Session path not available' })
@@ -255,6 +267,19 @@ export class ApiSessionClient extends EventEmitter {
                 }
 
                 callback(await readSessionFileBytes(data.path, workingDirectory))
+            } catch (error) {
+                callback({ success: false, error: error instanceof Error ? error.message : String(error) })
+            }
+        })
+
+        this.socket.on('file:upload-bytes', async (data: BinaryFileUploadRequest, callback: (response: BinaryFileUploadResponse) => void) => {
+            try {
+                callback(await uploadFileBytes({
+                    sessionId: this.sessionId,
+                    filename: data.filename,
+                    mimeType: data.mimeType,
+                    bytes: data.bytes
+                }) as BinaryFileUploadResponse)
             } catch (error) {
                 callback({ success: false, error: error instanceof Error ? error.message : String(error) })
             }
@@ -371,6 +396,10 @@ export class ApiSessionClient extends EventEmitter {
 
     onCancelQueuedMessage(callback: (localId: string) => boolean): void {
         this.cancelQueuedMessageCallback = callback
+    }
+
+    getMachineId(): string | null {
+        return this.metadata?.machineId ?? null
     }
 
     private enqueueUserMessage(message: UserMessage, localId?: string): void {

@@ -14,6 +14,7 @@ import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { usePointerFocusRing } from '@/hooks/usePointerFocusRing'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
+import { getInputStringAny } from '@/lib/toolInputUtils'
 
 const COMPACT_ELAPSED_INTERVAL_MS = 1000
 
@@ -47,7 +48,7 @@ function getToolEndMs(tool: ToolCallBlock, now: number): number {
 }
 
 export function isToolGroupActive(block: ToolGroupBlock): boolean {
-    return block.summary.runningCount > 0 || block.summary.pendingCount > 0
+    return block.tools.some((tool) => tool.tool.state === 'running' || tool.tool.state === 'pending')
 }
 
 export function getToolGroupDurationMs(block: ToolGroupBlock, now: number): number {
@@ -75,6 +76,46 @@ export function formatCompactDuration(durationMs: number): string {
     return `${seconds}s`
 }
 
+const SKILL_NAME_RE = /(?:skill|技能)\s*[:：]?\s*[$`]?([A-Za-z][\w-]{1,50})/i
+const USE_SKILL_RE = /(?:使用|用|using|use)\s+[$`]?([A-Za-z][\w-]{1,50})(?=\s*[:：,，。.]|\s|$)/i
+const IGNORED_SKILL_WORDS = new Set(['skill', 'tool', 'tools', 'function', 'mode', 'builtin'])
+
+function normalizeDetectedSkillName(value: string | null): string | null {
+    const normalized = value?.trim().replace(/^[$`]+|[`]+$/g, '') ?? ''
+    if (!normalized) return null
+    if (IGNORED_SKILL_WORDS.has(normalized.toLowerCase())) return null
+    return normalized
+}
+
+function detectSkillNameFromText(text: string): string | null {
+    const explicit = normalizeDetectedSkillName(text.match(SKILL_NAME_RE)?.[1] ?? null)
+    if (explicit) return explicit
+
+    return normalizeDetectedSkillName(text.match(USE_SKILL_RE)?.[1] ?? null)
+}
+
+function getToolGroupSkillName(block: ToolGroupBlock): string | null {
+    for (const tool of block.tools) {
+        if (tool.tool.name !== 'Skill') continue
+        const skill = normalizeDetectedSkillName(getInputStringAny(tool.tool.input, ['skill', 'name']))
+        if (skill) return skill
+    }
+
+    for (const detail of block.detailBlocks ?? []) {
+        if (detail.kind === 'generated-image') return 'imagegen'
+        if (detail.kind === 'tool-call' && detail.tool.name === 'Skill') {
+            const skill = normalizeDetectedSkillName(getInputStringAny(detail.tool.input, ['skill', 'name']))
+            if (skill) return skill
+        }
+        if (detail.kind === 'agent-text' || detail.kind === 'agent-reasoning') {
+            const skill = detectSkillNameFromText(detail.text)
+            if (skill) return skill
+        }
+    }
+
+    return null
+}
+
 export function formatToolGroupCompactTitle(
     block: ToolGroupBlock,
     now: number,
@@ -83,6 +124,13 @@ export function formatToolGroupCompactTitle(
     const active = isToolGroupActive(block)
     const durationMs = getToolGroupDurationMs(block, now)
     const renderedDuration = formatCompactDuration(durationMs)
+    const skillName = getToolGroupSkillName(block)
+    if (skillName) {
+        return active
+            ? t('toolGroup.compact.skill.processing', { skill: skillName, duration: renderedDuration }).trim()
+            : t('toolGroup.compact.skill.processed', { skill: skillName, duration: renderedDuration }).trim()
+    }
+
     const singleTool = !block.forceGenericCompactTitle && block.tools.length === 1 ? block.tools[0] : null
     if (singleTool) {
         const status = active ? 'processing' : 'processed'
@@ -298,7 +346,7 @@ export function ToolGroupCard(props: {
     const [now, setNow] = useState(() => Date.now())
     const hydrationRunRef = useRef(0)
     const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const wasActiveRef = useRef(props.block.summary.runningCount > 0 || props.block.summary.pendingCount > 0)
+    const wasActiveRef = useRef(isToolGroupActive(props.block))
     const { suppressFocusRing, onTriggerPointerDown, onTriggerKeyDown, onTriggerBlur } = usePointerFocusRing()
     const compactHeaderState = useContext(ToolGroupCompactHeaderContext)
     const compactMode = ctx.terminalToolDisplayMode === 'compact'

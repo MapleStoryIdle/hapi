@@ -1,6 +1,6 @@
 import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
-import type { BinaryFileReadRequest, BinaryFileReadResponse } from '@hapi/protocol'
+import type { BinaryFileReadRequest, BinaryFileReadResponse, BinaryFileUploadRequest, BinaryFileUploadResponse } from '@hapi/protocol'
 import type {
     CodexSubscriptionLimitsResponse,
     GetCodexSubscriptionLimitsRequest,
@@ -21,7 +21,7 @@ import type {
     SlashCommandsResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
-import type { Server } from 'socket.io'
+import type { Server, Socket } from 'socket.io'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
@@ -74,6 +74,14 @@ export type RpcFileBytesResponse = {
 } | {
     success: false
     error: string
+}
+
+export type RpcGeneratedImageFileReference = {
+    path: string
+    mimeType: string
+    size: number
+    mtimeMs: number
+    fileName?: string | null
 }
 
 export class RpcGateway {
@@ -238,7 +246,7 @@ export class RpcGateway {
     }
 
     async readSessionFileBytes(sessionId: string, path: string): Promise<RpcFileBytesResponse> {
-        return await this.binaryFileCall(`${sessionId}:${RPC_METHODS.ReadFile}`, {
+        return await this.binaryFileCallForSession(sessionId, `${sessionId}:${RPC_METHODS.ReadFile}`, {
             type: 'session-file',
             path
         })
@@ -249,9 +257,27 @@ export class RpcGateway {
     }
 
     async readGeneratedImageBytes(sessionId: string, imageId: string): Promise<RpcFileBytesResponse> {
-        return await this.binaryFileCall(`${sessionId}:${RPC_METHODS.ReadGeneratedImage}`, {
+        return await this.binaryFileCallForSession(sessionId, `${sessionId}:${RPC_METHODS.ReadGeneratedImage}`, {
             type: 'generated-image',
             imageId
+        })
+    }
+
+    async readGeneratedImageFileBytes(machineId: string, reference: RpcGeneratedImageFileReference): Promise<RpcFileBytesResponse> {
+        return await this.binaryFileCallForMachine(machineId, `${machineId}:${RPC_METHODS.ReadGeneratedImage}`, {
+            type: 'generated-image-file',
+            path: reference.path,
+            mimeType: reference.mimeType,
+            size: reference.size,
+            mtimeMs: reference.mtimeMs,
+            fileName: reference.fileName
+        })
+    }
+
+    async readUploadedFileBytes(sessionId: string, path: string): Promise<RpcFileBytesResponse> {
+        return await this.binaryFileCallForSession(sessionId, `${sessionId}:${RPC_METHODS.UploadFile}`, {
+            type: 'uploaded-file',
+            path
         })
     }
 
@@ -261,6 +287,14 @@ export class RpcGateway {
 
     async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.UploadFile, { sessionId, filename, content, mimeType }) as RpcUploadFileResponse
+    }
+
+    async uploadFileBytes(sessionId: string, filename: string, bytes: Uint8Array, mimeType: string): Promise<RpcUploadFileResponse> {
+        return await this.binaryUploadCallForSession(sessionId, `${sessionId}:${RPC_METHODS.UploadFile}`, {
+            filename,
+            mimeType,
+            bytes
+        })
     }
 
     async deleteUploadFile(sessionId: string, path: string): Promise<RpcDeleteUploadResponse> {
@@ -386,21 +420,31 @@ export class RpcGateway {
         }
     }
 
-    private async binaryFileCall(
+    private async binaryFileCallForSession(
+        sessionId: string,
         method: string,
         request: BinaryFileReadRequest,
         timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS
     ): Promise<RpcFileBytesResponse> {
-        const socketId = this.rpcRegistry.getSocketIdForMethod(method)
-        if (!socketId) {
-            throw new RpcTargetMissingError(method, 'handler-not-registered')
-        }
+        const socket = this.getSocketForSession(sessionId, method)
+        return await this.emitBinaryFileRead(socket, request, timeoutMs)
+    }
 
-        const socket = this.io.of('/cli').sockets.get(socketId)
-        if (!socket) {
-            throw new RpcTargetMissingError(method, 'socket-disconnected')
-        }
+    private async binaryFileCallForMachine(
+        machineId: string,
+        method: string,
+        request: BinaryFileReadRequest,
+        timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS
+    ): Promise<RpcFileBytesResponse> {
+        const socket = this.getSocketForMachine(machineId, method)
+        return await this.emitBinaryFileRead(socket, request, timeoutMs)
+    }
 
+    private async emitBinaryFileRead(
+        socket: Socket,
+        request: BinaryFileReadRequest,
+        timeoutMs: number
+    ): Promise<RpcFileBytesResponse> {
         const response = await socket.timeout(timeoutMs).emitWithAck('file:read-bytes', request) as BinaryFileReadResponse | unknown
         if (!response || typeof response !== 'object') {
             return { success: false, error: 'Unexpected binary file response' }
@@ -427,6 +471,74 @@ export class RpcGateway {
             size: typeof record.size === 'number' ? record.size : undefined,
             mtimeMs: typeof record.mtimeMs === 'number' ? record.mtimeMs : undefined
         }
+    }
+
+    private async binaryUploadCallForSession(
+        sessionId: string,
+        method: string,
+        request: BinaryFileUploadRequest,
+        timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS
+    ): Promise<RpcUploadFileResponse> {
+        const socket = this.getSocketForSession(sessionId, method)
+        return await this.emitBinaryUpload(socket, request, timeoutMs)
+    }
+
+    private async emitBinaryUpload(
+        socket: Socket,
+        request: BinaryFileUploadRequest,
+        timeoutMs: number
+    ): Promise<RpcUploadFileResponse> {
+        const response = await socket.timeout(timeoutMs).emitWithAck('file:upload-bytes', request) as BinaryFileUploadResponse | unknown
+        if (!response || typeof response !== 'object') {
+            return { success: false, error: 'Unexpected binary upload response' }
+        }
+
+        const record = response as Record<string, unknown>
+        if (record.success !== true || typeof record.path !== 'string') {
+            return {
+                success: false,
+                error: typeof record.error === 'string' ? record.error : 'Failed to upload file bytes'
+            }
+        }
+
+        return {
+            success: true,
+            path: record.path
+        }
+    }
+
+    private getSocketForSession(sessionId: string, method: string): Socket {
+        const namespace = this.io.of('/cli')
+        const room = namespace.adapter.rooms.get(`session:${sessionId}`)
+        if (!room || room.size === 0) {
+            throw new RpcTargetMissingError(method, 'socket-disconnected')
+        }
+
+        for (const socketId of room) {
+            const socket = namespace.sockets.get(socketId)
+            if (socket) {
+                return socket
+            }
+        }
+
+        throw new RpcTargetMissingError(method, 'socket-disconnected')
+    }
+
+    private getSocketForMachine(machineId: string, method: string): Socket {
+        const namespace = this.io.of('/cli')
+        const room = namespace.adapter.rooms.get(`machine:${machineId}`)
+        if (!room || room.size === 0) {
+            throw new RpcTargetMissingError(method, 'socket-disconnected')
+        }
+
+        for (const socketId of room) {
+            const socket = namespace.sockets.get(socketId)
+            if (socket) {
+                return socket
+            }
+        }
+
+        throw new RpcTargetMissingError(method, 'socket-disconnected')
     }
 }
 

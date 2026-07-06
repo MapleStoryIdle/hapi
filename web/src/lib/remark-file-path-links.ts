@@ -6,9 +6,15 @@ const TRAILING_PUNCTUATION = new Set(['.', ',', ';', ':', '!', '?'])
 const COMMON_FILE_EXTENSIONS = new Set([
     'avif', 'bmp', 'c', 'cjs', 'cpp', 'css', 'gif', 'go', 'h', 'hpp', 'html', 'ico', 'java',
     'jpeg', 'jpg', 'js', 'json', 'jsx', 'kt', 'lock', 'md', 'mdx', 'mjs', 'png', 'py', 'rs',
-    'scss', 'sh', 'sql', 'svg', 'swift', 'toml', 'ts', 'tsx', 'txt', 'vue', 'webp', 'xml',
-    'yaml', 'yml', 'zsh'
+    'markdown', 'scss', 'sh', 'sql', 'svg', 'swift', 'toml', 'ts', 'tsx', 'txt', 'vue', 'webp',
+    'xml', 'yaml', 'yml', 'zsh'
 ])
+
+export type FilePathLinkTarget = {
+    path: string
+    line?: number
+    column?: number
+}
 
 type MarkdownNode = {
     type?: string
@@ -18,17 +24,49 @@ type MarkdownNode = {
     children?: MarkdownNode[]
 }
 
-function createFileHref(path: string): string {
-    return `${FILE_PATH_HREF_PREFIX}${encodeURIComponent(path)}`
+function createFileHref(target: FilePathLinkTarget): string {
+    const params = new URLSearchParams()
+    if (target.line !== undefined) {
+        params.set('line', String(target.line))
+    }
+    if (target.column !== undefined) {
+        params.set('column', String(target.column))
+    }
+    const suffix = params.toString()
+    return `${FILE_PATH_HREF_PREFIX}${encodeURIComponent(target.path)}${suffix ? `?${suffix}` : ''}`
 }
 
-export function decodeFilePathHref(href: string): string | null {
+function parsePositiveInt(value: string | null): number | undefined {
+    if (!value) return undefined
+    if (!/^\d+$/.test(value)) return undefined
+    const parsed = Number(value)
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+export function decodeFilePathLinkHref(href: string): FilePathLinkTarget | null {
     if (!href.startsWith(FILE_PATH_HREF_PREFIX)) return null
+    const payload = href.slice(FILE_PATH_HREF_PREFIX.length)
+    const queryIndex = payload.indexOf('?')
+    const encodedPath = queryIndex >= 0 ? payload.slice(0, queryIndex) : payload
+    const query = queryIndex >= 0 ? payload.slice(queryIndex + 1) : ''
     try {
-        return decodeURIComponent(href.slice(FILE_PATH_HREF_PREFIX.length))
+        const path = decodeURIComponent(encodedPath)
+        if (!path) return null
+        const params = new URLSearchParams(query)
+        const line = parsePositiveInt(params.get('line'))
+        const column = parsePositiveInt(params.get('column'))
+        return {
+            path,
+            ...(line !== undefined ? { line } : {}),
+            ...(column !== undefined ? { column } : {})
+        }
     } catch {
         return null
     }
+}
+
+export function decodeFilePathHref(href: string): string | null {
+    return decodeFilePathLinkHref(href)?.path ?? null
 }
 
 function splitTrailingPunctuation(value: string): { path: string; trailing: string } {
@@ -60,6 +98,18 @@ function splitTrailingPunctuation(value: string): { path: string; trailing: stri
 
 function stripLineSuffix(value: string): string {
     return value.replace(/:\d+(?::\d+)?$/, '')
+}
+
+function parseLineTarget(value: string): FilePathLinkTarget {
+    const match = value.match(/^(.*?):(\d+)(?::(\d+))?$/)
+    if (!match) return { path: value }
+    const line = parsePositiveInt(match[2] ?? null)
+    const column = parsePositiveInt(match[3] ?? null)
+    return {
+        path: match[1] ?? value,
+        ...(line !== undefined ? { line } : {}),
+        ...(column !== undefined ? { column } : {})
+    }
 }
 
 function hasKnownFileExtension(value: string): boolean {
@@ -104,7 +154,7 @@ function linkTextNode(node: MarkdownNode): MarkdownNode[] {
         }
         parts.push({
             type: 'link',
-            url: createFileHref(filePath),
+            url: createFileHref(parseLineTarget(displayPath)),
             title: null,
             children: [{ type: 'text', value: displayPath }]
         })

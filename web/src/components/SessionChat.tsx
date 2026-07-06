@@ -1288,7 +1288,8 @@ function SessionChatInner(props: SessionChatProps) {
             params: { sessionId: props.session.id },
             search: {
                 path: encodeBase64(file.path),
-                staged: file.staged && !file.unstaged ? true : false
+                staged: file.staged && !file.unstaged ? true : false,
+                from: 'session'
             }
         })
     }, [navigate, props.session.id])

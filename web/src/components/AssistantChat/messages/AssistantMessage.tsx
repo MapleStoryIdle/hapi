@@ -145,10 +145,14 @@ export function HappyAssistantMessage() {
         || (typeof turnCount === 'number' && turnCount >= 2)
 
     const rootClass = toolOnly
-        ? 'py-1 min-w-0 max-w-full overflow-x-hidden'
+        ? cn(
+            'py-1 min-w-0 max-w-full overflow-x-hidden',
+            ctx.terminalToolDisplayMode === 'compact' ? 'px-3' : null
+        )
         : 'happy-assistant-message px-3 py-2 min-w-0 max-w-full overflow-x-hidden'
     const showCompactToolGroupHeader = ctx.terminalToolDisplayMode === 'compact' && firstToolGroup !== null && !toolOnly
     const compactToolGroupId = firstToolGroup?.id ?? null
+    const firstToolGroupActive = firstToolGroup ? isToolGroupActive(firstToolGroup) : false
     const compactToolGroupContext = useMemo(() => {
         if (!showCompactToolGroupHeader || compactToolGroupId === null) {
             return null
@@ -165,8 +169,8 @@ export function HappyAssistantMessage() {
             setCompactToolGroupOpen(false)
             return
         }
-        setCompactToolGroupOpen(isToolGroupActive(firstToolGroup))
-    }, [firstToolGroup?.id, firstToolGroup?.summary.pendingCount, firstToolGroup?.summary.runningCount, showCompactToolGroupHeader])
+        setCompactToolGroupOpen(firstToolGroupActive)
+    }, [firstToolGroup?.id, firstToolGroupActive, showCompactToolGroupHeader])
 
     const toggleCompactToolGroup = () => {
         if (!firstToolGroup) {

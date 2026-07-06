@@ -878,9 +878,9 @@ export function HappyComposer(props: {
     // layout pass, which shows up as a small upward twitch on mobile.
     const reserveAnchoredComposerHeight = compactTopAnchor
     const expandedHeightClass = compactTopAnchor
-        ? 'h-[88px] max-h-[88px]'
-        : 'min-h-[88px] max-h-[316px]'
-    const composerInputMaxRows = compactTopAnchor ? 1 : 4
+        ? 'h-[112px] max-h-[112px]'
+        : 'min-h-[112px] max-h-[360px]'
+    const composerInputMaxRows = compactTopAnchor ? 2 : 6
 
     const currentModelLabel = useMemo(() => {
         if (selectedModelBase !== undefined) {
@@ -1307,7 +1307,7 @@ export function HappyComposer(props: {
     ])
 
     return (
-        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[height,margin] duration-[700ms] ease-in-out ${reserveAnchoredComposerHeight ? 'h-[96px]' : ''}`}>
+        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[height,margin] duration-[700ms] ease-in-out ${reserveAnchoredComposerHeight ? 'h-[120px]' : ''}`}>
             <div
                 className="mx-auto w-full max-w-content"
             >
@@ -1376,8 +1376,8 @@ export function HappyComposer(props: {
                                 composerCompact
                                     ? 'flex h-12 min-w-0 flex-1 items-center px-14 py-0'
                                     : compactTopAnchor
-                                        ? 'flex h-[38px] min-h-[38px] max-h-[38px] min-w-0 flex-none items-start px-4 py-2'
-                                        : 'flex min-h-[38px] max-h-[8.5rem] min-w-0 flex-none items-start px-4 py-2'
+                                        ? 'flex h-[62px] min-h-[62px] max-h-[62px] min-w-0 flex-none items-start px-4 py-2'
+                                        : 'flex min-h-[62px] max-h-[11rem] min-w-0 flex-none items-start px-4 py-2'
                             }
                         >
                             <ComposerPrimitive.Input
@@ -1395,8 +1395,8 @@ export function HappyComposer(props: {
                                     composerCompact
                                         ? 'h-6 max-h-6 overflow-hidden leading-6'
                                         : compactTopAnchor
-                                            ? 'h-[22px] max-h-[22px] overflow-y-auto overscroll-contain leading-snug'
-                                            : 'min-h-[22px] max-h-[7.5rem] overflow-y-auto overscroll-contain leading-snug'
+                                            ? 'min-h-[44px] h-[44px] max-h-[44px] overflow-y-auto overscroll-contain leading-snug'
+                                            : 'min-h-[44px] max-h-[10rem] overflow-y-auto overscroll-contain leading-snug'
                                 }`}
                             />
                         </div>

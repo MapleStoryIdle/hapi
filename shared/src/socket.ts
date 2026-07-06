@@ -76,6 +76,16 @@ export type BinaryFileReadRequest = {
 } | {
     type: 'generated-image'
     imageId: string
+} | {
+    type: 'generated-image-file'
+    path: string
+    mimeType: string
+    size: number
+    mtimeMs: number
+    fileName?: string | null
+} | {
+    type: 'uploaded-file'
+    path: string
 }
 
 export type BinaryFileReadResponse = {
@@ -85,6 +95,20 @@ export type BinaryFileReadResponse = {
     fileName?: string | null
     size?: number
     mtimeMs?: number
+} | {
+    success: false
+    error: string
+}
+
+export type BinaryFileUploadRequest = {
+    filename: string
+    mimeType: string
+    bytes: Uint8Array | ArrayBuffer
+}
+
+export type BinaryFileUploadResponse = {
+    success: true
+    path: string
 } | {
     success: false
     error: string
@@ -214,6 +238,7 @@ export interface ServerToClientEvents {
     update: (data: Update, ack?: (response: CancelQueuedMessageAck) => void) => void
     'rpc-request': (data: { method: string; params: string }, callback: (response: string) => void) => void
     'file:read-bytes': (data: BinaryFileReadRequest, callback: (response: BinaryFileReadResponse) => void) => void
+    'file:upload-bytes': (data: BinaryFileUploadRequest, callback: (response: BinaryFileUploadResponse) => void) => void
     'terminal:open': (data: TerminalOpenPayload) => void
     'terminal:write': (data: TerminalWritePayload) => void
     'terminal:resize': (data: TerminalResizePayload) => void

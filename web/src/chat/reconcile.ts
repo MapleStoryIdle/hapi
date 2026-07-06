@@ -145,6 +145,7 @@ function areGeneratedImageBlocksEqual(left: GeneratedImageBlock, right: Generate
         && left.imageId === right.imageId
         && left.fileName === right.fileName
         && left.mimeType === right.mimeType
+        && left.sourcePath === right.sourcePath
         && left.meta === right.meta
 }
 

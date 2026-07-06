@@ -1,4 +1,4 @@
-import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol'
+import { AGENT_MESSAGE_PAYLOAD_TYPE, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -36,6 +36,16 @@ function isReadyEventContent(content: unknown): boolean {
     return data?.type === 'ready'
 }
 
+function isGeneratedImageContent(content: unknown): boolean {
+    const record = asRecord(content)
+    if (record?.type !== AGENT_MESSAGE_PAYLOAD_TYPE) {
+        return false
+    }
+
+    const data = asRecord(record.data)
+    return data?.type === 'generated-image'
+}
+
 export function shouldRecordSessionActivity(content: unknown): boolean {
     const message = unwrapRoleWrappedRecordEnvelope(content)
     if (!message) {
@@ -50,5 +60,5 @@ export function shouldRecordSessionActivity(content: unknown): boolean {
         return false
     }
 
-    return isReadyEventContent(message.content)
+    return isReadyEventContent(message.content) || isGeneratedImageContent(message.content)
 }

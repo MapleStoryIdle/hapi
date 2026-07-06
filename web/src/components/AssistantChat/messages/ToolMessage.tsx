@@ -46,6 +46,7 @@ function isGeneratedImageBlock(value: unknown): value is GeneratedImageBlock {
     if (typeof value.imageId !== 'string') return false
     if (typeof value.fileName !== 'string') return false
     if (value.mimeType !== null && typeof value.mimeType !== 'string') return false
+    if (value.sourcePath !== undefined && value.sourcePath !== null && typeof value.sourcePath !== 'string') return false
     return true
 }
 
@@ -79,28 +80,28 @@ function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
         }
     }, [ctx.api, ctx.sessionId, props.block.imageId])
 
-    return (
-        <div className="max-w-[92%] rounded-2xl border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] p-3">
-            <div className="mb-2 min-w-0 truncate text-xs font-medium text-[var(--app-hint)]">
-                Generated image · {props.block.fileName}
+    if (objectUrl) {
+        return (
+            <ImagePreview
+                src={objectUrl}
+                fileName={props.block.fileName}
+                viewerTitle={props.block.sourcePath ?? props.block.fileName}
+                label={props.block.fileName}
+                buttonClassName="inline-block max-w-full cursor-zoom-in overflow-hidden rounded-[24px] text-left align-top"
+                imageClassName="max-h-[min(20rem,42vh)] max-w-full rounded-[24px] border border-[var(--app-border)] object-contain shadow-sm"
+            />
+        )
+    }
+
+    if (error) {
+        return (
+            <div className="text-sm text-[var(--app-hint)]">
+                Generated image is unavailable. {error}
             </div>
-            {objectUrl ? (
-                <ImagePreview
-                    src={objectUrl}
-                    fileName={props.block.fileName}
-                    label={props.block.fileName}
-                    buttonClassName="block max-w-full cursor-zoom-in rounded-xl text-left"
-                    imageClassName="max-h-[min(28rem,60vh)] max-w-full rounded-xl object-contain"
-                />
-            ) : error ? (
-                <div className="text-sm text-[var(--app-hint)]">
-                    Generated image is unavailable. {error}
-                </div>
-            ) : (
-                <div className="h-48 w-72 max-w-full animate-pulse rounded-xl bg-[var(--app-subtle-bg)]" />
-            )}
-        </div>
-    )
+        )
+    }
+
+    return <div className="h-48 w-72 max-w-full animate-pulse rounded-xl bg-[var(--app-subtle-bg)]" />
 }
 
 function isPendingPermissionBlock(block: ChatBlock): boolean {

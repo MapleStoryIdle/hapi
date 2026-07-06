@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
+import { AGENT_MESSAGE_PAYLOAD_TYPE, isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import type {
     AcceptRemoteServerCandidateRequest,
     CursorMigrateOutcome,
@@ -47,6 +47,7 @@ import {
     type RpcCommandResponse,
     type RpcDeleteUploadResponse,
     type RpcFileBytesResponse,
+    type RpcGeneratedImageFileReference,
     type RpcGeneratedImageResponse,
     type RpcGetCodexSubscriptionLimitsResponse,
     type RpcListDirectoryResponse,
@@ -70,6 +71,7 @@ export type {
     RpcCommandResponse,
     RpcDeleteUploadResponse,
     RpcFileBytesResponse,
+    RpcGeneratedImageFileReference,
     RpcGeneratedImageResponse,
     RpcGetCodexSubscriptionLimitsResponse,
     RpcListDirectoryResponse,
@@ -118,6 +120,56 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
         ? value as Record<string, unknown>
         : null
+}
+
+function asString(value: unknown): string | null {
+    return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function asFiniteNumber(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+type StoredGeneratedImageReference = RpcGeneratedImageFileReference & {
+    machineId: string
+}
+
+function readGeneratedImageReference(
+    content: unknown,
+    imageId: string,
+    fallbackMachineId: string | null
+): StoredGeneratedImageReference | null {
+    const roleWrapped = unwrapRoleWrappedRecordEnvelope(content)
+    if (roleWrapped?.role !== 'agent') return null
+
+    const envelope = asRecord(roleWrapped.content)
+    if (!envelope || envelope.type !== AGENT_MESSAGE_PAYLOAD_TYPE) return null
+
+    const data = asRecord(envelope.data)
+    if (!data || data.type !== 'generated-image') return null
+
+    const storedImageId = asString(data.imageId ?? data.image_id)
+    if (storedImageId !== imageId) return null
+
+    const path = asString(data.sourcePath ?? data.source_path ?? data.path)
+    const mimeType = asString(data.mimeType ?? data.mime_type)
+    const size = asFiniteNumber(data.size)
+    const mtimeMs = asFiniteNumber(data.mtimeMs ?? data.mtime_ms)
+    const machineId = asString(data.sourceMachineId ?? data.source_machine_id ?? data.machineId ?? data.machine_id)
+        ?? fallbackMachineId
+
+    if (!path || !mimeType || size === null || mtimeMs === null || !machineId) {
+        return null
+    }
+
+    return {
+        machineId,
+        path,
+        mimeType,
+        size,
+        mtimeMs,
+        fileName: asString(data.fileName ?? data.file_name)
+    }
 }
 
 function normalizeUserMessageText(value: string): string | undefined {
@@ -1819,8 +1871,45 @@ export class SyncEngine {
         return await this.rpcGateway.readGeneratedImage(sessionId, imageId)
     }
 
+    private findGeneratedImageReference(sessionId: string, imageId: string): StoredGeneratedImageReference | null {
+        const fallbackMachineId = this.getSession(sessionId)?.metadata?.machineId ?? null
+        const messages = this.store.messages.getAllMessages(sessionId)
+
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+            const reference = readGeneratedImageReference(messages[i].content, imageId, fallbackMachineId)
+            if (reference) {
+                return reference
+            }
+        }
+
+        return null
+    }
+
     async readGeneratedImageBytes(sessionId: string, imageId: string): Promise<RpcFileBytesResponse> {
-        return await this.rpcGateway.readGeneratedImageBytes(sessionId, imageId)
+        let liveFailure: RpcFileBytesResponse | null = null
+
+        try {
+            const result = await this.rpcGateway.readGeneratedImageBytes(sessionId, imageId)
+            if (result.success) {
+                return result
+            }
+            liveFailure = result
+        } catch (error) {
+            if (!(error instanceof RpcTargetMissingError)) {
+                throw error
+            }
+        }
+
+        const reference = this.findGeneratedImageReference(sessionId, imageId)
+        if (!reference) {
+            return liveFailure ?? { success: false, error: 'Generated image not found' }
+        }
+
+        return await this.rpcGateway.readGeneratedImageFileBytes(reference.machineId, reference)
+    }
+
+    async readUploadedFileBytes(sessionId: string, path: string): Promise<RpcFileBytesResponse> {
+        return await this.rpcGateway.readUploadedFileBytes(sessionId, path)
     }
 
     async listDirectory(sessionId: string, path: string): Promise<RpcListDirectoryResponse> {
@@ -1829,6 +1918,10 @@ export class SyncEngine {
 
     async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {
         return await this.rpcGateway.uploadFile(sessionId, filename, content, mimeType)
+    }
+
+    async uploadFileBytes(sessionId: string, filename: string, bytes: Uint8Array, mimeType: string): Promise<RpcUploadFileResponse> {
+        return await this.rpcGateway.uploadFileBytes(sessionId, filename, bytes, mimeType)
     }
 
     async deleteUploadFile(sessionId: string, path: string): Promise<RpcDeleteUploadResponse> {

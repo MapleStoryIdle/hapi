@@ -115,3 +115,127 @@ describe('RpcGateway no-target diagnostics (tiann/hapi#916)', () => {
     })
 })
 
+describe('RpcGateway binary session channel', () => {
+    it('reads uploaded file bytes through the session socket without RPC method registration', async () => {
+        // Binary file transfer is a socket capability; it must not depend on legacy rpc-register.
+        const events: Array<{ event: string; payload: unknown }> = []
+        const socket = {
+            timeout() {
+                return {
+                    async emitWithAck(event: string, payload: unknown) {
+                        events.push({ event, payload })
+                        return {
+                            success: true,
+                            bytes: new Uint8Array([1, 2, 3]),
+                            mimeType: 'image/png',
+                            fileName: 'shot.png'
+                        }
+                    }
+                }
+            }
+        }
+        const namespace = {
+            adapter: { rooms: new Map([['session:session-1', new Set(['socket-1'])]]) },
+            sockets: { get: () => socket }
+        }
+        const io = { of: () => namespace } as unknown as Server
+        const rpcRegistry = {
+            getSocketIdForMethod() { return undefined }
+        } as unknown as RpcRegistry
+        const gateway = new RpcGateway(io, rpcRegistry)
+
+        const result = await gateway.readUploadedFileBytes('session-1', '/tmp/upload/shot.png')
+
+        expect(result.success).toBe(true)
+        if (!result.success) return
+        expect(Array.from(result.bytes)).toEqual([1, 2, 3])
+        expect(events).toEqual([{
+            event: 'file:read-bytes',
+            payload: { type: 'uploaded-file', path: '/tmp/upload/shot.png' }
+        }])
+    })
+
+    it('reads generated image file bytes through the machine socket', async () => {
+        const events: Array<{ event: string; payload: unknown }> = []
+        const socket = {
+            timeout() {
+                return {
+                    async emitWithAck(event: string, payload: unknown) {
+                        events.push({ event, payload })
+                        return {
+                            success: true,
+                            bytes: new Uint8Array([7, 8, 9]),
+                            mimeType: 'image/png',
+                            fileName: 'generated.png'
+                        }
+                    }
+                }
+            }
+        }
+        const namespace = {
+            adapter: { rooms: new Map([['machine:machine-1', new Set(['socket-1'])]]) },
+            sockets: { get: () => socket }
+        }
+        const io = { of: () => namespace } as unknown as Server
+        const rpcRegistry = {
+            getSocketIdForMethod() { return undefined }
+        } as unknown as RpcRegistry
+        const gateway = new RpcGateway(io, rpcRegistry)
+
+        const result = await gateway.readGeneratedImageFileBytes('machine-1', {
+            path: '/tmp/generated.png',
+            mimeType: 'image/png',
+            size: 3,
+            mtimeMs: 123,
+            fileName: 'generated.png'
+        })
+
+        expect(result.success).toBe(true)
+        if (!result.success) return
+        expect(Array.from(result.bytes)).toEqual([7, 8, 9])
+        expect(events).toEqual([{
+            event: 'file:read-bytes',
+            payload: {
+                type: 'generated-image-file',
+                path: '/tmp/generated.png',
+                mimeType: 'image/png',
+                size: 3,
+                mtimeMs: 123,
+                fileName: 'generated.png'
+            }
+        }])
+    })
+
+    it('uploads file bytes through the session socket without RPC method registration', async () => {
+        // Upload also uses the session-scoped binary socket event directly.
+        const events: Array<{ event: string; payload: unknown }> = []
+        const socket = {
+            timeout() {
+                return {
+                    async emitWithAck(event: string, payload: unknown) {
+                        events.push({ event, payload })
+                        return { success: true, path: '/tmp/upload/shot.png' }
+                    }
+                }
+            }
+        }
+        const namespace = {
+            adapter: { rooms: new Map([['session:session-1', new Set(['socket-1'])]]) },
+            sockets: { get: () => socket }
+        }
+        const io = { of: () => namespace } as unknown as Server
+        const rpcRegistry = {
+            getSocketIdForMethod() { return undefined }
+        } as unknown as RpcRegistry
+        const gateway = new RpcGateway(io, rpcRegistry)
+        const bytes = new Uint8Array([4, 5, 6])
+
+        const result = await gateway.uploadFileBytes('session-1', 'shot.png', bytes, 'image/png')
+
+        expect(result).toEqual({ success: true, path: '/tmp/upload/shot.png' })
+        expect(events).toEqual([{
+            event: 'file:upload-bytes',
+            payload: { filename: 'shot.png', mimeType: 'image/png', bytes }
+        }])
+    })
+})

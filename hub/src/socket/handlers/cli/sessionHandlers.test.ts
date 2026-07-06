@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import { Store, type StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import type { CliSocketWithData } from '../../socketTypes'
@@ -63,6 +64,48 @@ describe('cli session handlers', () => {
         expect(store.messages.getMessages(session.id)).toHaveLength(0)
         expect(socket.roomEvents).toHaveLength(0)
         expect(webEvents).toHaveLength(0)
+    })
+
+
+    it('records generated-image messages as session activity', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('generated-image-session', {}, null, 'default')
+        const socket = new FakeSocket()
+        const activities: Array<{ sessionId: string; updatedAt: number }> = []
+
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onSessionActivity: (sessionId, updatedAt) => {
+                activities.push({ sessionId, updatedAt })
+            }
+        })
+
+        socket.trigger('message', {
+            sid: session.id,
+            message: {
+                role: 'agent',
+                content: {
+                    type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                    data: {
+                        type: 'generated-image',
+                        imageId: 'image-1',
+                        fileName: 'preview.png',
+                        mimeType: 'image/png'
+                    }
+                }
+            }
+        })
+
+        // display_image / image generation produces a standalone visible message.
+        // It must touch the session so the web list/cache refreshes immediately,
+        // without waiting for a later text message.
+        expect(activities).toHaveLength(1)
+        expect(activities[0]?.sessionId).toBe(session.id)
+        expect(store.messages.getMessages(session.id)).toHaveLength(1)
     })
 
     it('update-metadata broadcasts the merged value, not the pre-merge payload', () => {

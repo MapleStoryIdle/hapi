@@ -27,10 +27,20 @@ function getTokenFromUrlParams(): string | null {
     return query.get('token')
 }
 
-function shouldClearStoredLoginFromUrl(): boolean {
+function isLocalDevBrowser(): boolean {
     if (!import.meta.env.DEV) return false
     if (typeof window === 'undefined') return false
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') return false
+    return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+}
+
+function getDevAccessToken(): string | null {
+    if (!isLocalDevBrowser()) return null
+    const token = import.meta.env.VITE_HAPI_DEV_ACCESS_TOKEN?.trim()
+    return token || null
+}
+
+function shouldClearStoredLoginFromUrl(): boolean {
+    if (!isLocalDevBrowser()) return false
     return new URLSearchParams(window.location.search).get('clearAuth') === '1'
 }
 
@@ -120,6 +130,14 @@ export function useAuthSource(baseUrl: string): {
         if (urlToken) {
             storeAccessToken(accessTokenKey, urlToken) // Save to localStorage for refresh
             setAuthSource({ type: 'accessToken', token: urlToken })
+            setIsLoading(false)
+            return
+        }
+
+        const devToken = getDevAccessToken()
+        if (devToken) {
+            storeAccessToken(accessTokenKey, devToken)
+            setAuthSource({ type: 'accessToken', token: devToken })
             setIsLoading(false)
             return
         }

@@ -570,6 +570,7 @@ export function normalizeAgentRecord(
                     imageId,
                     fileName: asString(data.fileName ?? data.file_name) ?? 'generated-image',
                     mimeType: asString(data.mimeType ?? data.mime_type),
+                    sourcePath: asString(data.sourcePath ?? data.source_path ?? data.path),
                     uuid,
                     parentUUID: null
                 }],

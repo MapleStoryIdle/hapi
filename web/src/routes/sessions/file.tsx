@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams, useSearch } from '@tanstack/react-router'
 import type { GitCommandResponse } from '@/types/api'
@@ -13,6 +13,7 @@ import { langAlias, useShikiHighlighter } from '@/lib/shiki'
 import { useTranslation } from '@/lib/use-translation'
 import { decodeBase64 } from '@/lib/utils'
 import { ImagePreview } from '@/components/ImagePreview'
+import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 
 const MAX_COPYABLE_FILE_BYTES = 1_000_000
 const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
@@ -163,6 +164,10 @@ function resolveImageMimeType(path: string): string | null {
     return IMAGE_MIME_BY_EXTENSION[ext] ?? null
 }
 
+function isMarkdownFile(path: string): boolean {
+    return /\.(md|markdown|mdx)$/i.test(path)
+}
+
 function getUtf8ByteLength(value: string): number {
     return new TextEncoder().encode(value).length
 }
@@ -175,6 +180,94 @@ function isBinaryContent(content: string): boolean {
         return code < 32 && code !== 9 && code !== 10 && code !== 13
     }).length
     return nonPrintable / content.length > 0.1
+}
+
+function SourceCodeView(props: {
+    content: string
+    highlighted: ReactNode | null
+    canCopyContent: boolean
+    copied: boolean
+    onCopy: () => void
+    copyLabel: string
+    targetLine?: number
+}) {
+    const lineRefs = useRef(new Map<number, HTMLDivElement>())
+    const lines = useMemo(() => props.content.split('\n'), [props.content])
+    const lineNumberWidth = `${String(Math.max(lines.length, 1)).length + 1}ch`
+
+    useEffect(() => {
+        if (!props.targetLine) return
+        const node = lineRefs.current.get(props.targetLine)
+        if (!node) return
+
+        const frame = window.requestAnimationFrame(() => {
+            node.scrollIntoView({ block: 'center', inline: 'nearest' })
+        })
+        return () => window.cancelAnimationFrame(frame)
+    }, [props.content, props.targetLine])
+
+    const copyButton = props.canCopyContent ? (
+        <button
+            type="button"
+            onClick={props.onCopy}
+            className="absolute right-2 top-2 z-10 rounded p-1 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] transition-colors"
+            title={props.copyLabel}
+        >
+            {props.copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
+        </button>
+    ) : null
+
+    if (!props.targetLine) {
+        return (
+            <div className="relative">
+                {copyButton}
+                <pre className="shiki overflow-auto rounded-md bg-[var(--app-code-bg)] p-3 pr-8 text-xs font-mono">
+                    <code>{props.highlighted ?? props.content}</code>
+                </pre>
+            </div>
+        )
+    }
+
+    return (
+        <div className="relative">
+            {copyButton}
+            <pre className="overflow-auto rounded-md bg-[var(--app-code-bg)] py-3 pr-8 text-xs font-mono">
+                <code className="block min-w-max">
+                    {lines.map((line, index) => {
+                        const lineNumber = index + 1
+                        const isTarget = lineNumber === props.targetLine
+                        return (
+                            <div
+                                key={lineNumber}
+                                ref={(node) => {
+                                    if (node) {
+                                        lineRefs.current.set(lineNumber, node)
+                                    } else {
+                                        lineRefs.current.delete(lineNumber)
+                                    }
+                                }}
+                                className={[
+                                    'flex min-w-max scroll-mt-20 leading-5',
+                                    isTarget ? 'bg-amber-500/20 ring-1 ring-inset ring-amber-400/50' : ''
+                                ].filter(Boolean).join(' ')}
+                            >
+                                <span
+                                    className={[
+                                        'select-none px-2 text-right text-[var(--app-hint)]',
+                                        isTarget ? 'font-semibold text-amber-600 dark:text-amber-300' : ''
+                                    ].filter(Boolean).join(' ')}
+                                    style={{ width: lineNumberWidth }}
+                                >
+                                    {lineNumber}
+                                </span>
+                                <span className="whitespace-pre px-3">{line || ' '}</span>
+                            </div>
+                        )
+                    })}
+                </code>
+            </pre>
+        </div>
+    )
 }
 
 function extractCommandError(result: GitCommandResponse | undefined): string | null {
@@ -193,10 +286,12 @@ export default function FilePage() {
     const search = useSearch({ from: '/sessions/$sessionId/file' })
     const encodedPath = typeof search.path === 'string' ? search.path : ''
     const staged = search.staged
+    const targetLine = typeof search.line === 'number' ? search.line : undefined
 
     const filePath = useMemo(() => decodePath(encodedPath), [encodedPath])
     const fileName = filePath.split('/').pop() || filePath || t('file.page.fallbackName')
     const imageMimeType = useMemo(() => resolveImageMimeType(filePath), [filePath])
+    const markdownFile = useMemo(() => isMarkdownFile(filePath), [filePath])
 
     const diffQuery = useQuery({
         queryKey: queryKeys.gitFileDiff(sessionId, filePath, staged),
@@ -234,7 +329,6 @@ export default function FilePage() {
     const diffContent = diffQuery.data?.success ? (diffQuery.data.stdout ?? '') : ''
     const diffError = extractCommandError(diffQuery.data)
     const diffSuccess = diffQuery.data?.success === true
-    const diffFailed = diffQuery.data?.success === false
 
     const fileContentResult = fileQuery.data
     const decodedContentResult = fileContentResult?.success && fileContentResult.content
@@ -274,21 +368,29 @@ export default function FilePage() {
         ? Boolean(imageBlobQuery.data)
         : fileContentResult?.success === true && Boolean(fileContentResult.content)
 
-    const [displayMode, setDisplayMode] = useState<'diff' | 'file'>('diff')
+    const [displayMode, setDisplayMode] = useState<'diff' | 'file'>('file')
+    const [markdownMode, setMarkdownMode] = useState<'preview' | 'source'>('preview')
 
     useEffect(() => {
-        if (imageMimeType) {
+        const preferFileContent = Boolean(imageMimeType || targetLine || (markdownFile && staged === undefined && search.tab !== 'changes'))
+        if (preferFileContent) {
             setDisplayMode('file')
             return
         }
-        if (diffSuccess && !diffContent) {
-            setDisplayMode('file')
+        if (diffSuccess && diffContent) {
+            setDisplayMode('diff')
             return
         }
-        if (diffFailed) {
-            setDisplayMode('file')
+        setDisplayMode('file')
+    }, [diffSuccess, diffContent, imageMimeType, markdownFile, search.tab, staged, targetLine])
+
+    useEffect(() => {
+        if (!markdownFile) {
+            setMarkdownMode('source')
+            return
         }
-    }, [diffSuccess, diffFailed, diffContent, imageMimeType])
+        setMarkdownMode(targetLine ? 'source' : 'preview')
+    }, [filePath, markdownFile, targetLine])
 
     const loading = diffQuery.isLoading || (imageMimeType ? imageBlobQuery.isLoading : fileQuery.isLoading)
     const imageBlobError = imageBlobQuery.error
@@ -302,6 +404,11 @@ export default function FilePage() {
     const missingPath = !filePath
     const diffErrorMessage = diffError ? formatDiffError(diffError, t) : null
     const fileErrorMessage = fileError ? formatReadFileError(fileError, t) : null
+    const showMarkdownModeTabs = displayMode === 'file'
+        && markdownFile
+        && fileContentResult?.success === true
+        && !binaryFile
+        && decodedContent.length > 0
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -374,6 +481,26 @@ export default function FilePage() {
                     </div>
                 </div>
             ) : null}
+            {showMarkdownModeTabs ? (
+                <div className="bg-[var(--app-bg)]">
+                    <div className="mx-auto w-full max-w-content px-3 py-2 flex items-center gap-2 border-b border-[var(--app-divider)]">
+                        <button
+                            type="button"
+                            onClick={() => setMarkdownMode('preview')}
+                            className={`rounded px-3 py-1 text-xs font-semibold ${markdownMode === 'preview' ? 'bg-[var(--app-button)] text-[var(--app-button-text)] opacity-80' : 'bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'}`}
+                        >
+                            {t('file.page.tab.preview')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setMarkdownMode('source')}
+                            className={`rounded px-3 py-1 text-xs font-semibold ${markdownMode === 'source' ? 'bg-[var(--app-button)] text-[var(--app-button-text)] opacity-80' : 'bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'}`}
+                        >
+                            {t('file.page.tab.source')}
+                        </button>
+                    </div>
+                </div>
+            ) : null}
 
             <div className="app-scroll-y flex-1 min-h-0">
                 <div className="mx-auto w-full max-w-content p-4">
@@ -405,21 +532,21 @@ export default function FilePage() {
                             </div>
                         ) : (
                             decodedContent ? (
-                                <div className="relative">
-                                    {canCopyContent ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => copyContent(decodedContent)}
-                                            className="absolute right-2 top-2 z-10 rounded p-1 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] transition-colors"
-                                            title={t('file.page.copyContent')}
-                                        >
-                                            {contentCopied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
-                                        </button>
-                                    ) : null}
-                                    <pre className="shiki overflow-auto rounded-md bg-[var(--app-code-bg)] p-3 pr-8 text-xs font-mono">
-                                        <code>{highlighted ?? decodedContent}</code>
-                                    </pre>
-                                </div>
+                                markdownFile && markdownMode === 'preview' ? (
+                                    <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-4">
+                                        <MarkdownRenderer content={decodedContent} />
+                                    </div>
+                                ) : (
+                                    <SourceCodeView
+                                        content={decodedContent}
+                                        highlighted={highlighted}
+                                        canCopyContent={canCopyContent}
+                                        copied={contentCopied}
+                                        onCopy={() => copyContent(decodedContent)}
+                                        copyLabel={t('file.page.copyContent')}
+                                        targetLine={targetLine}
+                                    />
+                                )
                             ) : (
                                 <div className="text-sm text-[var(--app-hint)]">{t('file.page.empty')}</div>
                             )

@@ -1,7 +1,7 @@
 import { logger } from '@/ui/logger'
 import { lstat, readFile, stat, writeFile } from 'fs/promises'
 import { createHash } from 'crypto'
-import { basename, resolve } from 'path'
+import { basename, isAbsolute, resolve } from 'path'
 import type { FileReadResponse, GeneratedImageResponse } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
@@ -45,6 +45,14 @@ export type ReadFileBytesResult = {
     error: string
 }
 
+export type GeneratedImageFileReference = {
+    path: string
+    mimeType: string
+    size: number
+    mtimeMs: number
+    fileName?: string | null
+}
+
 export async function readSessionFileBytes(path: string, workingDirectory: string): Promise<ReadFileBytesResult> {
     const validation = validatePath(path, workingDirectory)
     if (!validation.valid) {
@@ -69,10 +77,9 @@ export async function readSessionFileBytes(path: string, workingDirectory: strin
     }
 }
 
-export async function readGeneratedImageBytes(id: string): Promise<ReadFileBytesResult> {
-    const image = getGeneratedImage(id)
-    if (!image) {
-        return rpcError('Generated image not found')
+export async function readGeneratedImageFileBytes(image: GeneratedImageFileReference): Promise<ReadFileBytesResult> {
+    if (!isAbsolute(image.path)) {
+        return rpcError('Invalid generated image path')
     }
 
     try {
@@ -93,7 +100,7 @@ export async function readGeneratedImageBytes(id: string): Promise<ReadFileBytes
             success: true,
             bytes,
             mimeType: image.mimeType,
-            fileName: image.fileName,
+            fileName: image.fileName || basename(image.path) || 'generated-image',
             size: image.size,
             mtimeMs: image.mtimeMs
         }
@@ -101,6 +108,15 @@ export async function readGeneratedImageBytes(id: string): Promise<ReadFileBytes
         logger.debug('Failed to read generated image:', error)
         return rpcError(getErrorMessage(error, 'Failed to read generated image'))
     }
+}
+
+export async function readGeneratedImageBytes(id: string): Promise<ReadFileBytesResult> {
+    const image = getGeneratedImage(id)
+    if (!image) {
+        return rpcError('Generated image not found')
+    }
+
+    return await readGeneratedImageFileBytes(image)
 }
 
 export function registerFileHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {

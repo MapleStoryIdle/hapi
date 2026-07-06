@@ -130,6 +130,10 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
                 imageId: image.id,
                 fileName: image.fileName,
                 mimeType: image.mimeType,
+                sourcePath: image.path,
+                sourceMachineId: client.getMachineId() ?? undefined,
+                size: image.size,
+                mtimeMs: image.mtimeMs,
                 id: randomUUID()
             });
 

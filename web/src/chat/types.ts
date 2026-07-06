@@ -62,6 +62,7 @@ export type GeneratedImageContent = {
     imageId: string
     fileName: string
     mimeType: string | null
+    sourcePath?: string | null
     uuid: string
     parentUUID: string | null
 }
@@ -236,6 +237,7 @@ export type GeneratedImageBlock = {
     imageId: string
     fileName: string
     mimeType: string | null
+    sourcePath?: string | null
     meta?: unknown
 }
 

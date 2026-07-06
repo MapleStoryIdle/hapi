@@ -69,6 +69,14 @@ bun run dev             # hub + web concurrently
 bun run build:single-exe # All-in-one binary
 ```
 
+## Local HAPI dev stack
+
+- Restart local hub + web + source-built runner: `scripts/dev/local-hapi.sh restart`
+- Defaults: hub `127.0.0.1:8318`, web `127.0.0.1:5173`, access token `hapi-test-local:localdev`.
+- Test DB is fixed at `~/.hapi-local-dev/hapi.db` by default and passed explicitly as `DB_PATH`; override with `HAPI_LOCAL_DB_PATH=<path>`.
+- Hub and runner use `~/.hapi-local-dev` by default so local dev settings and runner state persist across restarts.
+- The script injects `VITE_HAPI_DEV_ACCESS_TOKEN` into web so plain `http://127.0.0.1:5173/sessions` uses the same token as the runner. Override the whole token only with `HAPI_LOCAL_ACCESS_TOKEN=<token>`.
+
 ## Key source dirs
 
 ### CLI (`cli/src/`)
