@@ -1571,7 +1571,7 @@ function SessionChatInner(props: SessionChatProps) {
                         </div>
 
                         <div
-                            className="pointer-events-auto"
+                            className="pointer-events-none"
                             style={{ paddingBottom: BOTTOM_FLOATING_CONTROL_GAP_PX }}
                         >
                             {planStatusVisible ? (

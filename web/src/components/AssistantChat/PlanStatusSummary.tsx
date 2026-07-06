@@ -178,10 +178,10 @@ export function PlanStatusSummary(props: {
     if (!props.plan) return null
 
     return (
-        <div ref={rootRef} className="relative mx-auto flex w-full max-w-content justify-center px-3">
+        <div ref={rootRef} className="pointer-events-none relative mx-auto flex w-full max-w-content justify-center px-3">
             {expanded ? (
                 <div
-                    className="absolute bottom-14 left-1/2 z-20 origin-bottom -translate-x-1/2 overflow-hidden rounded-[18px] border border-[var(--app-border)] bg-[var(--app-code-bg)] shadow-[0_18px_45px_rgba(15,23,42,0.16)] animate-diff-pop"
+                    className="pointer-events-auto absolute bottom-14 left-1/2 z-20 origin-bottom -translate-x-1/2 overflow-hidden rounded-[18px] border border-[var(--app-border)] bg-[var(--app-code-bg)] shadow-[0_18px_45px_rgba(15,23,42,0.16)] animate-diff-pop"
                     style={{
                         width: 'max-content',
                         minWidth: '14rem',
@@ -233,7 +233,7 @@ export function PlanStatusSummary(props: {
 
             <button
                 type="button"
-                className="inline-flex h-[34px] max-w-[min(82vw,26rem)] items-center gap-2 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-4 text-sm font-medium shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-[0_12px_30px_rgba(15,23,42,0.16)] animate-diff-pill"
+                className="pointer-events-auto inline-flex h-[34px] max-w-[min(82vw,26rem)] items-center gap-2 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-4 text-sm font-medium shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-[0_12px_30px_rgba(15,23,42,0.16)] animate-diff-pill"
                 aria-expanded={expanded}
                 onClick={() => setExpanded((value) => !value)}
             >

@@ -134,10 +134,10 @@ export function GitDiffSummary(props: {
     const showViewAll = hiddenCount > 0
 
     return (
-        <div ref={rootRef} className="relative mx-auto flex w-full max-w-content justify-center px-3">
+        <div ref={rootRef} className="pointer-events-none relative mx-auto flex w-full max-w-content justify-center px-3">
             {expanded ? (
                 <div
-                    className="absolute bottom-14 left-6 right-6 z-20 max-h-64 origin-bottom overflow-hidden rounded-[22px] border border-[var(--app-border)] bg-[var(--app-code-bg)] shadow-[0_18px_45px_rgba(15,23,42,0.16)] animate-diff-pop"
+                    className="pointer-events-auto absolute bottom-14 left-6 right-6 z-20 max-h-64 origin-bottom overflow-hidden rounded-[22px] border border-[var(--app-border)] bg-[var(--app-code-bg)] shadow-[0_18px_45px_rgba(15,23,42,0.16)] animate-diff-pop"
                     role="dialog"
                     aria-label={t('gitDiff.summary.title')}
                 >
@@ -207,7 +207,7 @@ export function GitDiffSummary(props: {
 
             <button
                 type="button"
-                className="inline-flex h-[34px] items-center gap-3 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-4 text-sm font-medium shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-[0_12px_30px_rgba(15,23,42,0.16)] animate-diff-pill"
+                className="pointer-events-auto inline-flex h-[34px] items-center gap-3 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-4 text-sm font-medium shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-[0_12px_30px_rgba(15,23,42,0.16)] animate-diff-pill"
                 aria-expanded={expanded}
                 onClick={() => setExpanded((value) => !value)}
             >

@@ -791,6 +791,7 @@ export default {
   'misc.loadOlder': 'Load older',
   'misc.newMessage': '{n} new message{s}',
   'misc.backToBottom': 'Back to bottom',
+  'misc.returnToUserMessage': 'Back to your previous message',
   'misc.loadingMessages': 'Loading messages…',
   'misc.typeMessage': "Type 'continue' to resume...",
   'misc.typeAMessage': 'Type a message...',

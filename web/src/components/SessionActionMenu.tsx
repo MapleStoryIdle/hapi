@@ -5,7 +5,8 @@ import {
     useLayoutEffect,
     useRef,
     useState,
-    type CSSProperties
+    type CSSProperties,
+    type ReactNode
 } from 'react'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -26,7 +27,14 @@ type SessionActionMenuProps = {
     menuId?: string
 }
 
-function EditIcon(props: { className?: string }) {
+type MenuIconProps = {
+    className?: string
+}
+
+function MenuIcon(props: MenuIconProps & {
+    children: ReactNode
+    strokeWidth?: number
+}) {
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -35,143 +43,87 @@ function EditIcon(props: { className?: string }) {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth={props.strokeWidth ?? 1.7}
             strokeLinecap="round"
             strokeLinejoin="round"
-            className={props.className}
+            className={`h-[18px] w-[18px] shrink-0 ${props.className ?? ''}`}
+            aria-hidden="true"
         >
-            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-            <path d="m15 5 4 4" />
+            {props.children}
         </svg>
     )
 }
 
-function ArchiveIcon(props: { className?: string }) {
+function EditIcon(props: MenuIconProps) {
     return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <rect width="20" height="5" x="2" y="3" rx="1" />
-            <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+        <MenuIcon {...props}>
+            <path d="m14.5 4.5 5 5" />
+            <path d="M4 20h5.2L19.7 9.5a2.1 2.1 0 0 0-3-3L6.2 17 4 20Z" />
+        </MenuIcon>
+    )
+}
+
+function ArchiveIcon(props: MenuIconProps) {
+    return (
+        <MenuIcon {...props}>
+            <path d="M4.5 7.5h15" />
+            <path d="M6 7.5h12v10.25A2.25 2.25 0 0 1 15.75 20h-7.5A2.25 2.25 0 0 1 6 17.75V7.5Z" />
+            <path d="M8 4h8l1.5 3.5h-11L8 4Z" />
             <path d="M10 12h4" />
-        </svg>
+        </MenuIcon>
     )
 }
 
-function DownloadIcon(props: { className?: string }) {
+function DownloadIcon(props: MenuIconProps) {
     return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" x2="12" y1="15" y2="3" />
-        </svg>
+        <MenuIcon {...props}>
+            <path d="M12 4v10" />
+            <path d="m8.5 10.5 3.5 3.5 3.5-3.5" />
+            <path d="M5 16.5v1.25A2.25 2.25 0 0 0 7.25 20h9.5A2.25 2.25 0 0 0 19 17.75V16.5" />
+        </MenuIcon>
     )
 }
 
-function FilesIcon(props: { className?: string }) {
+function FilesIcon(props: MenuIconProps) {
     return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-            <path d="M14 2v6h6" />
-        </svg>
+        <MenuIcon {...props}>
+            <path d="M4.5 7.5V6.25A2.25 2.25 0 0 1 6.75 4h3.1l2 2h5.4a2.25 2.25 0 0 1 2.25 2.25v.5" />
+            <path d="M3.75 8.5h16.5l-1 8.4A2.25 2.25 0 0 1 17 19H7a2.25 2.25 0 0 1-2.25-2.1l-1-8.4Z" />
+        </MenuIcon>
     )
 }
 
-function OutlineIcon(props: { className?: string }) {
+function OutlineIcon(props: MenuIconProps) {
     return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M8 6h13" />
-            <path d="M8 12h13" />
-            <path d="M8 18h13" />
-            <path d="M3 6h.01" />
-            <path d="M3 12h.01" />
-            <path d="M3 18h.01" />
-        </svg>
+        <MenuIcon {...props}>
+            <path d="M9 6.75h10" />
+            <path d="M9 12h10" />
+            <path d="M9 17.25h10" />
+            <path d="M4.5 6.75h.01" strokeWidth="2.6" />
+            <path d="M4.5 12h.01" strokeWidth="2.6" />
+            <path d="M4.5 17.25h.01" strokeWidth="2.6" />
+        </MenuIcon>
     )
 }
 
-function ReopenIcon(props: { className?: string }) {
+function ReopenIcon(props: MenuIconProps) {
     return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M3 12a9 9 0 1 0 3-6.7" />
-            <polyline points="3 4 3 10 9 10" />
-        </svg>
+        <MenuIcon {...props}>
+            <path d="M7.5 7.5A7 7 0 1 1 5 12.85" />
+            <path d="M4.5 6v4.5H9" />
+        </MenuIcon>
     )
 }
 
-function TrashIcon(props: { className?: string }) {
+function TrashIcon(props: MenuIconProps) {
     return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M3 6h18" />
-            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-            <line x1="10" x2="10" y1="11" y2="17" />
-            <line x1="14" x2="14" y1="11" y2="17" />
-        </svg>
+        <MenuIcon {...props}>
+            <path d="M5 7h14" />
+            <path d="M9.5 7V5.75A1.75 1.75 0 0 1 11.25 4h1.5a1.75 1.75 0 0 1 1.75 1.75V7" />
+            <path d="M7.25 7.25 8 18a2.25 2.25 0 0 0 2.25 2h3.5A2.25 2.25 0 0 0 16 18l.75-10.75" />
+            <path d="M10.5 11v5" />
+            <path d="M13.5 11v5" />
+        </MenuIcon>
     )
 }
 
