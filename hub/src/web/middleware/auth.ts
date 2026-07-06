@@ -14,6 +14,18 @@ const jwtPayloadSchema = z.object({
     ns: z.string()
 })
 
+function getPreviewTokenFromReferer(referer: string | undefined): string | undefined {
+    if (!referer) return undefined
+    try {
+        const url = new URL(referer)
+        return url.pathname.startsWith('/api/preview/')
+            ? url.searchParams.get('hapiPreviewToken') ?? undefined
+            : undefined
+    } catch {
+        return undefined
+    }
+}
+
 export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<WebAppEnv> {
     return async (c, next) => {
         const path = c.req.path
@@ -24,8 +36,15 @@ export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<W
 
         const authorization = c.req.header('authorization')
         const tokenFromHeader = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : undefined
-        const tokenFromQuery = path === '/api/events' ? c.req.query().token : undefined
-        const token = tokenFromHeader ?? tokenFromQuery
+        const tokenFromQuery = path === '/api/events'
+            ? c.req.query().token
+            : path.startsWith('/api/preview/')
+                ? c.req.query().hapiPreviewToken
+                : undefined
+        const tokenFromReferer = path.startsWith('/api/preview/')
+            ? getPreviewTokenFromReferer(c.req.header('referer'))
+            : undefined
+        const token = tokenFromHeader ?? tokenFromQuery ?? tokenFromReferer
 
         if (!token) {
             return c.json({ error: 'Missing authorization token' }, 401)

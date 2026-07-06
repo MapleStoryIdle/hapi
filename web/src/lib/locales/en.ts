@@ -251,6 +251,11 @@ export default {
   'session.directoryMissingWorktree': 'Worktree sessions require an existing repository directory.',
   'session.codexModelsLoadFailed': 'Failed to load Codex models',
   'session.createAndCreateDirectory': 'Create and make directory',
+  'localPreview.open': 'Open local preview',
+  'localPreview.title': 'Local preview',
+  'localPreview.back': 'Back to session',
+  'localPreview.refresh': 'Refresh preview',
+  'localPreview.empty': 'No local service is available to preview.',
 
   // Machine
   'machine.unknown': 'Unknown platform',

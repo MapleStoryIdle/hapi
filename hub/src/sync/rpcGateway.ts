@@ -13,6 +13,10 @@ import type {
     DirectoryEntry,
     FileReadResponse,
     GeneratedImageResponse,
+    LocalPreviewHttpRequest,
+    LocalPreviewHttpResponse,
+    LocalPreviewProbeRequest,
+    LocalPreviewProbeResponse,
     ListDirectoryResponse,
     OpencodeModelsResponse,
     OpencodeModelSummary,
@@ -64,6 +68,8 @@ export type RpcListCursorModelsResponse = CursorModelsResponse
 export type RpcOpencodeModel = OpencodeModelSummary
 export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
+export type RpcLocalPreviewProbeResponse = LocalPreviewProbeResponse
+export type RpcLocalPreviewHttpResponse = LocalPreviewHttpResponse
 export type RpcFileBytesResponse = {
     success: true
     bytes: Uint8Array
@@ -363,6 +369,14 @@ export class RpcGateway {
 
     async listOpencodeModelsForCwd(machineId: string, cwd: string): Promise<RpcListOpencodeModelsResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.ListOpencodeModelsForCwd, { cwd }) as RpcListOpencodeModelsResponse
+    }
+
+    async checkLocalPreview(machineId: string, request: LocalPreviewProbeRequest): Promise<RpcLocalPreviewProbeResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.LocalPreviewCheck, request) as RpcLocalPreviewProbeResponse
+    }
+
+    async proxyLocalPreviewRequest(machineId: string, request: LocalPreviewHttpRequest): Promise<RpcLocalPreviewHttpResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.LocalPreviewHttpRequest, request) as RpcLocalPreviewHttpResponse
     }
 
     /** Generic Pi RPC call — routes all Pi-specific session RPCs through

@@ -7,6 +7,7 @@ import type {
     AttachmentMetadata,
     CodexCollaborationMode,
     DecryptedMessage,
+    LocalPreviewCandidate,
     PermissionMode,
     Session,
     PiModelSummary,
@@ -18,6 +19,7 @@ import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { buildConversationOutline } from '@/chat/outline'
+import { extractLocalPreviews } from '@/lib/local-preview'
 import { buildVisibleChatBlocks, isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
 import { groupAssistantResultDetails } from '@/chat/assistantResultGrouping'
 import { isQueuedForInvocation, mergeMessages } from '@/lib/messages'
@@ -48,6 +50,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { SessionHeader } from '@/components/SessionHeader'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
+import { LocalPreviewLauncher } from '@/components/LocalPreviewLauncher'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
@@ -461,6 +464,18 @@ export function getLatestTurnCompletionKey(messages: readonly NormalizedMessage[
 export function getLatestUserTurnCreatedAt(messages: readonly NormalizedMessage[]): number | null {
     const latestUserIndex = messages.findLastIndex((message) => message.role === 'user')
     return latestUserIndex >= 0 ? messages[latestUserIndex]!.createdAt : null
+}
+
+function getCurrentLocalPreviewIdentity(): { protocol: 'http' | 'https'; port: number } | null {
+    if (typeof window === 'undefined') return null
+    const protocol = window.location.protocol === 'https:' ? 'https' : window.location.protocol === 'http:' ? 'http' : null
+    if (!protocol) return null
+    const port = window.location.port
+        ? Number(window.location.port)
+        : protocol === 'https'
+            ? 443
+            : 80
+    return Number.isSafeInteger(port) ? { protocol, port } : null
 }
 
 function useSettledRunActive(
@@ -1039,6 +1054,63 @@ function SessionChatInner(props: SessionChatProps) {
         }
         return normalized
     }, [visibleMessages])
+    const detectedLocalPreviews = useMemo(
+        () => extractLocalPreviews(normalizedMessages),
+        [normalizedMessages]
+    )
+    const detectedLocalPreviewKey = useMemo(
+        () => detectedLocalPreviews.map((candidate) => (
+            `${candidate.protocol}:${candidate.port}:${candidate.path}:${candidate.detectedAt}`
+        )).join('|'),
+        [detectedLocalPreviews]
+    )
+    const [localPreviewCandidates, setLocalPreviewCandidates] = useState<LocalPreviewCandidate[]>([])
+    const currentLocalPreviewIdentity = useMemo(() => getCurrentLocalPreviewIdentity(), [])
+    const visibleLocalPreviewCandidates = useMemo(
+        () => localPreviewCandidates.filter((candidate) => (
+            !currentLocalPreviewIdentity
+            || candidate.protocol !== currentLocalPreviewIdentity.protocol
+            || candidate.port !== currentLocalPreviewIdentity.port
+        )),
+        [currentLocalPreviewIdentity, localPreviewCandidates]
+    )
+
+    useEffect(() => {
+        const machineId = props.session.metadata?.machineId
+        if (!machineId || detectedLocalPreviews.length === 0) {
+            setLocalPreviewCandidates([])
+            return
+        }
+
+        let cancelled = false
+        const candidatesToCheck = detectedLocalPreviews.slice(0, 5)
+        void Promise.all(candidatesToCheck.map(async (candidate) => {
+            try {
+                return (await props.api.checkLocalPreview(props.session.id, {
+                    protocol: candidate.protocol,
+                    port: candidate.port,
+                    path: candidate.path,
+                    sourceUrl: candidate.sourceUrl
+                })).candidate
+            } catch {
+                return null
+            }
+        })).then((candidates) => {
+            if (cancelled) return
+            setLocalPreviewCandidates(candidates.filter((candidate): candidate is LocalPreviewCandidate => (
+                candidate !== null && candidate.status === 'online'
+            )))
+        })
+
+        return () => {
+            cancelled = true
+        }
+    }, [
+        detectedLocalPreviewKey,
+        props.api,
+        props.session.id,
+        props.session.metadata?.machineId
+    ])
 
     const goalStateSourceMessages = useMemo(
         () => buildGoalStateMessages(props.messages, props.pendingMessages ?? []),
@@ -1464,6 +1536,10 @@ function SessionChatInner(props: SessionChatProps) {
                     voiceStatus: voice?.status
                 }}
                 floating
+            />
+            <LocalPreviewLauncher
+                sessionId={props.session.id}
+                candidates={visibleLocalPreviewCandidates}
             />
 
             <CursorMigrationBanner metadata={props.session.metadata} />

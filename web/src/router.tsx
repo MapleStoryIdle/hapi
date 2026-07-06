@@ -49,6 +49,7 @@ const WorkspaceBrowser = lazy(() => import('@/components/WorkspaceBrowser').then
 const FilesPage = lazy(() => import('@/routes/sessions/files'))
 const FilePage = lazy(() => import('@/routes/sessions/file'))
 const TerminalPage = lazy(() => import('@/routes/sessions/terminal'))
+const PreviewPage = lazy(() => import('@/routes/sessions/preview'))
 const SettingsPage = lazy(() => import('@/routes/settings'))
 const SharePage = lazy(() => import('@/routes/share'))
 const RemoteServersPage = lazy(() => import('@/components/RemoteServers'))
@@ -1658,6 +1659,38 @@ const sessionTerminalRoute = createRoute({
     component: TerminalPage,
 })
 
+type SessionPreviewSearch = {
+    port?: number
+    protocol?: 'http' | 'https'
+    path?: string
+}
+
+const sessionPreviewRoute = createRoute({
+    getParentRoute: () => sessionDetailRoute,
+    path: 'preview',
+    validateSearch: (search: Record<string, unknown>): SessionPreviewSearch => {
+        const parsePort = (value: unknown): number | undefined => {
+            const text = typeof value === 'number'
+                ? String(value)
+                : typeof value === 'string'
+                    ? value
+                    : ''
+            if (!/^\d+$/.test(text)) return undefined
+            const parsed = Number(text)
+            return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 65535 ? parsed : undefined
+        }
+        const protocol = search.protocol === 'https' ? 'https' : search.protocol === 'http' ? 'http' : undefined
+        const path = typeof search.path === 'string' && search.path.startsWith('/') ? search.path : undefined
+        const port = parsePort(search.port)
+        return {
+            ...(port !== undefined ? { port } : {}),
+            ...(protocol !== undefined ? { protocol } : {}),
+            ...(path !== undefined ? { path } : {})
+        }
+    },
+    component: PreviewPage,
+})
+
 type SessionFileSearch = {
     path: string
     staged?: boolean
@@ -1803,6 +1836,7 @@ export const routeTree = rootRoute.addChildren([
         newSessionRoute,
         sessionDetailRoute.addChildren([
             sessionTerminalRoute,
+            sessionPreviewRoute,
             sessionFilesRoute,
             sessionFileRoute,
         ]),

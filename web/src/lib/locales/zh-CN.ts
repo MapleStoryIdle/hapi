@@ -255,6 +255,11 @@ export default {
   'session.directoryMissingWorktree': 'worktree 需要已存在的仓库目录。',
   'session.codexModelsLoadFailed': '加载 Codex 模型失败',
   'session.createAndCreateDirectory': '创建并新建目录',
+  'localPreview.open': '打开本地预览',
+  'localPreview.title': '本地预览',
+  'localPreview.back': '返回会话',
+  'localPreview.refresh': '刷新预览',
+  'localPreview.empty': '没有可预览的本地服务。',
 
   // Machine
   'machine.unknown': '未知平台',

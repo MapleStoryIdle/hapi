@@ -12,6 +12,10 @@ import type {
     AcceptRemoteServerCandidateRequest,
     CursorMigrateOutcome,
     CursorMigrateToAcpRequest,
+    LocalPreviewHttpRequest,
+    LocalPreviewHttpResponse,
+    LocalPreviewProbeRequest,
+    LocalPreviewProbeResponse,
     SlashCommandsResponse,
     UpdateRemoteServerRequest,
     VerifyRemoteServerCandidateRequest
@@ -55,6 +59,8 @@ import {
     type RpcListCursorModelsResponse,
     type RpcListOpencodeModelsResponse,
     type RpcListOpencodeReasoningEffortOptionsResponse,
+    type RpcLocalPreviewHttpResponse,
+    type RpcLocalPreviewProbeResponse,
     type RpcCursorModel,
     type RpcOpencodeModel,
     type RpcPathExistsResponse,
@@ -79,6 +85,8 @@ export type {
     RpcListCursorModelsResponse,
     RpcListOpencodeModelsResponse,
     RpcListOpencodeReasoningEffortOptionsResponse,
+    RpcLocalPreviewHttpResponse,
+    RpcLocalPreviewProbeResponse,
     RpcCursorModel,
     RpcOpencodeModel,
     RpcPathExistsResponse,
@@ -2004,6 +2012,14 @@ export class SyncEngine {
 
     async listOpencodeModelsForCwd(machineId: string, cwd: string): Promise<RpcListOpencodeModelsResponse> {
         return await this.rpcGateway.listOpencodeModelsForCwd(machineId, cwd)
+    }
+
+    async checkLocalPreview(machineId: string, request: LocalPreviewProbeRequest): Promise<LocalPreviewProbeResponse> {
+        return await this.rpcGateway.checkLocalPreview(machineId, request)
+    }
+
+    async proxyLocalPreviewRequest(machineId: string, request: LocalPreviewHttpRequest): Promise<LocalPreviewHttpResponse> {
+        return await this.rpcGateway.proxyLocalPreviewRequest(machineId, request)
     }
 
     /** Generic Pi RPC — delegates to rpcGateway.callPiRpc. */

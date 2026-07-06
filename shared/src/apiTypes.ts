@@ -336,6 +336,84 @@ export const MachinePathsExistsRequestSchema = z.object({
 
 export type MachinePathsExistsRequest = z.infer<typeof MachinePathsExistsRequestSchema>
 
+export const LocalPreviewProtocolSchema = z.enum(['http', 'https'])
+export type LocalPreviewProtocol = z.infer<typeof LocalPreviewProtocolSchema>
+
+export const LocalPreviewPortSchema = z.number().int().min(1).max(65535)
+
+export const LocalPreviewPathSchema = z.string()
+    .trim()
+    .min(1)
+    .max(4096)
+    .refine((value) => value.startsWith('/'), { message: 'path must start with /' })
+
+export const LocalPreviewCheckRequestSchema = z.object({
+    protocol: LocalPreviewProtocolSchema.default('http'),
+    port: LocalPreviewPortSchema,
+    path: LocalPreviewPathSchema.optional().default('/'),
+    sourceUrl: z.string().trim().max(4096).optional()
+})
+
+export type LocalPreviewCheckRequest = z.infer<typeof LocalPreviewCheckRequestSchema>
+
+export const LocalPreviewProbeRequestSchema = z.object({
+    protocol: LocalPreviewProtocolSchema.default('http'),
+    port: LocalPreviewPortSchema,
+    path: LocalPreviewPathSchema.optional().default('/')
+})
+
+export type LocalPreviewProbeRequest = z.infer<typeof LocalPreviewProbeRequestSchema>
+
+export type LocalPreviewProbeResponse = {
+    ok: boolean
+    status?: number
+    contentType?: string | null
+    title?: string | null
+    error?: string
+}
+
+export const LocalPreviewHttpMethodSchema = z.enum(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
+
+export const LocalPreviewHttpRequestSchema = z.object({
+    protocol: LocalPreviewProtocolSchema.default('http'),
+    port: LocalPreviewPortSchema,
+    path: LocalPreviewPathSchema,
+    method: LocalPreviewHttpMethodSchema.default('GET'),
+    headers: z.record(z.string(), z.string()).optional(),
+    bodyBase64: z.string().optional()
+})
+
+export type LocalPreviewHttpRequest = z.infer<typeof LocalPreviewHttpRequestSchema>
+
+export type LocalPreviewHttpResponse = {
+    ok: boolean
+    status: number
+    statusText?: string
+    headers: Record<string, string>
+    bodyBase64: string
+    error?: string
+}
+
+export type LocalPreviewCandidate = {
+    id: string
+    sessionId: string
+    machineId: string
+    protocol: LocalPreviewProtocol
+    port: number
+    path: string
+    url: string
+    sourceUrl?: string
+    status: 'online' | 'offline'
+    title?: string | null
+    statusCode?: number
+    error?: string
+    checkedAt: number
+}
+
+export type LocalPreviewCheckResponse = {
+    candidate: LocalPreviewCandidate
+}
+
 export const AuthRequestSchema = z.union([
     z.object({ initData: z.string() }),
     z.object({ accessToken: z.string() })

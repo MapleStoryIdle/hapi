@@ -37,6 +37,8 @@ import type {
     FileReadResponse,
     GitCommandResponse,
     ListDirectoryResponse,
+    LocalPreviewCheckRequest,
+    LocalPreviewCheckResponse,
     MachineListDirectoryResponse,
     MachinePathsExistsResponse,
     OpencodeModelsResponse,
@@ -292,6 +294,16 @@ export class ApiClient {
         const qs = params.toString()
         const url = `/api/sessions/${encodeURIComponent(sessionId)}/messages${qs ? `?${qs}` : ''}`
         return await this.request<MessagesResponse>(url)
+    }
+
+    async checkLocalPreview(sessionId: string, request: LocalPreviewCheckRequest): Promise<LocalPreviewCheckResponse> {
+        return await this.request<LocalPreviewCheckResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/previews/check`,
+            {
+                method: 'POST',
+                body: JSON.stringify(request)
+            }
+        )
     }
 
     async getGitStatus(sessionId: string): Promise<GitCommandResponse> {
