@@ -84,6 +84,8 @@ function getEventKey(event: AgentEvent): string {
             return `switch:${event.mode}`
         case 'message':
             return `message:${event.message}`
+        case 'task-status':
+            return `task-status:${event.status}:${event.code}:${event.message}:${event.retryAttempt ?? ''}:${event.maxRetries ?? ''}`
         case 'title-changed':
             return `title:${event.title}`
         case 'limit-reached':

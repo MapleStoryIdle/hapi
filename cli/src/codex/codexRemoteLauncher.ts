@@ -58,6 +58,19 @@ async function registerGeneratedImageFromPath(args: { id: string; path: string; 
 
 type HappyServer = Awaited<ReturnType<typeof buildHapiMcpBridge>>['server'];
 type QueuedMessage = { message: string; mode: EnhancedMode; isolate: boolean; hash: string };
+type CodexTaskStatusCode = 'system_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown';
+type CodexTaskStatusEvent = {
+    type: 'task-status';
+    status: 'retrying' | 'compacting' | 'compacted' | 'failed';
+    source: 'codex';
+    code: CodexTaskStatusCode;
+    message: string;
+    retryAttempt?: number;
+    maxRetries?: number;
+    recoverable: boolean;
+    actionUrl?: string;
+    resetAtText?: string;
+};
 type ChildAgentRuntime = {
     reasoningProcessor: ReasoningProcessor;
     diffProcessor: DiffProcessor;
@@ -111,6 +124,7 @@ const CONTEXT_COMPACT_RETRYABLE_ERROR_PATTERNS = [
 const SAME_THREAD_MAX_RETRIES = 3;
 const SAME_THREAD_MAX_COMPACT_RETRIES = 1;
 const SAME_THREAD_COMPACT_TIMEOUT_MS = 10 * 60 * 1000;
+const CODEX_USAGE_SETTINGS_URL = 'https://chatgpt.com/codex/settings/usage';
 const CODEX_GOALS_UNSUPPORTED_MESSAGE = 'Codex goals are not supported by this Codex runtime. Upgrade Codex or enable features.goals.';
 const MAX_CODEX_GOAL_OBJECTIVE_CHARS = 4_000;
 
@@ -162,6 +176,72 @@ function isContextCompactRetryableCodexError(error: string | null): boolean {
     }
     const normalized = error.toLowerCase();
     return CONTEXT_COMPACT_RETRYABLE_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
+
+function extractCodexUsageActionUrl(error: string): string | null {
+    const match = error.match(/https:\/\/chatgpt\.com\/codex\/settings\/usage[^\s)]*/i);
+    return match?.[0] ?? null;
+}
+
+function extractCodexUsageResetAtText(error: string): string | null {
+    const match = error.match(/\btry again at\s+([^.\n]+)/i);
+    return match?.[1]?.trim() ?? null;
+}
+
+function classifyCodexTaskFailure(error: string | null): {
+    code: CodexTaskStatusCode;
+    actionUrl?: string;
+    resetAtText?: string;
+} {
+    if (!error) {
+        return { code: 'unknown' };
+    }
+
+    const normalized = error.toLowerCase();
+    if (
+        normalized.includes('usage limit')
+        || normalized.includes('purchase more credits')
+        || normalized.includes('codex/settings/usage')
+    ) {
+        return {
+            code: 'usage_limit',
+            actionUrl: extractCodexUsageActionUrl(error) ?? CODEX_USAGE_SETTINGS_URL,
+            resetAtText: extractCodexUsageResetAtText(error) ?? undefined
+        };
+    }
+    if (normalized.includes('selected model is at capacity')) {
+        return { code: 'model_capacity' };
+    }
+    if (normalized.includes('codex thread entered systemerror')) {
+        return { code: 'system_error' };
+    }
+    if (isContextCompactRetryableCodexError(error) || normalized.includes('same-conversation compact')) {
+        return { code: 'context_window' };
+    }
+    return { code: 'unknown' };
+}
+
+function buildCodexTaskStatusEvent(args: {
+    status: CodexTaskStatusEvent['status'];
+    message: string;
+    retryAttempt?: number;
+    maxRetries?: number;
+    recoverable: boolean;
+    code?: CodexTaskStatusCode;
+}): CodexTaskStatusEvent {
+    const classified = classifyCodexTaskFailure(args.message);
+    return {
+        type: 'task-status',
+        status: args.status,
+        source: 'codex',
+        code: args.code ?? classified.code,
+        message: args.message,
+        ...(args.retryAttempt !== undefined ? { retryAttempt: args.retryAttempt } : {}),
+        ...(args.maxRetries !== undefined ? { maxRetries: args.maxRetries } : {}),
+        recoverable: args.recoverable,
+        ...(classified.actionUrl ? { actionUrl: classified.actionUrl } : {}),
+        ...(classified.resetAtText ? { resetAtText: classified.resetAtText } : {})
+    };
 }
 
 function formatGoalStatus(status: unknown): string {
@@ -1982,13 +2062,28 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             wakeLoop();
         };
 
+        const sendTaskStatus = (
+            terminalMessage: string,
+            args: Omit<Parameters<typeof buildCodexTaskStatusEvent>[0], 'message'> & { eventMessage?: string }
+        ) => {
+            const { eventMessage, ...eventArgs } = args;
+            messageBuffer.addMessage(terminalMessage, 'status');
+            session.sendSessionEvent(buildCodexTaskStatusEvent({
+                ...eventArgs,
+                message: eventMessage ?? terminalMessage.replace(/^Task failed:\s*/i, '')
+            }));
+        };
+
         const failCompactRecovery = (recovery: typeof compactRecovery, message: string) => {
             if (!recovery || compactRecovery !== recovery) {
                 return;
             }
             logger.warn(`[Codex] ${message}`);
-            messageBuffer.addMessage(message, 'status');
-            session.sendSessionEvent({ type: 'message', message });
+            sendTaskStatus(message, {
+                status: 'failed',
+                code: 'context_window',
+                recoverable: false
+            });
             activeMessage = null;
             clearCompactRecovery(recovery);
         };
@@ -2004,8 +2099,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (!this.shouldExit && this.currentThreadId === recovery.threadId) {
                 pending = recovery.message;
                 const message = 'Context compacted; retrying same conversation';
-                messageBuffer.addMessage(message, 'status');
-                session.sendSessionEvent({ type: 'message', message });
+                sendTaskStatus(message, {
+                    status: 'compacted',
+                    code: 'context_window',
+                    recoverable: true
+                });
             }
             clearCompactRecovery(recovery);
             return true;
@@ -2286,18 +2384,31 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     const retryMessage = error
                         ? `Task failed: ${error}; compacting same conversation before retry (${sameThreadCompactAttempt}/${SAME_THREAD_MAX_COMPACT_RETRIES})`
                         : `Task failed; compacting same conversation before retry (${sameThreadCompactAttempt}/${SAME_THREAD_MAX_COMPACT_RETRIES})`;
-                    messageBuffer.addMessage(retryMessage, 'status');
-                    session.sendSessionEvent({ type: 'message', message: retryMessage });
+                    sendTaskStatus(retryMessage, {
+                        status: 'compacting',
+                        eventMessage: error ?? 'Task failed',
+                        retryAttempt: sameThreadCompactAttempt,
+                        maxRetries: SAME_THREAD_MAX_COMPACT_RETRIES,
+                        recoverable: true
+                    });
                 } else if (shouldRetrySameThread) {
                     const retryMessage = error
                         ? `Task failed: ${error}; retrying same conversation (${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES})`
                         : `Task failed; retrying same conversation (${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES})`;
-                    messageBuffer.addMessage(retryMessage, 'status');
-                    session.sendSessionEvent({ type: 'message', message: retryMessage });
+                    sendTaskStatus(retryMessage, {
+                        status: 'retrying',
+                        eventMessage: error ?? 'Task failed',
+                        retryAttempt: sameThreadRetryAttempt,
+                        maxRetries: SAME_THREAD_MAX_RETRIES,
+                        recoverable: true
+                    });
                 } else {
                     const message = error ? `Task failed: ${error}` : 'Task failed';
-                    messageBuffer.addMessage(message, 'status');
-                    session.sendSessionEvent({ type: 'message', message });
+                    sendTaskStatus(message, {
+                        status: 'failed',
+                        eventMessage: error ?? 'Task failed',
+                        recoverable: false
+                    });
                 }
             }
 
@@ -3194,8 +3305,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         } catch (error) {
                             logger.warn(`[Codex] Failed to resume app-server thread ${resumeCandidate}; preserving old conversation boundary`, error);
                             const failureMessage = `Task failed: Codex conversation ${resumeCandidate} could not be resumed; no new conversation was created`;
-                            messageBuffer.addMessage(failureMessage, 'status');
-                            session.sendSessionEvent({ type: 'message', message: failureMessage });
+                            sendTaskStatus(failureMessage, {
+                                status: 'failed',
+                                eventMessage: `Codex conversation ${resumeCandidate} could not be resumed; no new conversation was created`,
+                                recoverable: false
+                            });
                             pending = null;
                             continue;
                         }

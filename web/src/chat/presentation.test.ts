@@ -13,6 +13,40 @@ describe('getEventPresentation — agent errors', () => {
     })
 })
 
+describe('getEventPresentation — task-status', () => {
+    it('formats retrying task status with attempt counts', () => {
+        const result = getEventPresentation({
+            type: 'task-status',
+            status: 'retrying',
+            source: 'codex',
+            code: 'system_error',
+            message: 'Codex thread entered systemError',
+            retryAttempt: 1,
+            maxRetries: 3,
+            recoverable: true
+        })
+
+        expect(result.icon).toBe('↻')
+        expect(result.text).toBe('Codex task failed; retrying 1/3')
+    })
+
+    it('formats usage-limit final failures', () => {
+        const result = getEventPresentation({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'usage_limit',
+            message: "You've hit your usage limit.",
+            recoverable: false,
+            resetAtText: '9:43 AM',
+            actionUrl: 'https://chatgpt.com/codex/settings/usage'
+        })
+
+        expect(result.icon).toBe('⚠️')
+        expect(result.text).toBe('Codex usage limit reached · try again at 9:43 AM')
+    })
+})
+
 describe('getEventPresentation — limit-warning', () => {
     it('formats five_hour warning', () => {
         const result = getEventPresentation({

@@ -29,6 +29,7 @@ const harness = vi.hoisted(() => ({
     startTurnMessages: [] as string[],
     failResumeThreadIds: [] as string[],
     nextThreadSystemErrorMessage: null as string | null,
+    nextTurnFailureMessage: null as string | null,
     failNextCompact: false,
     deferThreadStatusNotifications: false,
     emitChildThreadEvents: false,
@@ -195,6 +196,19 @@ vi.mock('./codexAppServerClient', () => {
                 } else {
                     notify();
                 }
+                return { turn: { id: turnId } };
+            }
+
+            if (harness.nextTurnFailureMessage) {
+                const failureMessage = harness.nextTurnFailureMessage;
+                harness.nextTurnFailureMessage = null;
+                const failedTurn = {
+                    status: 'Failed',
+                    message: failureMessage,
+                    turn: { id: turnId }
+                };
+                harness.notifications.push({ method: 'turn/completed', params: failedTurn });
+                this.notificationHandler?.('turn/completed', failedTurn);
                 return { turn: { id: turnId } };
             }
 
@@ -978,6 +992,7 @@ describe('codexRemoteLauncher', () => {
         harness.failResumeThreadIds = [];
         harness.remainingThreadSystemErrors = 0;
         harness.nextThreadSystemErrorMessage = null;
+        harness.nextTurnFailureMessage = null;
         harness.failNextCompact = false;
         harness.deferThreadStatusNotifications = false;
         harness.emitChildThreadEvents = false;
@@ -1405,8 +1420,12 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startTurnThreadIds).toEqual(['thread-1', 'thread-1', 'thread-1', 'thread-1']);
         expect(harness.startTurnMessages).toEqual(['first message', 'first message', 'first message', 'first message']);
         expect(sessionEvents).toContainEqual({
-            type: 'message',
-            message: 'Task failed: Codex thread entered systemError'
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'system_error',
+            message: 'Codex thread entered systemError',
+            recoverable: false
         });
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
         expect(session.thinking).toBe(false);
@@ -1424,9 +1443,15 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startTurnThreadIds).toEqual(['thread-1', 'thread-1']);
         expect(harness.startTurnMessages).toEqual(['first message', 'first message']);
         expect(session.sessionId).toBe('thread-1');
-        expect(sessionEvents).not.toContainEqual({
-            type: 'message',
-            message: 'Task failed: Codex thread entered systemError'
+        expect(sessionEvents).toContainEqual({
+            type: 'task-status',
+            status: 'retrying',
+            source: 'codex',
+            code: 'system_error',
+            message: 'Codex thread entered systemError',
+            retryAttempt: 1,
+            maxRetries: 3,
+            recoverable: true
         });
         expect(session.thinking).toBe(false);
     });
@@ -1444,9 +1469,23 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startTurnThreadIds).toEqual(['thread-1', 'thread-1']);
         expect(harness.startTurnMessages).toEqual(['first message', 'first message']);
         expect(session.sessionId).toBe('thread-1');
-        expect(sessionEvents).not.toContainEqual({
-            type: 'message',
-            message: "Task failed: Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying."
+        expect(sessionEvents).toContainEqual({
+            type: 'task-status',
+            status: 'compacting',
+            source: 'codex',
+            code: 'context_window',
+            message: "Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.",
+            retryAttempt: 1,
+            maxRetries: 1,
+            recoverable: true
+        });
+        expect(sessionEvents).toContainEqual({
+            type: 'task-status',
+            status: 'compacted',
+            source: 'codex',
+            code: 'context_window',
+            message: 'Context compacted; retrying same conversation',
+            recoverable: true
         });
         expect(session.thinking).toBe(false);
     });
@@ -1464,9 +1503,15 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startTurnThreadIds).toEqual(['thread-1', 'thread-1']);
         expect(harness.startTurnMessages).toEqual(['first message', 'first message']);
         expect(session.sessionId).toBe('thread-1');
-        expect(sessionEvents).not.toContainEqual({
-            type: 'message',
-            message: 'Task failed: Codex thread entered systemError'
+        expect(sessionEvents).toContainEqual({
+            type: 'task-status',
+            status: 'retrying',
+            source: 'codex',
+            code: 'system_error',
+            message: 'Codex thread entered systemError',
+            retryAttempt: 1,
+            maxRetries: 3,
+            recoverable: true
         });
         expect(session.thinking).toBe(false);
     });
@@ -1485,9 +1530,15 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startTurnThreadIds).toEqual(['thread-1', 'thread-1']);
         expect(harness.startTurnMessages).toEqual(['first message', 'first message']);
         expect(session.sessionId).toBe('thread-1');
-        expect(sessionEvents).not.toContainEqual({
-            type: 'message',
-            message: "Task failed: Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying."
+        expect(sessionEvents).toContainEqual({
+            type: 'task-status',
+            status: 'compacting',
+            source: 'codex',
+            code: 'context_window',
+            message: "Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.",
+            retryAttempt: 1,
+            maxRetries: 1,
+            recoverable: true
         });
         expect(session.thinking).toBe(false);
     });
@@ -1506,8 +1557,12 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startTurnThreadIds).toEqual(['thread-1']);
         expect(session.sessionId).toBe('thread-1');
         expect(sessionEvents).toContainEqual({
-            type: 'message',
-            message: 'Task failed: context window overflow and same-conversation compact failed'
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'context_window',
+            message: 'context window overflow and same-conversation compact failed',
+            recoverable: false
         });
         expect(session.thinking).toBe(false);
     });
@@ -1540,8 +1595,32 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startTurnThreadIds).toEqual([]);
         expect(session.sessionId).toBe('thread-old');
         expect(sessionEvents).toContainEqual({
-            type: 'message',
-            message: 'Task failed: Codex conversation thread-old could not be resumed; no new conversation was created'
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'unknown',
+            message: 'Codex conversation thread-old could not be resumed; no new conversation was created',
+            recoverable: false
+        });
+        expect(session.thinking).toBe(false);
+    });
+
+    it('classifies Codex usage-limit failures for structured UI display', async () => {
+        harness.nextTurnFailureMessage = "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 9:43 AM.";
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(sessionEvents).toContainEqual({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'usage_limit',
+            message: "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 9:43 AM.",
+            recoverable: false,
+            actionUrl: 'https://chatgpt.com/codex/settings/usage',
+            resetAtText: '9:43 AM'
         });
         expect(session.thinking).toBe(false);
     });

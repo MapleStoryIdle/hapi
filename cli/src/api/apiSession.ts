@@ -600,6 +600,17 @@ export class ApiSessionClient extends EventEmitter {
         type: 'message'
         message: string
     } | {
+        type: 'task-status'
+        status: 'retrying' | 'compacting' | 'compacted' | 'failed'
+        source: 'codex'
+        code: 'system_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown'
+        message: string
+        retryAttempt?: number
+        maxRetries?: number
+        recoverable: boolean
+        actionUrl?: string
+        resetAtText?: string
+    } | {
         type: 'permission-mode-changed'
         mode: SessionPermissionMode
     } | {

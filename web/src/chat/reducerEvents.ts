@@ -138,3 +138,33 @@ export function foldApiErrorEvents(blocks: ChatBlock[]): ChatBlock[] {
 
     return result
 }
+
+/**
+ * Fold consecutive task-status events, keeping the newest retry/failure state.
+ */
+export function foldTaskStatusEvents(blocks: ChatBlock[]): ChatBlock[] {
+    const result: ChatBlock[] = []
+
+    for (const block of blocks) {
+        if (block.kind !== 'agent-event') {
+            result.push(block)
+            continue
+        }
+
+        const event = block.event as { type: string }
+        if (event.type !== 'task-status') {
+            result.push(block)
+            continue
+        }
+
+        const prev = result[result.length - 1] as AgentEventBlock | undefined
+        if (prev?.kind === 'agent-event' && (prev.event as { type: string }).type === 'task-status') {
+            result[result.length - 1] = block
+            continue
+        }
+
+        result.push(block)
+    }
+
+    return result
+}

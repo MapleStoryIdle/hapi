@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { parseMessageAsEvent } from './reducerEvents'
-import type { NormalizedMessage } from './types'
+import { foldTaskStatusEvents, parseMessageAsEvent } from './reducerEvents'
+import type { AgentEvent, ChatBlock, NormalizedMessage } from './types'
 
 function makeAgentTextMessage(text: string): NormalizedMessage {
     return {
@@ -10,6 +10,15 @@ function makeAgentTextMessage(text: string): NormalizedMessage {
         localId: null,
         createdAt: Date.now(),
         isSidechain: false,
+    }
+}
+
+function makeTaskStatusBlock(id: string, event: AgentEvent): ChatBlock {
+    return {
+        kind: 'agent-event',
+        id,
+        createdAt: Date.now(),
+        event
     }
 }
 
@@ -71,5 +80,60 @@ describe('parseMessageAsEvent — usage limit formats', () => {
         const msg = makeAgentTextMessage('Claude AI usage limit reached|1774278000')
         msg.isSidechain = true
         expect(parseMessageAsEvent(msg)).toBeNull()
+    })
+})
+
+describe('foldTaskStatusEvents', () => {
+    it('keeps only the newest consecutive task status', () => {
+        const retrying = makeTaskStatusBlock('retrying', {
+            type: 'task-status',
+            status: 'retrying',
+            source: 'codex',
+            code: 'system_error',
+            message: 'Codex thread entered systemError',
+            retryAttempt: 1,
+            maxRetries: 3,
+            recoverable: true
+        })
+        const failed = makeTaskStatusBlock('failed', {
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'usage_limit',
+            message: "You've hit your usage limit.",
+            recoverable: false
+        })
+
+        expect(foldTaskStatusEvents([retrying, failed])).toEqual([failed])
+    })
+
+    it('does not fold task statuses across normal messages', () => {
+        const retrying = makeTaskStatusBlock('retrying', {
+            type: 'task-status',
+            status: 'retrying',
+            source: 'codex',
+            code: 'system_error',
+            message: 'Codex thread entered systemError',
+            retryAttempt: 1,
+            maxRetries: 3,
+            recoverable: true
+        })
+        const user: ChatBlock = {
+            kind: 'user-text',
+            id: 'user',
+            localId: null,
+            createdAt: Date.now(),
+            text: 'next'
+        }
+        const failed = makeTaskStatusBlock('failed', {
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'usage_limit',
+            message: "You've hit your usage limit.",
+            recoverable: false
+        })
+
+        expect(foldTaskStatusEvents([retrying, user, failed])).toEqual([retrying, user, failed])
     })
 })

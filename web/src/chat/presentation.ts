@@ -86,6 +86,43 @@ function formatTokenCount(value: number): string {
     return String(value)
 }
 
+function formatTaskStatusAttempt(event: AgentEvent): string {
+    const retryAttempt = asNumber((event as Record<string, unknown>).retryAttempt)
+    const maxRetries = asNumber((event as Record<string, unknown>).maxRetries)
+    return retryAttempt !== null && maxRetries !== null ? ` ${retryAttempt}/${maxRetries}` : ''
+}
+
+function formatTaskStatusEvent(event: AgentEvent): EventPresentation {
+    const record = event as Record<string, unknown>
+    const status = typeof record.status === 'string' ? record.status : 'failed'
+    const code = typeof record.code === 'string' ? record.code : 'unknown'
+    const attempt = formatTaskStatusAttempt(event)
+
+    if (status === 'retrying') {
+        return { icon: '↻', text: `Codex task failed; retrying${attempt}` }
+    }
+    if (status === 'compacting') {
+        return { icon: '◷', text: `Context too large; compacting before retry${attempt}` }
+    }
+    if (status === 'compacted') {
+        return { icon: '↻', text: 'Context compacted; retrying' }
+    }
+    if (code === 'usage_limit') {
+        const resetAtText = typeof record.resetAtText === 'string' ? record.resetAtText : ''
+        return {
+            icon: '⚠️',
+            text: resetAtText ? `Codex usage limit reached · try again at ${resetAtText}` : 'Codex usage limit reached'
+        }
+    }
+    if (code === 'model_capacity') {
+        return { icon: '⚠️', text: 'Selected Codex model is at capacity' }
+    }
+    if (code === 'context_window') {
+        return { icon: '⚠️', text: 'Codex task failed: context window is too large' }
+    }
+    return { icon: '⚠️', text: 'Codex task failed' }
+}
+
 function formatGoalStatus(status: string): string {
     if (status === 'active') return 'active'
     if (status === 'paused') return 'paused'
@@ -141,6 +178,9 @@ export type EventPresentation = {
 }
 
 export function getEventPresentation(event: AgentEvent): EventPresentation {
+    if (event.type === 'task-status') {
+        return formatTaskStatusEvent(event)
+    }
     if (event.type === 'api-error') {
         const { retryAttempt, maxRetries } = event as { retryAttempt: number; maxRetries: number }
         if (maxRetries > 0 && retryAttempt >= maxRetries) {
