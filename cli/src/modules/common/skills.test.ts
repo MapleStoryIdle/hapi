@@ -64,6 +64,7 @@ describe('listSkills', () => {
         const skills = await listSkills()
 
         expect(skills.map((skill) => skill.name)).toEqual(['amis'])
+        expect(skills[0]?.scope).toBe('user')
     })
 
     it('lists user skills from ~/.claude/skills', async () => {
@@ -93,6 +94,8 @@ describe('listSkills', () => {
         const skills = await listSkills(undefined, { flavor: 'codex' })
 
         expect(skills.map((skill) => skill.name)).toEqual(['amis', 'helloagents', 'skill-creator'])
+        expect(skills.find((skill) => skill.name === 'helloagents')?.scope).toBe('user')
+        expect(skills.find((skill) => skill.name === 'skill-creator')?.scope).toBe('system')
     })
 
     it('scopes user skills to the requested flavor', async () => {
@@ -159,6 +162,8 @@ describe('listSkills', () => {
 
         expect(claudeSkills.map((skill) => skill.name)).toEqual(['claude-market'])
         expect(codexSkills.map((skill) => skill.name)).toEqual(['codex-market'])
+        expect(claudeSkills[0]?.scope).toBe('plugin')
+        expect(codexSkills[0]?.scope).toBe('plugin')
     })
 
     it('uses configured Claude and Codex homes for installed marketplace skills', async () => {
@@ -215,7 +220,7 @@ describe('listSkills', () => {
 
         const skills = await listSkills(undefined, { flavor: 'codex' })
 
-        expect(skills).toEqual([{ name: 'plugin-skill', description: 'New marketplace skill' }])
+        expect(skills).toEqual([{ name: 'plugin-skill', description: 'New marketplace skill', scope: 'plugin' }])
     })
 
     it('falls back to directory name when frontmatter is missing', async () => {
@@ -224,7 +229,7 @@ describe('listSkills', () => {
         await writeFile(join(skillDir, 'SKILL.md'), '# No Frontmatter\n')
 
         await expect(listSkills()).resolves.toEqual([
-            { name: 'no-frontmatter', description: undefined }
+            { name: 'no-frontmatter', description: undefined, scope: 'user' }
         ])
     })
 
@@ -242,6 +247,7 @@ describe('listSkills', () => {
         const skills = await listSkills(workingDirectory, { flavor: 'claude' })
 
         expect(skills.map((skill) => skill.name)).toEqual(['local-skill', 'package-skill', 'root-skill'])
+        expect(skills.every((skill) => skill.scope === 'project')).toBe(true)
     })
 
     it('loads project skills from .claude/skills directories', async () => {
@@ -282,7 +288,7 @@ describe('listSkills', () => {
         const skills = await listSkills(workingDirectory)
 
         expect(skills).toHaveLength(1)
-        expect(skills[0]).toEqual({ name: 'shared', description: 'From agents' })
+        expect(skills[0]).toEqual({ name: 'shared', description: 'From agents', scope: 'project' })
     })
 
     it('uses only cwd project skills outside a git repository', async () => {
@@ -312,7 +318,8 @@ describe('listSkills', () => {
         expect(sharedSkills).toHaveLength(1)
         expect(sharedSkills[0]).toEqual({
             name: 'shared',
-            description: 'Local shared skill'
+            description: 'Local shared skill',
+            scope: 'project'
         })
     })
 })

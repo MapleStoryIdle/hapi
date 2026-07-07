@@ -11,7 +11,8 @@ import type {
     PermissionMode,
     Session,
     PiModelSummary,
-    SlashCommand
+    SlashCommand,
+    SkillSummary
 } from '@/types/api'
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
@@ -560,6 +561,9 @@ type SessionChatProps = {
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
     availableSlashCommands?: readonly SlashCommand[]
+    skills?: SkillSummary[]
+    skillsLoading?: boolean
+    skillsError?: string | null
     // The latest send the hub rejected (4xx/5xx/network).  When set, the
     // composer is asked to restore the typed text and surface an inline
     // error -- see HappyComposer.  Cleared by `onClearSendError` once the
@@ -1814,6 +1818,9 @@ function SessionChatInner(props: SessionChatProps) {
                                 onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
                                 terminalUnsupported={props.session.active && !terminalSupported}
                                 autocompleteSuggestions={props.autocompleteSuggestions}
+                                skills={props.skills}
+                                skillsLoading={props.skillsLoading}
+                                skillsError={props.skillsError}
                                 voiceStatus={voice?.status}
                                 voiceMicMuted={voice?.micMuted}
                                 onVoiceToggle={voice ? handleVoiceToggle : undefined}

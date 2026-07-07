@@ -6,6 +6,7 @@ import { parse as parseYaml } from 'yaml';
 export interface SkillSummary {
     name: string;
     description?: string;
+    scope: 'project' | 'user' | 'plugin' | 'system' | 'admin';
 }
 
 export interface ListSkillsRequest {
@@ -128,7 +129,18 @@ function parseFrontmatter(fileContent: string): { frontmatter?: Record<string, u
     }
 }
 
-function extractSkillSummary(skillDir: string, fileContent: string): SkillSummary | null {
+function getSkillScope(
+    skillDir: string,
+    fallbackScope: SkillSummary['scope'],
+): SkillSummary['scope'] {
+    return skillDir.split(/[\\/]/).includes('.system') ? 'system' : fallbackScope;
+}
+
+function extractSkillSummary(
+    skillDir: string,
+    fileContent: string,
+    scope: SkillSummary['scope'],
+): SkillSummary | null {
     const parsed = parseFrontmatter(fileContent);
     const nameFromFrontmatter = typeof parsed.frontmatter?.name === 'string' ? parsed.frontmatter.name.trim() : '';
     const name = nameFromFrontmatter || basename(skillDir);
@@ -140,7 +152,7 @@ function extractSkillSummary(skillDir: string, fileContent: string): SkillSummar
         ? parsed.frontmatter.description.trim()
         : undefined;
 
-    return { name, description };
+    return { name, description, scope };
 }
 
 async function listTopLevelSkillDirs(skillsRoot: string, options: { includeCodexSystem?: boolean } = {}): Promise<string[]> {
@@ -174,12 +186,15 @@ async function listTopLevelSkillDirs(skillsRoot: string, options: { includeCodex
     }
 }
 
-async function readSkillsFromDirs(skillDirs: string[]): Promise<SkillSummary[]> {
+async function readSkillsFromDirs(
+    skillDirs: string[],
+    fallbackScope: SkillSummary['scope'],
+): Promise<SkillSummary[]> {
     const skills = await Promise.all(skillDirs.map(async (dir): Promise<SkillSummary | null> => {
         const filePath = join(dir, 'SKILL.md');
         try {
             const fileContent = await readFile(filePath, 'utf-8');
-            return extractSkillSummary(dir, fileContent);
+            return extractSkillSummary(dir, fileContent, getSkillScope(dir, fallbackScope));
         } catch {
             return null;
         }
@@ -237,10 +252,10 @@ export async function listSkills(workingDirectory?: string, options: { flavor?: 
     ]);
 
     const [projectSkills, userSkills, pluginSkills, adminSkills] = await Promise.all([
-        readSkillsFromDirs(projectSkillDirs),
-        readSkillsFromDirs(userSkillDirs),
-        readSkillsFromDirs(pluginSkillDirs),
-        readSkillsFromDirs(adminSkillDirs),
+        readSkillsFromDirs(projectSkillDirs, 'project'),
+        readSkillsFromDirs(userSkillDirs, 'user'),
+        readSkillsFromDirs(pluginSkillDirs, 'plugin'),
+        readSkillsFromDirs(adminSkillDirs, 'admin'),
     ]);
 
     const dedupedSkills = new Map<string, SkillSummary>();

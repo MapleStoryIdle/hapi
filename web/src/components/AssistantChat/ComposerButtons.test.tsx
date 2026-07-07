@@ -196,6 +196,29 @@ describe('getComposerOptionalControlsVisibility', () => {
     })
 
     /**
+     * Skill is lower priority than permission and higher priority than
+     * context usage. On tight widths it should be the control that falls
+     * back into the "+" menu before permission, while context remains last.
+     */
+    it('places skill between permission and context usage in the optional priority order', () => {
+        expect(getComposerOptionalControlsVisibility(280, 160, 0, true, true)).toEqual({
+            permission: true,
+            skill: false,
+            contextUsage: false
+        })
+        expect(getComposerOptionalControlsVisibility(330, 160, 0, true, true)).toEqual({
+            permission: true,
+            skill: true,
+            contextUsage: false
+        })
+        expect(getComposerOptionalControlsVisibility(380, 160, 0, true, true)).toEqual({
+            permission: true,
+            skill: true,
+            contextUsage: true
+        })
+    })
+
+    /**
      * Status chips should consume their measured content width, not a fake
      * boolean reserve. If the status content is narrow, optional icons can use
      * the rest of the row.

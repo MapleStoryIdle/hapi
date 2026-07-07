@@ -1946,7 +1946,7 @@ export class SyncEngine {
 
     async listSkills(sessionId: string, flavor?: string): Promise<{
         success: boolean
-        skills?: Array<{ name: string; description?: string }>
+        skills?: Array<{ name: string; description?: string; scope?: 'project' | 'user' | 'plugin' | 'system' | 'admin' }>
         error?: string
     }> {
         return await this.rpcGateway.listSkills(sessionId, flavor)

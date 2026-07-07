@@ -67,9 +67,11 @@ export function useSkills(
                 .map((skill) => ({
                     key: `$${skill.name}`,
                     text: `$${skill.name}`,
-                    label: `$${skill.name}`,
+                    label: skill.name,
                     description: skill.description,
-                    source: 'builtin'
+                    source: skill.scope === 'project' || skill.scope === 'user' || skill.scope === 'plugin'
+                        ? skill.scope
+                        : 'builtin'
                 }))
         }
 
@@ -92,9 +94,11 @@ export function useSkills(
             .map(({ skill }) => ({
                 key: `$${skill.name}`,
                 text: `$${skill.name}`,
-                label: `$${skill.name}`,
+                label: skill.name,
                 description: skill.description,
-                source: 'builtin'
+                source: skill.scope === 'project' || skill.scope === 'user' || skill.scope === 'plugin'
+                    ? skill.scope
+                    : 'builtin'
             }))
     }, [skills])
 

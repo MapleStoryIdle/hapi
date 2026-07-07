@@ -6,6 +6,7 @@ import {
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
     type PointerEvent as ReactPointerEvent,
+    type RefObject,
     type SyntheticEvent as ReactSyntheticEvent,
     useCallback,
     useEffect,
@@ -14,7 +15,7 @@ import {
     useState
 } from 'react'
 import type { ApiClient } from '@/api/client'
-import type { AgentState, CodexCollaborationMode, PermissionMode, PiModelSummary, Session, ThreadGoal } from '@/types/api'
+import type { AgentState, CodexCollaborationMode, PermissionMode, PiModelSummary, Session, SkillSummary, ThreadGoal } from '@/types/api'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import type { ConversationStatus } from '@/realtime/types'
 import { useActiveWord } from '@/hooks/useActiveWord'
@@ -45,6 +46,114 @@ import { PiThinkingLevelPanel } from './PiThinkingLevelPanel'
 export interface TextInputState {
     text: string
     selection: { start: number; end: number }
+}
+
+type ComposerPreviewPart =
+    | { type: 'text'; text: string }
+    | { type: 'skill'; name: string; raw: string }
+
+const SKILL_TOKEN_PATTERN = /\$([A-Za-z0-9][A-Za-z0-9._:-]*)/g
+
+function SkillTokenIcon() {
+    return (
+        <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.25"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+        >
+            <path d="M8.5 3.5a2 2 0 0 1 3 1.73V7h2V5.23a2 2 0 1 1 2 0V7H18a2 2 0 0 1 2 2v2.5h-1.77a2 2 0 1 0 0 2H20V16a2 2 0 0 1-2 2h-2.5v-1.77a2 2 0 1 0-2 0V18h-2v-1.77a2 2 0 1 0-2 0V18H7a2 2 0 0 1-2-2v-2.5h1.77a2 2 0 1 0 0-2H5V9a2 2 0 0 1 2-2h2.5V5.23A2 2 0 0 1 8.5 3.5Z" />
+        </svg>
+    )
+}
+
+function getComposerPreviewParts(text: string, skillNames: Set<string>): ComposerPreviewPart[] {
+    if (!text || skillNames.size === 0) {
+        return text ? [{ type: 'text', text }] : []
+    }
+
+    const parts: ComposerPreviewPart[] = []
+    SKILL_TOKEN_PATTERN.lastIndex = 0
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+
+    while ((match = SKILL_TOKEN_PATTERN.exec(text)) !== null) {
+        const raw = match[0]
+        const name = match[1]
+        if (!skillNames.has(name)) {
+            continue
+        }
+        if (match.index > lastIndex) {
+            parts.push({ type: 'text', text: text.slice(lastIndex, match.index) })
+        }
+        parts.push({ type: 'skill', name, raw })
+        lastIndex = match.index + raw.length
+    }
+
+    if (lastIndex < text.length) {
+        parts.push({ type: 'text', text: text.slice(lastIndex) })
+    }
+
+    return parts.length > 0 ? parts : [{ type: 'text', text }]
+}
+
+function insertSkillTokenAtSelection(
+    text: string,
+    selection: TextInputState['selection'],
+    skillName: string,
+): { text: string; cursorPosition: number } {
+    const token = `$${skillName.trim()}`
+    const before = text.slice(0, selection.start)
+    const after = text.slice(selection.end)
+    const leading = before.length > 0 && !/\s$/.test(before) ? ' ' : ''
+    const trailing = after.length > 0 && /^\s/.test(after) ? '' : ' '
+    const insertion = `${leading}${token}${trailing}`
+
+    return {
+        text: `${before}${insertion}${after}`,
+        cursorPosition: before.length + insertion.length
+    }
+}
+
+function ComposerInputPreview(props: {
+    text: string
+    parts: ComposerPreviewPart[]
+    previewRef: RefObject<HTMLDivElement | null>
+    compactTopAnchor: boolean
+}) {
+    if (!props.text) return null
+
+    return (
+        <div
+            ref={props.previewRef}
+            aria-hidden="true"
+            className={`pointer-events-none absolute inset-x-4 top-2 bottom-2 overflow-hidden whitespace-pre-wrap break-words text-base leading-snug text-[var(--app-fg)] ${
+                props.compactTopAnchor ? 'max-h-[44px]' : 'max-h-[10rem]'
+            }`}
+        >
+            {props.parts.map((part, index) => part.type === 'skill' ? (
+                <span
+                    key={`${part.raw}-${index}`}
+                    className="relative inline-block align-baseline text-transparent"
+                >
+                    {part.raw}
+                    <span className="absolute inset-0 inline-flex min-w-0 items-baseline overflow-hidden rounded-[4px] bg-blue-500/10 font-semibold text-[var(--app-link)]">
+                        <span className="inline-flex w-[1ch] shrink-0 translate-y-[1px] items-center justify-center">
+                            <SkillTokenIcon />
+                        </span>
+                        <span className="min-w-0 truncate">{part.name}</span>
+                    </span>
+                </span>
+            ) : (
+                <span key={`text-${index}`}>{part.text}</span>
+            ))}
+        </div>
+    )
 }
 
 /**
@@ -215,6 +324,9 @@ export function HappyComposer(props: {
     terminalUnsupported?: boolean
     autocompletePrefixes?: string[]
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
+    skills?: SkillSummary[]
+    skillsLoading?: boolean
+    skillsError?: string | null
     // Voice assistant props
     voiceStatus?: ConversationStatus
     voiceMicMuted?: boolean
@@ -283,6 +395,9 @@ export function HappyComposer(props: {
         terminalUnsupported = false,
         autocompletePrefixes = ['@', '/', '$'],
         autocompleteSuggestions = defaultSuggestionHandler,
+        skills = [],
+        skillsLoading = false,
+        skillsError = null,
         voiceStatus = 'disconnected',
         voiceMicMuted = false,
         onVoiceToggle,
@@ -346,6 +461,7 @@ export function HappyComposer(props: {
     const setPendingSchedule = isControlled ? onScheduleProp : setPendingScheduleLocal
 
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const inputPreviewRef = useRef<HTMLDivElement>(null)
     const prevControlledByUser = useRef(controlledByUser)
 
     useComposerDraft(sessionId, composerText, (text) => api.composer().setText(text))
@@ -407,6 +523,7 @@ export function HappyComposer(props: {
 
     const { haptic: platformHaptic } = usePlatform()
     const bottomPaddingClass = 'pb-0'
+    const skillNames = useMemo(() => new Set(skills.map((skill) => skill.name)), [skills])
     const activeWord = useActiveWord(inputState.text, inputState.selection, autocompletePrefixes)
     const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions] = useActiveSuggestions(
         activeWord,
@@ -432,6 +549,29 @@ export function HappyComposer(props: {
         } catch {
             el.focus()
         }
+    }, [controlsDisabled])
+
+    const focusComposerInputAt = useCallback((cursorPosition: number) => {
+        if (controlsDisabled) return
+
+        const applySelection = () => {
+            const el = textareaRef.current
+            if (!el) return
+            const resolvedPosition = Math.min(cursorPosition, el.value.length)
+            el.setSelectionRange(resolvedPosition, resolvedPosition)
+            try {
+                el.focus({ preventScroll: true })
+            } catch {
+                el.focus()
+            }
+        }
+
+        applySelection()
+        window.setTimeout(applySelection, 0)
+        window.requestAnimationFrame(() => {
+            applySelection()
+            window.requestAnimationFrame(applySelection)
+        })
     }, [controlsDisabled])
 
     const handleComposerPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -463,19 +603,37 @@ export function HappyComposer(props: {
             selection: { start: result.cursorPosition, end: result.cursorPosition }
         })
 
-        setTimeout(() => {
-            const el = textareaRef.current
-            if (!el) return
-            el.setSelectionRange(result.cursorPosition, result.cursorPosition)
-            try {
-                el.focus({ preventScroll: true })
-            } catch {
-                el.focus()
-            }
-        }, 0)
+        focusComposerInputAt(result.cursorPosition)
 
         haptic('light')
-    }, [api, suggestions, inputState, autocompletePrefixes, haptic])
+    }, [api, suggestions, inputState, autocompletePrefixes, focusComposerInputAt, haptic])
+
+    const handleSkillSelect = useCallback((skill: SkillSummary) => {
+        if (controlsDisabled) return
+
+        const skillText = `$${skill.name}`
+        const result = activeWord?.startsWith('$')
+            ? applySuggestion(
+                inputState.text,
+                inputState.selection,
+                skillText,
+                autocompletePrefixes,
+                true
+            )
+            : insertSkillTokenAtSelection(inputState.text, inputState.selection, skill.name)
+
+        markSkillUsed(skill.name)
+        api.composer().setText(result.text)
+        setInputState({
+            text: result.text,
+            selection: { start: result.cursorPosition, end: result.cursorPosition }
+        })
+        clearSuggestions()
+
+        focusComposerInputAt(result.cursorPosition)
+
+        haptic('light')
+    }, [activeWord, api, autocompletePrefixes, clearSuggestions, controlsDisabled, focusComposerInputAt, haptic, inputState])
 
     const abortDisabled = controlsDisabled || isAborting || !threadIsRunning
     const switchDisabled = controlsDisabled || isSwitching || !controlledByUser
@@ -738,6 +896,12 @@ export function HappyComposer(props: {
         }
     }, [api, pendingSchedule])
 
+    const handleInputScroll = useCallback((event: ReactSyntheticEvent<HTMLTextAreaElement>) => {
+        const preview = inputPreviewRef.current
+        if (!preview) return
+        preview.scrollTop = event.currentTarget.scrollTop
+    }, [])
+
     const handleSettingsToggle = useCallback(() => {
         haptic('light')
         setShowSettings(prev => {
@@ -881,6 +1045,11 @@ export function HappyComposer(props: {
         ? 'h-[112px] max-h-[112px]'
         : 'min-h-[112px] max-h-[360px]'
     const composerInputMaxRows = compactTopAnchor ? 2 : 6
+    const composerPreviewParts = useMemo(
+        () => getComposerPreviewParts(composerText, skillNames),
+        [composerText, skillNames]
+    )
+    const hasSkillPreviewToken = composerPreviewParts.some((part) => part.type === 'skill')
 
     const currentModelLabel = useMemo(() => {
         if (selectedModelBase !== undefined) {
@@ -1374,12 +1543,20 @@ export function HappyComposer(props: {
                             onPointerDownCapture={handleComposerPointerDownCapture}
                             className={
                                 composerCompact
-                                    ? 'flex h-12 min-w-0 flex-1 items-center px-14 py-0'
+                                    ? 'relative flex h-12 min-w-0 flex-1 items-center px-14 py-0'
                                     : compactTopAnchor
-                                        ? 'flex h-[62px] min-h-[62px] max-h-[62px] min-w-0 flex-none items-start px-4 py-2'
-                                        : 'flex min-h-[62px] max-h-[11rem] min-w-0 flex-none items-start px-4 py-2'
+                                        ? 'relative flex h-[62px] min-h-[62px] max-h-[62px] min-w-0 flex-none items-start px-4 py-2'
+                                        : 'relative flex min-h-[62px] max-h-[11rem] min-w-0 flex-none items-start px-4 py-2'
                             }
                         >
+                            {hasSkillPreviewToken ? (
+                                <ComposerInputPreview
+                                    text={composerText}
+                                    parts={composerPreviewParts}
+                                    previewRef={inputPreviewRef}
+                                    compactTopAnchor={compactTopAnchor}
+                                />
+                            ) : null}
                             <ComposerPrimitive.Input
                                 ref={textareaRef}
                                 placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
@@ -1391,7 +1568,12 @@ export function HappyComposer(props: {
                                 onSelect={handleSelect}
                                 onKeyDown={handleKeyDown}
                                 onPaste={handlePaste}
-                                className={`flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                                onScroll={handleInputScroll}
+                                className={`relative z-10 flex-1 resize-none bg-transparent text-base placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                                    hasSkillPreviewToken
+                                        ? 'text-transparent caret-[var(--app-fg)] selection:bg-blue-200/60'
+                                        : 'text-[var(--app-fg)]'
+                                } ${
                                     composerCompact
                                         ? 'h-6 max-h-6 overflow-hidden leading-6'
                                         : compactTopAnchor
@@ -1417,6 +1599,10 @@ export function HappyComposer(props: {
                             permissionLabel={permissionLabel}
                             permissionModeOptions={permissionModeOptions}
                             onPermissionModeChange={showPermissionSettings ? handlePermissionChange : undefined}
+                            skills={skills}
+                            skillsLoading={skillsLoading}
+                            skillsError={skillsError}
+                            onSkillSelect={handleSkillSelect}
                             showPlanModeButton={showPlanModeTool}
                             planModeActive={collaborationMode === 'plan'}
                             onPlanModeToggle={showPlanModeTool ? handlePlanModeToggle : undefined}

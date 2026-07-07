@@ -1,5 +1,6 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
-import type { PermissionMode, Session } from '@/types/api'
+import { Filter, Puzzle, Search } from 'lucide-react'
+import type { PermissionMode, Session, SkillSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
@@ -758,6 +759,33 @@ export function getRemoteServerButtonAlias(server: { alias?: string | null; name
     return alias && alias.length > 0 ? alias : server.name
 }
 
+type SkillPickerTab = 'custom' | 'other'
+const LARK_SKILL_PREFIX = 'lark-'
+
+function getSkillPickerTab(skill: SkillSummary): SkillPickerTab {
+    return skill.scope === undefined || skill.scope === 'project' || skill.scope === 'user' ? 'custom' : 'other'
+}
+
+function getSkillScopeLabel(
+    skill: SkillSummary,
+    t: ReturnType<typeof useTranslation>['t'],
+): string {
+    switch (skill.scope) {
+        case 'project':
+            return t('composer.skills.scope.project')
+        case 'user':
+            return t('composer.skills.scope.user')
+        case 'plugin':
+            return t('composer.skills.scope.plugin')
+        case 'system':
+            return t('composer.skills.scope.system')
+        case 'admin':
+            return t('composer.skills.scope.admin')
+        default:
+            return t('composer.skills.scope.user')
+    }
+}
+
 function RemoteServerSelectedButton(props: {
     context: {
         api: ApiClient
@@ -909,15 +937,22 @@ export function getComposerOptionalControlsVisibility(
     toolbarWidth: number | null,
     requiredControlsWidth = 0,
     statusControlsWidth = 0,
-    hasContextUsageControl = true
+    hasContextUsageControl = true,
+    hasSkillControl = false,
+    hasPermissionControl = true
 ): {
     permission: boolean
+    skill?: boolean
     contextUsage: boolean
 } {
     // Unknown width happens before first layout/ResizeObserver tick; show by
     // default so wide toolbars do not flash as artificially collapsed.
     if (toolbarWidth === null) {
-        return { permission: true, contextUsage: hasContextUsageControl }
+        return {
+            permission: hasPermissionControl,
+            ...(hasSkillControl ? { skill: true } : {}),
+            contextUsage: hasContextUsageControl
+        }
     }
 
     const requiredWidth = COMPOSER_TOOLBAR_HORIZONTAL_PADDING_PX
@@ -926,15 +961,24 @@ export function getComposerOptionalControlsVisibility(
         + (COMPOSER_TOOLBAR_GAP_PX * 2)
         + statusControlsWidth
     const remainingWidth = toolbarWidth - requiredWidth
-    const hasFirstOptionalSlotSpace = remainingWidth >= COMPOSER_OPTIONAL_CONTROL_SLOT_PX
-    const hasSecondOptionalSlotSpace = remainingWidth >= COMPOSER_OPTIONAL_CONTROL_SLOT_PX * 2
+    let nextSlot = 1
+    const hasSlotSpace = (slot: number) => remainingWidth >= COMPOSER_OPTIONAL_CONTROL_SLOT_PX * slot
+    const permission = hasPermissionControl && hasSlotSpace(nextSlot)
+    if (hasPermissionControl) {
+        nextSlot += 1
+    }
+    const skill = hasSkillControl && hasSlotSpace(nextSlot)
+    if (hasSkillControl) {
+        nextSlot += 1
+    }
 
     return {
         // Permission mode directly changes execution risk, so keep its icon in
-        // the first optional slot. Context usage remains available in the "+"
-        // menu when there is no second optional slot for both icons.
-        permission: hasFirstOptionalSlotSpace,
-        contextUsage: hasContextUsageControl && hasSecondOptionalSlotSpace
+        // the first optional slot. Skill follows it; context usage remains
+        // available in the "+" menu when there is no later optional slot.
+        permission,
+        ...(hasSkillControl ? { skill } : {}),
+        contextUsage: hasContextUsageControl && hasSlotSpace(nextSlot)
     }
 }
 
@@ -954,6 +998,10 @@ export function ComposerButtons(props: {
     permissionLabel?: string
     permissionModeOptions?: Array<{ mode: PermissionMode; label: string }>
     onPermissionModeChange?: (mode: PermissionMode) => void
+    skills?: SkillSummary[]
+    skillsLoading?: boolean
+    skillsError?: string | null
+    onSkillSelect?: (skill: SkillSummary) => void
     showPlanModeButton?: boolean
     planModeActive?: boolean
     onPlanModeToggle?: () => void
@@ -1014,10 +1062,15 @@ export function ComposerButtons(props: {
     const [showSchedulePicker, setShowSchedulePicker] = useState(false)
     const [showToolsMenu, setShowToolsMenu] = useState(false)
     const [showPermissionMenu, setShowPermissionMenu] = useState(false)
+    const [showSkillMenu, setShowSkillMenu] = useState(false)
     const [showRemoteServerMenu, setShowRemoteServerMenu] = useState(false)
     const [showContextUsageMenu, setShowContextUsageMenu] = useState(false)
+    const [skillTab, setSkillTab] = useState<SkillPickerTab>('custom')
+    const [skillQuery, setSkillQuery] = useState('')
+    const [hideLarkSkills, setHideLarkSkills] = useState(true)
     const [remoteServerAnchor, setRemoteServerAnchor] = useState<'tools' | 'button'>('tools')
     const [permissionAnchor, setPermissionAnchor] = useState<'tools' | 'button'>('tools')
+    const [skillAnchor, setSkillAnchor] = useState<'tools' | 'button'>('button')
     const [contextUsageAnchor, setContextUsageAnchor] = useState<'tools' | 'button'>('button')
     const [toolbarWidth, setToolbarWidth] = useState<number | null>(null)
     const [requiredControlsWidth, setRequiredControlsWidth] = useState(0)
@@ -1027,6 +1080,7 @@ export function ComposerButtons(props: {
     const statusControlsRef = useRef<HTMLDivElement>(null)
     const toolsButtonRef = useRef<HTMLButtonElement>(null)
     const permissionButtonRef = useRef<HTMLButtonElement>(null)
+    const skillButtonRef = useRef<HTMLButtonElement>(null)
     const remoteServerButtonRef = useRef<HTMLButtonElement>(null)
     const contextUsageButtonRef = useRef<HTMLButtonElement>(null)
     const hasRemoteServerContext = Boolean(props.remoteServerContext)
@@ -1042,14 +1096,19 @@ export function ComposerButtons(props: {
     const showPlanStatus = Boolean(props.planModeActive && props.onPlanModeToggle)
     const showScheduleStatus = Boolean(hasSchedule && props.onSchedule)
     const hasContextUsageControl = props.contextUsagePercent != null
+    const skills = props.skills ?? []
+    const hasSkillControl = Boolean(props.onSkillSelect && (skills.length > 0 || props.skillsLoading || props.skillsError))
+    const showPermissionButton = Boolean(props.onPermissionModeChange && props.permissionModeOptions?.length)
     const optionalControlsVisibility = getComposerOptionalControlsVisibility(
         toolbarWidth,
         requiredControlsWidth,
         statusControlsWidth,
-        hasContextUsageControl
+        hasContextUsageControl,
+        hasSkillControl,
+        showPermissionButton
     )
-    const showPermissionButton = Boolean(props.onPermissionModeChange && props.permissionModeOptions?.length)
     const showInlinePermissionButton = showPermissionButton && optionalControlsVisibility.permission
+    const showInlineSkillButton = hasSkillControl && optionalControlsVisibility.skill === true
     const showInlineContextUsageButton = hasContextUsageControl && optionalControlsVisibility.contextUsage
     const permissionLabel = props.permissionLabel
         ?? props.permissionModeOptions?.find((option) => option.mode === props.permissionMode)?.label
@@ -1060,6 +1119,7 @@ export function ComposerButtons(props: {
         props.showPlanModeButton
         || props.showGoalModeButton
         || showPermissionButton
+        || hasSkillControl
         || hasRemoteServerContext
         || props.piThinkingLabel
     )
@@ -1070,15 +1130,26 @@ export function ComposerButtons(props: {
     )
     const openPermissionMenuFromTools = () => {
         setShowToolsMenu(false)
+        setShowSkillMenu(false)
         setShowRemoteServerMenu(false)
         setShowSchedulePicker(false)
         setShowContextUsageMenu(false)
         setPermissionAnchor('tools')
         setShowPermissionMenu(true)
     }
+    const openSkillMenuFromTools = () => {
+        setShowToolsMenu(false)
+        setShowPermissionMenu(false)
+        setShowRemoteServerMenu(false)
+        setShowSchedulePicker(false)
+        setShowContextUsageMenu(false)
+        setSkillAnchor('tools')
+        setShowSkillMenu(true)
+    }
     const openContextUsageFromTools = () => {
         setShowToolsMenu(false)
         setShowPermissionMenu(false)
+        setShowSkillMenu(false)
         setShowRemoteServerMenu(false)
         setShowSchedulePicker(false)
         setContextUsageAnchor('tools')
@@ -1104,11 +1175,12 @@ export function ComposerButtons(props: {
                         aria-label={t('composer.scheduleSend')}
                         title={t('composer.scheduleSend')}
                         disabled={props.controlsDisabled || hasAttachments}
-                        onClick={() => {
-                            setShowToolsMenu(false)
-                            if (hasSchedule && props.onClearSchedule) {
-                                props.onClearSchedule()
-                                return
+                            onClick={() => {
+                                setShowToolsMenu(false)
+                                setShowSkillMenu(false)
+                                if (hasSchedule && props.onClearSchedule) {
+                                    props.onClearSchedule()
+                                    return
                             }
                             setShowSchedulePicker(true)
                         }}
@@ -1198,6 +1270,23 @@ export function ComposerButtons(props: {
                         </button>
                     ) : null}
 
+                    {hasSkillControl && !showInlineSkillButton ? (
+                        <button
+                            type="button"
+                            aria-label={t('composer.skills.title')}
+                            title={t('composer.skills.title')}
+                            disabled={props.controlsDisabled}
+                            onClick={openSkillMenuFromTools}
+                            className={toolMenuItemClass}
+                        >
+                            <Puzzle />
+                            <span className="flex-1">{t('composer.skills.title')}</span>
+                            {skills.length > 0 ? (
+                                <span className="text-[var(--app-hint)]">{skills.length}</span>
+                            ) : null}
+                        </button>
+                    ) : null}
+
                     {hasRemoteServerContext ? (
                         <button
                             type="button"
@@ -1207,6 +1296,7 @@ export function ComposerButtons(props: {
                             onClick={() => {
                                 setShowToolsMenu(false)
                                 setShowPermissionMenu(false)
+                                setShowSkillMenu(false)
                                 setShowSchedulePicker(false)
                                 setShowContextUsageMenu(false)
                                 setRemoteServerAnchor('tools')
@@ -1328,6 +1418,155 @@ export function ComposerButtons(props: {
             })}
         </div>
     ) : null
+    const filteredSkills = hideLarkSkills
+        ? skills.filter((skill) => !skill.name.startsWith(LARK_SKILL_PREFIX))
+        : skills
+    const customSkillCount = filteredSkills.filter((skill) => getSkillPickerTab(skill) === 'custom').length
+    const otherSkillCount = Math.max(0, filteredSkills.length - customSkillCount)
+    const normalizedSkillQuery = skillQuery.trim().toLowerCase()
+    const visibleSkills = filteredSkills
+        .filter((skill) => getSkillPickerTab(skill) === skillTab)
+        .filter((skill) => {
+            if (!normalizedSkillQuery) return true
+            return skill.name.toLowerCase().includes(normalizedSkillQuery)
+                || (skill.description ?? '').toLowerCase().includes(normalizedSkillQuery)
+        })
+        .sort((a, b) => a.name.localeCompare(b.name))
+
+    useEffect(() => {
+        if (!showSkillMenu) return
+        if (skillTab !== 'custom') return
+        if (customSkillCount > 0 || otherSkillCount === 0) return
+        setSkillTab('other')
+    }, [customSkillCount, otherSkillCount, showSkillMenu, skillTab])
+
+    const skillMenuContent = (
+        <div className="py-3">
+            <div className="flex items-center justify-between gap-3 px-4">
+                <div className="flex items-center gap-2 text-[15px] font-semibold text-[var(--app-fg)]">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500/10 text-[var(--app-link)]">
+                        <Puzzle className="h-[18px] w-[18px]" />
+                    </span>
+                    <span>{t('composer.skills.title')}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                    <button
+                        type="button"
+                        aria-pressed={hideLarkSkills}
+                        aria-label={hideLarkSkills ? t('composer.skills.filterLark.show') : t('composer.skills.filterLark.hide')}
+                        title={hideLarkSkills ? t('composer.skills.filterLark.show') : t('composer.skills.filterLark.hide')}
+                        className={`flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
+                            hideLarkSkills
+                                ? 'border-blue-200 bg-blue-50 text-[var(--app-link)] dark:border-blue-400/25 dark:bg-blue-500/15'
+                                : 'border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                        }`}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => setHideLarkSkills((value) => !value)}
+                    >
+                        <Filter className="h-3.5 w-3.5" />
+                    </button>
+                    {filteredSkills.length > 0 ? (
+                        <span className="text-xs font-medium text-[var(--app-hint)]">
+                            {t('composer.skills.count', { count: filteredSkills.length })}
+                        </span>
+                    ) : null}
+                </div>
+            </div>
+
+            <div className="px-3 pt-3">
+                <label className="relative block">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-hint)]" />
+                    <input
+                        value={skillQuery}
+                        autoFocus
+                        placeholder={t('composer.skills.search')}
+                        className="h-9 w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] pl-9 pr-3 text-sm text-[var(--app-fg)] outline-none transition-colors placeholder:text-[var(--app-hint)] focus:border-[var(--app-link)]"
+                        onChange={(event) => setSkillQuery(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Escape') {
+                                setShowSkillMenu(false)
+                            }
+                        }}
+                    />
+                </label>
+            </div>
+
+            <div className="mx-3 mt-3 grid grid-cols-2 gap-1 rounded-lg bg-[var(--app-subtle-bg)] p-1">
+                {([
+                    ['custom', t('composer.skills.customTab'), customSkillCount],
+                    ['other', t('composer.skills.otherTab'), otherSkillCount],
+                ] as const).map(([tab, label, count]) => (
+                    <button
+                        key={tab}
+                        type="button"
+                        className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                            skillTab === tab
+                                ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm'
+                                : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                        }`}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => setSkillTab(tab)}
+                    >
+                        {label}
+                        <span className="ml-1 text-xs opacity-70">{count}</span>
+                    </button>
+                ))}
+            </div>
+
+            <div className="mt-2 max-h-[280px] overflow-y-auto px-2">
+                {props.skillsLoading ? (
+                    <div className="px-3 py-8 text-center text-sm text-[var(--app-hint)]">
+                        {t('composer.skills.loading')}
+                    </div>
+                ) : props.skillsError ? (
+                    <div className="px-3 py-8 text-center text-sm text-red-500">
+                        {props.skillsError}
+                    </div>
+                ) : visibleSkills.length === 0 ? (
+                    <div className="px-3 py-8 text-center text-sm text-[var(--app-hint)]">
+                        {normalizedSkillQuery
+                            ? t('composer.skills.noResults')
+                            : skillTab === 'custom'
+                                ? t('composer.skills.emptyCustom')
+                                : t('composer.skills.emptyOther')}
+                    </div>
+                ) : (
+                    visibleSkills.map((skill) => (
+                        <button
+                            key={`${skill.scope ?? 'unknown'}:${skill.name}`}
+                            type="button"
+                            className="group flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                                props.onSkillSelect?.(skill)
+                                setShowSkillMenu(false)
+                                setSkillQuery('')
+                            }}
+                        >
+                            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-[var(--app-link)]">
+                                <Puzzle className="h-[17px] w-[17px]" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                                <span className="flex min-w-0 items-center gap-2">
+                                    <span className="truncate text-sm font-semibold text-[var(--app-fg)]">
+                                        {skill.name}
+                                    </span>
+                                    <span className="shrink-0 rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--app-hint)]">
+                                        {getSkillScopeLabel(skill, t)}
+                                    </span>
+                                </span>
+                                {skill.description ? (
+                                    <span className="mt-0.5 block truncate text-xs leading-4 text-[var(--app-hint)]">
+                                        {skill.description}
+                                    </span>
+                                ) : null}
+                            </span>
+                        </button>
+                    ))
+                )}
+            </div>
+        </div>
+    )
     const scratchlistStatusLabel = props.scratchlistMode
         ? t('scratchlist.title')
         : t(scratchlistCount === 1 ? 'scratchlist.count.one' : 'scratchlist.count.other', { n: scratchlistCount })
@@ -1387,6 +1626,7 @@ export function ComposerButtons(props: {
                         event.stopPropagation()
                         setShowToolsMenu((open) => !open)
                         setShowPermissionMenu(false)
+                        setShowSkillMenu(false)
                         setShowSchedulePicker(false)
                         setShowRemoteServerMenu(false)
                         setShowContextUsageMenu(false)
@@ -1465,6 +1705,19 @@ export function ComposerButtons(props: {
                     </ToolbarMenu>
                 ) : null}
 
+                {showSkillMenu ? (
+                    <ToolbarMenu
+                        anchorRef={toolsButtonRef}
+                        align="left"
+                        width={340}
+                        maxHeight={430}
+                        showArrow
+                        onClose={() => setShowSkillMenu(false)}
+                    >
+                        {skillMenuContent}
+                    </ToolbarMenu>
+                ) : null}
+
                 {showContextUsageMenu ? (
                     <ToolbarMenu
                         anchorRef={toolsButtonRef}
@@ -1502,6 +1755,7 @@ export function ComposerButtons(props: {
                     event.stopPropagation()
                     setShowToolsMenu((open) => !open)
                     setShowPermissionMenu(false)
+                    setShowSkillMenu(false)
                     setShowSchedulePicker(false)
                     setShowRemoteServerMenu(false)
                     setShowContextUsageMenu(false)
@@ -1526,12 +1780,39 @@ export function ComposerButtons(props: {
                         setPermissionAnchor('button')
                         setShowPermissionMenu((open) => !(open && permissionAnchor === 'button'))
                         setShowToolsMenu(false)
+                        setShowSkillMenu(false)
                         setShowSchedulePicker(false)
                         setShowRemoteServerMenu(false)
                         setShowContextUsageMenu(false)
                     }}
                 >
                     <PermissionModeIcon mode={props.permissionMode} />
+                </button>
+            ) : null}
+
+            {showInlineSkillButton ? (
+                <button
+                    ref={skillButtonRef}
+                    type="button"
+                    aria-label={t('composer.skills.title')}
+                    title={t('composer.skills.title')}
+                    disabled={props.controlsDisabled}
+                    className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px] ${
+                        showSkillMenu && skillAnchor === 'button'
+                            ? 'bg-[var(--app-bg)] text-[var(--app-link)]'
+                            : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-link)]'
+                    }`}
+                    onClick={() => {
+                        setSkillAnchor('button')
+                        setShowSkillMenu((open) => !(open && skillAnchor === 'button'))
+                        setShowToolsMenu(false)
+                        setShowPermissionMenu(false)
+                        setShowSchedulePicker(false)
+                        setShowRemoteServerMenu(false)
+                        setShowContextUsageMenu(false)
+                    }}
+                >
+                    <Puzzle />
                 </button>
             ) : null}
 
@@ -1548,6 +1829,7 @@ export function ComposerButtons(props: {
                                 setShowRemoteServerMenu((open) => !(open && remoteServerAnchor === 'button'))
                                 setShowToolsMenu(false)
                                 setShowPermissionMenu(false)
+                                setShowSkillMenu(false)
                                 setShowSchedulePicker(false)
                                 setShowContextUsageMenu(false)
                             }}
@@ -1575,7 +1857,10 @@ export function ComposerButtons(props: {
                             title={t('composer.scheduleSend')}
                             disabled={props.controlsDisabled || hasAttachments}
                             className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2.5 text-xs font-medium text-[var(--app-fg)]/75 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-4 [&_svg]:w-4"
-                            onClick={() => setShowSchedulePicker(true)}
+                            onClick={() => {
+                                setShowSkillMenu(false)
+                                setShowSchedulePicker(true)
+                            }}
                         >
                             <ScheduleIcon />
                             <span>{t('composer.scheduleSend')}</span>
@@ -1612,6 +1897,7 @@ export function ComposerButtons(props: {
                             setShowContextUsageMenu((open) => !open)
                             setShowToolsMenu(false)
                             setShowPermissionMenu(false)
+                            setShowSkillMenu(false)
                             setShowSchedulePicker(false)
                             setShowRemoteServerMenu(false)
                         }}
@@ -1650,6 +1936,7 @@ export function ComposerButtons(props: {
                             onClick={() => {
                                 setShowToolsMenu(false)
                                 setShowPermissionMenu(false)
+                                setShowSkillMenu(false)
                                 setShowSchedulePicker(false)
                                 setShowRemoteServerMenu(false)
                                 setShowContextUsageMenu(false)
@@ -1736,6 +2023,19 @@ export function ComposerButtons(props: {
                     onClose={() => setShowPermissionMenu(false)}
                 >
                     {permissionMenuContent}
+                </ToolbarMenu>
+            ) : null}
+
+            {showSkillMenu ? (
+                <ToolbarMenu
+                    anchorRef={skillAnchor === 'button' && showInlineSkillButton ? skillButtonRef : toolsButtonRef}
+                    align="left"
+                    width={340}
+                    maxHeight={430}
+                    showArrow
+                    onClose={() => setShowSkillMenu(false)}
+                >
+                    {skillMenuContent}
                 </ToolbarMenu>
             ) : null}
 

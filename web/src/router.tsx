@@ -1362,6 +1362,9 @@ function SessionPage() {
         getSuggestions: getSlashSuggestions,
     } = useSlashCommands(api, sessionId, agentType)
     const {
+        skills,
+        isLoading: skillsLoading,
+        error: skillsError,
         getSuggestions: getSkillSuggestions,
     } = useSkills(api, sessionId)
 
@@ -1439,6 +1442,9 @@ function SessionPage() {
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}
+            skills={skills}
+            skillsLoading={skillsLoading}
+            skillsError={skillsError}
             sendError={sendError}
             onClearSendError={clearSendError}
             initialOutlineOpen={outline}
