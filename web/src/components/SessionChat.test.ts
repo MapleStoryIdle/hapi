@@ -7,6 +7,7 @@ import {
     isScratchlistHotkeyBlockedTarget,
     isScratchlistToggleHotkey,
     shouldAutoClearPendingSchedule,
+    shouldInsetFirstUserMessage,
     shouldRouteToScratchlist,
 } from './SessionChat'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
@@ -97,6 +98,29 @@ describe('getScrollButtonBottomInset', () => {
 
     it('falls back to the full bottom overlay height before composer measurement', () => {
         expect(getScrollButtonBottomInset(0, 320, BOTTOM_OVERLAY_INSET_PX)).toBe(320 + BOTTOM_OVERLAY_INSET_PX)
+    })
+})
+
+describe('shouldInsetFirstUserMessage', () => {
+    it('adds top inset only when the first loaded block is the first user message in history', () => {
+        expect(shouldInsetFirstUserMessage({
+            hasMoreMessages: false,
+            firstBlockKind: 'user-text'
+        })).toBe(true)
+    })
+
+    it('does not add top inset when older history may still exist', () => {
+        expect(shouldInsetFirstUserMessage({
+            hasMoreMessages: true,
+            firstBlockKind: 'user-text'
+        })).toBe(false)
+    })
+
+    it('does not add top inset for non-user first blocks', () => {
+        expect(shouldInsetFirstUserMessage({
+            hasMoreMessages: false,
+            firstBlockKind: 'agent-text'
+        })).toBe(false)
     })
 })
 

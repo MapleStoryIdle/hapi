@@ -9,6 +9,7 @@ import {
     captureScrollAnchor,
     findNearestUserMessageAnchorAbove,
     findVisibleUserMessageAnchor,
+    getPullToLoadOlderIndicator,
     getScrollIntent,
     hasUserMessageAnchor,
     locateNearestUserMessageAbove,
@@ -16,7 +17,9 @@ import {
     restoreScrollAnchor,
     scrollElementToViewportTop,
     shouldCancelInitialScrollSettling,
+    shouldEnableTopSentinelAutoLoad,
     shouldHideScrollToBottomButton,
+    shouldLoadOlderFromTopWheel,
     shouldShowReturnToUserMessageButton,
 } from '@/components/AssistantChat/HappyThread'
 import type { ConversationOutlineItem } from '@/chat/outline'
@@ -190,6 +193,102 @@ describe('ScrollToBottomButton', () => {
         )
 
         expect(container.textContent).toBe('')
+    })
+})
+
+describe('pull-to-load-older helpers', () => {
+    it('loads older messages when wheel-up hits the top edge', () => {
+        expect(shouldLoadOlderFromTopWheel({
+            scrollTop: 0,
+            deltaY: -24
+        })).toBe(true)
+    })
+
+    it('ignores wheel events away from the top edge', () => {
+        expect(shouldLoadOlderFromTopWheel({
+            scrollTop: 12,
+            deltaY: -24
+        })).toBe(false)
+    })
+
+    it('ignores downward and mostly-horizontal wheel movement', () => {
+        expect(shouldLoadOlderFromTopWheel({
+            scrollTop: 0,
+            deltaY: 24
+        })).toBe(false)
+        expect(shouldLoadOlderFromTopWheel({
+            scrollTop: 0,
+            deltaY: -8,
+            deltaX: 24
+        })).toBe(false)
+    })
+
+    it('keeps top-sentinel auto loading when desktop input is available as any pointer', () => {
+        const matchMedia = vi.fn((query: string) => ({
+            matches: query === '(any-hover: hover) and (any-pointer: fine)'
+        } as MediaQueryList))
+
+        expect(shouldEnableTopSentinelAutoLoad(matchMedia)).toBe(true)
+        expect(matchMedia).toHaveBeenCalledWith('(any-hover: hover) and (any-pointer: fine)')
+    })
+
+    it('disables top-sentinel auto loading on touch-only devices', () => {
+        const matchMedia = vi.fn(() => ({
+            matches: false
+        } as MediaQueryList))
+
+        expect(shouldEnableTopSentinelAutoLoad(matchMedia)).toBe(false)
+    })
+
+    it('stays idle when the gesture is unavailable', () => {
+        expect(getPullToLoadOlderIndicator({
+            enabled: false,
+            loading: false,
+            distancePx: 120
+        })).toEqual({
+            phase: 'idle',
+            progress: 0,
+            offset: 0
+        })
+    })
+
+    it('reports pulling before the release threshold', () => {
+        expect(getPullToLoadOlderIndicator({
+            enabled: true,
+            loading: false,
+            distancePx: 36,
+            thresholdPx: 72,
+            maxOffsetPx: 48
+        })).toEqual({
+            phase: 'pulling',
+            progress: 0.5,
+            offset: 20.88
+        })
+    })
+
+    it('reports ready once the release threshold is reached', () => {
+        expect(getPullToLoadOlderIndicator({
+            enabled: true,
+            loading: false,
+            distancePx: 96,
+            thresholdPx: 72,
+            maxOffsetPx: 48
+        })).toEqual({
+            phase: 'ready',
+            progress: 1,
+            offset: 48
+        })
+    })
+
+    it('keeps the loading state visible while older messages load', () => {
+        expect(getPullToLoadOlderIndicator({
+            enabled: false,
+            loading: true,
+            distancePx: 0
+        })).toMatchObject({
+            phase: 'loading',
+            progress: 1
+        })
     })
 })
 

@@ -59,6 +59,20 @@ function proxyPrefix(sessionId: string, port: number): string {
     return `${PREVIEW_ROUTE_PREFIX}/${encodeURIComponent(sessionId)}/${port}`
 }
 
+function appendInternalPreviewParams(value: string, token: string | undefined, protocol: LocalPreviewProtocol): string {
+    if (!value.startsWith('/api/preview/')) return value
+    try {
+        const parsed = new URL(value, 'http://hapi.local')
+        if (token) {
+            parsed.searchParams.set('hapiPreviewToken', token)
+        }
+        parsed.searchParams.set('hapiPreviewProtocol', protocol)
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`
+    } catch {
+        return value
+    }
+}
+
 function getForwardedPath(url: URL, sessionId: string, port: number): string {
     const prefix = proxyPrefix(sessionId, port)
     const rawPath = url.pathname.startsWith(prefix)
@@ -85,11 +99,16 @@ function shouldRewriteBody(contentType: string | null): boolean {
     const type = contentType?.toLowerCase() ?? ''
     return type.includes('text/html')
         || type.includes('text/css')
-        || type.includes('javascript')
-        || type.includes('ecmascript')
 }
 
-function rewriteLocalPreviewLocation(value: string, sessionId: string, port: number): string {
+function rewriteLocalPreviewLocation(
+    value: string,
+    sessionId: string,
+    port: number,
+    token: string | undefined,
+    protocol: LocalPreviewProtocol,
+    basePath?: string
+): string {
     if (!value || value.startsWith('#')) return value
     if (/^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith('//')) {
         try {
@@ -97,23 +116,48 @@ function rewriteLocalPreviewLocation(value: string, sessionId: string, port: num
             if (!['localhost', '127.0.0.1', '0.0.0.0', '[::1]', '::1'].includes(parsed.hostname)) {
                 return value
             }
-            return `${proxyPrefix(sessionId, port)}${parsed.pathname}${parsed.search}${parsed.hash}`
+            return appendInternalPreviewParams(
+                `${proxyPrefix(sessionId, port)}${parsed.pathname}${parsed.search}${parsed.hash}`,
+                token,
+                protocol
+            )
         } catch {
             return value
         }
     }
-    if (value.startsWith('/api/preview/')) return value
+    if (value.startsWith('/api/preview/')) return appendInternalPreviewParams(value, token, protocol)
     if (value.startsWith('/')) {
-        return `${proxyPrefix(sessionId, port)}${value}`
+        return appendInternalPreviewParams(`${proxyPrefix(sessionId, port)}${value}`, token, protocol)
+    }
+    if (basePath) {
+        try {
+            const resolved = new URL(value, new URL(basePath, 'http://hapi.local'))
+            if (resolved.origin === 'http://hapi.local') {
+                return appendInternalPreviewParams(
+                    `${proxyPrefix(sessionId, port)}${resolved.pathname}${resolved.search}${resolved.hash}`,
+                    token,
+                    protocol
+                )
+            }
+        } catch {
+            return value
+        }
     }
     return value
 }
 
-function rewriteLocalPreviewText(text: string, sessionId: string, port: number): string {
+function rewriteLocalPreviewAttributes(
+    text: string,
+    sessionId: string,
+    port: number,
+    token: string | undefined,
+    protocol: LocalPreviewProtocol,
+    basePath?: string
+): string {
     return text
         .replace(/\b(src|href|action)=("([^"]*)"|'([^']*)')/gi, (match, attr: string, quoted: string, doubleValue?: string, singleValue?: string) => {
             const value = doubleValue ?? singleValue ?? ''
-            const rewritten = rewriteLocalPreviewLocation(value, sessionId, port)
+            const rewritten = rewriteLocalPreviewLocation(value, sessionId, port, token, protocol, basePath)
             if (rewritten === value) return match
             const quote = quoted.startsWith("'") ? "'" : '"'
             return `${attr}=${quote}${rewritten}${quote}`
@@ -123,25 +167,86 @@ function rewriteLocalPreviewText(text: string, sessionId: string, port: number):
             const rewritten = value.split(',').map((entry) => {
                 const trimmed = entry.trim()
                 const [urlPart, ...rest] = trimmed.split(/\s+/)
-                return [rewriteLocalPreviewLocation(urlPart ?? '', sessionId, port), ...rest].filter(Boolean).join(' ')
+                return [rewriteLocalPreviewLocation(urlPart ?? '', sessionId, port, token, protocol, basePath), ...rest].filter(Boolean).join(' ')
             }).join(', ')
             if (rewritten === value) return match
             const quote = quoted.startsWith("'") ? "'" : '"'
             return `${attr}=${quote}${rewritten}${quote}`
         })
-        .replace(/url\(\s*(["']?)(\/(?!\/)[^"')]+)\1\s*\)/gi, (_match, quote: string, value: string) => {
-            return `url(${quote}${rewriteLocalPreviewLocation(value, sessionId, port)}${quote})`
-        })
-        .replace(/(["'`])\/(?!\/|api\/preview\/)([^"'`\s<>)]+)\1/g, (_match, quote: string, path: string) => {
-            return `${quote}${proxyPrefix(sessionId, port)}/${path}${quote}`
-        })
 }
 
-function responseHeadersWithLocationRewrite(headers: Record<string, string>, sessionId: string, port: number): Headers {
+function rewriteLocalPreviewHtmlAttributes(
+    html: string,
+    sessionId: string,
+    port: number,
+    token: string | undefined,
+    protocol: LocalPreviewProtocol,
+    basePath: string
+): string {
+    return html.replace(/<[^>]+>/g, (tag) => (
+        rewriteLocalPreviewAttributes(tag, sessionId, port, token, protocol, basePath)
+    ))
+}
+
+function rewriteLocalPreviewCss(
+    text: string,
+    sessionId: string,
+    port: number,
+    token: string | undefined,
+    protocol: LocalPreviewProtocol,
+    basePath: string
+): string {
+    return text.replace(/url\(\s*(["']?)(?![a-z][a-z0-9+.-]*:|\/\/|#|var\()([^"')]+)\1\s*\)/gi, (_match, quote: string, value: string) => {
+        return `url(${quote}${rewriteLocalPreviewLocation(value, sessionId, port, token, protocol, basePath)}${quote})`
+    })
+}
+
+function scriptJson(value: unknown): string {
+    return JSON.stringify(value).replace(/</g, '\\u003c')
+}
+
+function buildLocalPreviewBootstrapScript(args: {
+    sessionId: string
+    port: number
+    token: string | undefined
+    protocol: LocalPreviewProtocol
+    forwardedPath: string
+}): string {
+    const prefix = proxyPrefix(args.sessionId, args.port)
+    return `<script>(function(){var prefix=${scriptJson(prefix)};var token=${scriptJson(args.token ?? '')};var protocol=${scriptJson(args.protocol)};var forwardedPath=${scriptJson(args.forwardedPath)};function withParams(value){try{var url=new URL(value,location.origin);if(url.origin!==location.origin||url.pathname.indexOf(prefix)!==0)return value;if(token)url.searchParams.set('hapiPreviewToken',token);url.searchParams.set('hapiPreviewProtocol',protocol);return url.pathname+url.search+url.hash}catch(e){return value}}function toPreviewUrl(value){try{var url=new URL(value,location.href);if(url.origin!==location.origin)return value;if(url.pathname.indexOf(prefix)===0)return withParams(url.pathname+url.search+url.hash);if(url.pathname.indexOf('/api/preview/')===0)return value;return withParams(prefix+url.pathname+url.search+url.hash)}catch(e){return value}}try{history.replaceState(history.state,'',forwardedPath||'/')}catch(e){}if(window.fetch){var originalFetch=window.fetch;window.fetch=function(input,init){try{if(typeof input==='string'||input instanceof URL){return originalFetch.call(this,toPreviewUrl(String(input)),init)}if(input instanceof Request){return originalFetch.call(this,new Request(toPreviewUrl(input.url),input),init)}}catch(e){}return originalFetch.call(this,input,init)}}if(window.XMLHttpRequest){var originalOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(method,url){if(typeof url==='string'){arguments[1]=toPreviewUrl(url)}return originalOpen.apply(this,arguments)}}})();</script>`
+}
+
+function rewriteLocalPreviewHtml(
+    text: string,
+    sessionId: string,
+    port: number,
+    token: string | undefined,
+    protocol: LocalPreviewProtocol,
+    forwardedPath: string
+): string {
+    const rewritten = rewriteLocalPreviewHtmlAttributes(text, sessionId, port, token, protocol, forwardedPath)
+    const bootstrap = buildLocalPreviewBootstrapScript({ sessionId, port, token, protocol, forwardedPath })
+    if (/<head[\s>]/i.test(rewritten)) {
+        return rewritten.replace(/<head([^>]*)>/i, `<head$1>${bootstrap}`)
+    }
+    if (/<html[\s>]/i.test(rewritten)) {
+        return rewritten.replace(/<html([^>]*)>/i, `<html$1>${bootstrap}`)
+    }
+    return `${bootstrap}${rewritten}`
+}
+
+function responseHeadersWithLocationRewrite(
+    headers: Record<string, string>,
+    sessionId: string,
+    port: number,
+    token: string | undefined,
+    protocol: LocalPreviewProtocol,
+    basePath: string
+): Headers {
     const result = new Headers(headers)
     const location = result.get('location')
     if (location) {
-        result.set('location', rewriteLocalPreviewLocation(location, sessionId, port))
+        result.set('location', rewriteLocalPreviewLocation(location, sessionId, port, token, protocol, basePath))
     }
     result.delete('content-length')
     return result
@@ -215,6 +320,7 @@ export function createLocalPreviewRoutes(getSyncEngine: () => SyncEngine | null)
         }
 
         const protocol = resolveProtocol(c.req.query('hapiPreviewProtocol'))
+        const previewToken = c.req.query('hapiPreviewToken')
         const method = c.req.method.toUpperCase()
         const methodParsed = LocalPreviewHttpMethodSchema.safeParse(method)
         if (!methodParsed.success) {
@@ -222,10 +328,11 @@ export function createLocalPreviewRoutes(getSyncEngine: () => SyncEngine | null)
         }
 
         const url = new URL(c.req.url)
+        const forwardedPath = getForwardedPath(url, sessionResult.sessionId, port)
         const request: LocalPreviewHttpRequest = {
             protocol,
             port,
-            path: getForwardedPath(url, sessionResult.sessionId, port),
+            path: forwardedPath,
             method: methodParsed.data,
             headers: collectRequestHeaders(c.req.raw.headers),
             bodyBase64: await getBodyBase64(c.req.raw, method)
@@ -236,12 +343,15 @@ export function createLocalPreviewRoutes(getSyncEngine: () => SyncEngine | null)
             return c.text(result.error ?? 'Local preview request failed', result.status === 403 ? 403 : 502)
         }
 
-        const headers = responseHeadersWithLocationRewrite(result.headers, sessionResult.sessionId, port)
+        const headers = responseHeadersWithLocationRewrite(result.headers, sessionResult.sessionId, port, previewToken, protocol, forwardedPath)
         const bytes = Buffer.from(result.bodyBase64, 'base64')
         const contentType = headers.get('content-type')
         if (shouldRewriteBody(contentType)) {
             const text = new TextDecoder().decode(bytes)
-            const rewritten = rewriteLocalPreviewText(text, sessionResult.sessionId, port)
+            const lowerContentType = contentType?.toLowerCase() ?? ''
+            const rewritten = lowerContentType.includes('text/html')
+                ? rewriteLocalPreviewHtml(text, sessionResult.sessionId, port, previewToken, protocol, forwardedPath)
+                : rewriteLocalPreviewCss(text, sessionResult.sessionId, port, previewToken, protocol, forwardedPath)
             headers.delete('content-length')
             return new Response(rewritten, {
                 status: result.status,

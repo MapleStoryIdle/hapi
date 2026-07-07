@@ -1,29 +1,8 @@
 import { useCallback, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { Chrome } from 'lucide-react'
 import type { LocalPreviewCandidate } from '@/types/api'
 import { useTranslation } from '@/lib/use-translation'
-
-function BrowserPreviewIcon(props: { className?: string }) {
-    return (
-        <svg
-            className={props.className ?? 'h-5 w-5'}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-        >
-            <rect x="3" y="4.5" width="18" height="15.5" rx="2.5" />
-            <path d="M3 9h18" />
-            <path d="M7 7h.01" />
-            <path d="M10 7h.01" />
-            <path d="M13 14h4" />
-            <path d="M15 12l2 2-2 2" />
-        </svg>
-    )
-}
 
 function formatCandidate(candidate: LocalPreviewCandidate): string {
     return candidate.title?.trim()
@@ -56,9 +35,13 @@ export function LocalPreviewLauncher(props: {
 
     const primary = candidates[0]
     const label = t('localPreview.open')
+    const edgeOffset = 'max(0.75rem, calc((100% - var(--content-max-w, 960px)) / 2 + 0.75rem))'
 
     return (
-        <div className="fixed right-3 top-1/2 z-30 -translate-y-1/2">
+        <div
+            className="fixed top-[calc(env(safe-area-inset-top)+4.75rem)] z-30"
+            style={{ right: edgeOffset }}
+        >
             <button
                 type="button"
                 className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-lg shadow-black/10 transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
@@ -72,11 +55,11 @@ export function LocalPreviewLauncher(props: {
                     setOpen((value) => !value)
                 }}
             >
-                <BrowserPreviewIcon className="h-5 w-5" />
+                <Chrome className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
             </button>
 
             {open ? (
-                <div className="absolute right-12 top-1/2 w-64 -translate-y-1/2 overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-xl shadow-black/15">
+                <div className="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-xl shadow-black/15">
                     <div className="px-2 pb-1 pt-1 text-xs font-medium text-[var(--app-hint)]">
                         {t('localPreview.title')}
                     </div>
@@ -87,7 +70,7 @@ export function LocalPreviewLauncher(props: {
                             className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)]"
                             onClick={() => openCandidate(candidate)}
                         >
-                            <BrowserPreviewIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)]" />
+                            <Chrome className="h-4 w-4 shrink-0 text-[var(--app-hint)]" strokeWidth={1.8} aria-hidden="true" />
                             <span className="min-w-0 flex-1 truncate">{formatCandidate(candidate)}</span>
                             <span className="shrink-0 text-xs text-[var(--app-hint)]">{candidate.port}</span>
                         </button>

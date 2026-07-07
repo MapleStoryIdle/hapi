@@ -794,6 +794,8 @@ export default {
   'misc.variant': 'Variant',
   'misc.loading': 'Loading…',
   'misc.loadOlder': 'Load older',
+  'misc.pullToLoadOlder': 'Pull down to load earlier',
+  'misc.releaseToLoadOlder': 'Release to load earlier',
   'misc.newMessage': '{n} new message{s}',
   'misc.backToBottom': 'Back to bottom',
   'misc.returnToUserMessage': 'Back to your previous message',

@@ -798,6 +798,8 @@ export default {
   'misc.variant': '变体',
   'misc.loading': '加载中…',
   'misc.loadOlder': '加载更早的',
+  'misc.pullToLoadOlder': '下拉加载更早消息',
+  'misc.releaseToLoadOlder': '松开加载更早消息',
   'misc.newMessage': '{n} 条新消息',
   'misc.backToBottom': '回到底部',
   'misc.returnToUserMessage': '回到上一条我的消息',

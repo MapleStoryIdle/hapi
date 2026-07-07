@@ -90,6 +90,8 @@ const RUN_SETTLE_DELAY_MS = 1500
 const RUN_ACTIVITY_KEY_LOOKBACK = 12
 export const BOTTOM_FLOATING_CONTROL_GAP_PX = 8
 export const BOTTOM_OVERLAY_INSET_PX = 8
+const FLOATING_SESSION_HEADER_BOTTOM_PX = 72
+const THREAD_CONTENT_DEFAULT_TOP_GAP_PX = 12
 
 /**
  * The scroll-to-bottom button is the visual reference for bottom spacing;
@@ -105,6 +107,13 @@ export function getScrollButtonBottomInset(
     return composerOverlayHeight > 0
         ? composerOverlayHeight + bottomOverlayInset + BOTTOM_FLOATING_CONTROL_GAP_PX
         : bottomOverlayHeight + bottomOverlayInset
+}
+
+export function shouldInsetFirstUserMessage(params: {
+    hasMoreMessages: boolean
+    firstBlockKind: string | null
+}): boolean {
+    return !params.hasMoreMessages && params.firstBlockKind === 'user-text'
 }
 
 /**
@@ -1065,7 +1074,7 @@ function SessionChatInner(props: SessionChatProps) {
         [detectedLocalPreviews]
     )
     const [localPreviewCandidates, setLocalPreviewCandidates] = useState<LocalPreviewCandidate[]>([])
-    const currentLocalPreviewIdentity = useMemo(() => getCurrentLocalPreviewIdentity(), [])
+    const currentLocalPreviewIdentity = getCurrentLocalPreviewIdentity()
     const visibleLocalPreviewCandidates = useMemo(
         () => localPreviewCandidates.filter((candidate) => (
             !currentLocalPreviewIdentity
@@ -1200,6 +1209,12 @@ function SessionChatInner(props: SessionChatProps) {
         () => groupAssistantResultDetails(groupedVisibleBlocks, { runActive }),
         [groupedVisibleBlocks, runActive]
     )
+    const threadTopInset = shouldInsetFirstUserMessage({
+        hasMoreMessages: props.hasMoreMessages,
+        firstBlockKind: visibleBlocks[0]?.kind ?? null
+    })
+        ? FLOATING_SESSION_HEADER_BOTTOM_PX - THREAD_CONTENT_DEFAULT_TOP_GAP_PX
+        : undefined
 
     useEffect(() => {
         visibleGroupsRef.current = groupedVisibleBlocks.filter(isToolGroupBlock)
@@ -1589,6 +1604,7 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineOpen={outlineOpen}
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
+                        topInset={threadTopInset}
                         bottomInset={bottomOverlayReservedInset}
                         scrollButtonBottomInset={scrollButtonBottomInset}
                         bottomAccessoryVisible={bottomAccessoryVisible}

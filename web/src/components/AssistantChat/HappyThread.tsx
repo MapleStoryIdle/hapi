@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useTranslation } from '@/lib/use-translation'
+import { cn } from '@/lib/utils'
 import { ArrowDownIcon, CloseIcon } from '@/components/icons'
 
 type ScrollAnchor = {
@@ -32,6 +33,25 @@ const MANUAL_SCROLL_EPSILON_PX = 1
 const INITIAL_SCROLL_SETTLE_MS = 1800
 const INITIAL_SCROLL_SETTLE_DELAYS_MS = [0, 16, 50, 120, 250, 500, 900, 1400, 1800] as const
 const VIEWPORT_EDGE_EPSILON_PX = 1
+const TOP_LOAD_SCROLL_EDGE_PX = 2
+const TOP_LOAD_WHEEL_DELTA_EPSILON_PX = 0.5
+const PULL_TO_LOAD_OLDER_THRESHOLD_PX = 72
+const PULL_TO_LOAD_OLDER_MAX_OFFSET_PX = 48
+const PULL_TO_LOAD_OLDER_LOADING_OFFSET_PX = 34
+
+export type PullToLoadOlderPhase = 'idle' | 'pulling' | 'ready' | 'loading'
+
+type PullToLoadOlderIndicatorState = {
+    phase: PullToLoadOlderPhase
+    progress: number
+    offset: number
+}
+
+type PullToLoadOlderGestureState = {
+    touchId: number | null
+    startY: number
+    active: boolean
+}
 
 type ScrollIntent = {
     distanceFromBottom: number
@@ -74,6 +94,63 @@ export function getScrollIntent(params: {
 
 export function shouldCancelInitialScrollSettling(intent: ScrollIntent): boolean {
     return intent.isScrollingUp && intent.distanceFromBottom > MANUAL_SCROLL_EPSILON_PX
+}
+
+export function shouldEnableTopSentinelAutoLoad(matchMedia: ((query: string) => MediaQueryList) | undefined): boolean {
+    if (!matchMedia) {
+        return true
+    }
+    return matchMedia('(any-hover: hover) and (any-pointer: fine)').matches
+}
+
+export function shouldLoadOlderFromTopWheel(params: {
+    scrollTop: number
+    deltaY: number
+    deltaX?: number
+    edgePx?: number
+}): boolean {
+    if (params.scrollTop > (params.edgePx ?? TOP_LOAD_SCROLL_EDGE_PX)) {
+        return false
+    }
+    if (params.deltaY >= -TOP_LOAD_WHEEL_DELTA_EPSILON_PX) {
+        return false
+    }
+    return Math.abs(params.deltaY) >= Math.abs(params.deltaX ?? 0)
+}
+
+export function getPullToLoadOlderIndicator(params: {
+    enabled: boolean
+    loading: boolean
+    distancePx: number
+    thresholdPx?: number
+    maxOffsetPx?: number
+}): PullToLoadOlderIndicatorState {
+    if (params.loading) {
+        return {
+            phase: 'loading',
+            progress: 1,
+            offset: PULL_TO_LOAD_OLDER_LOADING_OFFSET_PX
+        }
+    }
+
+    const distancePx = Math.max(0, params.distancePx)
+    if (!params.enabled || distancePx === 0) {
+        return {
+            phase: 'idle',
+            progress: 0,
+            offset: 0
+        }
+    }
+
+    const thresholdPx = params.thresholdPx ?? PULL_TO_LOAD_OLDER_THRESHOLD_PX
+    const maxOffsetPx = params.maxOffsetPx ?? PULL_TO_LOAD_OLDER_MAX_OFFSET_PX
+    const progress = Math.min(distancePx / thresholdPx, 1)
+
+    return {
+        phase: progress >= 1 ? 'ready' : 'pulling',
+        progress,
+        offset: Math.min(maxOffsetPx, distancePx * 0.58)
+    }
 }
 
 export function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor | null {
@@ -180,6 +257,19 @@ export function scrollElementToViewportTop(
         top: viewport.scrollTop + targetRect.top - viewportRect.top,
         behavior: options.behavior ?? 'smooth'
     })
+}
+
+function getTouchById(touches: TouchList, touchId: number | null): Touch | null {
+    if (touchId === null) {
+        return touches[0] ?? null
+    }
+    for (let index = 0; index < touches.length; index += 1) {
+        const touch = touches.item(index)
+        if (touch?.identifier === touchId) {
+            return touch
+        }
+    }
+    return null
 }
 
 export function ScrollToBottomButton(props: {
@@ -297,6 +387,50 @@ function MessageSkeleton() {
                         <div className={`${row.height} ${row.width} rounded-xl bg-[var(--app-subtle-bg)]`} />
                     </div>
                 ))}
+            </div>
+        </div>
+    )
+}
+
+function PullToLoadOlderIndicator(props: PullToLoadOlderIndicatorState) {
+    const { t } = useTranslation()
+
+    if (props.phase === 'idle') {
+        return null
+    }
+
+    const isLoading = props.phase === 'loading'
+    const isReady = props.phase === 'ready'
+    const label = isLoading
+        ? t('misc.loading')
+        : isReady
+            ? t('misc.releaseToLoadOlder')
+            : t('misc.pullToLoadOlder')
+
+    return (
+        <div
+            className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)+4.25rem)] z-10 flex justify-center transition-[opacity,transform] duration-150 ease-out"
+            style={{
+                opacity: isLoading ? 1 : Math.max(0.35, props.progress),
+                transform: `translateY(${props.offset}px)`
+            }}
+        >
+            <div
+                role="status"
+                aria-live="polite"
+                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--app-border)_72%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_88%,transparent)] px-3 text-xs font-medium text-[var(--app-hint)] shadow-[0_8px_22px_rgba(15,23,42,0.10)] backdrop-blur-md"
+            >
+                {isLoading ? (
+                    <Spinner size="sm" label={null} className="text-current" />
+                ) : (
+                    <ArrowDownIcon
+                        className={cn(
+                            'h-3.5 w-3.5 transition-transform duration-150',
+                            isReady ? 'rotate-180' : ''
+                        )}
+                    />
+                )}
+                <span>{label}</span>
             </div>
         </div>
     )
@@ -461,9 +595,33 @@ export function HappyThread(props: {
     const [isAwayFromBottom, setIsAwayFromBottom] = useState(false)
     const [returnToUserMessageVisible, setReturnToUserMessageVisible] = useState(false)
     const [returnToUserMessageLoading, setReturnToUserMessageLoading] = useState(false)
+    const [pullToLoadDistance, setPullToLoadDistanceState] = useState(0)
+    const [pullToLoadLoading, setPullToLoadLoading] = useState(false)
+    const pullToLoadDistanceRef = useRef(0)
+    const pullToLoadLoadingRef = useRef(false)
+    const pullGestureRef = useRef<PullToLoadOlderGestureState>({
+        touchId: null,
+        startY: 0,
+        active: false
+    })
 
     // Smart scroll state: enabled only while the user is intentionally at the bottom.
     const autoScrollEnabledRef = useRef(true)
+    const setPullToLoadDistance = useCallback((distance: number) => {
+        const nextDistance = Math.max(0, distance)
+        if (Math.abs(nextDistance - pullToLoadDistanceRef.current) < 0.5) {
+            return
+        }
+        pullToLoadDistanceRef.current = nextDistance
+        setPullToLoadDistanceState(nextDistance)
+    }, [])
+    const resetPullGesture = useCallback(() => {
+        pullGestureRef.current = {
+            touchId: null,
+            startY: 0,
+            active: false
+        }
+    }, [])
     const updateReturnToUserMessageVisibility = useCallback(() => {
         const viewport = viewportRef.current
         setReturnToUserMessageVisible(viewport ? shouldShowReturnToUserMessageButton({
@@ -645,6 +803,10 @@ export function HappyThread(props: {
         setIsAwayFromBottom(false)
         setReturnToUserMessageVisible(false)
         setReturnToUserMessageLoading(false)
+        setPullToLoadDistance(0)
+        setPullToLoadLoading(false)
+        pullToLoadLoadingRef.current = false
+        resetPullGesture()
         onAtBottomChangeRef.current(true)
         forceScrollTokenRef.current = props.forceScrollToken
         pendingScrollRef.current = null
@@ -654,7 +816,7 @@ export function HappyThread(props: {
         initialScrollDeadlineRef.current = 0
         clearInitialScrollTimers()
         settlePendingLoad(false)
-    }, [props.sessionId, clearInitialScrollTimers, settlePendingLoad])
+    }, [props.sessionId, clearInitialScrollTimers, resetPullGesture, setPullToLoadDistance, settlePendingLoad])
 
     useLayoutEffect(() => {
         if (
@@ -766,6 +928,128 @@ export function HappyThread(props: {
         return loadPromise
     }, [isInitialScrollSettling, settlePendingLoad])
 
+    const canStartPullToLoadOlder = useCallback(() => {
+        return (
+            !isInitialScrollSettling()
+            && !isLoadingMessagesRef.current
+            && hasMoreMessagesRef.current
+            && !isLoadingMoreRef.current
+            && !loadLockRef.current
+            && !pendingLoadPromiseRef.current
+            && !pullToLoadLoadingRef.current
+        )
+    }, [isInitialScrollSettling])
+
+    useEffect(() => {
+        if (props.hasMoreMessages && !props.isLoadingMessages) {
+            return
+        }
+        resetPullGesture()
+        setPullToLoadDistance(0)
+    }, [props.hasMoreMessages, props.isLoadingMessages, resetPullGesture, setPullToLoadDistance])
+
+    useEffect(() => {
+        const viewport = viewportRef.current
+        if (!viewport) {
+            return
+        }
+
+        const handleTouchStart = (event: TouchEvent) => {
+            if (event.touches.length !== 1) {
+                resetPullGesture()
+                setPullToLoadDistance(0)
+                return
+            }
+            const touch = event.touches[0]
+            pullGestureRef.current = {
+                touchId: touch.identifier,
+                startY: touch.clientY,
+                active: viewport.scrollTop <= 0 && canStartPullToLoadOlder()
+            }
+            setPullToLoadDistance(0)
+        }
+
+        const handleTouchMove = (event: TouchEvent) => {
+            const gesture = pullGestureRef.current
+            const touch = getTouchById(event.touches, gesture.touchId)
+            if (!touch) {
+                return
+            }
+
+            if (!gesture.active) {
+                if (viewport.scrollTop > 0 || !canStartPullToLoadOlder()) {
+                    gesture.startY = touch.clientY
+                    return
+                }
+                if (touch.clientY <= gesture.startY) {
+                    gesture.startY = touch.clientY
+                    return
+                }
+                gesture.active = true
+                gesture.startY = touch.clientY
+                return
+            }
+
+            const distance = touch.clientY - gesture.startY
+            if (distance <= 0) {
+                setPullToLoadDistance(0)
+                return
+            }
+
+            if (event.cancelable) {
+                event.preventDefault()
+            }
+            setPullToLoadDistance(distance)
+        }
+
+        const finishPull = (shouldLoad: boolean) => {
+            const indicator = getPullToLoadOlderIndicator({
+                enabled: canStartPullToLoadOlder(),
+                loading: false,
+                distancePx: pullToLoadDistanceRef.current
+            })
+            resetPullGesture()
+            setPullToLoadDistance(0)
+
+            if (!shouldLoad || indicator.phase !== 'ready') {
+                return
+            }
+
+            pullToLoadLoadingRef.current = true
+            setPullToLoadLoading(true)
+            void loadOlderPreservingScroll().finally(() => {
+                pullToLoadLoadingRef.current = false
+                setPullToLoadLoading(false)
+                setPullToLoadDistance(0)
+            })
+        }
+
+        const handleTouchEnd = () => {
+            finishPull(true)
+        }
+
+        const handleTouchCancel = () => {
+            finishPull(false)
+        }
+
+        viewport.addEventListener('touchstart', handleTouchStart, { passive: true })
+        viewport.addEventListener('touchmove', handleTouchMove, { passive: false })
+        viewport.addEventListener('touchend', handleTouchEnd)
+        viewport.addEventListener('touchcancel', handleTouchCancel)
+
+        return () => {
+            viewport.removeEventListener('touchstart', handleTouchStart)
+            viewport.removeEventListener('touchmove', handleTouchMove)
+            viewport.removeEventListener('touchend', handleTouchEnd)
+            viewport.removeEventListener('touchcancel', handleTouchCancel)
+        }
+    }, [
+        canStartPullToLoadOlder,
+        loadOlderPreservingScroll,
+        resetPullGesture,
+        setPullToLoadDistance
+    ])
+
     const handleOutlineSelect = useCallback(async (item: ConversationOutlineItem) => {
         const target = await locateOutlineTargetMessage({
             targetMessageId: item.targetMessageId,
@@ -817,12 +1101,40 @@ export function HappyThread(props: {
     }, [loadOlderPreservingScroll])
 
     useEffect(() => {
+        const viewport = viewportRef.current
+        if (!viewport) {
+            return
+        }
+
+        const handleWheel = (event: WheelEvent) => {
+            if (!shouldLoadOlderFromTopWheel({
+                scrollTop: viewport.scrollTop,
+                deltaY: event.deltaY,
+                deltaX: event.deltaX
+            })) {
+                return
+            }
+
+            initialScrollDeadlineRef.current = 0
+            clearInitialScrollTimers()
+            autoScrollEnabledRef.current = false
+            void loadOlderPreservingScroll()
+        }
+
+        viewport.addEventListener('wheel', handleWheel, { passive: true })
+        return () => viewport.removeEventListener('wheel', handleWheel)
+    }, [clearInitialScrollTimers, loadOlderPreservingScroll])
+
+    useEffect(() => {
         const sentinel = topSentinelRef.current
         const viewport = viewportRef.current
         if (!sentinel || !viewport || !props.hasMoreMessages || props.isLoadingMessages) {
             return
         }
         if (typeof IntersectionObserver === 'undefined') {
+            return
+        }
+        if (!shouldEnableTopSentinelAutoLoad(typeof window.matchMedia === 'function' ? window.matchMedia.bind(window) : undefined)) {
             return
         }
 
@@ -919,6 +1231,11 @@ export function HappyThread(props: {
     ])
 
     const showSkeleton = props.isLoadingMessages && props.rawMessagesCount === 0 && props.pendingCount === 0
+    const pullToLoadIndicator = getPullToLoadOlderIndicator({
+        enabled: props.hasMoreMessages && !props.isLoadingMessages,
+        loading: pullToLoadLoading,
+        distancePx: pullToLoadDistance
+    })
 
     return (
         <HappyChatProvider value={{
@@ -963,35 +1280,6 @@ export function HappyThread(props: {
                                         </div>
                                     ) : null}
 
-                                    {props.hasMoreMessages && !props.isLoadingMessages ? (
-                                        <div className="py-1 mb-2">
-                                            <div className="mx-auto w-fit">
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        void loadOlderPreservingScroll()
-                                                    }}
-                                                    disabled={props.isLoadingMoreMessages || props.isLoadingMessages}
-                                                    aria-busy={props.isLoadingMoreMessages}
-                                                    className="gap-1.5 text-xs opacity-80 hover:opacity-100"
-                                                >
-                                                    {props.isLoadingMoreMessages ? (
-                                                        <>
-                                                            <Spinner size="sm" label={null} className="text-current" />
-                                                            {t('misc.loading')}
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <span aria-hidden="true">↑</span>
-                                                            {t('misc.loadOlder')}
-                                                        </>
-                                                    )}
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    ) : null}
-
                                     {import.meta.env.DEV && props.normalizedMessagesCount === 0 && props.rawMessagesCount > 0 ? (
                                         <div className="mb-2 rounded-md bg-amber-500/10 p-2 text-xs">
                                             Message normalization returned 0 items for {props.rawMessagesCount} messages (see `web/src/chat/normalize.ts`).
@@ -1007,6 +1295,7 @@ export function HappyThread(props: {
                         </div>
                     </div>
                 </ThreadPrimitive.Viewport>
+                <PullToLoadOlderIndicator {...pullToLoadIndicator} />
                 {(props.scrollButtonPositionReady ?? true) ? (
                     <>
                         <ReturnToUserMessageButton
