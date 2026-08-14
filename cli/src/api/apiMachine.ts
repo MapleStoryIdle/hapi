@@ -10,6 +10,12 @@ import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
 import type { BinaryFileReadRequest, BinaryFileReadResponse, ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
 import type { MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
+import {
+    getLocalCodexSessionData,
+    listLocalCodexSessions,
+    type CodexLocalSessionDataRpcResponse,
+    type CodexLocalSessionsRpcResponse
+} from '@hapi/protocol/codexTranscript'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RunnerState, Machine, MachineMetadata } from './types'
 import { RunnerStateSchema, MachineMetadataSchema } from './types'
@@ -42,6 +48,16 @@ interface ListMachineDirectoryRequest {
     path: string
 }
 
+interface ListCodexLocalSessionsRequest {
+    limit?: unknown
+}
+
+interface ReadCodexLocalSessionRequest {
+    sessionId?: unknown
+    before?: unknown
+    limit?: unknown
+}
+
 function normalizeWorkspaceRoots(paths?: string[]): string[] | undefined {
     if (!paths?.length) {
         return undefined
@@ -68,8 +84,42 @@ function workspaceRootsEqual(left?: string[], right?: string[]): boolean {
     return normalizedLeft.every((value, index) => value === normalizedRight[index])
 }
 
-function formatWorkspaceRoots(paths?: string[]): string {
-    return paths?.length ? paths.join(', ') : '(none)'
+function runnerMetadataMatchesAdvertised(
+    current: MachineMetadata | null,
+    advertised: MachineMetadata
+): boolean {
+    if (!current) return false
+
+    return current.host === advertised.host
+        && current.platform === advertised.platform
+        && current.happyCliVersion === advertised.happyCliVersion
+        && current.homeDir === advertised.homeDir
+        && current.codexHome === advertised.codexHome
+        && current.happyHomeDir === advertised.happyHomeDir
+        && current.happyLibDir === advertised.happyLibDir
+        && workspaceRootsEqual(current.workspaceRoots, advertised.workspaceRoots)
+}
+
+function mergeAdvertisedRunnerMetadata(
+    current: MachineMetadata | null,
+    advertised: MachineMetadata
+): MachineMetadata {
+    const {
+        host: _host,
+        platform: _platform,
+        happyCliVersion: _happyCliVersion,
+        homeDir: _homeDir,
+        codexHome: _codexHome,
+        happyHomeDir: _happyHomeDir,
+        happyLibDir: _happyLibDir,
+        workspaceRoots: _workspaceRoots,
+        ...preserved
+    } = current ?? {}
+
+    return {
+        ...preserved,
+        ...advertised
+    }
 }
 
 export class ApiMachineClient {
@@ -83,7 +133,8 @@ export class ApiMachineClient {
     constructor(
         private readonly token: string,
         private readonly machine: Machine,
-        private readonly workspaceRoots?: string[]
+        private readonly workspaceRoots?: string[],
+        private readonly advertisedMetadata?: MachineMetadata
     ) {
         // Realpath roots once so all subsequent comparisons are against
         // canonical, symlink-resolved locations. Falls back to lexical
@@ -96,6 +147,39 @@ export class ApiMachineClient {
         })
 
         registerCommonHandlers(this.rpcHandlerManager, getInvokedCwd())
+
+        this.rpcHandlerManager.registerHandler<ListCodexLocalSessionsRequest, CodexLocalSessionsRpcResponse>(
+            RPC_METHODS.ListCodexLocalSessions,
+            async (params) => {
+                const limit = params?.limit
+                if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100)) {
+                    return { success: false, error: 'limit must be an integer between 1 and 100' }
+                }
+                return { success: true, sessions: listLocalCodexSessions(limit) }
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<ReadCodexLocalSessionRequest, CodexLocalSessionDataRpcResponse>(
+            RPC_METHODS.ReadCodexLocalSession,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                if (!sessionId) {
+                    return { success: false, error: 'sessionId is required' }
+                }
+                const before = params?.before
+                const limit = params?.limit
+                if (before !== undefined && (typeof before !== 'number' || !Number.isInteger(before) || before < 0)) {
+                    return { success: false, error: 'before must be a non-negative integer' }
+                }
+                if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100)) {
+                    return { success: false, error: 'limit must be an integer between 1 and 100' }
+                }
+                const data = getLocalCodexSessionData(sessionId, { before, limit })
+                return data
+                    ? { success: true, data }
+                    : { success: false, error: 'Codex session not found' }
+            }
+        )
 
         this.rpcHandlerManager.registerHandler<PathExistsRequest, PathExistsResponse>(RPC_METHODS.PathExists, async (params) => {
             const rawPaths = Array.isArray(params?.paths) ? params.paths : []
@@ -252,7 +336,7 @@ export class ApiMachineClient {
 
     setRPCHandlers({ spawnSession, stopSession, requestShutdown }: MachineRpcHandlers): void {
         this.rpcHandlerManager.registerHandler(RPC_METHODS.SpawnHappySession, async (params: any) => {
-            const { directory, sessionId, resumeSessionId, machineId, approvedNewDirectoryCreation, agent, model, effort, modelReasoningEffort, yolo, permissionMode, serviceTier, token, sessionType, worktreeName } = params || {}
+            const { directory, sessionId, resumeSessionId, forkSessionId, machineId, approvedNewDirectoryCreation, agent, model, effort, modelReasoningEffort, yolo, permissionMode, serviceTier, token, sessionType, worktreeName } = params || {}
 
             if (!directory) {
                 throw new Error('Directory is required')
@@ -267,6 +351,7 @@ export class ApiMachineClient {
                 directory,
                 sessionId,
                 resumeSessionId,
+                forkSessionId,
                 machineId,
                 approvedNewDirectoryCreation,
                 agent,
@@ -405,31 +490,15 @@ export class ApiMachineClient {
                 logger.debug('[API MACHINE] Failed to update runner state on connect', error)
             })
 
-            const hubWorkspaceRoots = this.machine.metadata?.workspaceRoots
-            const desiredWorkspaceRoots = this.workspaceRoots
-            if (!workspaceRootsEqual(desiredWorkspaceRoots, hubWorkspaceRoots)) {
-                if (desiredWorkspaceRoots?.length) {
-                    console.log(`[HAPI] Syncing workspace roots to hub: ${formatWorkspaceRoots(desiredWorkspaceRoots)} (current hub value: ${formatWorkspaceRoots(hubWorkspaceRoots)})`)
-                } else {
-                    console.log(`[HAPI] Clearing workspace roots on hub (was: ${formatWorkspaceRoots(hubWorkspaceRoots)})`)
-                }
+            const advertisedMetadata = this.advertisedMetadata
+            if (advertisedMetadata && !runnerMetadataMatchesAdvertised(this.machine.metadata, advertisedMetadata)) {
                 this.updateMachineMetadata((current) => {
-                    const base = current ?? this.machine.metadata
-                    if (!base) {
-                        return { workspaceRoots: desiredWorkspaceRoots } as MachineMetadata
-                    }
-                    if (desiredWorkspaceRoots?.length) {
-                        return { ...base, workspaceRoots: desiredWorkspaceRoots }
-                    }
-                    const { workspaceRoots: _workspaceRoots, ...rest } = base
-                    return rest as MachineMetadata
+                    return mergeAdvertisedRunnerMetadata(current ?? this.machine.metadata, advertisedMetadata)
                 }).then(() => {
-                    console.log(`[HAPI] Workspace roots synced: ${formatWorkspaceRoots(this.machine.metadata?.workspaceRoots)}`)
+                    logger.debug('[API MACHINE] Runner metadata synced to hub')
                 }).catch((error) => {
-                    console.error('[HAPI] Failed to sync workspace roots:', error instanceof Error ? error.message : error)
+                    logger.debug('[API MACHINE] Failed to sync runner metadata to hub', error)
                 })
-            } else if (desiredWorkspaceRoots?.length) {
-                console.log(`[HAPI] Workspace roots already up to date on hub: ${formatWorkspaceRoots(desiredWorkspaceRoots)}`)
             }
 
             this.startKeepAlive()

@@ -1,5 +1,5 @@
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
-import { AlertTriangle, Archive, Clock, ExternalLink, RefreshCw, type LucideIcon } from 'lucide-react'
+import { Activity, AlertTriangle, Archive, Clock, ExternalLink, RefreshCw, type LucideIcon } from 'lucide-react'
 import { getEventPresentation } from '@/chat/presentation'
 import type { AgentEvent } from '@/chat/types'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
@@ -8,9 +8,14 @@ import { getConversationMessageAnchorId } from '@/chat/outline'
 import { MessageTimestamp } from '@/components/AssistantChat/messages/MessageTimestamp'
 
 type TaskStatusEvent = Extract<AgentEvent, { type: 'task-status' }>
+type AutomationHeartbeatEvent = Extract<AgentEvent, { type: 'automation-heartbeat' }>
 
 function isTaskStatusEvent(event: AgentEvent | undefined): event is TaskStatusEvent {
     return event?.type === 'task-status'
+}
+
+function isAutomationHeartbeatEvent(event: AgentEvent | undefined): event is AutomationHeartbeatEvent {
+    return event?.type === 'automation-heartbeat'
 }
 
 function taskStatusAttempt(event: TaskStatusEvent): string | null {
@@ -102,6 +107,39 @@ function taskStatusVisual(event: TaskStatusEvent): {
     }
 }
 
+function AutomationHeartbeatCard(props: { event: AutomationHeartbeatEvent; messageId: string }) {
+    const { t } = useTranslation()
+    const decision = props.event.decision === 'DONT_NOTIFY'
+        ? t('automationHeartbeat.dontNotify')
+        : props.event.decision
+
+    return (
+        <MessagePrimitive.Root id={getConversationMessageAnchorId(props.messageId)} className="scroll-mt-4 py-1">
+            <div className="mx-auto w-full max-w-[min(92%,42rem)] px-2">
+                <div className="rounded-xl border border-[color-mix(in_srgb,#64748B_30%,var(--app-border))] bg-[color-mix(in_srgb,var(--app-bg)_92%,#64748B)] px-3 py-2 text-left text-sm shadow-sm">
+                    <div className="flex items-start gap-2.5">
+                        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--app-bg)_72%,transparent)] text-slate-500 dark:text-slate-300">
+                            <Activity className="h-4 w-4" aria-hidden="true" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="font-medium text-[var(--app-fg)]">{t('automationHeartbeat.title')}</div>
+                                <MessageTimestamp className="shrink-0 text-[10px] text-[var(--app-hint)]" />
+                            </div>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--app-hint)]">
+                                <span>{props.event.automationId}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{decision}</span>
+                            </div>
+                            <p className="mt-1 text-sm leading-5 text-[var(--app-fg)]">{props.event.message}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </MessagePrimitive.Root>
+    )
+}
+
 function TaskStatusCard(props: { event: TaskStatusEvent; messageId: string }) {
     const { t } = useTranslation()
     const visual = taskStatusVisual(props.event)
@@ -167,6 +205,10 @@ export function HappySystemMessage() {
 
     if (isTaskStatusEvent(event)) {
         return <TaskStatusCard event={event} messageId={messageId} />
+    }
+
+    if (isAutomationHeartbeatEvent(event)) {
+        return <AutomationHeartbeatCard event={event} messageId={messageId} />
     }
 
     return (

@@ -9,6 +9,7 @@ import {
     captureScrollAnchor,
     findNearestUserMessageAnchorAbove,
     findVisibleUserMessageAnchor,
+    getThreadContentPadding,
     getPullToLoadOlderIndicator,
     getScrollIntent,
     hasUserMessageAnchor,
@@ -143,6 +144,18 @@ describe('ReturnToUserMessageButton', () => {
 
         expect(container.textContent).toBe('')
     })
+
+    it('keeps the control above the mobile bottom safe area', () => {
+        const { container } = render(
+            <I18nProvider>
+                <ReturnToUserMessageButton visible={true} bottomInset={120} bottomSafeAreaInset onClick={vi.fn()} />
+            </I18nProvider>
+        )
+
+        expect(container.querySelector('button')?.style.bottom).toBe(
+            'calc(120px + env(safe-area-inset-bottom))'
+        )
+    })
 })
 
 describe('ScrollToBottomButton', () => {
@@ -175,6 +188,18 @@ describe('ScrollToBottomButton', () => {
         expect(container.querySelector('button')?.style.bottom).toBe('128px')
     })
 
+    it('keeps the control above the mobile bottom safe area', () => {
+        const { container } = render(
+            <I18nProvider>
+                <ScrollToBottomButton count={0} visible={true} bottomInset={120} bottomSafeAreaInset onClick={vi.fn()} />
+            </I18nProvider>
+        )
+
+        expect(container.querySelector('button')?.style.bottom).toBe(
+            'calc(120px + env(safe-area-inset-bottom))'
+        )
+    })
+
     it('stays hidden at bottom when there are no pending messages', () => {
         const { container } = render(
             <I18nProvider>
@@ -193,6 +218,27 @@ describe('ScrollToBottomButton', () => {
         )
 
         expect(container.textContent).toBe('')
+    })
+})
+
+describe('thread endpoint insets', () => {
+    it('keeps the first iPhone PWA message below the notch and floating title bar', () => {
+        const padding = getThreadContentPadding({ topInset: 62 })
+
+        // `--app-safe-area-top` resolves to the device notch inset in an
+        // installed PWA. The additional 62px is the measured title-bar
+        // surface; 12px is the normal message breathing room.
+        expect(padding.paddingTop).toBe('calc(var(--app-safe-area-top) + 74px)')
+        expect(padding.paddingBottom).toBeUndefined()
+    })
+
+    it('keeps the latest message above an iPhone composer without duplicating its safe area', () => {
+        // The measured overlay already contains HappyComposer's bottom safe
+        // area (e.g. input + 34px home-indicator inset on a current iPhone).
+        const padding = getThreadContentPadding({ bottomInset: 104 })
+
+        expect(padding.paddingTop).toBeUndefined()
+        expect(padding.paddingBottom).toBe('116px')
     })
 })
 

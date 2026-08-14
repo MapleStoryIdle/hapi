@@ -4,7 +4,7 @@ import type { ReasoningEffort } from '../appServerTypes';
 import type { EnhancedMode } from '../loop';
 import type { SlashCommand } from '@/modules/common/slashCommands';
 
-const REASONING_EFFORTS = new Set<ReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const REASONING_EFFORTS = new Set<ReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 export const MAX_CODEX_GOAL_OBJECTIVE_CHARS = 4_000;
 
 const UNSUPPORTED_CODEX_BUILTIN_COMMANDS = new Set([
@@ -18,7 +18,6 @@ const UNSUPPORTED_CODEX_BUILTIN_COMMANDS = new Set([
     'prompts',
     'quit',
     'redo',
-    'review',
     'undo'
 ]);
 
@@ -257,9 +256,10 @@ export function resolveCodexSlashCommand(
                 '- `/goal pause|resume|clear` — update the current goal',
                 '- `/clear` — reset current Codex thread context',
                 '- `/compact` — compact current Codex thread context',
+                '- `/review [--uncommitted|--base <branch>|--commit <sha>|instructions]` — run a Codex code review',
                 '- `/status` — show current Codex session config',
                 '- `/model [name|auto]` — show or set model',
-                '- `/reasoning [low|medium|high|xhigh|default]` — show or set reasoning effort',
+                '- `/reasoning [low|medium|high|xhigh|max|ultra|default]` — show or set reasoning effort',
                 '- `/fast [on|off|status]` — toggle Fast mode (GPT-5.5 / GPT-5.4, ChatGPT login)',
                 '- `/permissions [default|read-only|safe-yolo|yolo]` — show or set permission mode',
                 '',

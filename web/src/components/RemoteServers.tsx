@@ -496,7 +496,7 @@ export function RemoteServerContextMenuContent(props: {
                     key={server.id}
                     type="button"
                     disabled={pendingId !== null}
-                    onClick={() => { void selectServer(server.id) }}
+                    onClick={() => { void selectServer(selected?.id === server.id ? null : server.id) }}
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-[var(--app-subtle-bg)] disabled:opacity-60"
                 >
                     <ServerIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)]" />

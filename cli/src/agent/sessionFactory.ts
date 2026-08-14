@@ -12,7 +12,10 @@ import { logger } from '@/ui/logger'
 import { runtimePath } from '@/projectPath'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { readWorktreeEnv } from '@/utils/worktreeEnv'
+import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
 import packageJson from '../../package.json'
+
+export { HAPI_SESSION_ID_ENV, exportHapiHubApiUrl, exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
 
 export type SessionStartedBy = 'runner' | 'terminal'
 
@@ -38,12 +41,19 @@ export type SessionBootstrapResult = {
     workingDirectory: string
 }
 
+function resolveCodexHome(): string {
+    const configured = process.env.CODEX_HOME?.trim()
+    const value = configured?.replace(/^~(?=$|[\\/])/, os.homedir()) ?? resolve(os.homedir(), '.codex')
+    return resolve(value)
+}
+
 export function buildMachineMetadata(options?: { workspaceRoots?: string[] }): MachineMetadata {
     return {
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),
         happyCliVersion: packageJson.version,
         homeDir: os.homedir(),
+        codexHome: resolveCodexHome(),
         happyHomeDir: configuration.happyHomeDir,
         happyLibDir: runtimePath(),
         workspaceRoots: options?.workspaceRoots
@@ -171,6 +181,8 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
 
     const session = api.sessionSyncClient(sessionInfo)
 
+    exportHapiSessionEnv(sessionInfo.id)
+
     await reportSessionStarted(sessionInfo.id, metadata)
 
     return {
@@ -221,6 +233,7 @@ export async function bootstrapExistingSession(options: {
 
     const session = api.sessionSyncClient(sessionInfo)
     session.updateMetadata(buildUpdatedMetadata)
+    exportHapiSessionEnv(sessionInfo.id)
     await reportSessionStarted(sessionInfo.id, metadata)
 
     return {

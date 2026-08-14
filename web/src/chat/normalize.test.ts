@@ -13,6 +13,26 @@ function makeMessage(content: unknown): DecryptedMessage {
 }
 
 describe('normalizeDecryptedMessage', () => {
+    it('normalizes automation heartbeats into formatted status events', () => {
+        const message = makeMessage({
+            role: 'user',
+            content: {
+                type: 'text',
+                text: '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>Nothing to report.</message> </heartbeat>'
+            }
+        })
+
+        expect(normalizeDecryptedMessage(message)).toMatchObject({
+            role: 'event',
+            content: {
+                type: 'automation-heartbeat',
+                automationId: 'bug',
+                decision: 'DONT_NOTIFY',
+                message: 'Nothing to report.'
+            }
+        })
+    })
+
     it('drops unsupported Claude system output records', () => {
         const message = makeMessage({
             role: 'agent',

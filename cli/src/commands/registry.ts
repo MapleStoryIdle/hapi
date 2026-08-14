@@ -14,6 +14,8 @@ import { hookForwarderCommand } from './hookForwarder'
 import { mcpCommand } from './mcp'
 import { notifyCommand } from './notify'
 import { hubCommand } from './hub'
+import { inspectPeerCommand } from './inspectPeer'
+import { pingPeerCommand } from './pingPeer'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -48,7 +50,9 @@ const COMMANDS: CommandDefinition[] = [
     doctorCommand,
     resumeCommand,
     runnerCommand,
-    notifyCommand
+    notifyCommand,
+    inspectPeerCommand,
+    pingPeerCommand
 ]
 
 const commandMap = new Map<string, CommandDefinition>()

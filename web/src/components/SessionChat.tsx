@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { AssistantRuntimeProvider, useAssistantApi, useAssistantState } from '@assistant-ui/react'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
-import type { ApiClient } from '@/api/client'
+import { ApiError, type ApiClient } from '@/api/client'
 import type {
     AttachmentMetadata,
     CodexCollaborationMode,
@@ -49,7 +50,11 @@ import { deleteShareTransfer, getShareTransfer } from '@/lib/shareTransfer'
 import { getDraft } from '@/lib/composer-drafts'
 import { useTranslation } from '@/lib/use-translation'
 import { SessionHeader } from '@/components/SessionHeader'
-import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
+import {
+    CursorMigrationBanner,
+    isCursorMigrationAmbiguous,
+    isCursorMigrationInProgress
+} from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
 import { LocalPreviewLauncher } from '@/components/LocalPreviewLauncher'
 import { usePlatform } from '@/hooks/usePlatform'
@@ -75,6 +80,7 @@ import { useOpencodeModels } from '@/hooks/queries/useOpencodeModels'
 import { usePiModels } from '@/hooks/queries/usePiModels'
 import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeReasoningEffortOptions'
 import { useGitStatusFiles } from '@/hooks/queries/useGitStatusFiles'
+import { useSessions } from '@/hooks/queries/useSessions'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useVoiceOptional } from '@/lib/voice-context'
 import { registerSessionStore } from '@/realtime/realtimeClientTools'
@@ -82,6 +88,7 @@ import { registerVoiceHooksStore, voiceHooks } from '@/realtime/hooks/voiceHooks
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 import { RemoteServerCandidatePrompt } from '@/components/RemoteServers'
 import { encodeBase64 } from '@/lib/utils'
+import { queryKeys } from '@/lib/query-keys'
 
 const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSession').then((module) => ({
     default: module.VoiceBackendSession
@@ -90,9 +97,9 @@ const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSessio
 const RUN_SETTLE_DELAY_MS = 1500
 const RUN_ACTIVITY_KEY_LOOKBACK = 12
 export const BOTTOM_FLOATING_CONTROL_GAP_PX = 8
-export const BOTTOM_OVERLAY_INSET_PX = 8
-const FLOATING_SESSION_HEADER_BOTTOM_PX = 72
-const THREAD_CONTENT_DEFAULT_TOP_GAP_PX = 12
+export const BOTTOM_OVERLAY_INSET_PX = 0
+// 50px control surface (including border) + 12px bottom breathing room.
+export const FLOATING_SESSION_HEADER_HEIGHT_PX = 62
 
 /**
  * The scroll-to-bottom button is the visual reference for bottom spacing;
@@ -110,11 +117,16 @@ export function getScrollButtonBottomInset(
         : bottomOverlayHeight + bottomOverlayInset
 }
 
-export function shouldInsetFirstUserMessage(params: {
-    hasMoreMessages: boolean
-    firstBlockKind: string | null
+export function canCreateSideSessionFromSession(params: {
+    agentFlavor: string | null | undefined
+    active: boolean
+    controlledByUser: boolean
+    isSideSession: boolean
 }): boolean {
-    return !params.hasMoreMessages && params.firstBlockKind === 'user-text'
+    return params.agentFlavor === 'codex'
+        && params.active
+        && !params.controlledByUser
+        && !params.isSideSession
 }
 
 /**
@@ -211,6 +223,20 @@ export function shouldRouteToScratchlist(
 
 function isUninvokedScheduledMessage(message: DecryptedMessage): boolean {
     return message.invokedAt == null && message.scheduledAt != null
+}
+
+function getApiErrorPayloadMessage(error: unknown): string | null {
+    if (!(error instanceof ApiError) || !error.body) {
+        return null
+    }
+    try {
+        const payload = JSON.parse(error.body) as { error?: unknown }
+        return typeof payload.error === 'string' && payload.error.trim().length > 0
+            ? payload.error
+            : null
+    } catch {
+        return null
+    }
 }
 
 /**
@@ -599,6 +625,8 @@ function SessionChatInner(props: SessionChatProps) {
     const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const navigate = useNavigate()
+    const queryClient = useQueryClient()
+    const { sessions: sessionSummaries } = useSessions(props.api)
     const sessionInactive = !props.session.active
     const inactiveCanResume = inactiveSessionCanResume(props.session, props.messages.length)
     const terminalSupported = isRemoteTerminalSupported(props.session.metadata)
@@ -626,7 +654,6 @@ function SessionChatInner(props: SessionChatProps) {
     const [bottomAccessoryExpanded, setBottomAccessoryExpanded] = useState(false)
     const [clearedPlanSourceBlockId, setClearedPlanSourceBlockId] = useState<string | null>(null)
     const scrollButtonPositionReady = bottomOverlayHeight > 0 && !(gitSessionId && gitStatusLoading)
-    const bottomOverlayReservedInset = bottomOverlayHeight + BOTTOM_OVERLAY_INSET_PX
     const scrollButtonBottomInset = getScrollButtonBottomInset(composerOverlayHeight, bottomOverlayHeight, BOTTOM_OVERLAY_INSET_PX)
     const lastGitRefreshUpdatedAtRef = useRef(props.session.updatedAt)
     useEffect(() => {
@@ -714,6 +741,63 @@ function SessionChatInner(props: SessionChatProps) {
     )
     const agentFlavor = props.session.metadata?.flavor ?? null
     const controlledByUser = props.session.agentState?.controlledByUser === true
+    const [sideSessionPending, setSideSessionPending] = useState(false)
+    const [sideSessionError, setSideSessionError] = useState<string | null>(null)
+    const hasCursorMigrationNotice = isCursorMigrationInProgress(props.session.metadata)
+        || isCursorMigrationAmbiguous(props.session.metadata)
+    const hasFloatingHeaderNotice = hasCursorMigrationNotice
+        || sideSessionError !== null
+        || Boolean(props.session.teamState)
+        || sessionInactive
+    const activeSideSessions = useMemo(() => {
+        return sessionSummaries
+            .filter((session) => session.active && session.metadata?.sideSession?.parentSessionId === props.session.id)
+            .map((session) => ({
+                id: session.id,
+                title: session.metadata?.name
+                    ?? session.metadata?.summary?.text
+                    ?? session.metadata?.path?.split('/').filter(Boolean).pop()
+                    ?? session.id.slice(0, 8)
+            }))
+    }, [props.session.id, sessionSummaries])
+    const handleCreateSideSession = useCallback(async () => {
+        if (sideSessionPending) return
+        setSideSessionPending(true)
+        setSideSessionError(null)
+        try {
+            const result = await props.api.createSideSession(props.session.id)
+            if (result.type === 'error') {
+                throw new Error(result.message)
+            }
+            if (result.session) {
+                queryClient.setQueryData(queryKeys.session(result.sessionId), { session: result.session })
+            }
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.session(result.sessionId) })
+            ])
+            await navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId: result.sessionId },
+                search: { fromSessionId: props.session.id }
+            })
+        } catch (error) {
+            const message = error instanceof ApiError && error.code === 'fork_unavailable'
+                ? t('session.sideSession.unavailable')
+                : getApiErrorPayloadMessage(error)
+                    ?? (error instanceof Error ? error.message : 'Failed to create side session')
+            setSideSessionError(message)
+        } finally {
+            setSideSessionPending(false)
+        }
+    }, [navigate, props.api, props.session.id, queryClient, sideSessionPending, t])
+    const handleSelectSideSession = useCallback((sessionId: string) => {
+        void navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            search: { fromSessionId: props.session.id }
+        })
+    }, [navigate])
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
     const codexModelsState = useCodexModels({
         api: props.api,
@@ -734,6 +818,16 @@ function SessionChatInner(props: SessionChatProps) {
         }
         return options
     }, [agentFlavor, codexModelsState.models])
+    const codexReasoningEffortOptions = useMemo(() => {
+        if (agentFlavor !== 'codex') {
+            return undefined
+        }
+
+        const selectedModel = props.session.model
+            ? codexModelsState.models.find((candidate) => candidate.id === props.session.model)
+            : codexModelsState.models.find((candidate) => candidate.isDefault) ?? codexModelsState.models[0]
+        return selectedModel?.supportedReasoningEfforts?.map((value) => ({ value }))
+    }, [agentFlavor, codexModelsState.models, props.session.model])
     const opencodeModelsState = useOpencodeModels({
         api: props.api,
         sessionId: props.session.id,
@@ -1213,13 +1307,6 @@ function SessionChatInner(props: SessionChatProps) {
         () => groupAssistantResultDetails(groupedVisibleBlocks, { runActive }),
         [groupedVisibleBlocks, runActive]
     )
-    const threadTopInset = shouldInsetFirstUserMessage({
-        hasMoreMessages: props.hasMoreMessages,
-        firstBlockKind: visibleBlocks[0]?.kind ?? null
-    })
-        ? FLOATING_SESSION_HEADER_BOTTOM_PX - THREAD_CONTENT_DEFAULT_TOP_GAP_PX
-        : undefined
-
     useEffect(() => {
         visibleGroupsRef.current = groupedVisibleBlocks.filter(isToolGroupBlock)
     }, [groupedVisibleBlocks])
@@ -1520,7 +1607,10 @@ function SessionChatInner(props: SessionChatProps) {
     })
 
     return (
-        <div className="relative flex h-full min-h-0 flex-col">
+        <div
+            className="relative flex h-full min-h-0 flex-col overflow-hidden"
+            data-testid="session-chat-surface"
+        >
             <SessionHeader
                 session={props.session}
                 onBack={props.onBack}
@@ -1537,6 +1627,17 @@ function SessionChatInner(props: SessionChatProps) {
                         replace: true
                     })
                 }}
+                onCreateSideSession={
+                    canCreateSideSessionFromSession({
+                        agentFlavor,
+                        active: props.session.active,
+                        controlledByUser,
+                        isSideSession: Boolean(props.session.metadata?.sideSession)
+                    })
+                        ? handleCreateSideSession
+                        : undefined
+                }
+                sideSessionPending={sideSessionPending}
                 status={{
                     active: props.session.active,
                     thinking: props.session.thinking,
@@ -1561,18 +1662,44 @@ function SessionChatInner(props: SessionChatProps) {
                 candidates={visibleLocalPreviewCandidates}
             />
 
-            <CursorMigrationBanner metadata={props.session.metadata} />
+            {hasFloatingHeaderNotice ? (
+                <div
+                    className="pointer-events-none absolute inset-x-0 z-10"
+                    style={{
+                        top: `calc(max(var(--app-safe-area-top), 0.75rem) + ${FLOATING_SESSION_HEADER_HEIGHT_PX}px)`
+                    }}
+                >
+                    <div className="pointer-events-auto">
+                        <CursorMigrationBanner metadata={props.session.metadata} />
 
-            {props.session.teamState && (
-                <TeamPanel teamState={props.session.teamState} />
-            )}
+                        {sideSessionError ? (
+                            <div className="px-3 pt-3">
+                                <div className="mx-auto flex w-full max-w-content items-center justify-between gap-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+                                    <span className="min-w-0 break-words">{sideSessionError}</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSideSessionError(null)}
+                                        className="shrink-0 rounded-full px-2 py-1 text-xs font-semibold hover:bg-red-500/10"
+                                    >
+                                        关闭
+                                    </button>
+                                </div>
+                            </div>
+                        ) : null}
 
-            {sessionInactive ? (
-                <div className="px-3 pt-3">
-                    <div className="mx-auto w-full max-w-content rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
-                        {inactiveCanResume
-                            ? t('session.inactive.autoResume')
-                            : t('session.inactive.cannotResume')}
+                        {props.session.teamState ? (
+                            <TeamPanel teamState={props.session.teamState} />
+                        ) : null}
+
+                        {sessionInactive ? (
+                            <div className="px-3 pt-3">
+                                <div className="mx-auto w-full max-w-content rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
+                                    {inactiveCanResume
+                                        ? t('session.inactive.autoResume')
+                                        : t('session.inactive.cannotResume')}
+                                </div>
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             ) : null}
@@ -1608,8 +1735,16 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineOpen={outlineOpen}
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
-                        topInset={threadTopInset}
-                        bottomInset={bottomOverlayReservedInset}
+                        // The scroll viewport remains edge-to-edge. Only its
+                        // initial scroll position is padded: first message
+                        // starts below the notch + floating title bar, while
+                        // later messages can pass behind that overlay.
+                        topInset={visibleBlocks.length > 0 ? FLOATING_SESSION_HEADER_HEIGHT_PX : undefined}
+                        // The measured bottom overlay includes the composer
+                        // and its iOS home-indicator padding. Reserving that
+                        // measured height keeps the latest message visible
+                        // without adding a second safe-area strip.
+                        bottomInset={bottomOverlayHeight || undefined}
                         scrollButtonBottomInset={scrollButtonBottomInset}
                         bottomAccessoryVisible={bottomAccessoryVisible}
                         bottomAccessoryExpanded={bottomAccessoryExpanded}
@@ -1685,7 +1820,11 @@ function SessionChatInner(props: SessionChatProps) {
                             )}
                         </div>
 
-                        <div ref={composerOverlayRef} className="pointer-events-auto">
+                        <div
+                            ref={composerOverlayRef}
+                            className="pointer-events-auto"
+                            data-testid="session-chat-composer-overlay"
+                        >
                             <div className="relative">
                                 {agentFlavor === 'codex' ? (
                                     <SubagentDock
@@ -1732,9 +1871,11 @@ function SessionChatInner(props: SessionChatProps) {
                                 piModels={agentFlavor === 'pi' ? (piModelsState.availableModels.length > 0 ? piModelsState.availableModels : piCachedModels) : undefined}
                                 piSelectedModel={agentFlavor === 'pi' ? piSelectedModel : undefined}
                                 availableModelReasoningEffortOptions={
-                                    agentFlavor === 'opencode' && opencodeReasoningEffortState.options.length > 0
-                                        ? opencodeReasoningEffortState.options
-                                        : undefined
+                                    agentFlavor === 'codex'
+                                        ? codexReasoningEffortOptions
+                                        : agentFlavor === 'opencode' && opencodeReasoningEffortState.options.length > 0
+                                            ? opencodeReasoningEffortState.options
+                                            : undefined
                                 }
                                 active={props.session.active}
                                 allowSendWhenInactive
@@ -1836,6 +1977,8 @@ function SessionChatInner(props: SessionChatProps) {
                                     }
                                     : undefined
                                 }
+                                activeSideSessions={activeSideSessions}
+                                onSelectSideSession={handleSelectSideSession}
                                 sendError={props.sendError ?? null}
                                 onClearSendError={props.onClearSendError}
                                 compactTopAnchor={bottomAccessoryVisible}

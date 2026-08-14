@@ -121,6 +121,34 @@ describe('MessageService goal status filtering', () => {
         ])
     })
 
+    it('returns stored automation heartbeats for formatted web rendering', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'automation-heartbeat-filter')
+
+        store.messages.addMessage(session.id, {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>Nothing to report.</message> </heartbeat>'
+            }
+        })
+        store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'Visible prompt' } })
+
+        const service = new MessageService(store, makeIo(() => {}), makePublisher() as any)
+        const page = service.getMessagesPage(session.id, { limit: 10, before: null })
+
+        expect(page.messages.map((message) => message.content)).toEqual([
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>Nothing to report.</message> </heartbeat>'
+                }
+            },
+            { role: 'user', content: { type: 'text', text: 'Visible prompt' } }
+        ])
+    })
+
     it('exports chronological visible messages and omits queued user rows', () => {
         const store = makeStore()
         const session = makeSession(store, 'session-export-visible')

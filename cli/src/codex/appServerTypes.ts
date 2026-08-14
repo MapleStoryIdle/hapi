@@ -140,6 +140,32 @@ export interface ThreadResumeResponse {
     [key: string]: unknown;
 }
 
+/** Native Codex branch operation. Omitting all overrides keeps the source thread configuration. */
+export interface ThreadForkParams {
+    threadId: string;
+    lastTurnId?: string;
+    cwd?: string;
+    model?: string;
+    modelProvider?: string;
+    serviceTier?: string | null;
+    approvalPolicy?: ApprovalPolicy;
+    sandbox?: SandboxMode;
+    config?: Record<string, unknown>;
+    baseInstructions?: string;
+    developerInstructions?: string;
+    ephemeral?: boolean;
+}
+
+export interface ThreadForkResponse {
+    thread: {
+        id: string;
+    };
+    model: string;
+    reasoningEffort?: ReasoningEffort | string | null;
+    serviceTier?: string | null;
+    [key: string]: unknown;
+}
+
 export type UserInput =
     | {
         type: 'text';
@@ -175,7 +201,10 @@ export type SandboxPolicy =
         excludeSlashTmp?: boolean;
     };
 
-export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+// Keep this aligned with Codex's currently advertised app-server efforts.
+// GPT-5.6 adds `max` and `ultra`; older models simply omit unsupported values
+// from `model/list`.
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 export type ReasoningSummary = 'auto' | 'none' | 'brief' | 'detailed';
 
 export type CollaborationMode = {
@@ -229,6 +258,29 @@ export interface ThreadCompactStartParams {
 }
 
 export interface ThreadCompactStartResponse {
+    [key: string]: unknown;
+}
+
+export type ReviewTarget =
+    | { type: 'uncommittedChanges' }
+    | { type: 'baseBranch'; branch: string }
+    | { type: 'commit'; sha: string; title: string | null }
+    | { type: 'custom'; instructions: string };
+
+export type ReviewDelivery = 'inline' | 'detached';
+
+export interface ReviewStartParams {
+    threadId: string;
+    target: ReviewTarget;
+    delivery?: ReviewDelivery | null;
+}
+
+export interface ReviewStartResponse {
+    turn: {
+        id?: string;
+        status?: string;
+    };
+    reviewThreadId: string;
     [key: string]: unknown;
 }
 

@@ -14,6 +14,7 @@ export const BUILTIN_SLASH_COMMANDS = {
     codex: [
         { name: 'clear', description: 'Clear current Codex thread context', source: 'builtin' },
         { name: 'compact', description: 'Compact current Codex thread context', source: 'builtin' },
+        { name: 'review', description: 'Run a Codex code review', source: 'builtin' },
         { name: 'goal', description: 'Set, view, pause, resume, or clear a persistent Codex goal', source: 'builtin' },
         { name: 'help', description: 'Show supported HAPI Codex slash commands', source: 'builtin' },
         { name: 'plan', description: 'Enable plan mode; use /plan off to return to default', source: 'builtin' },

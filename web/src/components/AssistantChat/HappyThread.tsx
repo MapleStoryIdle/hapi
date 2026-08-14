@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { ThreadPrimitive } from '@assistant-ui/react'
 import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
@@ -101,6 +101,30 @@ export function shouldEnableTopSentinelAutoLoad(matchMedia: ((query: string) => 
         return true
     }
     return matchMedia('(any-hover: hover) and (any-pointer: fine)').matches
+}
+
+/**
+ * The thread viewport itself always reaches both physical viewport edges.
+ * These paddings apply only at the two natural scroll endpoints: the first
+ * message clears the floating header, and the latest message clears the
+ * bottom overlay. Every intermediate message can still scroll beneath those
+ * overlays.
+ */
+export function getThreadContentPadding(props: {
+    topInset?: number
+    bottomInset?: number
+    bottomSafeAreaInset?: boolean
+}): Pick<CSSProperties, 'paddingTop' | 'paddingBottom'> {
+    return {
+        paddingTop: props.topInset !== undefined
+            ? `calc(var(--app-safe-area-top) + ${props.topInset + 12}px)`
+            : undefined,
+        paddingBottom: props.bottomInset
+            ? props.bottomSafeAreaInset
+                ? `calc(${props.bottomInset + 12}px + var(--app-safe-area-bottom))`
+                : `${props.bottomInset + 12}px`
+            : undefined
+    }
 }
 
 export function shouldLoadOlderFromTopWheel(params: {
@@ -277,6 +301,7 @@ export function ScrollToBottomButton(props: {
     visible: boolean
     hidden?: boolean
     bottomInset?: number
+    bottomSafeAreaInset?: boolean
     bottomAccessoryVisible?: boolean
     onClick: () => void
 }) {
@@ -293,7 +318,9 @@ export function ScrollToBottomButton(props: {
     const newMessageLabel = t('misc.newMessage', { n: props.count, s: props.count === 1 ? '' : 's' })
     const label = hasNewMessages ? newMessageLabel : t('misc.backToBottom')
     const bottomOffsetPx = (props.bottomInset ?? 0) + (props.bottomAccessoryVisible ? 8 : 0)
-    const bottomOffset = `${bottomOffsetPx}px`
+    const bottomOffset = props.bottomSafeAreaInset
+        ? `calc(${bottomOffsetPx}px + env(safe-area-inset-bottom))`
+        : `${bottomOffsetPx}px`
     const rightOffset = 'max(1rem, calc((100% - var(--content-max-w, 960px)) / 2 + 0.75rem))'
     const contentClass = hasNewMessages
         ? 'inline-flex h-8 items-center gap-1 rounded-full border border-white/25 bg-[color-mix(in_srgb,var(--app-button)_82%,transparent)] px-3 text-xs font-medium text-[var(--app-button-text)] shadow-[0_8px_22px_rgba(15,23,42,0.14)] backdrop-blur-md animate-bounce-in'
@@ -327,6 +354,7 @@ export function ReturnToUserMessageButton(props: {
     loading?: boolean
     hidden?: boolean
     bottomInset?: number
+    bottomSafeAreaInset?: boolean
     bottomAccessoryVisible?: boolean
     onClick: () => void
 }) {
@@ -337,7 +365,9 @@ export function ReturnToUserMessageButton(props: {
 
     const label = t('misc.returnToUserMessage')
     const bottomOffsetPx = (props.bottomInset ?? 0) + (props.bottomAccessoryVisible ? 8 : 0)
-    const bottomOffset = `${bottomOffsetPx}px`
+    const bottomOffset = props.bottomSafeAreaInset
+        ? `calc(${bottomOffsetPx}px + env(safe-area-inset-bottom))`
+        : `${bottomOffsetPx}px`
     const leftOffset = 'max(1rem, calc((100% - var(--content-max-w, 960px)) / 2 + 0.75rem))'
 
     return (
@@ -557,6 +587,7 @@ export function HappyThread(props: {
     outlineItems: readonly ConversationOutlineItem[]
     topInset?: number
     bottomInset?: number
+    bottomSafeAreaInset?: boolean
     scrollButtonBottomInset?: number
     bottomAccessoryVisible?: boolean
     bottomAccessoryExpanded?: boolean
@@ -1258,16 +1289,16 @@ export function HappyThread(props: {
                     scrollToBottomOnRunStart={false}
                     scrollToBottomOnThreadSwitch={false}
                 >
-                    <div ref={viewportRef} className="app-scroll-y min-h-0 flex-1 overflow-x-hidden">
+                    <div
+                        ref={viewportRef}
+                        className="app-scroll-y min-h-0 flex-1 overflow-x-hidden"
+                        data-testid="happy-thread-viewport"
+                    >
                         <div
                             ref={contentRef}
                             className="mx-auto w-full max-w-content min-w-0 p-3"
-                            style={{
-                                paddingTop: props.topInset
-                                    ? `calc(env(safe-area-inset-top) + ${props.topInset + 12}px)`
-                                    : undefined,
-                                paddingBottom: props.bottomInset ? `${props.bottomInset + 12}px` : undefined
-                            }}
+                            style={getThreadContentPadding(props)}
+                            data-testid="happy-thread-content"
                         >
                             <div ref={topSentinelRef} className="h-px w-full" aria-hidden="true" />
                             {showSkeleton ? (
@@ -1307,6 +1338,7 @@ export function HappyThread(props: {
                                 pendingCount: props.pendingCount
                             })}
                             bottomInset={props.scrollButtonBottomInset ?? props.bottomInset}
+                            bottomSafeAreaInset={props.bottomSafeAreaInset}
                             bottomAccessoryVisible={props.scrollButtonBottomInset === undefined ? props.bottomAccessoryVisible : false}
                             onClick={handleReturnToUserMessage}
                         />
@@ -1319,6 +1351,7 @@ export function HappyThread(props: {
                                 pendingCount: props.pendingCount
                             })}
                             bottomInset={props.scrollButtonBottomInset ?? props.bottomInset}
+                            bottomSafeAreaInset={props.bottomSafeAreaInset}
                             bottomAccessoryVisible={props.scrollButtonBottomInset === undefined ? props.bottomAccessoryVisible : false}
                             onClick={scrollToBottom}
                         />

@@ -17,6 +17,18 @@
         <meta name="apple-mobile-web-app-title" content="HAPI" />
         <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
 
+        <script>
+            (function () {
+                var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+                    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+                var isStandalone = navigator.standalone === true
+                    || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+                if (isIOS && isStandalone) {
+                    document.documentElement.setAttribute('data-ios-standalone', 'true')
+                }
+            })()
+        </script>
+
         <!-- Favicon -->
         <link rel="icon" href="/favicon.ico" sizes="48x48" />
         <link rel="icon" href="/icon.svg" sizes="any" type="image/svg+xml" />

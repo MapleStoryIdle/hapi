@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { logger } from '@/ui/logger';
 import { JsonLineParser } from '@/utils/jsonLineParser';
 import { killProcessByChildProcess } from '@/utils/process';
+import { buildDefaultModeRequestUserInputConfigArgs } from './utils/codexFeatureFlags';
 import type {
     CollaborationModeListResponse,
     GetAccountRateLimitsResponse,
@@ -13,12 +14,16 @@ import type {
     ThreadStartResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
+    ThreadForkParams,
+    ThreadForkResponse,
     TurnStartParams,
     TurnStartResponse,
     TurnInterruptParams,
     TurnInterruptResponse,
     ThreadCompactStartParams,
     ThreadCompactStartResponse,
+    ReviewStartParams,
+    ReviewStartResponse,
     ThreadGoalSetParams,
     ThreadGoalSetResponse,
     ThreadGoalGetParams,
@@ -71,6 +76,10 @@ function createAbortError(): Error {
     return error;
 }
 
+export function buildCodexAppServerArgs(): string[] {
+    return ['app-server', ...buildDefaultModeRequestUserInputConfigArgs()];
+}
+
 export class CodexAppServerClient extends JsonLineParser {
     private process: ChildProcessWithoutNullStreams | null = null;
     private connected = false;
@@ -92,7 +101,7 @@ export class CodexAppServerClient extends JsonLineParser {
             return;
         }
 
-        this.process = spawn('codex', ['app-server'], {
+        this.process = spawn('codex', buildCodexAppServerArgs(), {
             env: Object.keys(process.env).reduce((acc, key) => {
                 const value = process.env[key];
                 if (typeof value === 'string') acc[key] = value;
@@ -200,6 +209,14 @@ export class CodexAppServerClient extends JsonLineParser {
         return response as ThreadResumeResponse;
     }
 
+    async forkThread(params: ThreadForkParams, options?: { signal?: AbortSignal }): Promise<ThreadForkResponse> {
+        const response = await this.sendRequest('thread/fork', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ThreadForkResponse;
+    }
+
     async startTurn(params: TurnStartParams, options?: { signal?: AbortSignal }): Promise<TurnStartResponse> {
         const response = await this.sendRequest('turn/start', params, {
             signal: options?.signal,
@@ -224,6 +241,17 @@ export class CodexAppServerClient extends JsonLineParser {
             timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
         });
         return response as ThreadCompactStartResponse;
+    }
+
+    async startReview(
+        params: ReviewStartParams,
+        options?: { signal?: AbortSignal }
+    ): Promise<ReviewStartResponse> {
+        const response = await this.sendRequest('review/start', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ReviewStartResponse;
     }
 
     async setThreadGoal(

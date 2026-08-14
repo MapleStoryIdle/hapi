@@ -16,6 +16,8 @@ import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import { App } from '@/App'
 import { SessionList, getSessionWorkspaceTitle } from '@/components/SessionList'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
+import { RecentCodexSessionsDrawer } from '@/components/RecentCodexSessionsDrawer'
+import { CodexSessionContextPage } from '@/components/CodexSessionContextPage'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
 import { useAppContext } from '@/lib/app-context'
@@ -42,6 +44,7 @@ import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary, Ses
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
 import { presentMachineHealth, formatMachineUptimeSeconds } from '@/lib/machineHealth'
+import { getLanNetworkInterfaces } from '@/lib/networkInterfaces'
 
 const SessionChat = lazy(() => import('@/components/SessionChat').then((module) => ({ default: module.SessionChat })))
 const NewSession = lazy(() => import('@/components/NewSession').then((module) => ({ default: module.NewSession })))
@@ -208,7 +211,7 @@ function MoreHorizontalIcon(props: { className?: string }) {
     )
 }
 
-function MenuLinesIcon(props: { className?: string }) {
+function RecentSessionsIcon(props: { className?: string }) {
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -222,8 +225,9 @@ function MenuLinesIcon(props: { className?: string }) {
             strokeLinejoin="round"
             className={props.className}
         >
-            <path d="M5 9h14" />
-            <path d="M5 15h9" />
+            <path d="M3 12a9 9 0 1 0 3-6.7" />
+            <path d="M3 4v5h5" />
+            <path d="M12 7v5l3 2" />
         </svg>
     )
 }
@@ -349,7 +353,7 @@ function RunnerDetailsPanel(props: { machine: Machine }) {
     const diskDetail = health?.disk
         ? `${formatBytes(health.disk.freeBytes)} free / ${formatBytes(health.disk.totalBytes)}`
         : undefined
-    const networkList = health?.networkInterfaces ?? []
+    const networkList = getLanNetworkInterfaces(health?.networkInterfaces)
     const cliList = health?.agentCli ?? []
     const runnerStartedAt = formatRunnerTime(machine.runnerState?.startedAt)
     const lastSeenAt = formatRunnerTime(machine.activeAt)
@@ -395,7 +399,7 @@ function RunnerDetailsPanel(props: { machine: Machine }) {
 
             <div className="mt-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-xs font-medium text-[var(--app-hint)]">网络</div>
+                    <div className="text-xs font-medium text-[var(--app-hint)]">局域网 IP</div>
                     <div className="text-[11px] text-[var(--app-hint)]">{networkList.length > 0 ? `${networkList.length} 个地址` : '暂无数据'}</div>
                 </div>
                 {networkList.length > 0 ? (
@@ -406,7 +410,7 @@ function RunnerDetailsPanel(props: { machine: Machine }) {
                             </span>
                         ))}
                     </div>
-                ) : <div className="text-xs text-[var(--app-hint)]">runner 重启后会开始上报网络接口。</div>}
+                ) : <div className="text-xs text-[var(--app-hint)]">未发现可直接访问的局域网 IPv4。</div>}
             </div>
 
             <div className="mt-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
@@ -484,6 +488,7 @@ function SessionsPage() {
     const [isDuplicateMergeConfirmOpen, setIsDuplicateMergeConfirmOpen] = useState(false)
     const [isMergingDuplicateSessions, setIsMergingDuplicateSessions] = useState(false)
     const [isSessionsMenuOpen, setIsSessionsMenuOpen] = useState(false)
+    const [isRecentCodexDrawerOpen, setIsRecentCodexDrawerOpen] = useState(false)
     const [selectedRunnerMachineId, setSelectedRunnerMachineId] = useState<string | null>(loadSelectedRunnerMachineId)
     const [isRunnerDetailsOpen, setIsRunnerDetailsOpen] = useState(false)
     const [isRunnerSwitcherOpen, setIsRunnerSwitcherOpen] = useState(false)
@@ -502,7 +507,10 @@ function SessionsPage() {
         return labels
     }, [machines])
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
-    const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
+    const isRecentCodexContext = pathname.startsWith('/sessions/codex/')
+    const selectedSessionId = !isRecentCodexContext && sessionMatch && sessionMatch.sessionId !== 'new'
+        ? sessionMatch.sessionId
+        : null
     const selectedSession = useMemo(
         () => selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null,
         [selectedSessionId, sessions]
@@ -882,12 +890,18 @@ function SessionsPage() {
                     <div className="mx-auto grid w-full max-w-[620px] grid-cols-[52px_1fr_52px] items-center px-6 pb-3 pt-5">
                         <button
                             type="button"
-                            onClick={() => navigate({ to: '/browse' })}
-                            aria-label={t('browse.nav')}
-                            className="flex h-[52px] w-[52px] items-center justify-center rounded-full border border-[#eeeeee] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors hover:bg-[var(--app-subtle-bg)]"
-                            title={t('browse.nav')}
+                            onClick={() => setIsRecentCodexDrawerOpen(true)}
+                            aria-label={t('recentCodex.title')}
+                            aria-expanded={isRecentCodexDrawerOpen}
+                            aria-haspopup="dialog"
+                            className={`flex h-[52px] w-[52px] items-center justify-center rounded-full border text-[var(--app-fg)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                                isRecentCodexDrawerOpen
+                                    ? 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
+                                    : 'border-[#eeeeee] bg-[var(--app-bg)] hover:bg-[var(--app-subtle-bg)]'
+                            }`}
+                            title={t('recentCodex.title')}
                         >
-                            <MenuLinesIcon className="h-6 w-6" />
+                            <RecentSessionsIcon className="h-6 w-6" />
                         </button>
                         <div className="flex min-w-0 flex-col items-center justify-center px-4 text-center">
                             <button
@@ -1007,7 +1021,7 @@ function SessionsPage() {
                                         <span className={sessionsMenuIconClass}>
                                             <ServerIcon className="h-4 w-4" />
                                         </span>
-                                        <span>远程服务器</span>
+                                        <span>{t('sessions.remoteServers')}</span>
                                     </button>
                                     <button
                                         type="button"
@@ -1067,6 +1081,21 @@ function SessionsPage() {
                 </div>
             </div>
             </div>
+            <RecentCodexSessionsDrawer
+                api={api}
+                machineId={selectedRunnerMachine?.id ?? null}
+                open={isRecentCodexDrawerOpen}
+                onOpenChange={setIsRecentCodexDrawerOpen}
+                onOpenSession={(session) => {
+                    if (!selectedRunnerMachine) return
+                    setIsRecentCodexDrawerOpen(false)
+                    navigate({
+                        to: '/sessions/codex/$codexSessionId',
+                        params: { codexSessionId: session.id },
+                        search: { machineId: selectedRunnerMachine.id }
+                    })
+                }}
+            />
             {/* 中文注释：这里展示的是本地 Codex transcript 列表；默认尝试勾选当前 Hapi 会话关联的 Codex thread。 */}
             <CodexSessionSyncDialog
                 isOpen={isSyncConfirmOpen}
@@ -1124,12 +1153,12 @@ function classifySendError(
 function SessionPage() {
     const { api } = useAppContext()
     const { t } = useTranslation()
-    const goBack = useAppGoBack()
+    const defaultGoBack = useAppGoBack()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
-    const { outline } = useSearch({ from: '/sessions/$sessionId' })
+    const { outline, fromSessionId } = useSearch({ from: '/sessions/$sessionId' })
     const {
         session,
         error: sessionError,
@@ -1384,9 +1413,21 @@ function SessionPage() {
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId },
+            search: fromSessionId ? { fromSessionId } : {},
             replace: true,
         })
-    }, [navigate, sessionId])
+    }, [fromSessionId, navigate, sessionId])
+
+    const goBack = useCallback(() => {
+        if (fromSessionId && fromSessionId !== sessionId) {
+            navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId: fromSessionId }
+            })
+            return
+        }
+        defaultGoBack()
+    }, [defaultGoBack, fromSessionId, navigate, sessionId])
 
     if (!session) {
         if (sessionError) {
@@ -1449,6 +1490,26 @@ function SessionPage() {
             onClearSendError={clearSendError}
             initialOutlineOpen={outline}
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
+        />
+    )
+}
+
+function CodexSessionContextRoute() {
+    const { api } = useAppContext()
+    const navigate = useNavigate()
+    const { codexSessionId } = useParams({ from: '/sessions/codex/$codexSessionId' })
+    const { machineId } = useSearch({ from: '/sessions/codex/$codexSessionId' })
+
+    return (
+        <CodexSessionContextPage
+            api={api}
+            sessionId={codexSessionId}
+            machineId={machineId}
+            onBack={() => navigate({ to: '/sessions' })}
+            onForked={(sessionId) => navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId }
+            })}
         />
     )
 }
@@ -1633,12 +1694,30 @@ const sessionsIndexRoute = createRoute({
     component: SessionsIndexPage,
 })
 
+const codexSessionContextRoute = createRoute({
+    getParentRoute: () => sessionsRoute,
+    path: 'codex/$codexSessionId',
+    validateSearch: (search: Record<string, unknown>): { machineId?: string } => {
+        const machineId = typeof search.machineId === 'string' && search.machineId.trim().length > 0
+            ? search.machineId
+            : undefined
+        return machineId ? { machineId } : {}
+    },
+    component: CodexSessionContextRoute,
+})
+
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; fromSessionId?: string } => {
         const outline = search.outline === true || search.outline === 'true'
-        return outline ? { outline: true } : {}
+        const fromSessionId = typeof search.fromSessionId === 'string' && search.fromSessionId.trim().length > 0
+            ? search.fromSessionId
+            : undefined
+        return {
+            ...(outline ? { outline: true } : {}),
+            ...(fromSessionId ? { fromSessionId } : {})
+        }
     },
     component: SessionDetailRoute,
 })
@@ -1840,6 +1919,7 @@ export const routeTree = rootRoute.addChildren([
     sessionsRoute.addChildren([
         sessionsIndexRoute,
         newSessionRoute,
+        codexSessionContextRoute,
         sessionDetailRoute.addChildren([
             sessionTerminalRoute,
             sessionPreviewRoute,

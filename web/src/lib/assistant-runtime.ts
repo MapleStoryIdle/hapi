@@ -575,7 +575,7 @@ function extractMessageContent(message: AppendMessage): { text: string; attachme
 }
 
 export function useHappyRuntime(props: {
-    session: Session
+    session: Pick<Session, 'active' | 'thinking'>
     blocks: readonly VisibleChatBlock[]
     isSending: boolean
     isRunning?: boolean

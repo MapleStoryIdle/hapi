@@ -3,6 +3,7 @@ import { isBunCompiled } from '@/projectPath'
 import { logger } from '@/ui/logger'
 import { getCliArgs } from '@/utils/cliArgs'
 import { ensureLoopbackProxyBypass } from '@/utils/proxyEnv'
+import { printHapiCliCapabilities } from './capabilities'
 import { resolveCommand } from './registry'
 
 export async function runCli(): Promise<void> {
@@ -13,6 +14,11 @@ export async function runCli(): Promise<void> {
     if (args.includes('-v') || args.includes('--version')) {
         console.log(`hapi version: ${packageJson.version}`)
         process.exit(0)
+    }
+
+    if (args.length === 1 && (args[0] === '--hapi-capabilities' || args[0] === '--help-json')) {
+        printHapiCliCapabilities()
+        return
     }
 
     if (isBunCompiled()) {

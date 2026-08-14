@@ -13,10 +13,48 @@ import { logger } from "@/ui/logger";
 import { ApiSessionClient } from "@/api/apiSession";
 import { randomUUID } from "node:crypto";
 import { detectImageMimeType, readImageHeader, registerGeneratedImage } from "@/modules/common/generatedImages";
+import {
+    INSPECT_PEER_TOOL_DESCRIPTION,
+    PING_PEER_TOOL_DESCRIPTION,
+    SESSION_ID_PREFIX_PARAM_DESCRIPTION
+} from '@hapi/protocol/sessionCitation'
+import {
+    PingPeerError,
+    formatInspectPeerReport,
+    formatPeerSessionsList,
+    inspectPeer,
+    listPeerSessions,
+    peerListFetchLimit,
+    pingPeer
+} from '@/modules/pingPeer/pingPeer'
 
 type StartHappyServerOptions = {
     emitTitleSummary?: boolean;
 };
+
+/**
+ * HAPI MCP 对外暴露的能力清单。
+ *
+ * 该常量既是 Agent 侧可发现能力的机器可读来源，也用于桥接配置和测试；不要
+ * 只注册工具却忘记更新这里。
+ */
+export const HAPI_MCP_TOOL_NAMES = [
+    'change_title',
+    'display_image',
+    'verify_ssh_server_candidate',
+    'list_peers',
+    'inspect_peer',
+    'ping_peer'
+] as const
+
+/** 会读取其他会话或对其他会话写入消息的 MCP 工具必须由用户手动批准。 */
+const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set<string>(['inspect_peer', 'ping_peer'])
+
+export function toClaudeAllowedHapiMcpTools(toolNames: readonly string[]): string[] {
+    return toolNames
+        .filter((toolName) => !CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS.has(toolName))
+        .map((toolName) => `mcp__hapi__${toolName}`)
+}
 
 function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean): McpServer {
     const handler = async (title: string) => {
@@ -59,6 +97,20 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
         tags: z.array(z.string().min(1)).optional().describe('Optional server tags'),
         detectedCommandKind: z.enum(['ssh', 'scp', 'rsync']).describe('Command kind that discovered this server'),
         detectedToolCallId: z.string().optional().describe('Optional tool call id that discovered this server'),
+    });
+
+    const pingPeerInputSchema: z.ZodTypeAny = z.object({
+        sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
+        message: z.string().min(1).describe('Message text to deliver to the target session')
+    });
+
+    const inspectPeerInputSchema: z.ZodTypeAny = z.object({
+        sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
+        messageLimit: z.number().int().min(1).max(100).optional().describe('Recent message page size (default 30, max 100).')
+    });
+
+    const listPeersInputSchema: z.ZodTypeAny = z.object({
+        limit: z.number().int().min(1).max(100).optional().describe('Max sessions to return (default 30, max 100).')
     });
 
     mcp.registerTool<any, any>('change_title', {
@@ -124,6 +176,8 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
                 size: info.size,
                 mtimeMs: info.mtimeMs
             });
+
+            await client.persistGeneratedImage(image);
 
             client.sendAgentMessage({
                 type: 'generated-image',
@@ -219,6 +273,94 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
                     },
                 ],
                 isError: true,
+            };
+        }
+    });
+
+    mcp.registerTool<any, any>('list_peers', {
+        description: 'List peer HAPI sessions on the same hub/namespace. Returns id, active state, flavor and name only. Then use inspect_peer or ping_peer with an id.',
+        title: 'List Peer Sessions',
+        inputSchema: listPeersInputSchema
+    }, async (args: { limit?: number }) => {
+        try {
+            const limit = args.limit ?? 30;
+            const sessions = await listPeerSessions({
+                limit: peerListFetchLimit(limit, { excludeCaller: true })
+            });
+            const peers = sessions.filter((session) => session.id !== client.sessionId);
+            return {
+                content: [{
+                    type: 'text' as const,
+                    text: formatPeerSessionsList(peers, {
+                        maxRows: limit,
+                        hasMore: peers.length > limit
+                    })
+                }],
+                isError: false
+            };
+        } catch (error) {
+            const message = error instanceof PingPeerError
+                ? error.message
+                : error instanceof Error ? error.message : String(error);
+            logger.debug('[hapiMCP] Failed to list peers:', message);
+            return {
+                content: [{ type: 'text' as const, text: `Failed to list peers: ${message}` }],
+                isError: true
+            };
+        }
+    });
+
+    mcp.registerTool<any, any>('inspect_peer', {
+        description: INSPECT_PEER_TOOL_DESCRIPTION,
+        title: 'Inspect Peer Session',
+        inputSchema: inspectPeerInputSchema
+    }, async (args: { sessionIdPrefix: string; messageLimit?: number }) => {
+        try {
+            const result = await inspectPeer({
+                sessionIdPrefix: args.sessionIdPrefix,
+                messageLimit: args.messageLimit
+            });
+            return {
+                content: [{ type: 'text' as const, text: formatInspectPeerReport(result) }],
+                isError: false
+            };
+        } catch (error) {
+            const message = error instanceof PingPeerError
+                ? error.message
+                : error instanceof Error ? error.message : String(error);
+            logger.debug('[hapiMCP] Failed to inspect peer:', message);
+            return {
+                content: [{ type: 'text' as const, text: `Failed to inspect peer: ${message}` }],
+                isError: true
+            };
+        }
+    });
+
+    mcp.registerTool<any, any>('ping_peer', {
+        description: PING_PEER_TOOL_DESCRIPTION,
+        title: 'Ping Peer Session',
+        inputSchema: pingPeerInputSchema
+    }, async (args: { sessionIdPrefix: string; message: string }) => {
+        try {
+            const result = await pingPeer({
+                sessionIdPrefix: args.sessionIdPrefix,
+                message: args.message
+            });
+            return {
+                content: [{
+                    type: 'text' as const,
+                    text: `Delivered to ${result.sessionId}${result.resumed ? ' (resumed)' : ''} (${result.name})`
+                }],
+                isError: false
+            };
+        } catch (error) {
+            const message = error instanceof PingPeerError
+                ? error.message
+                : error instanceof Error ? error.message : String(error);
+            logger.debug('[hapiMCP] Failed to ping peer:', message);
+            return {
+                content: [{ type: 'text' as const, text: `Failed to ping peer: ${message}` }],
+                isError: true
             };
         }
     });
@@ -322,7 +464,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
 
     return {
         url: mcpUrl,
-        toolNames: ['change_title', 'display_image', 'verify_ssh_server_candidate'],
+        toolNames: [...HAPI_MCP_TOOL_NAMES],
         stop: () => {
             logger.debug('[hapiMCP] Stopping server');
             for (const mcp of mcps.values()) {

@@ -173,6 +173,10 @@ export const RenameSessionRequestSchema = z.object({
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
 
+export type CreateSideSessionResponse =
+    | { type: 'success'; sessionId: string; session?: Session }
+    | { type: 'error'; message: string; code?: string }
+
 /** Per-session legacy stream-json → ACP migrator request. See tiann/hapi#824. */
 export const CursorMigrateToAcpRequestSchema = z.object({
     /** Skip removing the legacy ~/.cursor/chats source store.db even after verify passes. */

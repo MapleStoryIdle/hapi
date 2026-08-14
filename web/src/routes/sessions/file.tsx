@@ -534,7 +534,7 @@ export default function FilePage() {
                             decodedContent ? (
                                 markdownFile && markdownMode === 'preview' ? (
                                     <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-4">
-                                        <MarkdownRenderer content={decodedContent} />
+                                        <MarkdownRenderer content={decodedContent} standalone />
                                     </div>
                                 ) : (
                                     <SourceCodeView

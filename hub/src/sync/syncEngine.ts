@@ -10,6 +10,7 @@
 import { AGENT_MESSAGE_PAYLOAD_TYPE, isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import type {
     AcceptRemoteServerCandidateRequest,
+    CreateSideSessionResponse,
     CursorMigrateOutcome,
     CursorMigrateToAcpRequest,
     LocalPreviewHttpRequest,
@@ -29,6 +30,7 @@ import type {
     RemoteServerCandidate,
     RemoteServerSnapshot,
     Session,
+    SideSessionMetadata,
     SyncEvent
 } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
@@ -40,6 +42,7 @@ import type { RpcRegistry } from '../socket/rpcRegistry'
 import type { SSEManager } from '../sse/sseManager'
 import { CursorLegacyMigrator, type CursorLegacyMigratorOptions } from '../cursor/cursorLegacyMigrator'
 import { basename } from 'node:path'
+import type { GeneratedImageStore } from '../generatedImages/store'
 
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
@@ -62,6 +65,8 @@ import {
     type RpcLocalPreviewHttpResponse,
     type RpcLocalPreviewProbeResponse,
     type RpcCursorModel,
+    type RpcCodexLocalSessionDataResponse,
+    type RpcCodexLocalSessionsResponse,
     type RpcOpencodeModel,
     type RpcPathExistsResponse,
     type RpcReadFileResponse,
@@ -88,6 +93,8 @@ export type {
     RpcLocalPreviewHttpResponse,
     RpcLocalPreviewProbeResponse,
     RpcCursorModel,
+    RpcCodexLocalSessionDataResponse,
+    RpcCodexLocalSessionsResponse,
     RpcOpencodeModel,
     RpcPathExistsResponse,
     RpcReadFileResponse,
@@ -253,6 +260,7 @@ export class SyncEngine {
     private readonly messageService: MessageService
     private readonly rpcGateway: RpcGateway
     private inactivityTimer: NodeJS.Timeout | null = null
+    private generatedImageCleanupTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP load/newSession complete). */
     private readonly sessionReadyIds = new Set<string>()
 
@@ -260,7 +268,8 @@ export class SyncEngine {
         private readonly store: Store,
         io: Server,
         rpcRegistry: RpcRegistry,
-        sseManager: SSEManager
+        sseManager: SSEManager,
+        private readonly generatedImageStore?: GeneratedImageStore
     ) {
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
         this.sessionCache = new SessionCache(store, this.eventPublisher)
@@ -274,6 +283,11 @@ export class SyncEngine {
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
+        if (this.generatedImageStore) {
+            this.cleanupExpiredGeneratedImages()
+            this.generatedImageCleanupTimer = setInterval(() => this.cleanupExpiredGeneratedImages(), 60 * 60 * 1000)
+            this.generatedImageCleanupTimer.unref()
+        }
     }
 
     stop(): void {
@@ -281,6 +295,16 @@ export class SyncEngine {
             clearInterval(this.inactivityTimer)
             this.inactivityTimer = null
         }
+        if (this.generatedImageCleanupTimer) {
+            clearInterval(this.generatedImageCleanupTimer)
+            this.generatedImageCleanupTimer = null
+        }
+    }
+
+    private cleanupExpiredGeneratedImages(): void {
+        void this.generatedImageStore?.pruneExpired().catch((error) => {
+            console.warn('[generated-images] Failed to prune expired images:', error)
+        })
     }
 
     subscribe(listener: SyncEventListener): () => void {
@@ -1042,7 +1066,8 @@ export class SyncEngine {
         resumeSessionId?: string,
         effort?: string,
         permissionMode?: PermissionMode,
-        serviceTier?: string
+        serviceTier?: string,
+        forkSessionId?: string
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         return await this.rpcGateway.spawnSession(
             machineId,
@@ -1056,8 +1081,118 @@ export class SyncEngine {
             resumeSessionId,
             effort,
             permissionMode,
-            serviceTier
+            serviceTier,
+            forkSessionId
         )
+    }
+
+    async createSideSession(sessionId: string, namespace: string): Promise<CreateSideSessionResponse> {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) {
+            return {
+                type: 'error',
+                message: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found',
+                code: access.reason === 'access-denied' ? 'access_denied' : 'session_not_found'
+            }
+        }
+
+        const parentSession = access.session
+        const metadata = parentSession.metadata
+        if (!parentSession.active) {
+            return { type: 'error', message: 'Parent session is not active', code: 'parent_inactive' }
+        }
+        if (metadata?.flavor !== 'codex') {
+            return { type: 'error', message: 'Side sessions are only supported for Codex sessions', code: 'unsupported_flavor' }
+        }
+        if (!metadata.path) {
+            return { type: 'error', message: 'Parent session metadata missing path', code: 'metadata_missing' }
+        }
+
+        const onlineMachines = this.machineCache.getOnlineMachinesByNamespace(namespace)
+        const targetMachine = (() => {
+            if (metadata.machineId) {
+                const exact = onlineMachines.find((machine) => machine.id === metadata.machineId)
+                if (exact) return exact
+            }
+            if (metadata.host) {
+                const hostMatch = onlineMachines.find((machine) => machine.metadata?.host === metadata.host)
+                if (hostMatch) return hostMatch
+            }
+            return null
+        })()
+
+        if (!targetMachine) {
+            return { type: 'error', message: 'No machine online for the parent session', code: 'no_machine_online' }
+        }
+
+        const forkResult = await (async () => {
+            try {
+                return await this.rpcGateway.forkCodexSideSession(access.sessionId)
+            } catch (error) {
+                if (error instanceof RpcTargetMissingError) {
+                    return {
+                        type: 'error' as const,
+                        message: 'This session is running on an older CLI process and does not support side sessions yet. Reopen the session, then try again.',
+                        code: 'fork_unavailable'
+                    }
+                }
+                return {
+                    type: 'error' as const,
+                    message: error instanceof Error ? error.message : 'Failed to create side session',
+                    code: 'fork_failed'
+                }
+            }
+        })()
+        if (forkResult.type !== 'success') {
+            return {
+                type: 'error',
+                message: forkResult.message,
+                code: forkResult.code ?? 'fork_failed'
+            }
+        }
+
+        const spawnResult = await this.rpcGateway.spawnSession(
+            targetMachine.id,
+            metadata.path,
+            'codex',
+            parentSession.model ?? undefined,
+            parentSession.modelReasoningEffort ?? undefined,
+            undefined,
+            undefined,
+            undefined,
+            forkResult.childCodexThreadId,
+            parentSession.effort ?? undefined,
+            parentSession.permissionMode ?? metadata.preferredPermissionMode,
+            parentSession.serviceTier ?? undefined
+        )
+        if (spawnResult.type !== 'success') {
+            return { type: 'error', message: spawnResult.message, code: 'spawn_failed' }
+        }
+
+        const becameActive = await this.waitForSessionActive(spawnResult.sessionId)
+        if (!becameActive) {
+            return { type: 'error', message: 'Side session failed to become active', code: 'spawn_failed' }
+        }
+
+        const sideSession: SideSessionMetadata = {
+            parentSessionId: access.sessionId,
+            parentCodexThreadId: forkResult.parentCodexThreadId,
+            childCodexThreadId: forkResult.childCodexThreadId,
+            createdAt: Date.now(),
+            mode: 'fork_context'
+        }
+        const parentTitle = metadata.name ?? metadata.summary?.text ?? 'Codex'
+        const childName = `侧边 · ${parentTitle}`.slice(0, 80)
+        try {
+            const childSession = await this.sessionCache.setSideSessionMetadata(spawnResult.sessionId, sideSession, childName)
+            return { type: 'success', sessionId: spawnResult.sessionId, session: childSession }
+        } catch (error) {
+            return {
+                type: 'error',
+                message: error instanceof Error ? error.message : 'Failed to persist side session metadata',
+                code: 'metadata_failed'
+            }
+        }
     }
 
     private resolveFlavor(session: Session): AgentFlavor {
@@ -1855,6 +1990,18 @@ export class SyncEngine {
         return await this.rpcGateway.listMachineDirectory(machineId, path)
     }
 
+    async listCodexLocalSessions(machineId: string, limit: number): Promise<RpcCodexLocalSessionsResponse> {
+        return await this.rpcGateway.listCodexLocalSessions(machineId, limit)
+    }
+
+    async readCodexLocalSession(
+        machineId: string,
+        sessionId: string,
+        options?: { before?: number; limit?: number }
+    ): Promise<RpcCodexLocalSessionDataResponse> {
+        return await this.rpcGateway.readCodexLocalSession(machineId, sessionId, options)
+    }
+
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {
         return await this.rpcGateway.getGitStatus(sessionId, cwd)
     }
@@ -1894,6 +2041,20 @@ export class SyncEngine {
     }
 
     async readGeneratedImageBytes(sessionId: string, imageId: string): Promise<RpcFileBytesResponse> {
+        const session = this.getSession(sessionId)
+        const reference = this.findGeneratedImageReference(sessionId, imageId)
+        if (session && reference && this.generatedImageStore) {
+            const stored = await this.generatedImageStore.read(session.namespace, imageId)
+            if (stored) {
+                return {
+                    success: true,
+                    bytes: stored.bytes,
+                    mimeType: stored.mimeType,
+                    fileName: stored.fileName
+                }
+            }
+        }
+
         let liveFailure: RpcFileBytesResponse | null = null
 
         try {
@@ -1908,7 +2069,6 @@ export class SyncEngine {
             }
         }
 
-        const reference = this.findGeneratedImageReference(sessionId, imageId)
         if (!reference) {
             return liveFailure ?? { success: false, error: 'Generated image not found' }
         }

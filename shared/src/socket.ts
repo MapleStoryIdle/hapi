@@ -114,6 +114,22 @@ export type BinaryFileUploadResponse = {
     error: string
 }
 
+/** A generated image copied from the CLI to durable hub storage. */
+export type GeneratedImageStoreRequest = {
+    sid: string
+    imageId: string
+    fileName: string
+    mimeType: string
+    bytes: Uint8Array | ArrayBuffer
+}
+
+export type GeneratedImageStoreResponse = {
+    success: true
+} | {
+    success: false
+    error: string
+}
+
 export const UpdateNewMessageBodySchema = z.object({
     t: z.literal('new-message'),
     sid: z.string(),
@@ -248,6 +264,7 @@ export interface ServerToClientEvents {
 
 export interface ClientToServerEvents {
     message: (data: { sid: string; message: unknown; localId?: string }) => void
+    'generated-image:store': (data: GeneratedImageStoreRequest, callback: (response: GeneratedImageStoreResponse) => void) => void
     'session-alive': (data: {
         sid: string
         time: number

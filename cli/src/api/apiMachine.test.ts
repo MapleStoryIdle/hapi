@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync, mkdirSync, realpathSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -19,7 +19,7 @@ vi.mock('../modules/common/opencodeModels', () => ({
 }))
 
 import { ApiMachineClient } from './apiMachine'
-import type { Machine } from './types'
+import type { Machine, MachineMetadata } from './types'
 
 function makeMachine(id: string): Machine {
     return {
@@ -44,6 +44,15 @@ async function callListOpencodeModels(client: ApiMachineClient, machineId: strin
     const raw = await manager.handleRequest({
         method: `${machineId}:listOpencodeModelsForCwd`,
         params: JSON.stringify({ cwd })
+    })
+    return JSON.parse(raw) as unknown
+}
+
+async function callMachineRpc(client: ApiMachineClient, machineId: string, method: string, params: unknown): Promise<unknown> {
+    const manager = (client as unknown as { rpcHandlerManager: { handleRequest: (req: { method: string; params: string }) => Promise<string> } }).rpcHandlerManager
+    const raw = await manager.handleRequest({
+        method: `${machineId}:${method}`,
+        params: JSON.stringify(params)
     })
     return JSON.parse(raw) as unknown
 }
@@ -142,6 +151,120 @@ describe('ApiMachineClient listOpencodeModelsForCwd handler', () => {
             rmSync(secondWorkspaceRoot, { recursive: true, force: true })
             client.shutdown()
         }
+    })
+})
+
+describe('ApiMachineClient Codex local transcript handlers', () => {
+    const originalCodexHome = process.env.CODEX_HOME
+    let codexHome: string
+
+    beforeEach(() => {
+        codexHome = mkdtempSync(join(tmpdir(), 'hapi-machine-codex-home-'))
+        process.env.CODEX_HOME = codexHome
+    })
+
+    afterEach(() => {
+        rmSync(codexHome, { recursive: true, force: true })
+        if (originalCodexHome === undefined) delete process.env.CODEX_HOME
+        else process.env.CODEX_HOME = originalCodexHome
+    })
+
+    it('reads summaries and context from the runner-local CODEX_HOME', async () => {
+        const machine = makeMachine('machine-codex')
+        const sessionId = '12345678-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '13')
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(join(transcriptDir, `rollout-${sessionId}.jsonl`), [
+            JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'developer instruction that must stay hidden' }] } }),
+            JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '# AGENTS.md instructions for /workspace/project\n\n<INSTRUCTIONS>Injected context</INSTRUCTIONS>' }] } }),
+            JSON.stringify({ timestamp: '2026-08-13T10:00:00.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'runner-local prompt' }] } }),
+            JSON.stringify({ timestamp: '2026-08-13T10:00:00.001Z', type: 'event_msg', payload: { type: 'user_message', message: 'runner-local prompt' } }),
+            JSON.stringify({ timestamp: '2026-08-13T10:00:01.001Z', type: 'event_msg', payload: { type: 'agent_message', message: 'runner-local answer' } }),
+            JSON.stringify({ timestamp: '2026-08-13T10:00:01.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'runner-local answer' }] } })
+        ].join('\n'))
+        const client = new ApiMachineClient('cli-token', machine)
+
+        try {
+            const listed = await callMachineRpc(client, machine.id, 'listCodexLocalSessions', { limit: 5 }) as { success: boolean; sessions?: Array<{ id: string }> }
+            expect(listed).toMatchObject({ success: true, sessions: [{ id: sessionId }] })
+
+            const read = await callMachineRpc(client, machine.id, 'readCodexLocalSession', { sessionId }) as {
+                success: boolean
+                data?: { context: unknown[]; importedMessages: unknown[] }
+            }
+            expect(read.success).toBe(true)
+            expect(read.data?.context).toEqual([
+                { role: 'user', text: 'runner-local prompt' },
+                { role: 'assistant', text: 'runner-local answer' }
+            ])
+            expect(read.data?.importedMessages).toHaveLength(2)
+        } finally {
+            client.shutdown()
+        }
+    })
+})
+
+describe('ApiMachineClient runner metadata sync', () => {
+    beforeEach(() => {
+        ioMock.mockReset()
+    })
+
+    it('backfills the runner Codex home when an existing machine reconnects', async () => {
+        const machine = makeMachine('machine-metadata')
+        machine.metadataVersion = 6
+        machine.metadata = {
+            host: 'Mac-mini.local',
+            platform: 'darwin',
+            happyCliVersion: '0.20.2',
+            homeDir: '/Users/dev',
+            happyHomeDir: '/Users/dev/.hapi',
+            happyLibDir: '/opt/hapi',
+            workspaceRoots: ['/Users/dev/IdeaProjects'],
+            displayName: 'My runner'
+        }
+        const advertisedMetadata: MachineMetadata = {
+            host: 'Mac-mini.local',
+            platform: 'darwin',
+            happyCliVersion: '0.20.2',
+            homeDir: '/Users/dev',
+            codexHome: '/Users/dev/.codex',
+            happyHomeDir: '/Users/dev/.hapi',
+            happyLibDir: '/opt/hapi',
+            workspaceRoots: ['/Users/dev/IdeaProjects']
+        }
+        const listeners = new Map<string, (...args: unknown[]) => void>()
+        const socket = {
+            on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+                listeners.set(event, listener)
+            }),
+            emit: vi.fn(),
+            emitWithAck: vi.fn(async (event: string, data: { runnerState?: unknown; metadata?: MachineMetadata }) => {
+                if (event === 'machine-update-state') {
+                    return { result: 'success', version: 2, runnerState: data.runnerState }
+                }
+                return { result: 'success', version: 7, metadata: data.metadata }
+            }),
+            close: vi.fn()
+        }
+        ioMock.mockReturnValue(socket)
+        const client = new ApiMachineClient('cli-token', machine, advertisedMetadata.workspaceRoots, advertisedMetadata)
+
+        client.connect()
+        listeners.get('connect')?.()
+        await vi.waitFor(() => {
+            expect(socket.emitWithAck).toHaveBeenCalledWith('machine-update-metadata', expect.objectContaining({
+                machineId: machine.id,
+                expectedVersion: 6,
+                metadata: expect.objectContaining(advertisedMetadata)
+            }))
+        })
+
+        expect(machine.metadata).toMatchObject({
+            codexHome: '/Users/dev/.codex',
+            displayName: 'My runner'
+        })
+        client.shutdown()
     })
 })
 

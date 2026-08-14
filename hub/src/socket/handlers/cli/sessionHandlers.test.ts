@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
+import { GeneratedImageStore } from '../../../generatedImages/store'
 import { Store, type StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import type { CliSocketWithData } from '../../socketTypes'
@@ -39,6 +43,45 @@ function redundantGoalStatusContent(message: string): unknown {
 }
 
 describe('cli session handlers', () => {
+    it('persists generated-image bytes before the agent process exits', async () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('generated-image-store-session', {}, null, 'default')
+        const socket = new FakeSocket()
+        const rootDir = await mkdtemp(join(tmpdir(), 'hapi-generated-image-handler-'))
+        const images = new GeneratedImageStore(rootDir)
+        const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            generatedImageStore: images
+        })
+
+        try {
+            const response = await new Promise<unknown>((resolve) => {
+                socket.trigger('generated-image:store', {
+                    sid: session.id,
+                    imageId: 'image-1',
+                    fileName: 'preview.png',
+                    mimeType: 'image/png',
+                    bytes: pngBytes
+                }, resolve)
+            })
+
+            expect(response).toEqual({ success: true })
+            await expect(images.read('default', 'image-1')).resolves.toEqual({
+                bytes: Buffer.from(pngBytes),
+                mimeType: 'image/png',
+                fileName: 'preview.png'
+            })
+        } finally {
+            await rm(rootDir, { recursive: true, force: true })
+        }
+    })
+
     it('drops redundant goal status events before persistence and broadcast', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('goal-status-session', {}, null, 'default')
@@ -64,6 +107,39 @@ describe('cli session handlers', () => {
         expect(store.messages.getMessages(session.id)).toHaveLength(0)
         expect(socket.roomEvents).toHaveLength(0)
         expect(webEvents).toHaveLength(0)
+    })
+
+    it('persists and broadcasts automation heartbeats for formatted web rendering', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('heartbeat-filter-session', {}, null, 'default')
+        const socket = new FakeSocket()
+        const webEvents: SyncEvent[] = []
+
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onWebappEvent: (event) => {
+                webEvents.push(event)
+            }
+        })
+
+        socket.trigger('message', {
+            sid: session.id,
+            message: {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>Nothing to report.</message> </heartbeat>'
+                }
+            }
+        })
+
+        expect(store.messages.getMessages(session.id)).toHaveLength(1)
+        expect(socket.roomEvents).toHaveLength(1)
+        expect(webEvents).toHaveLength(1)
     })
 
 

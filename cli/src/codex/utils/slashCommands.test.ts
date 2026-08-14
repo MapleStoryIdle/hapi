@@ -41,6 +41,9 @@ describe('resolveCodexSlashCommand', () => {
         expect(resolveCodexSlashCommand('/reasoning low', state)).toMatchObject({
             updates: { modelReasoningEffort: 'low' }
         });
+        expect(resolveCodexSlashCommand('/reasoning ultra', state)).toMatchObject({
+            updates: { modelReasoningEffort: 'ultra' }
+        });
         expect(resolveCodexSlashCommand('/permissions yolo', state)).toMatchObject({
             updates: { permissionMode: 'yolo' }
         });
@@ -129,8 +132,12 @@ describe('resolveCodexSlashCommand', () => {
         });
     });
 
+    it('lets /review pass through for native special-command handling', () => {
+        expect(resolveCodexSlashCommand('/review --base main', state)).toEqual({ kind: 'passthrough' });
+    });
+
     it('handles unsupported Codex built-in commands instead of sending them to the model', () => {
-        for (const command of ['diff', 'undo', 'review', 'compat']) {
+        for (const command of ['diff', 'undo', 'compat']) {
             expect(resolveCodexSlashCommand(`/${command}`, state)).toEqual({
                 kind: 'handled',
                 message: `/${command} is a Codex CLI command that is not supported in HAPI sessions yet.`

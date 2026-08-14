@@ -91,6 +91,9 @@ ${chalk.bold('Usage:')}
   hapi opencode          Start OpenCode ACP mode
   hapi resume [id]       Resume an existing HAPI session locally
   hapi mcp               Start MCP stdio bridge
+  hapi inspect-peer <id> Read another HAPI session (never resumes it)
+  hapi ping-peer <id> <message>
+                         Send a message to another HAPI session
   hapi connect           (not available in direct-connect mode)
   hapi notify            (not available in direct-connect mode)
   hapi hub               Start the API + web hub

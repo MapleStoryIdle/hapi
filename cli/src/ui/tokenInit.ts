@@ -10,6 +10,7 @@
 import * as readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import chalk from 'chalk'
+import { exportHapiHubApiUrl } from '@/agent/hapiSessionEnv'
 import { configuration } from '@/configuration'
 import { readSettings, updateSettings } from '@/persistence'
 import { initializeApiUrl } from '@/ui/apiUrlInit'
@@ -20,10 +21,12 @@ import { initializeApiUrl } from '@/ui/apiUrlInit'
  */
 export async function initializeToken(): Promise<void> {
     // Initialize API URL first (env > settings.json > default)
-    await initializeApiUrl()
+    const apiUrlSource = await initializeApiUrl()
+    const exportApiUrl = apiUrlSource !== 'default'
 
     // 1. Environment variable has highest priority (allows temporary override)
     if (configuration.cliApiToken) {
+        exportHapiHubApiUrl({ exportApiUrl })
         return
     }
 
@@ -31,6 +34,7 @@ export async function initializeToken(): Promise<void> {
     const settings = await readSettings()
     if (settings.cliApiToken) {
         configuration._setCliApiToken(settings.cliApiToken)
+        exportHapiHubApiUrl({ exportApiUrl })
         return
     }
 
@@ -48,6 +52,7 @@ export async function initializeToken(): Promise<void> {
         cliApiToken: token
     }))
     configuration._setCliApiToken(token)
+    exportHapiHubApiUrl({ exportApiUrl })
 }
 
 async function promptForToken(): Promise<string> {

@@ -8,14 +8,14 @@ export type ComposerReasoningEffortSourceOption = {
     name?: string
 }
 
-const CODEX_REASONING_EFFORT_PRESETS = ['low', 'medium', 'high', 'xhigh'] as const
-const CODEX_UNSUPPORTED_REASONING_EFFORTS = new Set(['max'])
+const CODEX_REASONING_EFFORT_PRESETS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const
 const CODEX_REASONING_EFFORT_LABELS: Record<string, string> = {
     low: 'Low',
     medium: 'Medium',
     high: 'High',
     xhigh: 'XHigh',
-    max: 'Max'
+    max: 'Max',
+    ultra: 'Ultra'
 }
 
 function normalizeCodexComposerReasoningEffort(effort?: string | null): string | null {
@@ -56,6 +56,36 @@ function buildOpencodeComposerReasoningEffortOptions(
     return options
 }
 
+function buildCodexComposerReasoningEffortOptions(
+    currentEffort: string | null,
+    dynamicOptions?: ComposerReasoningEffortSourceOption[] | null
+): CodexComposerReasoningEffortOption[] {
+    const advertisedOptions = dynamicOptions?.filter((option) => option.value.trim().length > 0) ?? []
+    const optionValues = new Set(advertisedOptions.map((option) => option.value))
+    const options: CodexComposerReasoningEffortOption[] = [{ value: null, label: 'Default' }]
+
+    if (currentEffort && !optionValues.has(currentEffort)) {
+        options.push({
+            value: currentEffort,
+            label: formatCodexReasoningEffortLabel(currentEffort)
+        })
+    }
+
+    if (advertisedOptions.length > 0) {
+        options.push(...advertisedOptions.map((option) => ({
+            value: option.value,
+            label: option.name ?? formatCodexReasoningEffortLabel(option.value)
+        })))
+        return options
+    }
+
+    options.push(...CODEX_REASONING_EFFORT_PRESETS.map((effort) => ({
+        value: effort,
+        label: CODEX_REASONING_EFFORT_LABELS[effort]
+    })))
+    return options
+}
+
 export function getCodexComposerReasoningEffortOptions(
     currentEffort?: string | null,
     flavor?: string | null,
@@ -70,25 +100,5 @@ export function getCodexComposerReasoningEffortOptions(
         return buildOpencodeComposerReasoningEffortOptions(normalizedCurrentEffort, dynamicOptions)
     }
 
-    const options: CodexComposerReasoningEffortOption[] = [
-        { value: null, label: 'Default' }
-    ]
-
-    if (
-        normalizedCurrentEffort
-        && !CODEX_UNSUPPORTED_REASONING_EFFORTS.has(normalizedCurrentEffort)
-        && !(CODEX_REASONING_EFFORT_PRESETS as readonly string[]).includes(normalizedCurrentEffort)
-    ) {
-        options.push({
-            value: normalizedCurrentEffort,
-            label: formatCodexReasoningEffortLabel(normalizedCurrentEffort)
-        })
-    }
-
-    options.push(...CODEX_REASONING_EFFORT_PRESETS.map((effort) => ({
-        value: effort,
-        label: CODEX_REASONING_EFFORT_LABELS[effort]
-    })))
-
-    return options
+    return buildCodexComposerReasoningEffortOptions(normalizedCurrentEffort, dynamicOptions)
 }

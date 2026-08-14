@@ -9,6 +9,7 @@ import { registerMachineHandlers } from './machineHandlers'
 import { registerRpcHandlers } from './rpcHandlers'
 import { registerSessionHandlers } from './sessionHandlers'
 import { cleanupTerminalHandlers, registerTerminalHandlers } from './terminalHandlers'
+import type { GeneratedImageStore } from '../../../generatedImages/store'
 
 type SessionAlivePayload = {
     sid: string
@@ -51,10 +52,11 @@ export type CliHandlersDeps = {
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
     onMessagesConsumed?: (sessionId: string) => void
+    generatedImageStore?: GeneratedImageStore
 }
 
 export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlersDeps): void {
-    const { io, store, rpcRegistry, terminalRegistry, onSessionAlive, onSessionReady, onSessionEnd, onMachineAlive, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued, onMessagesConsumed } = deps
+    const { io, store, rpcRegistry, terminalRegistry, onSessionAlive, onSessionReady, onSessionEnd, onMachineAlive, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued, onMessagesConsumed, generatedImageStore } = deps
     const terminalNamespace = io.of('/terminal')
     const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null
 
@@ -118,7 +120,8 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
         onBackgroundTaskDelta,
         onSessionActivity,
         onSweepImmediateQueued,
-        onMessagesConsumed
+        onMessagesConsumed,
+        generatedImageStore
     })
     registerMachineHandlers(socket, {
         store,

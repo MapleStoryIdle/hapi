@@ -35,8 +35,8 @@ async function runRpc<T>(fn: () => Promise<T>): Promise<T | { success: false; er
     }
 }
 
-// A generated-image id represents a validated local-file snapshot. Keep browser caching enabled
-// so remounts don't force a CLI RPC; the CLI rejects uncached requests if the source file changed.
+// Generated images are copied to durable hub storage. Keep browser caching enabled because an
+// image id is immutable and remounts should not require a storage read or CLI round-trip.
 const GENERATED_IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable'
 const SESSION_FILE_BYTES_CACHE_CONTROL = 'private, max-age=0, must-revalidate'
 
@@ -225,8 +225,7 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             return c.json({ success: false, error: result.error ?? 'Generated image not found' }, 404)
         }
 
-        // Cache aggressively in the browser. HAPI no longer stores an extra image copy on disk;
-        // uncached loads read the original file through the CLI path registry.
+        // Cache aggressively in the browser: persisted generated-image ids are immutable.
         return c.body(Uint8Array.from(result.bytes), 200, {
             'Content-Type': result.mimeType ?? 'application/octet-stream',
             'Content-Disposition': inlineContentDisposition(result.fileName, 'generated-image'),

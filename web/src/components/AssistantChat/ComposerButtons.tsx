@@ -1,5 +1,5 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
-import { Filter, Puzzle, Search } from 'lucide-react'
+import { Filter, Puzzle, Search, Zap } from 'lucide-react'
 import type { PermissionMode, Session, SkillSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import type { ConversationStatus } from '@/realtime/types'
@@ -8,7 +8,7 @@ import { ScheduleIcon } from '@/components/icons'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
-import { RemoteServerContextMenuContent, ServerIcon, useRemoteServerContextSelection } from '@/components/RemoteServers'
+import { RemoteServerContextMenuContent, ServerIcon } from '@/components/RemoteServers'
 
 function ChevronIcon() {
     return <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 3.75L5 6.25L7.5 3.75" /></svg>
@@ -131,7 +131,7 @@ function AttachmentIcon() {
     )
 }
 
-function PlanModeIcon() {
+export function PlanModeIcon() {
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -150,7 +150,7 @@ function PlanModeIcon() {
     )
 }
 
-function GoalModeIcon() {
+export function GoalModeIcon() {
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -727,7 +727,7 @@ function ContextUsageIndicator(props: {
         <button
             ref={props.buttonRef}
             type="button"
-            className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--app-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+            className={`flex h-[42px] w-[34px] shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--app-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
                 props.active ? 'bg-[var(--app-bg)]' : ''
             }`}
             aria-label={props.label}
@@ -759,11 +759,21 @@ export function getRemoteServerButtonAlias(server: { alias?: string | null; name
     return alias && alias.length > 0 ? alias : server.name
 }
 
-type SkillPickerTab = 'custom' | 'other'
+type SkillPickerGroup = 'project' | 'user' | 'plugin' | 'system'
 const LARK_SKILL_PREFIX = 'lark-'
 
-function getSkillPickerTab(skill: SkillSummary): SkillPickerTab {
-    return skill.scope === undefined || skill.scope === 'project' || skill.scope === 'user' ? 'custom' : 'other'
+function getSkillPickerGroup(skill: SkillSummary): SkillPickerGroup {
+    switch (skill.scope) {
+        case 'project':
+        case 'user':
+        case 'plugin':
+        case 'system':
+            return skill.scope
+        case 'admin':
+            return 'system'
+        default:
+            return 'user'
+    }
 }
 
 function getSkillScopeLabel(
@@ -784,42 +794,6 @@ function getSkillScopeLabel(
         default:
             return t('composer.skills.scope.user')
     }
-}
-
-function RemoteServerSelectedButton(props: {
-    context: {
-        api: ApiClient
-        session: Session
-        onChanged: () => void
-    }
-    buttonRef: RefObject<HTMLButtonElement | null>
-    active: boolean
-    controlsDisabled: boolean
-    onClick: () => void
-}) {
-    const { selected } = useRemoteServerContextSelection(props.context.api, props.context.session)
-    if (!selected) return null
-
-    const alias = getRemoteServerButtonAlias(selected)
-    const details = `${selected.name} · ${selected.user}@${selected.host}`
-
-    return (
-        <button
-            ref={props.buttonRef}
-            type="button"
-            aria-label={`远程服务器: ${alias}`}
-            title={`远程服务器: ${alias} (${details})`}
-            disabled={props.controlsDisabled}
-            className={`flex h-8 max-w-[6.5rem] shrink-0 items-center rounded-full border border-[var(--app-border)] px-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                props.active
-                    ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
-                    : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]/75 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
-            }`}
-            onClick={props.onClick}
-        >
-            <span className="min-w-0 truncate">{alias}</span>
-        </button>
-    )
 }
 
 export function UnifiedButton(props: {
@@ -990,6 +964,7 @@ export function ComposerButtons(props: {
     settingsLabel?: string
     settingsModelLabel?: string
     settingsReasoningLabel?: string | null
+    fastModeActive?: boolean
     settingsOpen?: boolean
     contextUsagePercent?: number | null
     contextUsageLabel?: string
@@ -1065,10 +1040,8 @@ export function ComposerButtons(props: {
     const [showSkillMenu, setShowSkillMenu] = useState(false)
     const [showRemoteServerMenu, setShowRemoteServerMenu] = useState(false)
     const [showContextUsageMenu, setShowContextUsageMenu] = useState(false)
-    const [skillTab, setSkillTab] = useState<SkillPickerTab>('custom')
     const [skillQuery, setSkillQuery] = useState('')
     const [hideLarkSkills, setHideLarkSkills] = useState(true)
-    const [remoteServerAnchor, setRemoteServerAnchor] = useState<'tools' | 'button'>('tools')
     const [permissionAnchor, setPermissionAnchor] = useState<'tools' | 'button'>('tools')
     const [skillAnchor, setSkillAnchor] = useState<'tools' | 'button'>('button')
     const [contextUsageAnchor, setContextUsageAnchor] = useState<'tools' | 'button'>('button')
@@ -1081,7 +1054,6 @@ export function ComposerButtons(props: {
     const toolsButtonRef = useRef<HTMLButtonElement>(null)
     const permissionButtonRef = useRef<HTMLButtonElement>(null)
     const skillButtonRef = useRef<HTMLButtonElement>(null)
-    const remoteServerButtonRef = useRef<HTMLButtonElement>(null)
     const contextUsageButtonRef = useRef<HTMLButtonElement>(null)
     const hasRemoteServerContext = Boolean(props.remoteServerContext)
 
@@ -1093,7 +1065,6 @@ export function ComposerButtons(props: {
         && props.pendingSchedule == null
     const showRunningStopButton = props.showAbortButton && (!props.abortDisabled || props.isAborting)
     const showScratchlistStatus = Boolean(props.onScratchlistToggle && (props.scratchlistMode || scratchlistCount > 0))
-    const showPlanStatus = Boolean(props.planModeActive && props.onPlanModeToggle)
     const showScheduleStatus = Boolean(hasSchedule && props.onSchedule)
     const hasContextUsageControl = props.contextUsagePercent != null
     const skills = props.skills ?? []
@@ -1299,7 +1270,6 @@ export function ComposerButtons(props: {
                                 setShowSkillMenu(false)
                                 setShowSchedulePicker(false)
                                 setShowContextUsageMenu(false)
-                                setRemoteServerAnchor('tools')
                                 setShowRemoteServerMenu(true)
                             }}
                             className={toolMenuItemClass}
@@ -1421,24 +1391,56 @@ export function ComposerButtons(props: {
     const filteredSkills = hideLarkSkills
         ? skills.filter((skill) => !skill.name.startsWith(LARK_SKILL_PREFIX))
         : skills
-    const customSkillCount = filteredSkills.filter((skill) => getSkillPickerTab(skill) === 'custom').length
-    const otherSkillCount = Math.max(0, filteredSkills.length - customSkillCount)
     const normalizedSkillQuery = skillQuery.trim().toLowerCase()
     const visibleSkills = filteredSkills
-        .filter((skill) => getSkillPickerTab(skill) === skillTab)
         .filter((skill) => {
             if (!normalizedSkillQuery) return true
             return skill.name.toLowerCase().includes(normalizedSkillQuery)
                 || (skill.description ?? '').toLowerCase().includes(normalizedSkillQuery)
         })
         .sort((a, b) => a.name.localeCompare(b.name))
+    const skillSections = [
+        { key: 'project', label: t('composer.skills.scope.project') },
+        { key: 'user', label: t('composer.skills.scope.user') },
+        { key: 'plugin', label: t('composer.skills.scope.plugin') },
+        { key: 'system', label: t('composer.skills.scope.system') },
+    ].map((section) => ({
+        ...section,
+        skills: visibleSkills.filter((skill) => getSkillPickerGroup(skill) === section.key),
+    })).filter((section) => section.skills.length > 0)
 
-    useEffect(() => {
-        if (!showSkillMenu) return
-        if (skillTab !== 'custom') return
-        if (customSkillCount > 0 || otherSkillCount === 0) return
-        setSkillTab('other')
-    }, [customSkillCount, otherSkillCount, showSkillMenu, skillTab])
+    const renderSkillOption = (skill: SkillSummary) => (
+        <button
+            key={`${skill.scope ?? 'unknown'}:${skill.name}`}
+            type="button"
+            className="group flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+                props.onSkillSelect?.(skill)
+                setShowSkillMenu(false)
+                setSkillQuery('')
+            }}
+        >
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-[var(--app-link)]">
+                <Puzzle className="h-[17px] w-[17px]" />
+            </span>
+            <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-semibold text-[var(--app-fg)]">
+                        {skill.name}
+                    </span>
+                    <span className="shrink-0 rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--app-hint)]">
+                        {getSkillScopeLabel(skill, t)}
+                    </span>
+                </span>
+                {skill.description ? (
+                    <span className="mt-0.5 block truncate text-xs leading-4 text-[var(--app-hint)]">
+                        {skill.description}
+                    </span>
+                ) : null}
+            </span>
+        </button>
+    )
 
     const skillMenuContent = (
         <div className="py-3">
@@ -1465,11 +1467,6 @@ export function ComposerButtons(props: {
                     >
                         <Filter className="h-3.5 w-3.5" />
                     </button>
-                    {filteredSkills.length > 0 ? (
-                        <span className="text-xs font-medium text-[var(--app-hint)]">
-                            {t('composer.skills.count', { count: filteredSkills.length })}
-                        </span>
-                    ) : null}
                 </div>
             </div>
 
@@ -1491,29 +1488,7 @@ export function ComposerButtons(props: {
                 </label>
             </div>
 
-            <div className="mx-3 mt-3 grid grid-cols-2 gap-1 rounded-lg bg-[var(--app-subtle-bg)] p-1">
-                {([
-                    ['custom', t('composer.skills.customTab'), customSkillCount],
-                    ['other', t('composer.skills.otherTab'), otherSkillCount],
-                ] as const).map(([tab, label, count]) => (
-                    <button
-                        key={tab}
-                        type="button"
-                        className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                            skillTab === tab
-                                ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm'
-                                : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
-                        }`}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => setSkillTab(tab)}
-                    >
-                        {label}
-                        <span className="ml-1 text-xs opacity-70">{count}</span>
-                    </button>
-                ))}
-            </div>
-
-            <div className="mt-2 max-h-[280px] overflow-y-auto px-2">
+            <div className="mt-3 max-h-[280px] overflow-y-auto px-2">
                 {props.skillsLoading ? (
                     <div className="px-3 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('composer.skills.loading')}
@@ -1522,47 +1497,23 @@ export function ComposerButtons(props: {
                     <div className="px-3 py-8 text-center text-sm text-red-500">
                         {props.skillsError}
                     </div>
-                ) : visibleSkills.length === 0 ? (
+                ) : skillSections.length === 0 ? (
                     <div className="px-3 py-8 text-center text-sm text-[var(--app-hint)]">
-                        {normalizedSkillQuery
-                            ? t('composer.skills.noResults')
-                            : skillTab === 'custom'
-                                ? t('composer.skills.emptyCustom')
-                                : t('composer.skills.emptyOther')}
+                        {t('composer.skills.noResults')}
                     </div>
                 ) : (
-                    visibleSkills.map((skill) => (
-                        <button
-                            key={`${skill.scope ?? 'unknown'}:${skill.name}`}
-                            type="button"
-                            className="group flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => {
-                                props.onSkillSelect?.(skill)
-                                setShowSkillMenu(false)
-                                setSkillQuery('')
-                            }}
-                        >
-                            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-[var(--app-link)]">
-                                <Puzzle className="h-[17px] w-[17px]" />
-                            </span>
-                            <span className="min-w-0 flex-1">
-                                <span className="flex min-w-0 items-center gap-2">
-                                    <span className="truncate text-sm font-semibold text-[var(--app-fg)]">
-                                        {skill.name}
-                                    </span>
-                                    <span className="shrink-0 rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--app-hint)]">
-                                        {getSkillScopeLabel(skill, t)}
-                                    </span>
-                                </span>
-                                {skill.description ? (
-                                    <span className="mt-0.5 block truncate text-xs leading-4 text-[var(--app-hint)]">
-                                        {skill.description}
-                                    </span>
-                                ) : null}
-                            </span>
-                        </button>
-                    ))
+                    <div className="space-y-3 pb-1">
+                        {skillSections.map((section) => (
+                            <div key={section.key}>
+                                <div className="px-3 pb-1 text-[11px] font-medium text-[var(--app-hint)]">
+                                    {section.label}
+                                </div>
+                                <div className="space-y-0.5">
+                                    {section.skills.map(renderSkillOption)}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 )}
             </div>
         </div>
@@ -1735,7 +1686,7 @@ export function ComposerButtons(props: {
     }
 
     return (
-        <div ref={toolbarRef} className="flex flex-nowrap items-center gap-1 px-2 pb-2">
+        <div ref={toolbarRef} className="flex flex-nowrap items-center gap-0.5 pb-2 pl-1 pr-2">
             <button
                 ref={toolsButtonRef}
                 type="button"
@@ -1771,7 +1722,7 @@ export function ComposerButtons(props: {
                     aria-label={`${t('misc.permissionMode')}: ${permissionLabel}`}
                     title={`${t('misc.permissionMode')}: ${permissionLabel}`}
                     disabled={props.controlsDisabled}
-                    className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[22px] [&_svg]:w-[22px] ${
+                    className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:h-[25px] [&_svg]:w-[25px] ${
                         showPermissionMenu && permissionAnchor === 'button'
                             ? `bg-[var(--app-bg)] ${getPermissionToneClass(props.permissionMode)}`
                             : `${getPermissionToneClass(props.permissionMode)} hover:bg-[var(--app-bg)]`
@@ -1818,38 +1769,6 @@ export function ComposerButtons(props: {
 
             <div className="flex min-w-0 flex-1 items-center overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 <div ref={statusControlsRef} className="flex w-max items-center gap-1">
-                    {props.remoteServerContext ? (
-                        <RemoteServerSelectedButton
-                            context={props.remoteServerContext}
-                            buttonRef={remoteServerButtonRef}
-                            active={showRemoteServerMenu && remoteServerAnchor === 'button'}
-                            controlsDisabled={props.controlsDisabled}
-                            onClick={() => {
-                                setRemoteServerAnchor('button')
-                                setShowRemoteServerMenu((open) => !(open && remoteServerAnchor === 'button'))
-                                setShowToolsMenu(false)
-                                setShowPermissionMenu(false)
-                                setShowSkillMenu(false)
-                                setShowSchedulePicker(false)
-                                setShowContextUsageMenu(false)
-                            }}
-                        />
-                    ) : null}
-
-                    {showPlanStatus ? (
-                        <button
-                            type="button"
-                            aria-label={t('tool.exitPlan')}
-                            title={t('tool.exitPlan')}
-                            disabled={props.controlsDisabled}
-                            className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-[#EAF2FF] px-2.5 text-xs font-semibold text-[#1D4ED8] transition-colors hover:bg-[#DBEAFE] disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/35 dark:bg-blue-500/15 dark:text-blue-300 [&_svg]:h-4 [&_svg]:w-4"
-                            onClick={props.onPlanModeToggle}
-                        >
-                            <PlanModeIcon />
-                            <span>{t('composer.planMode')}</span>
-                        </button>
-                    ) : null}
-
                     {showScheduleStatus ? (
                         <button
                             type="button"
@@ -1884,7 +1803,7 @@ export function ComposerButtons(props: {
                 </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex shrink-0 items-center gap-0.5">
                 {showInlineContextUsageButton ? (
                     <ContextUsageIndicator
                         percentage={props.contextUsagePercent}
@@ -1904,7 +1823,7 @@ export function ComposerButtons(props: {
                     />
                 ) : null}
 
-                <div ref={requiredControlsRef} className="flex shrink-0 items-center gap-1">
+                <div ref={requiredControlsRef} className="flex shrink-0 items-center gap-0.5">
                     {props.piModelLabel ? (
                         <button
                             type="button"
@@ -1944,6 +1863,14 @@ export function ComposerButtons(props: {
                             }}
                             disabled={props.controlsDisabled}
                         >
+                            {props.fastModeActive ? (
+                                <Zap
+                                    aria-hidden="true"
+                                    data-testid="composer-fast-mode-icon"
+                                    className="h-4 w-4 shrink-0 text-[#34C759]"
+                                    strokeWidth={2.4}
+                                />
+                            ) : null}
                             {props.settingsModelLabel ? (
                                 <>
                                     <span className="min-w-0 truncate font-bold text-[var(--app-fg)]">{props.settingsModelLabel}</span>
@@ -2053,7 +1980,7 @@ export function ComposerButtons(props: {
 
             {showRemoteServerMenu && props.remoteServerContext ? (
                 <ToolbarMenu
-                    anchorRef={remoteServerAnchor === 'button' ? remoteServerButtonRef : toolsButtonRef}
+                    anchorRef={toolsButtonRef}
                     align="left"
                     width={300}
                     maxHeight={320}

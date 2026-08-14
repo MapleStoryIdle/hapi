@@ -15,6 +15,10 @@ const {
     readSettingsMock: vi.fn()
 }))
 
+vi.mock('@/agent/hapiSessionEnv', () => ({
+    exportHapiSessionEnv: vi.fn()
+}))
+
 vi.mock('@/api/api', () => ({
     ApiClient: {
         create: async () => ({
@@ -47,7 +51,7 @@ vi.mock('@/ui/logger', () => ({
     }
 }))
 
-import { bootstrapExistingSession, buildSessionMetadata } from './sessionFactory'
+import { bootstrapExistingSession, buildMachineMetadata, buildSessionMetadata } from './sessionFactory'
 
 function createSession(): Session {
     return {
@@ -192,5 +196,16 @@ describe('bootstrapExistingSession', () => {
         })
 
         expect(metadata.capabilities?.terminal).toBe(true)
+    })
+
+    it('advertises the absolute CODEX_HOME for native fork source affinity', () => {
+        const originalCodexHome = process.env.CODEX_HOME
+        process.env.CODEX_HOME = '/tmp/hapi-test-codex-home'
+        try {
+            expect(buildMachineMetadata().codexHome).toBe('/tmp/hapi-test-codex-home')
+        } finally {
+            if (originalCodexHome === undefined) delete process.env.CODEX_HOME
+            else process.env.CODEX_HOME = originalCodexHome
+        }
     })
 })

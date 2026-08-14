@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
 import {
+    buildSessionTree,
     deduplicateSessionsByAgentId,
     expandSelectedSessionCollapseOverrides,
     filterActiveSessionsOnly,
@@ -9,9 +10,11 @@ import {
     getSessionWorkspaceDirectory,
     getSessionWorkspaceTitle,
     getVisibleSessionPreview,
+    getVisibleSessionTreePreview,
     isSidebarEmptySessionStub,
     normalizeSearch,
     prepareSidebarSessions,
+    sessionTreeNodeContainsSession,
     sessionMatchesQuery,
     shouldShowSessionInSidebar
 } from './SessionList'
@@ -333,6 +336,73 @@ describe('getVisibleSessionPreview', () => {
         }))
 
         expect(getVisibleSessionPreview(sessions, { expanded: true, limit: 2 })).toHaveLength(4)
+    })
+})
+
+describe('side session tree helpers', () => {
+    it('nests side sessions under their parent session', () => {
+        const sessions = [
+            makeSession({
+                id: 'parent',
+                metadata: { path: '/work/hapi', name: 'Parent' },
+                updatedAt: 100
+            }),
+            makeSession({
+                id: 'side',
+                metadata: {
+                    path: '/work/hapi',
+                    name: 'Side',
+                    sideSession: {
+                        parentSessionId: 'parent',
+                        parentCodexThreadId: 'parent-thread',
+                        childCodexThreadId: 'child-thread',
+                        createdAt: 1,
+                        mode: 'fork_context'
+                    }
+                },
+                updatedAt: 90
+            }),
+            makeSession({
+                id: 'standalone',
+                metadata: { path: '/work/hapi', name: 'Standalone' },
+                updatedAt: 80
+            })
+        ]
+
+        const tree = buildSessionTree(sessions)
+
+        expect(tree.map(node => node.session.id)).toEqual(['parent', 'standalone'])
+        expect(tree[0]?.sideSessions.map(node => node.session.id)).toEqual(['side'])
+        expect(sessionTreeNodeContainsSession(tree[0]!, 'side')).toBe(true)
+    })
+
+    it('keeps the parent visible when the selected side session is outside the preview limit', () => {
+        const nodes = buildSessionTree([
+            makeSession({ id: 'older-1', metadata: { path: '/work/hapi' }, updatedAt: 100 }),
+            makeSession({ id: 'older-2', metadata: { path: '/work/hapi' }, updatedAt: 90 }),
+            makeSession({ id: 'parent', metadata: { path: '/work/hapi' }, updatedAt: 80 }),
+            makeSession({
+                id: 'selected-side',
+                metadata: {
+                    path: '/work/hapi',
+                    sideSession: {
+                        parentSessionId: 'parent',
+                        childCodexThreadId: 'child-thread',
+                        createdAt: 1,
+                        mode: 'fork_context'
+                    }
+                },
+                updatedAt: 70
+            })
+        ])
+
+        const preview = getVisibleSessionTreePreview(nodes, {
+            selectedSessionId: 'selected-side',
+            limit: 2
+        })
+
+        expect(preview.map(node => node.session.id)).toEqual(['older-1', 'parent'])
+        expect(preview[1]?.sideSessions.map(node => node.session.id)).toEqual(['selected-side'])
     })
 })
 

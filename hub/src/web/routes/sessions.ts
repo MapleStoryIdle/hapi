@@ -90,8 +90,20 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const getPendingCount = (s: Session) => s.agentState?.requests ? Object.keys(s.agentState.requests).length : 0
 
         const namespace = c.get('namespace')
-        const sessionRecords = engine.getSessionsByNamespace(namespace)
+        const limitRaw = c.req.query('limit')
+        const parsedLimit = limitRaw === undefined ? null : Number(limitRaw)
+        const limit = parsedLimit !== null && Number.isFinite(parsedLimit)
+            ? Math.min(500, Math.max(1, Math.floor(parsedLimit)))
+            : null
+        const order = c.req.query('order')
+
+        let sessionRecords = engine.getSessionsByNamespace(namespace)
             .sort((a, b) => {
+                // A2A 的 peer discovery 需要按最近活动排序后再截断，不能让 active
+                // 优先级把最近已结束但可恢复的协作会话排除在列表之外。
+                if (order === 'updatedAt') {
+                    return b.updatedAt - a.updatedAt
+                }
                 // Active sessions first
                 if (a.active !== b.active) {
                     return a.active ? -1 : 1
@@ -105,6 +117,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 // Then by updatedAt
                 return b.updatedAt - a.updatedAt
             })
+        if (limit !== null) {
+            sessionRecords = sessionRecords.slice(0, limit)
+        }
         const scheduledCounts = engine.getFutureScheduledMessageCounts(sessionRecords.map((session) => session.id))
         const nextScheduledAt = engine.getNextScheduledAtBySessionIds(sessionRecords.map((session) => session.id))
         const sessions = sessionRecords.map((session) => {
@@ -197,6 +212,38 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         return c.json({ type: 'success', sessionId: result.sessionId })
+    })
+
+    app.post('/sessions/:id/side-session', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const namespace = c.get('namespace')
+        const result = await engine.createSideSession(sessionResult.sessionId, namespace)
+        if (result.type === 'error') {
+            const status = result.code === 'no_machine_online' ? 503
+                : result.code === 'access_denied' ? 403
+                    : result.code === 'session_not_found' ? 404
+                        : result.code === 'unsupported_flavor' ? 400
+                            : result.code === 'parent_inactive'
+                                || result.code === 'busy'
+                                || result.code === 'metadata_missing'
+                                || result.code === 'fork_unavailable'
+                                || result.code === 'fork_failed'
+                                || result.code === 'missing_model'
+                                || result.code === 'thread_unavailable' ? 409
+                                : 500
+            return c.json({ error: result.message, code: result.code }, status)
+        }
+
+        return c.json(result)
     })
 
     app.post('/sessions/:id/reopen', async (c) => {

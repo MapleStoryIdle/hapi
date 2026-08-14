@@ -26,8 +26,34 @@ const AUTO_APPROVE_TOOL_NAME_HINTS = [
     'think',
     'save_memory'
 ];
+// list_peers 只返回有限的同 namespace 会话目录，可在只读模式自动允许。
+const AUTO_APPROVE_EXACT_TOOL_NAMES = new Set([
+    'list_peers',
+    'hapi_list_peers',
+    'happy__list_peers',
+    'mcp__hapi__list_peers',
+    'list peer sessions'
+]);
+// inspect_peer 会泄露另一会话历史，ping_peer 会 resume 并写入另一会话；二者
+// 必须像写操作一样经过权限门控，尤其不能被 read-only 自动批准。
+const SENSITIVE_PEER_TOOL_HINTS = [
+    'inspect_peer',
+    'inspect-peer',
+    'inspect peer',
+    'ping_peer',
+    'ping-peer',
+    'ping peer'
+];
 const AUTO_APPROVE_TOOL_ID_HINTS = ['change_title', 'save_memory'];
-const AUTO_APPROVE_WRITE_TOOL_HINTS = ['write', 'edit', 'create', 'delete', 'patch', 'fs-edit'];
+const AUTO_APPROVE_WRITE_TOOL_HINTS = [
+    'write',
+    'edit',
+    'create',
+    'delete',
+    'patch',
+    'fs-edit',
+    ...SENSITIVE_PEER_TOOL_HINTS
+];
 
 export function resolveToolAutoApprovalDecision(
     mode: PermissionMode | undefined,
@@ -45,7 +71,16 @@ export function resolveToolAutoApprovalDecision(
     const lowerId = toolCallId.toLowerCase();
     const decisionForMode: AutoApprovalDecision = mode === 'yolo' ? 'approved_for_session' : 'approved';
 
-    if (rules.alwaysToolNameHints.some((name) => lowerTool.includes(name))) {
+    // A2A inspection exposes another session's history and ping can wake and
+    // write to another session. This boundary wins over broad yolo modes.
+    if (SENSITIVE_PEER_TOOL_HINTS.some((name) => lowerTool.includes(name))) {
+        return null;
+    }
+
+    if (
+        AUTO_APPROVE_EXACT_TOOL_NAMES.has(lowerTool)
+        || rules.alwaysToolNameHints.some((name) => lowerTool.includes(name))
+    ) {
         return decisionForMode;
     }
 

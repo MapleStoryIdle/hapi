@@ -8,7 +8,9 @@ describe('getCodexComposerReasoningEffortOptions', () => {
             { value: 'low', label: 'Low' },
             { value: 'medium', label: 'Medium' },
             { value: 'high', label: 'High' },
-            { value: 'xhigh', label: 'XHigh' }
+            { value: 'xhigh', label: 'XHigh' },
+            { value: 'max', label: 'Max' },
+            { value: 'ultra', label: 'Ultra' }
         ])
     })
 
@@ -19,17 +21,20 @@ describe('getCodexComposerReasoningEffortOptions', () => {
             { value: 'low', label: 'Low' },
             { value: 'medium', label: 'Medium' },
             { value: 'high', label: 'High' },
-            { value: 'xhigh', label: 'XHigh' }
+            { value: 'xhigh', label: 'XHigh' },
+            { value: 'max', label: 'Max' },
+            { value: 'ultra', label: 'Ultra' }
         ])
     })
 
-    it('does not preserve max as a selectable Codex value', () => {
-        expect(getCodexComposerReasoningEffortOptions('max', 'codex')).toEqual([
+    it('uses the selected Codex model\'s advertised reasoning efforts', () => {
+        expect(getCodexComposerReasoningEffortOptions('ultra', 'codex', [
+            { value: 'low', name: 'Fast' },
+            { value: 'ultra', name: 'Ultra' }
+        ])).toEqual([
             { value: null, label: 'Default' },
-            { value: 'low', label: 'Low' },
-            { value: 'medium', label: 'Medium' },
-            { value: 'high', label: 'High' },
-            { value: 'xhigh', label: 'XHigh' }
+            { value: 'low', label: 'Fast' },
+            { value: 'ultra', label: 'Ultra' }
         ])
     })
 

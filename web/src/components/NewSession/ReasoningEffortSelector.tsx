@@ -5,6 +5,7 @@ import { useTranslation } from '@/lib/use-translation'
 export function ReasoningEffortSelector(props: {
     agent: AgentType
     value: NewSessionReasoningEffort
+    codexOptions?: { value: NewSessionReasoningEffort; label: string }[]
     isDisabled: boolean
     inline?: boolean
     onChange: (value: NewSessionReasoningEffort) => void
@@ -17,7 +18,7 @@ export function ReasoningEffortSelector(props: {
 
     const options = props.agent === 'opencode'
         ? OPENCODE_REASONING_EFFORT_OPTIONS
-        : CODEX_REASONING_EFFORT_OPTIONS
+        : props.codexOptions ?? CODEX_REASONING_EFFORT_OPTIONS
 
     return (
         <div className={props.inline

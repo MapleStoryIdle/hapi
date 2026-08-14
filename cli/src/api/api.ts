@@ -261,7 +261,7 @@ export class ApiClient {
         return new ApiSessionClient(this.token, session)
     }
 
-    machineSyncClient(machine: Machine, options?: { workspaceRoots?: string[] }): ApiMachineClient {
-        return new ApiMachineClient(this.token, machine, options?.workspaceRoots)
+    machineSyncClient(machine: Machine, options?: { workspaceRoots?: string[]; advertisedMetadata?: MachineMetadata }): ApiMachineClient {
+        return new ApiMachineClient(this.token, machine, options?.workspaceRoots, options?.advertisedMetadata)
     }
 }

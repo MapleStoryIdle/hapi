@@ -71,12 +71,46 @@ describe('codexCommand', () => {
         })
     })
 
+    it('parses a native Codex fork target', async () => {
+        await codexCommand.run(createCommandContext(['fork', 'session-123']))
+
+        expect(assertCodexLocalSupportedMock).toHaveBeenCalledOnce()
+        expect(runCodexMock).toHaveBeenCalledWith({
+            forkSessionId: 'session-123'
+        })
+    })
+
+    it('prints native fork help without starting an Agent', async () => {
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+        try {
+            await codexCommand.run(createCommandContext(['--help']))
+            expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('codex fork <source-session-id>'))
+            expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("selected runner's own CODEX_HOME"))
+            expect(runCodexMock).not.toHaveBeenCalled()
+            expect(initializeTokenMock).not.toHaveBeenCalled()
+        } finally {
+            logSpy.mockRestore()
+        }
+    })
+
     it('skips the local version check for runner-started sessions', async () => {
         await codexCommand.run(createCommandContext(['--started-by', 'runner']))
 
         expect(assertCodexLocalSupportedMock).not.toHaveBeenCalled()
         expect(runCodexMock).toHaveBeenCalledWith({
             startedBy: 'runner'
+        })
+    })
+
+    it.each(['max', 'ultra'] as const)('accepts %s as a Codex reasoning effort', async (modelReasoningEffort) => {
+        await codexCommand.run(createCommandContext([
+            '--started-by', 'runner',
+            '--model-reasoning-effort', modelReasoningEffort
+        ]))
+
+        expect(runCodexMock).toHaveBeenCalledWith({
+            startedBy: 'runner',
+            modelReasoningEffort
         })
     })
 

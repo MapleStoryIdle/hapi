@@ -25,6 +25,24 @@ export const WorktreeMetadataSchema = z.object({
 
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
+export const SideSessionMetadataSchema = z.object({
+    parentSessionId: z.string(),
+    parentCodexThreadId: z.string().optional(),
+    childCodexThreadId: z.string(),
+    createdAt: z.number(),
+    mode: z.literal('fork_context')
+})
+
+export type SideSessionMetadata = z.infer<typeof SideSessionMetadataSchema>
+
+export const CodexForkMetadataSchema = z.object({
+    sourceCodexSessionId: z.string(),
+    createdAt: z.number(),
+    mode: z.literal('native_fork')
+})
+
+export type CodexForkMetadata = z.infer<typeof CodexForkMetadataSchema>
+
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
@@ -66,6 +84,8 @@ export const MetadataSchema = z.object({
     flavor: z.string().nullish(),
     capabilities: SessionCapabilitiesSchema.optional(),
     worktree: WorktreeMetadataSchema.optional(),
+    sideSession: SideSessionMetadataSchema.optional(),
+    codexFork: CodexForkMetadataSchema.optional(),
     // Cached Pi model list — written by CLI, read by web (inactive session fallback).
     // Minimal shape: each entry must have modelId; other fields (provider, name, etc.) pass through.
     piAvailableModels: z.array(z.object({ modelId: z.string() }).passthrough()).optional(),
@@ -347,6 +367,8 @@ export const MachineMetadataSchema = z.object({
     happyCliVersion: z.string(),
     displayName: z.string().optional(),
     homeDir: z.string().optional(),
+    /** Absolute CODEX_HOME advertised by a runner for native thread affinity. */
+    codexHome: z.string().optional(),
     happyHomeDir: z.string().optional(),
     happyLibDir: z.string().optional(),
     workspaceRoots: z.array(z.string()).optional()

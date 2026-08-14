@@ -13,6 +13,7 @@ import { SOCKET_MAX_HTTP_BUFFER_SIZE } from './socketLimits'
 import type { SyncEvent } from '../sync/syncEngine'
 import { TerminalRegistry } from './terminalRegistry'
 import type { CliSocketWithData, SocketData, SocketServer } from './socketTypes'
+import type { GeneratedImageStore } from '../generatedImages/store'
 
 const jwtPayloadSchema = z.object({
     uid: z.number(),
@@ -45,6 +46,7 @@ export type SocketServerDeps = {
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
     onMessagesConsumed?: (sessionId: string) => void
+    generatedImageStore?: GeneratedImageStore
 }
 
 export function createSocketServer(deps: SocketServerDeps): {
@@ -127,7 +129,8 @@ export function createSocketServer(deps: SocketServerDeps): {
         onBackgroundTaskDelta: deps.onBackgroundTaskDelta,
         onSessionActivity: deps.onSessionActivity,
         onSweepImmediateQueued: deps.onSweepImmediateQueued,
-        onMessagesConsumed: deps.onMessagesConsumed
+        onMessagesConsumed: deps.onMessagesConsumed,
+        generatedImageStore: deps.generatedImageStore
     }))
 
     terminalNs.use(async (socket, next) => {

@@ -3,6 +3,7 @@ import type { ApiClient } from '@/api/client'
 import type { ChatToolCall } from '@/chat/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import {
     isRequestUserInputToolName,
@@ -59,6 +60,7 @@ function OptionRow(props: {
 type QuestionState = {
     selected: string | null
     userNote: string
+    customAnswer: boolean
 }
 
 export function RequestUserInputFooter(props: {
@@ -76,6 +78,7 @@ export function RequestUserInputFooter(props: {
 
     const [step, setStep] = useState(0)
     const [stateByQuestion, setStateByQuestion] = useState<Record<string, QuestionState>>({})
+    const [dialogOpen, setDialogOpen] = useState(true)
 
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -84,9 +87,10 @@ export function RequestUserInputFooter(props: {
         setStep(0)
         const initial: Record<string, QuestionState> = {}
         for (const q of questions) {
-            initial[q.id] = { selected: null, userNote: '' }
+            initial[q.id] = { selected: null, userNote: '', customAnswer: false }
         }
         setStateByQuestion(initial)
+        setDialogOpen(true)
         setLoading(false)
         setError(null)
     }, [props.tool.id])
@@ -100,6 +104,7 @@ export function RequestUserInputFooter(props: {
         try {
             await action()
             haptic.notification(hapticType)
+            setDialogOpen(false)
             props.onDone()
         } catch (e) {
             haptic.notification('error')
@@ -115,9 +120,9 @@ export function RequestUserInputFooter(props: {
         const state = stateByQuestion[question.id]
         if (!state) return false
 
-        // For questions with options, require a selection OR user note
+        // For questions with options, require a selection or an explicitly chosen custom answer.
         if (question.options.length > 0) {
-            return state.selected !== null || state.userNote.trim().length > 0
+            return state.selected !== null || (state.customAnswer && state.userNote.trim().length > 0)
         }
 
         // For pure text questions (no options), require user note
@@ -166,7 +171,21 @@ export function RequestUserInputFooter(props: {
             ...prev,
             [questionId]: {
                 ...prev[questionId],
-                selected: optionLabel
+                selected: optionLabel,
+                userNote: '',
+                customAnswer: false
+            }
+        }))
+    }
+
+    const selectCustomAnswer = (questionId: string) => {
+        haptic.selection()
+        setStateByQuestion((prev) => ({
+            ...prev,
+            [questionId]: {
+                ...prev[questionId],
+                selected: null,
+                customAnswer: true
             }
         }))
     }
@@ -185,128 +204,153 @@ export function RequestUserInputFooter(props: {
     const isPureTextQuestion = currentQuestion && currentQuestion.options.length === 0
 
     return (
-        <div className="mt-3 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
-            <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                        <Badge variant="default">
-                            {t('tool.question')}
-                        </Badge>
-                        <span className="font-mono text-xs text-[var(--app-hint)]">
-                            [{clampedStep + 1}/{total}]
-                        </span>
-                    </div>
-                </div>
-            </div>
+        <>
+            <Dialog open={dialogOpen} onOpenChange={(open) => {
+                if (!loading) setDialogOpen(open)
+            }}>
+                <DialogContent className="max-h-[calc(100vh-24px)] max-w-xl overflow-y-auto" aria-describedby={undefined}>
+                    <DialogHeader>
+                        <DialogTitle>{t('tool.answerQuestion')}</DialogTitle>
+                    </DialogHeader>
 
-            {error ? (
-                <div className="mt-2 text-xs text-red-600">
-                    {error}
-                </div>
-            ) : null}
-
-            {currentQuestion ? (
-                <div className="mt-3">
-                    {currentQuestion.question ? (
-                        <div>
-                            <MarkdownRenderer content={currentQuestion.question} />
-                        </div>
-                    ) : null}
-
-                    {isPureTextQuestion ? (
-                        // Pure text question - show only textarea
-                        <textarea
-                            value={currentState?.userNote ?? ''}
-                            onChange={(e) => updateUserNote(currentQuestion.id, e.target.value)}
-                            disabled={props.disabled || loading}
-                            placeholder={t('tool.requestUserInput.textPlaceholder')}
-                            className="mt-3 w-full min-h-[88px] resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
-                        />
-                    ) : (
-                        // Question with options
-                        <>
-                            <div className="mt-3 flex flex-col gap-1">
-                                {currentQuestion.options.map((opt, optIdx) => {
-                                    const isSelected = currentState?.selected === opt.label
-                                    return (
-                                        <OptionRow
-                                            key={optIdx}
-                                            checked={isSelected}
-                                            disabled={props.disabled || loading}
-                                            title={opt.label}
-                                            description={opt.description}
-                                            onClick={() => selectOption(currentQuestion.id, opt.label)}
-                                        />
-                                    )
-                                })}
-                            </div>
-
-                            {/* User note input - always shown for questions with options */}
-                            <div className="mt-3">
-                                <div className="text-xs text-[var(--app-hint)] mb-1">
-                                    {t('tool.requestUserInput.noteLabel')}
+                    <div className="mt-3">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                    <Badge variant="default">
+                                        {t('tool.question')}
+                                    </Badge>
+                                    <span className="font-mono text-xs text-[var(--app-hint)]">
+                                        [{clampedStep + 1}/{total}]
+                                    </span>
                                 </div>
-                                <textarea
-                                    value={currentState?.userNote ?? ''}
-                                    onChange={(e) => updateUserNote(currentQuestion.id, e.target.value)}
-                                    disabled={props.disabled || loading}
-                                    placeholder={t('tool.requestUserInput.notePlaceholder')}
-                                    className="w-full min-h-[60px] resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
-                                />
                             </div>
-                        </>
-                    )}
-                </div>
-            ) : null}
+                        </div>
 
-            <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                    {questions.length > 1 ? (
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={props.disabled || loading || clampedStep === 0}
-                            onClick={prev}
-                        >
-                            {t('tool.prev')}
-                        </Button>
-                    ) : null}
-                </div>
+                        {error ? (
+                            <div className="mt-2 text-xs text-red-600">
+                                {error}
+                            </div>
+                        ) : null}
 
-                <div className="flex items-center gap-2">
-                    {questions.length > 1 && clampedStep < questions.length - 1 ? (
-                        <Button
-                            type="button"
-                            variant="default"
-                            size="sm"
-                            disabled={props.disabled || loading}
-                            onClick={next}
-                        >
-                            {t('tool.next')}
-                        </Button>
-                    ) : (
-                        <Button
-                            type="button"
-                            variant="default"
-                            size="sm"
-                            disabled={props.disabled || loading}
-                            onClick={submit}
-                            aria-busy={loading}
-                            className="gap-2"
-                        >
-                            {loading ? (
-                                <>
-                                    <Spinner size="sm" label={null} className="text-[var(--app-button-text)]" />
-                                    {t('tool.submitting')}
-                                </>
-                            ) : (
-                                t('tool.submit')
-                            )}
-                        </Button>
-                    )}
+                        {currentQuestion ? (
+                            <div className="mt-3">
+                                {currentQuestion.question ? (
+                                    <div>
+                                        <MarkdownRenderer content={currentQuestion.question} />
+                                    </div>
+                                ) : null}
+
+                                {isPureTextQuestion ? (
+                                    <textarea
+                                        value={currentState?.userNote ?? ''}
+                                        onChange={(e) => updateUserNote(currentQuestion.id, e.target.value)}
+                                        disabled={props.disabled || loading}
+                                        placeholder={t('tool.requestUserInput.textPlaceholder')}
+                                        className="mt-3 w-full min-h-[88px] resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                    />
+                                ) : (
+                                    <div className="mt-3 flex flex-col gap-1">
+                                        {currentQuestion.options.map((opt, optIdx) => {
+                                            const isSelected = currentState?.selected === opt.label
+                                            return (
+                                                <OptionRow
+                                                    key={optIdx}
+                                                    checked={isSelected}
+                                                    disabled={props.disabled || loading}
+                                                    title={opt.label}
+                                                    description={opt.description}
+                                                    onClick={() => selectOption(currentQuestion.id, opt.label)}
+                                                />
+                                            )
+                                        })}
+                                        <OptionRow
+                                            checked={currentState?.customAnswer ?? false}
+                                            disabled={props.disabled || loading}
+                                            title={t('tool.other')}
+                                            description={t('tool.otherDescription')}
+                                            onClick={() => selectCustomAnswer(currentQuestion.id)}
+                                        />
+                                        {(currentState?.customAnswer ?? false) ? (
+                                            <textarea
+                                                value={currentState?.userNote ?? ''}
+                                                onChange={(e) => updateUserNote(currentQuestion.id, e.target.value)}
+                                                disabled={props.disabled || loading}
+                                                placeholder={t('tool.requestUserInput.textPlaceholder')}
+                                                className="mt-2 min-h-[88px] w-full resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] disabled:opacity-50"
+                                            />
+                                        ) : null}
+                                    </div>
+                                )}
+                            </div>
+                        ) : null}
+
+                        <div className="mt-3 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                                {questions.length > 1 ? (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={props.disabled || loading || clampedStep === 0}
+                                        onClick={prev}
+                                    >
+                                        {t('tool.prev')}
+                                    </Button>
+                                ) : null}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                {questions.length > 1 && clampedStep < questions.length - 1 ? (
+                                    <Button
+                                        type="button"
+                                        variant="default"
+                                        size="sm"
+                                        disabled={props.disabled || loading}
+                                        onClick={next}
+                                    >
+                                        {t('tool.next')}
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        type="button"
+                                        variant="default"
+                                        size="sm"
+                                        disabled={props.disabled || loading}
+                                        onClick={submit}
+                                        aria-busy={loading}
+                                        className="gap-2"
+                                    >
+                                        {loading ? (
+                                            <>
+                                                <Spinner size="sm" label={null} className="text-[var(--app-button-text)]" />
+                                                {t('tool.submitting')}
+                                            </>
+                                        ) : (
+                                            t('tool.submit')
+                                        )}
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
+                <div className="min-w-0 text-sm text-[var(--app-hint)]">
+                    {t('tool.waitingForAnswer')}
                 </div>
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={props.disabled || loading}
+                    onClick={() => setDialogOpen(true)}
+                >
+                    {t('tool.answerQuestion')}
+                </Button>
             </div>
-        </div>
+        </>
     )
 }

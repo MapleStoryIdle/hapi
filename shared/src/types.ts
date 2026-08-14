@@ -21,6 +21,8 @@ export type {
     Session,
     SessionPatch,
     SessionUpdatedData,
+    SideSessionMetadata,
+    CodexForkMetadata,
     SyncEvent,
     TeamMember,
     TeamMessage,

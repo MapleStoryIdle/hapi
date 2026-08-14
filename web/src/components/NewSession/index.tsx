@@ -29,7 +29,13 @@ import {
     saveNewSessionFormDraft,
     shouldRestoreNewSessionFormDraft
 } from './newSessionFormDraft'
-import type { AgentType, ClaudeEffort, NewSessionReasoningEffort, SessionType } from './types'
+import {
+    CODEX_REASONING_EFFORT_OPTIONS,
+    type AgentType,
+    type ClaudeEffort,
+    type NewSessionReasoningEffort,
+    type SessionType
+} from './types'
 import { ActionButtons } from './ActionButtons'
 import { AgentSelector } from './AgentSelector'
 import { DirectorySection } from './DirectorySection'
@@ -204,6 +210,30 @@ export function NewSession(props: {
         }
         return options
     }, [codexModelsState.models, model])
+    const codexReasoningEffortOptions = useMemo(() => {
+        const selectedModel = model === 'auto'
+            ? codexModelsState.models.find((candidate) => candidate.isDefault) ?? codexModelsState.models[0]
+            : codexModelsState.models.find((candidate) => candidate.id === model)
+        const supportedEfforts = selectedModel?.supportedReasoningEfforts
+        if (!supportedEfforts?.length) {
+            return undefined
+        }
+
+        const supportedEffortSet = new Set(supportedEfforts)
+        return CODEX_REASONING_EFFORT_OPTIONS.filter((option) => (
+            option.value === 'default' || supportedEffortSet.has(option.value)
+        ))
+    }, [codexModelsState.models, model])
+
+    useEffect(() => {
+        if (
+            agent === 'codex'
+            && codexReasoningEffortOptions
+            && !codexReasoningEffortOptions.some((option) => option.value === modelReasoningEffort)
+        ) {
+            setModelReasoningEffort('default')
+        }
+    }, [agent, codexReasoningEffortOptions, modelReasoningEffort])
     const cursorModelsState = useCursorModelsForMachine({
         api: props.api,
         machineId,
@@ -716,6 +746,7 @@ export function NewSession(props: {
                     <ReasoningEffortSelector
                         agent={agent}
                         value={modelReasoningEffort}
+                        codexOptions={codexReasoningEffortOptions}
                         isDisabled={isFormDisabled}
                         inline
                         onChange={setModelReasoningEffort}

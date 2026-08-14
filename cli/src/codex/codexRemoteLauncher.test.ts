@@ -14,11 +14,13 @@ const harness = vi.hoisted(() => ({
     failListCollaborationModes: false,
     startThreadIds: [] as string[],
     resumeThreadIds: [] as string[],
+    forkThreadIds: [] as string[],
     startTurnThreadIds: [] as string[],
     startTurnParams: [] as Array<Record<string, unknown>>,
     startTurnErrors: [] as Error[],
     interruptedTurns: [] as Array<{ threadId: string; turnId: string }>,
     compactThreadIds: [] as string[],
+    reviewStartCalls: [] as unknown[],
     goalSetCalls: [] as unknown[],
     goalGetCalls: [] as unknown[],
     goalClearCalls: [] as unknown[],
@@ -116,6 +118,17 @@ vi.mock('./codexAppServerClient', () => {
             return { thread: { id }, model: 'gpt-5.4' };
         }
 
+        async forkThread(params?: { threadId?: string }): Promise<{ thread: { id: string }; model: string; reasoningEffort: string; serviceTier: string }> {
+            const sourceId = params?.threadId ?? 'thread-source';
+            harness.forkThreadIds.push(sourceId);
+            return {
+                thread: { id: `fork-${sourceId}` },
+                model: 'gpt-5.4',
+                reasoningEffort: 'xhigh',
+                serviceTier: 'priority'
+            };
+        }
+
         async compactThread(params?: { threadId?: string }): Promise<Record<string, never>> {
             const threadId = params?.threadId ?? 'thread-unknown';
             harness.compactThreadIds.push(threadId);
@@ -127,6 +140,25 @@ vi.mock('./codexAppServerClient', () => {
             harness.notifications.push({ method: 'thread/compacted', params: compacted });
             this.notificationHandler?.('thread/compacted', compacted);
             return {};
+        }
+
+        async startReview(params?: { threadId?: string }): Promise<{ turn: { id?: string }; reviewThreadId: string }> {
+            harness.reviewStartCalls.push(params ?? {});
+            const threadId = params?.threadId ?? 'thread-unknown';
+            const turnId = `review-turn-${harness.reviewStartCalls.length}`;
+            const started = { turn: { id: turnId } };
+            harness.notifications.push({ method: 'turn/started', params: started });
+            this.notificationHandler?.('turn/started', started);
+            if (!harness.suppressTurnCompletion) {
+                const completed = {
+                    thread: { id: threadId },
+                    turn: { id: turnId },
+                    status: 'completed'
+                };
+                harness.notifications.push({ method: 'turn/completed', params: completed });
+                this.notificationHandler?.('turn/completed', completed);
+            }
+            return { turn: { id: turnId }, reviewThreadId: threadId };
         }
 
         async setThreadGoal(params?: { threadId?: string; objective?: string; status?: string }): Promise<{ goal: Record<string, unknown> }> {
@@ -869,6 +901,8 @@ function createSessionStub(messages = ['hello from launcher test'], mode = creat
     const collaborationModes: Array<EnhancedMode['collaborationMode'] | undefined> = [];
     let currentPermissionMode: EnhancedMode['permissionMode'] = mode.permissionMode;
     let currentModel: string | null | undefined = mode.model;
+    let currentModelReasoningEffort: string | null | undefined = mode.modelReasoningEffort;
+    let currentServiceTier: string | null | undefined;
     let currentCollaborationMode: EnhancedMode['collaborationMode'] | undefined = mode.collaborationMode;
     let agentState: FakeAgentState = {
         requests: {},
@@ -905,6 +939,7 @@ function createSessionStub(messages = ['hello from launcher test'], mode = creat
         codexArgs: undefined,
         codexCliOverrides: undefined,
         sessionId: null as string | null,
+        forkSessionId: null as string | null,
         thinking: false,
         getPermissionMode() {
             return currentPermissionMode;
@@ -914,6 +949,18 @@ function createSessionStub(messages = ['hello from launcher test'], mode = creat
         },
         getModel() {
             return currentModel;
+        },
+        setModelReasoningEffort(nextEffort: string | null) {
+            currentModelReasoningEffort = nextEffort;
+        },
+        getModelReasoningEffort() {
+            return currentModelReasoningEffort;
+        },
+        setServiceTier(nextTier: string | null) {
+            currentServiceTier = nextTier;
+        },
+        getServiceTier() {
+            return currentServiceTier;
         },
         getCollaborationMode() {
             return currentCollaborationMode;
@@ -958,6 +1005,8 @@ function createSessionStub(messages = ['hello from launcher test'], mode = creat
             currentPermissionMode = nextMode;
         },
         getModel: () => currentModel,
+        getModelReasoningEffort: () => currentModelReasoningEffort,
+        getServiceTier: () => currentServiceTier,
         getCollaborationMode: () => currentCollaborationMode,
         collaborationModes,
         getAgentState: () => agentState
@@ -977,11 +1026,13 @@ describe('codexRemoteLauncher', () => {
         harness.failListCollaborationModes = false;
         harness.startThreadIds = [];
         harness.resumeThreadIds = [];
+        harness.forkThreadIds = [];
         harness.startTurnThreadIds = [];
         harness.startTurnParams = [];
         harness.startTurnErrors = [];
         harness.interruptedTurns = [];
         harness.compactThreadIds = [];
+        harness.reviewStartCalls = [];
         harness.goalSetCalls = [];
         harness.goalGetCalls = [];
         harness.goalClearCalls = [];
@@ -1056,6 +1107,21 @@ describe('codexRemoteLauncher', () => {
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
         expect(thinkingChanges).toContain(true);
         expect(session.thinking).toBe(false);
+    });
+
+    it('forks the native Codex thread without applying HAPI model or reasoning overrides', async () => {
+        const { session, foundSessionIds, getModel, getModelReasoningEffort, getServiceTier } = createSessionStub(['branch this']);
+        session.forkSessionId = 'source-thread';
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.forkThreadIds).toEqual(['source-thread']);
+        expect(harness.startThreadIds).toEqual([]);
+        expect(harness.resumeThreadIds).toEqual([]);
+        expect(foundSessionIds).toContain('fork-source-thread');
+        expect(getModel()).toBe('gpt-5.4');
+        expect(getModelReasoningEffort()).toBe('xhigh');
+        expect(getServiceTier()).toBe('fast');
     });
 
     it('forwards parent agent message snapshots and final messages with the same stream id', async () => {
@@ -2341,6 +2407,26 @@ describe('codexRemoteLauncher', () => {
             type: 'message',
             message: 'Compaction completed'
         });
+    });
+
+    it('starts an inline Codex review without sending a normal turn', async () => {
+        const { session, sessionEvents } = createSessionStub(['/review --base main']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startThreadIds).toEqual(['thread-1']);
+        expect(harness.startTurnThreadIds).toEqual([]);
+        expect(harness.reviewStartCalls).toEqual([{
+            threadId: 'thread-1',
+            target: { type: 'baseBranch', branch: 'main' },
+            delivery: 'inline'
+        }]);
+        expect(sessionEvents).toContainEqual({
+            type: 'message',
+            message: 'Code review started: base branch main'
+        });
+        expect(session.thinking).toBe(false);
     });
 
     it('interrupts an in-flight turn before compacting the current thread', async () => {

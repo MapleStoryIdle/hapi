@@ -31,6 +31,11 @@ type SessionGroup = {
     hasActiveSession: boolean
 }
 
+export type SessionTreeNode = {
+    session: SessionSummary
+    sideSessions: SessionTreeNode[]
+}
+
 function SessionsEmptyState(props: {
     onNewSession: () => void
     onBrowse?: () => void
@@ -206,6 +211,78 @@ export function prepareSidebarSessions(sessions: SessionSummary[], selectedSessi
 // selected session out from under them.
 export function filterActiveSessionsOnly(sessions: SessionSummary[], selectedSessionId?: string | null): SessionSummary[] {
     return sessions.filter(session => session.active || session.id === selectedSessionId)
+}
+
+function getSideSessionParentId(session: SessionSummary): string | null {
+    const parentSessionId = session.metadata?.sideSession?.parentSessionId?.trim()
+    return parentSessionId || null
+}
+
+export function buildSessionTree(sessions: SessionSummary[]): SessionTreeNode[] {
+    const byId = new Map(sessions.map(session => [session.id, session]))
+    const childrenByParentId = new Map<string, SessionSummary[]>()
+    const childIds = new Set<string>()
+
+    for (const session of sessions) {
+        const parentSessionId = getSideSessionParentId(session)
+        if (!parentSessionId || !byId.has(parentSessionId)) {
+            continue
+        }
+        const children = childrenByParentId.get(parentSessionId) ?? []
+        children.push(session)
+        childrenByParentId.set(parentSessionId, children)
+        childIds.add(session.id)
+    }
+
+    const toNode = (session: SessionSummary): SessionTreeNode => ({
+        session,
+        sideSessions: (childrenByParentId.get(session.id) ?? []).map(toNode)
+    })
+
+    return sessions
+        .filter(session => !childIds.has(session.id))
+        .map(toNode)
+}
+
+export function sessionTreeNodeContainsSession(node: SessionTreeNode, sessionId: string): boolean {
+    if (node.session.id === sessionId) {
+        return true
+    }
+    return node.sideSessions.some(child => sessionTreeNodeContainsSession(child, sessionId))
+}
+
+function sessionTreeNodeHasRequiredSession(node: SessionTreeNode, selectedSessionId?: string | null): boolean {
+    if (node.session.pendingRequestsCount > 0 || node.session.backgroundTaskCount > 0) {
+        return true
+    }
+    if (selectedSessionId && sessionTreeNodeContainsSession(node, selectedSessionId)) {
+        return true
+    }
+    return node.sideSessions.some(child => sessionTreeNodeHasRequiredSession(child, selectedSessionId))
+}
+
+export function getVisibleSessionTreePreview(
+    nodes: SessionTreeNode[],
+    options: {
+        expanded?: boolean
+        selectedSessionId?: string | null
+        limit?: number
+    } = {}
+): SessionTreeNode[] {
+    const limit = options.limit ?? GROUP_SESSION_PREVIEW_LIMIT
+    if (options.expanded || nodes.length <= limit) return nodes
+
+    const visible = nodes.filter((node, index) => {
+        return index < limit || sessionTreeNodeHasRequiredSession(node, options.selectedSessionId)
+    })
+
+    for (let index = visible.length - 1; visible.length > limit && index >= 0; index -= 1) {
+        const node = visible[index]
+        if (!node || sessionTreeNodeHasRequiredSession(node, options.selectedSessionId)) continue
+        visible.splice(index, 1)
+    }
+
+    return visible
 }
 
 // Paginated "Show N more": reveal one batch (step) at a time instead of expanding
@@ -548,9 +625,24 @@ function SessionItem(props: {
     api: ApiClient | null
     selected?: boolean
     showDetailedStatus?: boolean
+    nested?: boolean
+    sideSessionCount?: number
+    sideSessionsCollapsed?: boolean
+    onToggleSideSessions?: () => void
 }) {
     const { t } = useTranslation()
-    const { session: s, onSelect, showPath = true, api, selected = false, showDetailedStatus = false } = props
+    const {
+        session: s,
+        onSelect,
+        showPath = true,
+        api,
+        selected = false,
+        showDetailedStatus = false,
+        nested = false,
+        sideSessionCount = 0,
+        sideSessionsCollapsed = false,
+        onToggleSideSessions
+    } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -594,6 +686,7 @@ function SessionItem(props: {
     })
 
     const sessionName = getSessionTitle(s)
+    const sessionSubtitle = showPath ? s.metadata?.path ?? s.id : null
     const todoProgress = getTodoProgress(s)
     const attention = useMemo(
         () => showDetailedStatus
@@ -613,37 +706,64 @@ function SessionItem(props: {
         Boolean(attention),
         hasScheduleTooltip
     )
+    const toggleSideSessions = (event: React.MouseEvent | React.KeyboardEvent | React.TouchEvent) => {
+        event.preventDefault()
+        event.stopPropagation()
+        onToggleSideSessions?.()
+    }
     return (
         <>
             <button
                 type="button"
                 {...longPressHandlers}
-                className={`session-list-item group/session-row flex w-full items-center justify-between gap-3 rounded-xl px-0 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${selected ? 'text-[var(--app-fg)]' : ''}`}
+                className={`session-list-item group/session-row flex w-full items-center justify-between gap-3 rounded-xl px-0 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${nested ? 'py-1.5' : 'py-2'} ${selected ? 'text-[var(--app-fg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
                 aria-describedby={describedBy}
             >
-                <div className="flex min-w-0 flex-1 items-center gap-3">
+                <div className={`flex min-w-0 flex-1 items-center ${nested ? 'gap-2.5' : 'gap-3'}`}>
                     <AgentFlavorStatusIcon
                         flavor={s.metadata?.flavor}
-                        className="h-[18px] w-[18px]"
+                        className={nested ? 'h-4 w-4' : 'h-[18px] w-[18px]'}
                         showStatus={s.active}
                         statusClassName="bg-[#34C759]"
                     />
                     <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-normal leading-[18px] tracking-normal text-[var(--app-fg)]">
+                        <div className={`truncate font-normal tracking-normal text-[var(--app-fg)] ${nested ? 'text-[13px] leading-[17px]' : 'text-sm leading-[18px]'}`}>
                             {sessionName}
                         </div>
-                        {showPath ? (
+                        {sessionSubtitle ? (
                             <div className="mt-0.5 truncate text-xs leading-4 text-[var(--app-hint)]">
-                                {s.metadata?.path ?? s.id}
+                                {sessionSubtitle}
                             </div>
                         ) : null}
                     </div>
                 </div>
                 <div className="flex h-6 shrink-0 items-center justify-end gap-2 text-[var(--app-hint)]">
+                    {sideSessionCount > 0 ? (
+                        <span
+                            role="button"
+                            tabIndex={0}
+                            className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                            title={sideSessionsCollapsed ? t('sessions.sideSessions.expand') : t('sessions.sideSessions.collapse')}
+                            aria-label={sideSessionsCollapsed ? t('sessions.sideSessions.expand') : t('sessions.sideSessions.collapse')}
+                            aria-expanded={!sideSessionsCollapsed}
+                            onClick={toggleSideSessions}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onMouseUp={(event) => event.stopPropagation()}
+                            onTouchStart={(event) => event.stopPropagation()}
+                            onTouchEnd={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    toggleSideSessions(event)
+                                }
+                            }}
+                        >
+                            <ChevronIcon className="h-3.5 w-3.5" collapsed={sideSessionsCollapsed} />
+                        </span>
+                    ) : null}
                     {s.active && s.thinking ? (
-                        <LoaderIcon className="h-6 w-6 animate-spin-slow text-[var(--app-fg)]" />
+                        <LoaderIcon className={`${nested ? 'h-4 w-4' : 'h-6 w-6'} animate-spin-slow text-[var(--app-fg)]`} />
                     ) : attention ? (
                         <SessionAttentionIndicator
                             attention={attention}
@@ -831,13 +951,58 @@ export function SessionList(props: {
         })
     }
 
-    const getVisibleGroupSessions = (group: SessionGroup): SessionSummary[] => {
-        return getVisibleSessionPreview(
-            group.sessions,
-            {
-                selectedSessionId,
-                limit: getGroupVisibleCount(group)
-            }
+    const getVisibleGroupNodes = (nodes: SessionTreeNode[], group: SessionGroup): SessionTreeNode[] => (
+        getVisibleSessionTreePreview(nodes, {
+            selectedSessionId,
+            limit: getGroupVisibleCount(group)
+        })
+    )
+
+    const isSideSessionsCollapsed = (node: SessionTreeNode): boolean => {
+        if (selectedSessionId && node.sideSessions.some(child => sessionTreeNodeContainsSession(child, selectedSessionId))) {
+            return false
+        }
+        return collapseOverrides.get(`side::${node.session.id}`) ?? false
+    }
+
+    const toggleSideSessions = (sessionId: string, collapsed: boolean) => {
+        setCollapseOverrides(prev => {
+            const next = new Map(prev)
+            next.set(`side::${sessionId}`, !collapsed)
+            return next
+        })
+    }
+
+    const renderSessionNode = (node: SessionTreeNode, depth = 0): React.ReactNode => {
+        const sideCollapsed = isSideSessionsCollapsed(node)
+        const hasSideSessions = node.sideSessions.length > 0
+        return (
+            <div key={node.session.id} className="min-w-0">
+                <SessionItem
+                    session={node.session}
+                    onSelect={props.onSelect}
+                    showPath={false}
+                    api={api}
+                    selected={node.session.id === selectedSessionId}
+                    showDetailedStatus={showDetailedStatus}
+                    nested={depth > 0}
+                    sideSessionCount={node.sideSessions.length}
+                    sideSessionsCollapsed={sideCollapsed}
+                    onToggleSideSessions={hasSideSessions ? () => toggleSideSessions(node.session.id, sideCollapsed) : undefined}
+                />
+                {hasSideSessions ? (
+                    <div className="collapsible-panel" data-open={!sideCollapsed || undefined}>
+                        <div className="collapsible-inner">
+                            <div className={cn(
+                                'border-l border-[var(--app-divider)] pl-3',
+                                depth === 0 ? 'ml-6' : 'ml-5'
+                            )}>
+                                {node.sideSessions.map(child => renderSessionNode(child, depth + 1))}
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
+            </div>
         )
     }
 
@@ -898,6 +1063,15 @@ export function SessionList(props: {
                 knownKeys.add(g.key)
                 knownKeys.add(`sessions::${g.key}`)
                 knownKeys.add(`machine::${g.machineId ?? UNKNOWN_MACHINE_ID}`)
+                const collectSideKeys = (nodes: SessionTreeNode[]) => {
+                    for (const node of nodes) {
+                        if (node.sideSessions.length > 0) {
+                            knownKeys.add(`side::${node.session.id}`)
+                            collectSideKeys(node.sideSessions)
+                        }
+                    }
+                }
+                collectSideKeys(buildSessionTree(g.sessions))
             }
             let changed = false
             for (const key of next.keys()) {
@@ -972,11 +1146,12 @@ export function SessionList(props: {
 
                             <div className="collapsible-panel" data-open={!machineCollapsed || undefined}>
                                 <div className="collapsible-inner">
-                                <div className="flex flex-col gap-6">
+                                <div className="flex flex-col gap-1.5">
                                     {mg.projectGroups.map((group) => {
                                         const isCollapsed = isGroupCollapsed(group)
-                                        const visibleGroupSessions = getVisibleGroupSessions(group)
-                                        const hiddenSessionCount = group.sessions.length - visibleGroupSessions.length
+                                        const sessionNodes = buildSessionTree(group.sessions)
+                                        const visibleGroupNodes = getVisibleGroupNodes(sessionNodes, group)
+                                        const hiddenSessionCount = sessionNodes.length - visibleGroupNodes.length
                                         const canCollapseSessions = getGroupVisibleCount(group) > sessionPreviewLimit
                                         const showMoreCount = Math.min(sessionPreviewLimit, hiddenSessionCount)
                                         const canStartInGroupDirectory = group.directory !== 'Other'
@@ -1017,18 +1192,8 @@ export function SessionList(props: {
                                                 <div className="collapsible-panel" data-open={!isCollapsed || undefined}>
                                                     <div className="collapsible-inner">
                                                     <div className="flex flex-col py-2 pl-4">
-                                                        {visibleGroupSessions.map((s) => (
-                                                            <SessionItem
-                                                                key={s.id}
-                                                                session={s}
-                                                                onSelect={props.onSelect}
-                                                                showPath={false}
-                                                                api={api}
-                                                                selected={s.id === selectedSessionId}
-                                                                showDetailedStatus={showDetailedStatus}
-                                                            />
-                                                        ))}
-                                                        {group.sessions.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canCollapseSessions) ? (
+                                                        {visibleGroupNodes.map(node => renderSessionNode(node))}
+                                                        {sessionNodes.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canCollapseSessions) ? (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => hiddenSessionCount > 0

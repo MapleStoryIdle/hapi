@@ -12,6 +12,7 @@ import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
+import type { GeneratedImageStore } from '../../../generatedImages/store'
 
 type SessionAlivePayload = {
     sid: string
@@ -62,6 +63,14 @@ const updateStateSchema = z.object({
     agentState: z.unknown().nullable()
 })
 
+const generatedImageStoreSchema = z.object({
+    sid: z.string().min(1),
+    imageId: z.string().min(1).max(256),
+    fileName: z.string().max(512),
+    mimeType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']),
+    bytes: z.union([z.instanceof(Uint8Array), z.instanceof(ArrayBuffer)])
+})
+
 export type SessionHandlersDeps = {
     store: Store
     resolveSessionAccess: ResolveSessionAccess
@@ -77,10 +86,47 @@ export type SessionHandlersDeps = {
     /** Drops the queued-thinking grace so synchronous CLI handlers (e.g. slash
      *  commands) don't leave the spinner stuck for the full grace window. */
     onMessagesConsumed?: (sessionId: string) => void
+    generatedImageStore?: GeneratedImageStore
 }
 
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
-    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued, onMessagesConsumed } = deps
+    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued, onMessagesConsumed, generatedImageStore } = deps
+
+    socket.on('generated-image:store', async (data, callback) => {
+        const parsed = generatedImageStoreSchema.safeParse(data)
+        if (!parsed.success) {
+            callback({ success: false, error: 'Invalid generated image' })
+            return
+        }
+
+        const sessionAccess = resolveSessionAccess(parsed.data.sid)
+        if (!sessionAccess.ok) {
+            emitAccessError('session', parsed.data.sid, sessionAccess.reason)
+            callback({ success: false, error: 'Session access denied' })
+            return
+        }
+
+        if (!generatedImageStore) {
+            callback({ success: false, error: 'Generated image storage unavailable' })
+            return
+        }
+
+        try {
+            await generatedImageStore.persist({
+                namespace: sessionAccess.value.namespace,
+                imageId: parsed.data.imageId,
+                fileName: parsed.data.fileName,
+                mimeType: parsed.data.mimeType,
+                bytes: parsed.data.bytes
+            })
+            callback({ success: true })
+        } catch (error) {
+            callback({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to store generated image'
+            })
+        }
+    })
 
     socket.on('message', (data: unknown) => {
         const parsed = messageSchema.safeParse(data)

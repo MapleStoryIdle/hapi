@@ -319,10 +319,11 @@ describe('ComposerButtons — plan mode status control', () => {
     })
 
     /**
-     * Active plan mode is represented in the composer status bar. The status
-     * icon is also the exit action and sits before the abort control.
+     * Active plan mode is represented above the composer by HappyComposer.
+     * ComposerButtons keeps only the tool menu toggle and no longer renders
+     * a second status chip in the bottom toolbar.
      */
-    it('renders active plan mode as a status-bar icon before the unified abort button', () => {
+    it('keeps active plan mode out of the bottom toolbar and toggles from the tools menu', () => {
         const onPlanModeToggle = vi.fn()
 
         renderInProviders(
@@ -353,13 +354,12 @@ describe('ComposerButtons — plan mode status control', () => {
             />
         )
 
-        const exitPlanButton = screen.getByRole('button', { name: 'Exit Plan Mode' })
         const abortButton = screen.getByRole('button', { name: 'Abort' })
         expect(abortButton.querySelector('span')?.className).toContain('bg-red')
-        const buttons = screen.getAllByRole('button')
-        expect(buttons.indexOf(exitPlanButton)).toBeLessThan(buttons.indexOf(abortButton))
+        expect(screen.queryByRole('button', { name: 'Exit Plan Mode' })).not.toBeInTheDocument()
 
-        fireEvent.click(exitPlanButton)
+        fireEvent.click(screen.getByRole('button', { name: 'More tools' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Plan mode' }))
 
         expect(onPlanModeToggle).toHaveBeenCalledTimes(1)
     })
@@ -412,6 +412,101 @@ describe('ComposerButtons — compact composer layout', () => {
         expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument()
+    })
+
+    /**
+     * Fast mode should be visible inside the model/settings pill without
+     * changing the label text users already scan for model and reasoning.
+     */
+    it('renders a lightning icon at the start of the settings pill in fast mode', () => {
+        renderInProviders(
+            <ComposerButtons
+                canSend={false}
+                controlsDisabled={false}
+                showSettingsButton
+                onSettingsToggle={noop}
+                settingsLabel="Settings"
+                settingsModelLabel="5.5"
+                settingsReasoningLabel="超高"
+                fastModeActive
+                showTerminalButton={false}
+                terminalDisabled={false}
+                terminalLabel="Terminal"
+                onTerminal={noop}
+                showAbortButton={false}
+                abortDisabled={false}
+                isAborting={false}
+                onAbort={noop}
+                showSwitchButton={false}
+                switchDisabled={false}
+                isSwitching={false}
+                onSwitch={noop}
+                voiceEnabled={false}
+                voiceStatus="disconnected"
+                onVoiceToggle={noop}
+                onSend={noop}
+            />
+        )
+
+        const settingsButton = screen.getByRole('button', { name: 'Settings' })
+        expect(screen.getByTestId('composer-fast-mode-icon')).toBeInTheDocument()
+        expect(settingsButton.textContent).toContain('5.5')
+        expect(settingsButton.textContent).toContain('超高')
+    })
+})
+
+describe('ComposerButtons — skill picker', () => {
+    const noop = () => {}
+
+    afterEach(() => {
+        cleanup()
+    })
+
+    it('groups skills by scope without tab or count badges', () => {
+        renderInProviders(
+            <ComposerButtons
+                canSend={false}
+                controlsDisabled={false}
+                showSettingsButton={false}
+                onSettingsToggle={noop}
+                skills={[
+                    { name: 'plugin-beta', description: 'Plugin skill', scope: 'plugin' },
+                    { name: 'project-bravo', description: 'Project skill', scope: 'project' },
+                    { name: 'system-delta', description: 'System skill', scope: 'system' },
+                    { name: 'global-alpha', description: 'Global skill', scope: 'user' },
+                ]}
+                onSkillSelect={noop}
+                showTerminalButton={false}
+                terminalDisabled={false}
+                terminalLabel="Terminal"
+                onTerminal={noop}
+                showAbortButton={false}
+                abortDisabled={false}
+                isAborting={false}
+                onAbort={noop}
+                showSwitchButton={false}
+                switchDisabled={false}
+                isSwitching={false}
+                onSwitch={noop}
+                voiceEnabled={false}
+                voiceStatus="disconnected"
+                onVoiceToggle={noop}
+                onSend={noop}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
+
+        const projectSkill = screen.getByText('project-bravo')
+        const globalSkill = screen.getByText('global-alpha')
+        const pluginSkill = screen.getByText('plugin-beta')
+        const systemSkill = screen.getByText('system-delta')
+        expect(projectSkill.compareDocumentPosition(globalSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(globalSkill.compareDocumentPosition(pluginSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(pluginSkill.compareDocumentPosition(systemSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(screen.queryByRole('button', { name: /Custom\s+\d/ })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /Other\s+\d/ })).not.toBeInTheDocument()
+        expect(screen.queryByText('4')).not.toBeInTheDocument()
     })
 })
 

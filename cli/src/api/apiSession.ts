@@ -15,6 +15,7 @@ import type {
     BinaryFileReadResponse,
     BinaryFileUploadRequest,
     BinaryFileUploadResponse,
+    GeneratedImageStoreResponse,
     SessionEndReason,
     VerifyRemoteServerCandidateRequest,
     VerifyRemoteServerCandidateResponse
@@ -41,6 +42,7 @@ import { AgentStateSchema, CliMessagesResponseSchema, MetadataSchema, UserMessag
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
 import { readGeneratedImageBytes, readGeneratedImageFileBytes, readSessionFileBytes } from '../modules/common/handlers/files'
+import type { GeneratedImageMetadata } from '../modules/common/generatedImages'
 import { cleanupUploadDir, readUploadFileBytes, uploadFileBytes } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
@@ -591,6 +593,35 @@ export class ApiSessionClient extends EventEmitter {
             sid: this.sessionId,
             message: content
         })
+    }
+
+    /**
+     * Copy a displayed image to the hub before its agent-owned source file can
+     * disappear. The message still retains its source reference as a fallback
+     * when an older hub does not support durable image storage.
+     */
+    async persistGeneratedImage(image: GeneratedImageMetadata): Promise<void> {
+        const source = await readGeneratedImageFileBytes(image)
+        if (!source.success) {
+            logger.debug('[API] Failed to read generated image for persistence:', source.error)
+            return
+        }
+
+        try {
+            const response = await this.socket.timeout(30_000).emitWithAck('generated-image:store', {
+                sid: this.sessionId,
+                imageId: image.id,
+                fileName: image.fileName,
+                mimeType: image.mimeType,
+                bytes: source.bytes
+            }) as GeneratedImageStoreResponse
+
+            if (!response.success) {
+                logger.debug('[API] Failed to persist generated image:', response.error)
+            }
+        } catch (error) {
+            logger.debug('[API] Failed to persist generated image:', error instanceof Error ? error.message : String(error))
+        }
     }
 
     sendSessionEvent(event: {

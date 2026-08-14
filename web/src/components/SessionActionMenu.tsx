@@ -8,6 +8,7 @@ import {
     type CSSProperties,
     type ReactNode
 } from 'react'
+import { GitBranch } from 'lucide-react'
 import { useTranslation } from '@/lib/use-translation'
 
 type SessionActionMenuProps = {
@@ -23,6 +24,8 @@ type SessionActionMenuProps = {
     filesActive?: boolean
     onToggleOutline?: () => void
     outlineActive?: boolean
+    onCreateSideSession?: () => void
+    sideSessionPending?: boolean
     anchorPoint: { x: number; y: number }
     menuId?: string
 }
@@ -106,6 +109,16 @@ function OutlineIcon(props: MenuIconProps) {
     )
 }
 
+function SideSessionIcon(props: MenuIconProps) {
+    return (
+        <GitBranch
+            className={`h-[18px] w-[18px] shrink-0 ${props.className ?? ''}`}
+            strokeWidth={1.8}
+            aria-hidden="true"
+        />
+    )
+}
+
 function ReopenIcon(props: MenuIconProps) {
     return (
         <MenuIcon {...props}>
@@ -148,6 +161,8 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         filesActive,
         onToggleOutline,
         outlineActive,
+        onCreateSideSession,
+        sideSessionPending,
         anchorPoint,
         menuId
     } = props
@@ -190,6 +205,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleToggleOutline = () => {
         onClose()
         onToggleOutline?.()
+    }
+
+    const handleCreateSideSession = () => {
+        onClose()
+        onCreateSideSession?.()
     }
 
     const updatePosition = useCallback(() => {
@@ -322,7 +342,20 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     </button>
                 ) : null}
 
-                {(onToggleFiles || onToggleOutline) ? (
+                {onCreateSideSession ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)] disabled:cursor-wait disabled:opacity-60`}
+                        onClick={handleCreateSideSession}
+                        disabled={sideSessionPending}
+                    >
+                        <SideSessionIcon className="text-[var(--app-hint)]" />
+                        {sideSessionPending ? t('session.action.sideSession.creating') : t('session.action.sideSession')}
+                    </button>
+                ) : null}
+
+                {(onToggleFiles || onToggleOutline || onCreateSideSession) ? (
                     <div className="mx-2 h-px bg-[var(--app-divider)]" />
                 ) : null}
 

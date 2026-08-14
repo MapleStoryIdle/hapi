@@ -114,16 +114,17 @@ describe('codexLocal', () => {
         expect(hookArg).toContain('{ hooks = [{ type = "command", command = "');
         expect(args).toContain("mcp_servers.hapi.args=['mcp','--url','http://127.0.0.1:63995/']");
         expect(args).toContain('mcp_servers.hapi.tools.change_title.approval_mode="approve"');
+        expect(args).toContain('features.default_mode_request_user_input=true');
     });
 
-    it('passes reasoning effort through Codex config instead of an unsupported CLI flag', async () => {
+    it.each(['max', 'ultra'] as const)('passes %s reasoning effort through Codex config instead of an unsupported CLI flag', async (modelReasoningEffort) => {
         const controller = new AbortController();
 
         await codexLocal({
             abort: controller.signal,
             sessionId: 'codex-session-1',
             path: workspacePath,
-            modelReasoningEffort: 'high',
+            modelReasoningEffort,
             onSessionFound: vi.fn()
         });
 
@@ -133,7 +134,31 @@ describe('codexLocal', () => {
         };
 
         expect(spawnOptions.args).toContain('-c');
-        expect(spawnOptions.args).toContain('model_reasoning_effort="high"');
+        expect(spawnOptions.args).toContain(`model_reasoning_effort="${modelReasoningEffort}"`);
         expect(spawnOptions.args).not.toContain('--model-reasoning-effort');
+    });
+
+    it('uses native fork without overriding the source model or reasoning effort', async () => {
+        const controller = new AbortController();
+        const onSessionFound = vi.fn();
+
+        await codexLocal({
+            abort: controller.signal,
+            sessionId: null,
+            forkSessionId: 'source-codex-session',
+            path: workspacePath,
+            model: 'gpt-5.4',
+            modelReasoningEffort: 'high',
+            onSessionFound
+        });
+
+        const spawnOptions = spawnWithTerminalGuardMock.mock.calls[0][0] as {
+            args: string[];
+        };
+
+        expect(spawnOptions.args.slice(0, 2)).toEqual(['fork', 'source-codex-session']);
+        expect(spawnOptions.args).not.toContain('--model');
+        expect(spawnOptions.args).not.toContain('model_reasoning_effort="high"');
+        expect(onSessionFound).not.toHaveBeenCalled();
     });
 });

@@ -87,6 +87,18 @@ describe('isExternalUserMessage', () => {
         ).toBe(false)
     })
 
+    it('forwards automation heartbeat control messages for formatted web rendering', () => {
+        expect(
+            isExternalUserMessage({
+                ...baseUserMsg,
+                message: {
+                    role: 'user',
+                    content: '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>Nothing to report.</message> </heartbeat>'
+                },
+            })
+        ).toBe(true)
+    })
+
     it('returns true for user text that mentions XML-like strings but is not injected', () => {
         expect(
             isExternalUserMessage({

@@ -759,10 +759,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
     // Get or create machine (with retry for transient connection errors)
+    const machineMetadata = buildMachineMetadata({ workspaceRoots });
     const machine = await withRetry(
       () => api.getOrCreateMachine({
         machineId,
-        metadata: buildMachineMetadata({ workspaceRoots }),
+        metadata: machineMetadata,
         runnerState: initialRunnerState
       }),
       {
@@ -779,7 +780,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
 
     // Create realtime machine session
-    const apiMachine = api.machineSyncClient(machine, { workspaceRoots });
+    const apiMachine = api.machineSyncClient(machine, { workspaceRoots, advertisedMetadata: machineMetadata });
 
     // Set RPC handlers
     apiMachine.setRPCHandlers({
@@ -1091,7 +1092,9 @@ export function buildCliArgs(
             ? 'pi'
             : 'claude';
   const args = [agentCommand];
-  if (options.resumeSessionId) {
+  if (options.forkSessionId && agent === 'codex') {
+    args.push('fork', options.forkSessionId);
+  } else if (options.resumeSessionId) {
     if (agent === 'codex') {
       args.push('resume', options.resumeSessionId);
     } else if (agent === 'cursor') {

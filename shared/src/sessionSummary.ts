@@ -1,4 +1,4 @@
-import type { Session, WorktreeMetadata } from './schemas'
+import type { Session, SideSessionMetadata, WorktreeMetadata } from './schemas'
 
 export type PendingRequestKind = 'permission' | 'input'
 
@@ -38,6 +38,7 @@ export type SessionSummaryMetadata = {
     worktree?: WorktreeMetadata
     agentSessionId?: string
     lifecycleState?: string
+    sideSession?: SideSessionMetadata
 }
 
 export type SessionSummary = {
@@ -122,7 +123,8 @@ export function toSessionSummary(session: Session): SessionSummary {
             ?? session.metadata.cursorSessionId
             ?? session.metadata.kimiSessionId
             ?? undefined,
-        lifecycleState: session.metadata.lifecycleState
+        lifecycleState: session.metadata.lifecycleState,
+        sideSession: session.metadata.sideSession
     } : null
 
     const todoProgress = session.todos?.length ? {

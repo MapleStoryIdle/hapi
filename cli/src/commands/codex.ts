@@ -7,6 +7,7 @@ import { CODEX_PERMISSION_MODES } from '@hapi/protocol/modes'
 import type { CodexPermissionMode } from '@hapi/protocol/types'
 import type { ReasoningEffort } from '@/codex/appServerTypes'
 import { assertCodexLocalSupported } from '@/codex/utils/codexVersion'
+import { printHapiCliCapabilities } from './capabilities'
 
 function parseReasoningEffort(value: string): ReasoningEffort {
     switch (value) {
@@ -16,6 +17,8 @@ function parseReasoningEffort(value: string): ReasoningEffort {
         case 'medium':
         case 'high':
         case 'xhigh':
+        case 'max':
+        case 'ultra':
             return value
         default:
             throw new Error('Invalid --model-reasoning-effort value')
@@ -32,11 +35,40 @@ function parseServiceTier(value: string): 'fast' | 'standard' {
     throw new Error('Invalid --service-tier value')
 }
 
+function showHelp(): void {
+    console.log(`
+${chalk.bold('hapi codex')} - Start, resume, or fork a Codex CLI conversation
+
+${chalk.bold('Usage:')}
+  hapi codex
+  hapi codex resume <session-id>
+  hapi codex fork <source-session-id>
+
+${chalk.bold('Fork semantics:')}
+  Uses native Codex thread/fork. The source conversation history, model,
+  reasoning effort, service tier, and native policy are inherited by Codex.
+  HAPI starts a separate session for the fork; it does not modify the source.
+  A remote fork reads the source from the selected runner's own CODEX_HOME;
+  that runner must also be allowed to spawn in the transcript workspace.
+
+${chalk.bold('Machine-readable help:')}
+  hapi codex --hapi-help-json
+`)
+}
+
 export const codexCommand: CommandDefinition = {
     name: 'codex',
     requiresRuntimeAssets: true,
     run: async ({ commandArgs }) => {
         try {
+            if (commandArgs.length === 1 && (commandArgs[0] === '--help' || commandArgs[0] === '-h')) {
+                showHelp()
+                return
+            }
+            if (commandArgs.length === 1 && commandArgs[0] === '--hapi-help-json') {
+                printHapiCliCapabilities('codex')
+                return
+            }
             const { runCodex } = await import('@/codex/runCodex')
 
             const options: {
@@ -44,6 +76,7 @@ export const codexCommand: CommandDefinition = {
                 codexArgs?: string[]
                 permissionMode?: CodexPermissionMode
                 resumeSessionId?: string
+                forkSessionId?: string
                 model?: string
                 modelReasoningEffort?: ReasoningEffort
                 serviceTier?: string
@@ -59,6 +92,15 @@ export const codexCommand: CommandDefinition = {
                         throw new Error('resume requires a session id')
                     }
                     options.resumeSessionId = candidate
+                    i += 1
+                    continue
+                }
+                if (i === 0 && arg === 'fork') {
+                    const candidate = commandArgs[i + 1]
+                    if (!candidate || candidate.startsWith('-')) {
+                        throw new Error('fork requires a session id')
+                    }
+                    options.forkSessionId = candidate
                     i += 1
                     continue
                 }

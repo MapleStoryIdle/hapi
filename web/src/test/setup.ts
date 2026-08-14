@@ -69,6 +69,40 @@ if (!('IntersectionObserver' in globalThis)) {
     })
 }
 
+// assistant-ui measures its thread root on mount. jsdom has no layout engine,
+// so a no-op observer is sufficient for component tests that exercise the
+// normal conversation renderer.
+if (!('ResizeObserver' in globalThis)) {
+    class MockResizeObserver implements ResizeObserver {
+        disconnect() {}
+        observe() {}
+        unobserve() {}
+    }
+
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+        value: MockResizeObserver,
+        configurable: true
+    })
+    Object.defineProperty(window, 'ResizeObserver', {
+        value: MockResizeObserver,
+        configurable: true
+    })
+}
+
+if (typeof HTMLElement.prototype.scrollTo !== 'function') {
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+        value(options: ScrollToOptions | number, top?: number) {
+            if (typeof options === 'number') {
+                this.scrollTop = top ?? 0
+                return
+            }
+            this.scrollTop = options.top ?? this.scrollTop
+            this.scrollLeft = options.left ?? this.scrollLeft
+        },
+        configurable: true
+    })
+}
+
 if (typeof window.matchMedia !== 'function') {
     Object.defineProperty(window, 'matchMedia', {
         writable: true,

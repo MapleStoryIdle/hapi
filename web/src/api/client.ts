@@ -2,6 +2,8 @@ import type {
     AttachmentMetadata,
     AuthResponse,
     CodexLocalSessionsResponse,
+    CodexLocalSessionContextResponse,
+    ForkCodexLocalSessionResponse,
     CodexDuplicateSessionsResponse,
     CodexMergeDuplicateSessionsResponse,
     CodexDesktopScriptResponse,
@@ -44,6 +46,7 @@ import type {
     OpencodeModelsResponse,
     OpencodeReasoningEffortResponse,
     AcceptRemoteServerCandidateRequest,
+    CreateSideSessionResponse,
     ReopenSessionResponse,
     UpdateRemoteServerRequest,
     UploadFileResponse
@@ -217,8 +220,32 @@ export class ApiClient {
         })
     }
 
-    async getCodexSessions(): Promise<CodexLocalSessionsResponse> {
-        return await this.request<CodexLocalSessionsResponse>('/api/codex/sessions')
+    async getCodexSessions(options?: { limit?: number; machineId?: string }): Promise<CodexLocalSessionsResponse> {
+        const queryParams = new URLSearchParams()
+        if (options?.machineId) queryParams.set('machineId', options.machineId)
+        if (options?.limit) queryParams.set('limit', String(options.limit))
+        const query = queryParams.size > 0 ? `?${queryParams.toString()}` : ''
+        return await this.request<CodexLocalSessionsResponse>(`/api/codex/sessions${query}`)
+    }
+
+    async getCodexSessionContext(
+        sessionId: string,
+        machineId: string,
+        options: { before?: number; limit?: number } = {}
+    ): Promise<CodexLocalSessionContextResponse> {
+        const queryParams = new URLSearchParams({ machineId })
+        if (options.before !== undefined) queryParams.set('before', String(options.before))
+        if (options.limit !== undefined) queryParams.set('limit', String(options.limit))
+        return await this.request<CodexLocalSessionContextResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/context?${queryParams.toString()}`
+        )
+    }
+
+    async forkCodexSession(sessionId: string, payload?: { machineId?: string }): Promise<ForkCodexLocalSessionResponse> {
+        return await this.request<ForkCodexLocalSessionResponse>(`/api/codex/sessions/${encodeURIComponent(sessionId)}/fork`, {
+            method: 'POST',
+            body: JSON.stringify(payload ?? {})
+        })
     }
 
     async getCodexDesktopStatus(): Promise<CodexDesktopStatusResponse> {
@@ -463,6 +490,13 @@ export class ApiClient {
             }
         )
         return response.sessionId
+    }
+
+    async createSideSession(sessionId: string): Promise<CreateSideSessionResponse> {
+        return await this.request<CreateSideSessionResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/side-session`,
+            { method: 'POST', body: JSON.stringify({}) }
+        )
     }
 
     async getRemoteServers(): Promise<RemoteServersResponse> {

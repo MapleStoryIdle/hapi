@@ -202,6 +202,21 @@ describe('runCodex', () => {
         expect(mockCodexSession.setServiceTier).not.toHaveBeenCalled()
     })
 
+    it.each(['max', 'ultra'] as const)('accepts %s reasoning effort from the session config RPC', async (modelReasoningEffort) => {
+        await runCodexImpl({
+            workingDirectory: '/tmp/project'
+        } as Parameters<typeof runCodex>[0])
+
+        const setConfigHandler = harness.session.rpcHandlerManager.registerHandler.mock.calls
+            .find(([method]) => method === 'set-session-config')?.[1] as ((payload: unknown) => Promise<unknown>) | undefined
+        expect(setConfigHandler).toBeDefined()
+
+        await expect(setConfigHandler!({ modelReasoningEffort })).resolves.toEqual({
+            applied: expect.objectContaining({ modelReasoningEffort })
+        })
+        expect(mockCodexSession.setModelReasoningEffort).toHaveBeenLastCalledWith(modelReasoningEffort)
+    })
+
     it('replays transcript history when attaching a new Hapi session to an existing Codex thread', async () => {
         await runCodexImpl({
             workingDirectory: '/tmp/project',

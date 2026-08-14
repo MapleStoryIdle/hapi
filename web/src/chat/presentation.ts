@@ -178,6 +178,9 @@ export type EventPresentation = {
 }
 
 export function getEventPresentation(event: AgentEvent): EventPresentation {
+    if (event.type === 'automation-heartbeat') {
+        return { icon: '◌', text: `Automation heartbeat · ${event.automationId}` }
+    }
     if (event.type === 'task-status') {
         return formatTaskStatusEvent(event)
     }

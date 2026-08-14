@@ -1,5 +1,9 @@
 import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+import type {
+    CodexLocalSessionDataRpcResponse,
+    CodexLocalSessionsRpcResponse
+} from '@hapi/protocol/codexTranscript'
 import type { BinaryFileReadRequest, BinaryFileReadResponse, BinaryFileUploadRequest, BinaryFileUploadResponse } from '@hapi/protocol'
 import type {
     CodexSubscriptionLimitsResponse,
@@ -30,6 +34,7 @@ import type { RpcRegistry } from '../socket/rpcRegistry'
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
 const MODEL_LIST_RPC_TIMEOUT_MS = 120_000
+const SIDE_SESSION_FORK_RPC_TIMEOUT_MS = 90_000
 
 /**
  * tiann/hapi#916: thrown by {@link RpcGateway.rpcCall} when the target CLI is
@@ -70,6 +75,11 @@ export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
 export type RpcLocalPreviewProbeResponse = LocalPreviewProbeResponse
 export type RpcLocalPreviewHttpResponse = LocalPreviewHttpResponse
+export type RpcCodexLocalSessionsResponse = CodexLocalSessionsRpcResponse
+export type RpcCodexLocalSessionDataResponse = CodexLocalSessionDataRpcResponse
+export type RpcForkCodexSideSessionResponse =
+    | { type: 'success'; childCodexThreadId: string; parentCodexThreadId: string }
+    | { type: 'error'; message: string; code?: string }
 export type RpcFileBytesResponse = {
     success: true
     bytes: Uint8Array
@@ -168,13 +178,14 @@ export class RpcGateway {
         resumeSessionId?: string,
         effort?: string,
         permissionMode?: PermissionMode,
-        serviceTier?: string
+        serviceTier?: string,
+        forkSessionId?: string
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         try {
             const result = await this.machineRpc(
                 machineId,
                 RPC_METHODS.SpawnHappySession,
-                { type: 'spawn-in-directory', directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, resumeSessionId, effort, permissionMode, serviceTier }
+                { type: 'spawn-in-directory', directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, resumeSessionId, effort, permissionMode, serviceTier, forkSessionId }
             )
             if (result && typeof result === 'object') {
                 const obj = result as Record<string, unknown>
@@ -215,6 +226,21 @@ export class RpcGateway {
             return { success: false, error: 'Unexpected list-directory result' }
         }
         return result as RpcListDirectoryResponse
+    }
+
+    async listCodexLocalSessions(machineId: string, limit: number): Promise<RpcCodexLocalSessionsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListCodexLocalSessions, { limit }) as RpcCodexLocalSessionsResponse
+    }
+
+    async readCodexLocalSession(
+        machineId: string,
+        sessionId: string,
+        options?: { before?: number; limit?: number }
+    ): Promise<RpcCodexLocalSessionDataResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ReadCodexLocalSession, {
+            sessionId,
+            ...options
+        }) as RpcCodexLocalSessionDataResponse
     }
 
     async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {
@@ -339,6 +365,40 @@ export class RpcGateway {
             request,
             DEFAULT_RPC_TIMEOUT_MS
         ) as RpcGetCodexSubscriptionLimitsResponse
+    }
+
+    async forkCodexSideSession(sessionId: string): Promise<RpcForkCodexSideSessionResponse> {
+        const result = await this.sessionRpc(
+            sessionId,
+            RPC_METHODS.ForkCodexSideSession,
+            {},
+            SIDE_SESSION_FORK_RPC_TIMEOUT_MS
+        )
+        if (!result || typeof result !== 'object') {
+            return { type: 'error', message: 'Unexpected side session fork result', code: 'bad_response' }
+        }
+        const obj = result as Record<string, unknown>
+        if (
+            obj.type === 'success'
+            && typeof obj.childCodexThreadId === 'string'
+            && obj.childCodexThreadId.length > 0
+            && typeof obj.parentCodexThreadId === 'string'
+            && obj.parentCodexThreadId.length > 0
+        ) {
+            return {
+                type: 'success',
+                childCodexThreadId: obj.childCodexThreadId,
+                parentCodexThreadId: obj.parentCodexThreadId
+            }
+        }
+        if (obj.type === 'error' && typeof obj.message === 'string') {
+            return {
+                type: 'error',
+                message: obj.message,
+                ...(typeof obj.code === 'string' ? { code: obj.code } : {})
+            }
+        }
+        return { type: 'error', message: 'Unexpected side session fork result', code: 'bad_response' }
     }
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {

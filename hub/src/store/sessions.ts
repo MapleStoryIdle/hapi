@@ -53,6 +53,8 @@ const PARSE_IDENTITY_FIELDS = ['path', 'host'] as const
 
 const ROUTING_FIELDS = ['flavor', 'machineId'] as const
 
+const RELATION_FIELDS = ['sideSession'] as const
+
 const SIMPLE_RESUME_TOKENS = [
     'claudeSessionId',
     'codexSessionId',
@@ -124,6 +126,7 @@ export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     let merged: Record<string, unknown> | null = null
     merged = carryForwardIfMissing(prior, next, merged, PARSE_IDENTITY_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
+    merged = carryForwardIfMissing(prior, next, merged, RELATION_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next

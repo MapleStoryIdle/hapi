@@ -7,6 +7,7 @@ import {
     buildModelReasoningEffortConfigArgs
 } from './utils/codexMcpConfig';
 import { codexSystemPrompt } from './utils/systemPrompt';
+import { buildDefaultModeRequestUserInputConfigArgs } from './utils/codexFeatureFlags';
 import type { ReasoningEffort } from './appServerTypes';
 import { resolveCodexCommand } from './utils/codexExecutable';
 import type { McpServersConfig } from './utils/buildHapiMcpBridge';
@@ -33,6 +34,7 @@ export function filterResumeSubcommand(args: string[]): string[] {
 export async function codexLocal(opts: {
     abort: AbortSignal;
     sessionId: string | null;
+    forkSessionId?: string | null;
     path: string;
     model?: string;
     modelReasoningEffort?: ReasoningEffort;
@@ -47,22 +49,31 @@ export async function codexLocal(opts: {
 }): Promise<void> {
     const args: string[] = [];
 
-    if (opts.sessionId) {
+    if (opts.forkSessionId) {
+        args.push('fork', opts.forkSessionId);
+    } else if (opts.sessionId) {
         args.push('resume', opts.sessionId);
         opts.onSessionFound(opts.sessionId);
     }
 
-    if (opts.model) {
+    // `codex fork` inherits the source thread's model and reasoning settings.
+    // Passing overrides here would replace those inherited settings before the
+    // newly forked thread starts.
+    if (opts.model && !opts.forkSessionId) {
         args.push('--model', opts.model);
     }
 
-    if (opts.modelReasoningEffort) {
+    if (opts.modelReasoningEffort && !opts.forkSessionId) {
         args.push(...buildModelReasoningEffortConfigArgs(opts.modelReasoningEffort));
     }
 
     if (opts.sandbox) {
         args.push('--sandbox', opts.sandbox);
     }
+
+    // Keep Default-mode questions structured even when the user's config does
+    // not already opt into Codex's experimental user-input feature.
+    args.push(...buildDefaultModeRequestUserInputConfigArgs());
 
     // Add MCP server configuration
     if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {

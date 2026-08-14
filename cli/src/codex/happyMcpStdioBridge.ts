@@ -1,7 +1,7 @@
 /**
  * HAPI MCP STDIO Bridge
  *
- * Minimal STDIO MCP server exposing HAPI tools such as `change_title` and `display_image`.
+ * STDIO MCP server exposing the HAPI tool capability set, including A2A peer tools.
  * On invocation it forwards the tool call to an existing HAPI HTTP MCP server
  * using the StreamableHTTPClientTransport.
  *
@@ -16,6 +16,21 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
+import {
+  INSPECT_PEER_TOOL_DESCRIPTION,
+  PING_PEER_TOOL_DESCRIPTION,
+  SESSION_ID_PREFIX_PARAM_DESCRIPTION,
+} from '@hapi/protocol/sessionCitation';
+
+/** stdio bridge 可代理的 HTTP MCP 工具；供外部宿主做能力发现。 */
+export const HAPI_MCP_STDIO_TOOL_NAMES = [
+  'change_title',
+  'display_image',
+  'verify_ssh_server_candidate',
+  'list_peers',
+  'inspect_peer',
+  'ping_peer',
+] as const;
 
 function parseArgs(argv: string[]): { url: string | null } {
   let url: string | null = null;
@@ -56,6 +71,20 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       await client.connect(transport);
       httpClient = client;
       return client;
+    }
+
+    async function forwardTool(name: string, args: Record<string, unknown>, failureLabel: string): Promise<any> {
+      try {
+        const client = await ensureHttpClient();
+        return await client.callTool({ name, arguments: args }) as any;
+      } catch (error) {
+        return {
+          content: [
+            { type: 'text' as const, text: `${failureLabel}: ${error instanceof Error ? error.message : String(error)}` },
+          ],
+          isError: true,
+        };
+      }
     }
 
     // Create STDIO MCP server
@@ -155,6 +184,50 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
           };
         }
       }
+    );
+
+    const listPeersInputSchema: z.ZodTypeAny = z.object({
+      limit: z.number().int().min(1).max(100).optional().describe('Max sessions to return (default 30, max 100).'),
+    });
+
+    server.registerTool<any, any>(
+      'list_peers',
+      {
+        description: 'List peer HAPI sessions on the same hub/namespace. Then use inspect_peer or ping_peer with a listed id.',
+        title: 'List Peer Sessions',
+        inputSchema: listPeersInputSchema,
+      },
+      async (args: Record<string, unknown>) => await forwardTool('list_peers', args, 'Failed to list peers')
+    );
+
+    const inspectPeerInputSchema: z.ZodTypeAny = z.object({
+      sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
+      messageLimit: z.number().int().min(1).max(100).optional().describe('Recent message page size (default 30, max 100).'),
+    });
+
+    server.registerTool<any, any>(
+      'inspect_peer',
+      {
+        description: INSPECT_PEER_TOOL_DESCRIPTION,
+        title: 'Inspect Peer Session',
+        inputSchema: inspectPeerInputSchema,
+      },
+      async (args: Record<string, unknown>) => await forwardTool('inspect_peer', args, 'Failed to inspect peer')
+    );
+
+    const pingPeerInputSchema: z.ZodTypeAny = z.object({
+      sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
+      message: z.string().min(1).describe('Message text to deliver to the target session'),
+    });
+
+    server.registerTool<any, any>(
+      'ping_peer',
+      {
+        description: PING_PEER_TOOL_DESCRIPTION,
+        title: 'Ping Peer Session',
+        inputSchema: pingPeerInputSchema,
+      },
+      async (args: Record<string, unknown>) => await forwardTool('ping_peer', args, 'Failed to ping peer')
     );
 
     // Start STDIO transport

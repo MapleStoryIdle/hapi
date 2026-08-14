@@ -18,7 +18,10 @@ import { EventPublisher } from './eventPublisher'
 type StoredMessageForDelivery = ReturnType<Store['messages']['getMessages']>[number]
 
 function isWebVisibleStoredMessage(message: StoredMessageForDelivery): boolean {
-    return !isRedundantGoalStatusEventContent(message.content)
+    if (isRedundantGoalStatusEventContent(message.content)) {
+        return false
+    }
+    return true
 }
 
 function toDecryptedMessage(message: StoredMessageForDelivery): DecryptedMessage {

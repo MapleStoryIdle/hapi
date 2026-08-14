@@ -40,17 +40,19 @@ describe('Claude effort options', () => {
 })
 
 describe('reasoning effort options', () => {
-    it('does not offer max for Codex new sessions', () => {
+    it('offers all supported Codex reasoning effort presets', () => {
         expect(CODEX_REASONING_EFFORT_OPTIONS).toEqual([
             { value: 'default', label: 'Default' },
             { value: 'low', label: 'Low' },
             { value: 'medium', label: 'Medium' },
             { value: 'high', label: 'High' },
             { value: 'xhigh', label: 'XHigh' },
+            { value: 'max', label: 'Max' },
+            { value: 'ultra', label: 'Ultra' },
         ])
     })
 
-    it('keeps max isolated to OpenCode new sessions', () => {
+    it('keeps the OpenCode reasoning presets unchanged', () => {
         expect(OPENCODE_REASONING_EFFORT_OPTIONS).toEqual([
             { value: 'default', label: 'Default' },
             { value: 'low', label: 'Low' },

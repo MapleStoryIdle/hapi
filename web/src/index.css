@@ -67,6 +67,14 @@
 }
 
 :root {
+    /*
+     * Keep the browser-provided inset in one token. Individual surfaces may
+     * add a visual minimum, but must still derive from this raw value so the
+     * layout tracks iOS standalone/PWA safe-area changes.
+     */
+    --app-safe-area-top: env(safe-area-inset-top, 0px);
+    --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+
     --app-bg: var(--tg-theme-bg-color, #ffffff);
     --app-fg: var(--tg-theme-text-color, #111827);
     --app-text: var(--app-fg);
@@ -149,6 +157,16 @@
     --app-chat-font-size: 0.9rem;
     --app-chat-line-height: 1.65rem;
     --app-message-action-size: 1.75rem;
+}
+
+/*
+ * Some installed iOS PWAs intermittently resolve safe-area-inset-bottom to
+ * zero after the page settles. Portrait iPhones use a 34px home-indicator
+ * inset, so keep it as the standalone fallback. The viewport hook clears it
+ * while the software keyboard owns the lower part of the visual viewport.
+ */
+html[data-ios-standalone="true"] {
+    --app-safe-area-bottom: max(34px, env(safe-area-inset-bottom, 0px));
 }
 
 [data-theme="dark"] {
@@ -363,6 +381,18 @@ body {
     touch-action: pan-x pan-y;
     overscroll-behavior: none;
     -webkit-text-size-adjust: 100%;
+}
+
+/*
+ * WebKit standalone PWAs with viewport-fit=cover can under-report dynamic
+ * viewport units by the bottom safe-area inset. Use the full legacy viewport
+ * when the keyboard fallback has not explicitly supplied a visual height.
+ */
+@media all and (display-mode: standalone) {
+    html:not([data-telegram-app="true"]),
+    html:not([data-telegram-app="true"]) body {
+        height: var(--app-viewport-height, 100vh);
+    }
 }
 
 #root {

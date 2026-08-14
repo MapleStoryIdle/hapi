@@ -23,13 +23,14 @@ import { formatMessageWithRemoteServerContext } from '@/remoteServers/contextPro
 
 export { emitReadyIfIdle } from './utils/emitReadyIfIdle';
 
-const REASONING_EFFORTS = new Set<ReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'])
+const REASONING_EFFORTS = new Set<ReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
 
 export async function runCodex(opts: {
     startedBy?: 'runner' | 'terminal';
     codexArgs?: string[];
     permissionMode?: PermissionMode;
     resumeSessionId?: string;
+    forkSessionId?: string;
     model?: string;
     modelReasoningEffort?: ReasoningEffort;
     serviceTier?: string;
@@ -417,6 +418,7 @@ export async function runCodex(opts: {
             modelReasoningEffort: currentModelReasoningEffort,
             collaborationMode: currentCollaborationMode,
             resumeSessionId: opts.resumeSessionId,
+            forkSessionId: opts.forkSessionId,
             replayTranscriptHistoryOnStart,
             onModeChange: createModeChangeHandler(session),
             onSessionReady: (instance) => {

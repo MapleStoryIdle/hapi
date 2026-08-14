@@ -8,6 +8,10 @@ import type { EventPublisher } from './eventPublisher'
 import { SessionCache } from './sessionCache'
 import { RpcTargetMissingError } from './rpcGateway'
 import { SyncEngine } from './syncEngine'
+import { GeneratedImageStore } from '../generatedImages/store'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 function createPublisher(events: SyncEvent[]): EventPublisher {
     return {
@@ -118,6 +122,67 @@ describe('session model', () => {
             })
         } finally {
             engine.stop()
+        }
+    })
+
+    it('reads durable generated-image bytes after the session socket is gone', async () => {
+        const rootDir = await mkdtemp(join(tmpdir(), 'hapi-generated-image-engine-'))
+        const images = new GeneratedImageStore(rootDir)
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never,
+            images
+        )
+        const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+        try {
+            const session = engine.getOrCreateSession(
+                'generated-image-durable',
+                { path: '/tmp/project', host: 'localhost', flavor: 'codex', machineId: 'machine-1' },
+                null,
+                'default'
+            )
+            await images.persist({
+                namespace: 'default',
+                imageId: 'img-durable',
+                fileName: 'saved.png',
+                mimeType: 'image/png',
+                bytes: pngBytes
+            })
+            store.messages.addMessage(session.id, {
+                role: 'agent',
+                content: {
+                    type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                    data: {
+                        type: 'generated-image',
+                        imageId: 'img-durable',
+                        fileName: 'saved.png',
+                        mimeType: 'image/png',
+                        sourcePath: '/tmp/no-longer-exists.png',
+                        sourceMachineId: 'machine-1',
+                        size: pngBytes.length,
+                        mtimeMs: 1234,
+                        id: 'event-durable'
+                    }
+                }
+            })
+
+            ;(engine as any).rpcGateway.readGeneratedImageBytes = async () => {
+                throw new Error('durable image should not need a session socket')
+            }
+
+            await expect(engine.readGeneratedImageBytes(session.id, 'img-durable')).resolves.toEqual({
+                success: true,
+                bytes: Buffer.from(pngBytes),
+                mimeType: 'image/png',
+                fileName: 'saved.png'
+            })
+        } finally {
+            engine.stop()
+            await rm(rootDir, { recursive: true, force: true })
         }
     })
 

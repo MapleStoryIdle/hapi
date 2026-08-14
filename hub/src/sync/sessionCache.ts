@@ -1,4 +1,4 @@
-import { AgentStateSchema, MetadataSchema, TeamStateSchema } from '@hapi/protocol/schemas'
+import { AgentStateSchema, MetadataSchema, TeamStateSchema, type SideSessionMetadata } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
@@ -634,6 +634,53 @@ export class SessionCache {
             if (result.result === 'success') {
                 this.refreshSession(sessionId)
                 return
+            }
+
+            this.refreshSession(sessionId)
+        }
+
+        throw new Error('Session was modified concurrently. Please try again.')
+    }
+
+    async setSideSessionMetadata(
+        sessionId: string,
+        sideSession: SideSessionMetadata,
+        name?: string
+    ): Promise<Session> {
+        for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session) {
+                throw new Error('Session not found')
+            }
+
+            const currentMetadata = session.metadata
+            if (!currentMetadata) {
+                throw new Error('Session metadata missing')
+            }
+            const nextMetadata = {
+                ...currentMetadata,
+                ...(name && !currentMetadata.name ? { name } : {}),
+                sideSession
+            }
+
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                nextMetadata,
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+
+            if (result.result === 'error') {
+                throw new Error('Failed to update side session metadata')
+            }
+
+            if (result.result === 'success') {
+                const refreshed = this.refreshSession(sessionId)
+                if (!refreshed) {
+                    throw new Error('Session not found after metadata update')
+                }
+                return refreshed
             }
 
             this.refreshSession(sessionId)

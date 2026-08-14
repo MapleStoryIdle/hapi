@@ -175,9 +175,13 @@ function getLimitPercentClass(remainingPercent: number | null): string {
     return 'text-[var(--app-hint)]'
 }
 
+function isDisplayableLimitWindow(window: CodexSubscriptionLimitWindow | null | undefined): window is CodexSubscriptionLimitWindow {
+    return window != null && Number.isFinite(window.usedPercent)
+}
+
 function getDisplayLimitWindows(limits: CodexSubscriptionLimits | null): CodexSubscriptionLimitWindow[] {
     const windows = [limits?.primary, limits?.secondary]
-        .filter((window): window is CodexSubscriptionLimitWindow => Boolean(window))
+        .filter(isDisplayableLimitWindow)
 
     const fiveHourWindow = windows.find((window) => window.windowDurationMins === 300)
     const weeklyWindow = windows.find((window) => (window.windowDurationMins ?? 0) >= 7 * 24 * 60)
@@ -223,19 +227,12 @@ function CodexSubscriptionLimitsBadge(props: {
     const [open, setOpen] = useState(false)
     const rootRef = useRef<HTMLDivElement | null>(null)
     const windows = getDisplayLimitWindows(props.limits)
-    const text = windows.length > 0
-        ? windows.map(formatLimitWindow).filter(Boolean).join(' · ')
-        : '5h -- · 7d --'
-    const rows = windows.length > 0
-        ? windows.map((window) => ({
-            label: formatLimitDuration(window),
-            remaining: getRemainingPercent(window),
-            resetAt: formatResetAt(window.resetsAt)
-        }))
-        : [
-            { label: '5h', remaining: null, resetAt: null },
-            { label: '7d', remaining: null, resetAt: null }
-        ]
+    const text = windows.map(formatLimitWindow).filter(Boolean).join(' · ')
+    const rows = windows.map((window) => ({
+        label: formatLimitDuration(window),
+        remaining: getRemainingPercent(window),
+        resetAt: formatResetAt(window.resetsAt)
+    }))
     const resetDetails = windows
         .map((window) => {
             const resetAt = formatResetAt(window.resetsAt)
@@ -273,6 +270,10 @@ function CodexSubscriptionLimitsBadge(props: {
             document.removeEventListener('keydown', handleKeyDown)
         }
     }, [open])
+
+    if (windows.length === 0) {
+        return null
+    }
 
     return (
         <div ref={rootRef} className="pointer-events-auto relative shrink-0">
@@ -343,6 +344,8 @@ export function SessionHeader(props: {
     api: ApiClient | null
     onSessionDeleted?: () => void
     onSessionReopened?: (newSessionId: string) => void
+    onCreateSideSession?: () => void
+    sideSessionPending?: boolean
     status?: StatusBarProps
     floating?: boolean
 }) {
@@ -451,9 +454,13 @@ export function SessionHeader(props: {
         return null
     }
 
+    // A small visual minimum keeps the title clear of the top edge when a
+    // standalone WebKit viewport reports a zero inset. On notched devices the
+    // browser-provided inset remains the source of truth.
+    const headerTopInsetClass = 'pt-[max(var(--app-safe-area-top),0.75rem)]'
     const headerShellClass = props.floating
-        ? 'pointer-events-none absolute inset-x-0 top-0 z-20 bg-transparent pt-[env(safe-area-inset-top)]'
-        : 'bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]'
+        ? `pointer-events-none absolute inset-x-0 top-0 z-20 bg-transparent ${headerTopInsetClass}`
+        : `bg-[var(--app-bg)] ${headerTopInsetClass}`
     const headerSurfaceClass = props.floating
         ? 'border-[color-mix(in_srgb,var(--app-border)_70%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_24%,transparent)] shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl'
         : 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
@@ -464,7 +471,7 @@ export function SessionHeader(props: {
     return (
         <>
             <div className={headerShellClass}>
-                <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3">
+                <div className={`mx-auto flex w-full max-w-content items-center gap-2 px-3 pb-3 ${props.floating ? 'pt-0' : 'pt-3'}`}>
                     <div className={`${props.floating ? 'pointer-events-auto' : ''} flex min-w-0 items-center gap-0.5 rounded-[20px] border px-1.5 py-1.5 ${headerSurfaceClass}`}>
                         {/* Back button */}
                         <button
@@ -568,6 +575,8 @@ export function SessionHeader(props: {
                 filesActive={props.filesActive}
                 onToggleOutline={props.onToggleOutline}
                 outlineActive={props.outlineActive}
+                onCreateSideSession={props.onCreateSideSession}
+                sideSessionPending={props.sideSessionPending}
                 anchorPoint={menuAnchorPoint}
                 menuId={menuId}
             />

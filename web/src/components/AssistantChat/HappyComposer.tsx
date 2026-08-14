@@ -6,7 +6,6 @@ import {
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
     type PointerEvent as ReactPointerEvent,
-    type RefObject,
     type SyntheticEvent as ReactSyntheticEvent,
     useCallback,
     useEffect,
@@ -14,12 +13,15 @@ import {
     useRef,
     useState
 } from 'react'
+import { GitBranch, Puzzle } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { AgentState, CodexCollaborationMode, PermissionMode, PiModelSummary, Session, SkillSummary, ThreadGoal } from '@/types/api'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import type { ConversationStatus } from '@/realtime/types'
 import { useActiveWord } from '@/hooks/useActiveWord'
 import { useActiveSuggestions } from '@/hooks/useActiveSuggestions'
+import { findActiveWord } from '@/utils/findActiveWord'
 import { applySuggestion } from '@/utils/applySuggestion'
 import { usePlatform } from '@/hooks/usePlatform'
 import { supportsEffort, supportsModelChange, PI_THINKING_LEVEL_LABELS } from '@hapi/protocol'
@@ -30,11 +32,13 @@ import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { shouldShowComposerStatusBar, StatusBar } from '@/components/AssistantChat/StatusBar'
-import { ComposerButtons, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
+import { ComposerButtons, GoalModeIcon, PlanModeIcon, getRemoteServerButtonAlias, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
+import { ServerIcon, useRemoteServerContextSelection } from '@/components/RemoteServers'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
 import { useTranslation } from '@/lib/use-translation'
+import { queryKeys } from '@/lib/query-keys'
 import { getModelOptionsForFlavor, getNextModelForFlavor } from './modelOptions'
 import { getClaudeComposerEffortOptions } from './claudeEffortOptions'
 import { getCodexComposerReasoningEffortOptions } from './codexReasoningEffortOptions'
@@ -48,112 +52,80 @@ export interface TextInputState {
     selection: { start: number; end: number }
 }
 
-type ComposerPreviewPart =
-    | { type: 'text'; text: string }
-    | { type: 'skill'; name: string; raw: string }
+const LEADING_SKILL_TOKEN_PATTERN = /^\s*\$([A-Za-z0-9][A-Za-z0-9._:-]*)(?:\s+|$)/
 
-const SKILL_TOKEN_PATTERN = /\$([A-Za-z0-9][A-Za-z0-9._:-]*)/g
-
-function SkillTokenIcon() {
-    return (
-        <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.25"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-        >
-            <path d="M8.5 3.5a2 2 0 0 1 3 1.73V7h2V5.23a2 2 0 1 1 2 0V7H18a2 2 0 0 1 2 2v2.5h-1.77a2 2 0 1 0 0 2H20V16a2 2 0 0 1-2 2h-2.5v-1.77a2 2 0 1 0-2 0V18h-2v-1.77a2 2 0 1 0-2 0V18H7a2 2 0 0 1-2-2v-2.5h1.77a2 2 0 1 0 0-2H5V9a2 2 0 0 1 2-2h2.5V5.23A2 2 0 0 1 8.5 3.5Z" />
-        </svg>
-    )
-}
-
-function getComposerPreviewParts(text: string, skillNames: Set<string>): ComposerPreviewPart[] {
-    if (!text || skillNames.size === 0) {
-        return text ? [{ type: 'text', text }] : []
-    }
-
-    const parts: ComposerPreviewPart[] = []
-    SKILL_TOKEN_PATTERN.lastIndex = 0
-    let lastIndex = 0
-    let match: RegExpExecArray | null
-
-    while ((match = SKILL_TOKEN_PATTERN.exec(text)) !== null) {
-        const raw = match[0]
-        const name = match[1]
-        if (!skillNames.has(name)) {
-            continue
-        }
-        if (match.index > lastIndex) {
-            parts.push({ type: 'text', text: text.slice(lastIndex, match.index) })
-        }
-        parts.push({ type: 'skill', name, raw })
-        lastIndex = match.index + raw.length
-    }
-
-    if (lastIndex < text.length) {
-        parts.push({ type: 'text', text: text.slice(lastIndex) })
-    }
-
-    return parts.length > 0 ? parts : [{ type: 'text', text }]
-}
-
-function insertSkillTokenAtSelection(
+function removeActiveSkillWord(
     text: string,
     selection: TextInputState['selection'],
-    skillName: string,
-): { text: string; cursorPosition: number } {
-    const token = `$${skillName.trim()}`
-    const before = text.slice(0, selection.start)
-    const after = text.slice(selection.end)
-    const leading = before.length > 0 && !/\s$/.test(before) ? ' ' : ''
-    const trailing = after.length > 0 && /^\s/.test(after) ? '' : ' '
-    const insertion = `${leading}${token}${trailing}`
+    prefixes: string[]
+): { text: string; cursorPosition: number } | null {
+    const activeWord = findActiveWord(text, selection, prefixes)
+    if (!activeWord?.activeWord.startsWith('$')) return null
+
+    const before = text.slice(0, activeWord.offset)
+    const after = text.slice(activeWord.endOffset)
+    const normalizedAfter = before.endsWith(' ') && after.startsWith(' ')
+        ? after.slice(1)
+        : before.length === 0 && after.startsWith(' ')
+            ? after.slice(1)
+            : after
 
     return {
-        text: `${before}${insertion}${after}`,
-        cursorPosition: before.length + insertion.length
+        text: `${before}${normalizedAfter}`,
+        cursorPosition: before.length
     }
 }
 
-function ComposerInputPreview(props: {
-    text: string
-    parts: ComposerPreviewPart[]
-    previewRef: RefObject<HTMLDivElement | null>
-    compactTopAnchor: boolean
-}) {
-    if (!props.text) return null
+function removeLeadingKnownSkillToken(
+    text: string,
+    skillsByName: ReadonlyMap<string, SkillSummary>
+): { text: string; cursorPosition: number } | null {
+    const match = text.match(LEADING_SKILL_TOKEN_PATTERN)
+    const name = match?.[1]
+    if (!match || !name || !skillsByName.has(name)) return null
 
-    return (
-        <div
-            ref={props.previewRef}
-            aria-hidden="true"
-            className={`pointer-events-none absolute inset-x-4 top-2 bottom-2 overflow-hidden whitespace-pre-wrap break-words text-base leading-snug text-[var(--app-fg)] ${
-                props.compactTopAnchor ? 'max-h-[44px]' : 'max-h-[10rem]'
-            }`}
-        >
-            {props.parts.map((part, index) => part.type === 'skill' ? (
-                <span
-                    key={`${part.raw}-${index}`}
-                    className="relative inline-block align-baseline text-transparent"
-                >
-                    {part.raw}
-                    <span className="absolute inset-0 inline-flex min-w-0 items-baseline overflow-hidden rounded-[4px] bg-blue-500/10 font-semibold text-[var(--app-link)]">
-                        <span className="inline-flex w-[1ch] shrink-0 translate-y-[1px] items-center justify-center">
-                            <SkillTokenIcon />
-                        </span>
-                        <span className="min-w-0 truncate">{part.name}</span>
-                    </span>
-                </span>
-            ) : (
-                <span key={`text-${index}`}>{part.text}</span>
-            ))}
-        </div>
-    )
+    const nextText = text.slice(match[0].length)
+    return {
+        text: nextText,
+        cursorPosition: 0
+    }
+}
+
+export function getComposerTextWithSelectedSkill(text: string, skillName?: string | null): string {
+    const normalizedSkillName = skillName?.trim()
+    if (!normalizedSkillName) return text
+
+    const token = `$${normalizedSkillName}`
+    const existing = text.match(LEADING_SKILL_TOKEN_PATTERN)
+    if (existing?.[1] === normalizedSkillName) {
+        return text
+    }
+
+    const body = text.trimStart()
+    return body.length > 0 ? `${token} ${body}` : token
+}
+
+export function extractLeadingSkillForComposer(
+    text: string,
+    skillsByName: ReadonlyMap<string, SkillSummary>
+): { skill: SkillSummary; text: string } | null {
+    const match = text.match(LEADING_SKILL_TOKEN_PATTERN)
+    const name = match?.[1]
+    if (!match || !name) return null
+
+    return {
+        skill: skillsByName.get(name) ?? { name },
+        text: text.slice(match[0].length)
+    }
+}
+
+type ActiveSideSessionChip = {
+    id: string
+    title: string
+}
+
+function SideSessionChipIcon() {
+    return <GitBranch strokeWidth={2} aria-hidden="true" />
 }
 
 /**
@@ -200,7 +172,9 @@ function formatReasoningLabel(value: string | null | undefined, label: string, l
     if (normalized === 'low') return '低'
     if (normalized === 'medium') return '中'
     if (normalized === 'high') return '高'
-    if (normalized === 'xhigh' || normalized === 'max') return '超高'
+    if (normalized === 'xhigh') return '超高'
+    if (normalized === 'max') return '最高'
+    if (normalized === 'ultra') return '极限'
     return label
 }
 
@@ -353,6 +327,8 @@ export function HappyComposer(props: {
         session: Session
         onChanged: () => void
     }
+    activeSideSessions?: ActiveSideSessionChip[]
+    onSelectSideSession?: (sessionId: string) => void
     compactTopAnchor?: boolean
 }) {
     const { t, locale } = useTranslation()
@@ -409,6 +385,8 @@ export function HappyComposer(props: {
         onClearSendError,
         showStatusBar = true,
         remoteServerContext,
+        activeSideSessions = [],
+        onSelectSideSession,
         compactTopAnchor = false
     } = props
 
@@ -420,12 +398,14 @@ export function HappyComposer(props: {
     const effort = rawEffort ?? null
     const serviceTier = rawServiceTier ?? null
 
+    const queryClient = useQueryClient()
     const api = useAssistantApi()
     const { composerEnterBehavior } = useComposerEnterBehavior()
     const composerText = useAssistantState(({ composer }) => composer.text)
     const attachments = useAssistantState(({ composer }) => composer.attachments)
     const threadIsRunning = useAssistantState(({ thread }) => thread.isRunning)
     const threadIsDisabled = useAssistantState(({ thread }) => thread.isDisabled)
+    const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null)
 
     const controlsDisabled = disabled || (!active && !allowSendWhenInactive) || threadIsDisabled
     const trimmed = composerText.trim()
@@ -441,7 +421,7 @@ export function HappyComposer(props: {
         const path = (attachment as { path?: string }).path
         return typeof path === 'string' && path.length > 0
     })
-    const canSend = (hasText || hasAttachments) && attachmentsReady && !controlsDisabled
+    const canSend = (hasText || hasAttachments || selectedSkill !== null) && attachmentsReady && !controlsDisabled
 
     const [inputState, setInputState] = useState<TextInputState>({
         text: '',
@@ -453,6 +433,8 @@ export function HappyComposer(props: {
     const [showPiThinkingPanel, setShowPiThinkingPanel] = useState(false)
     const [isAborting, setIsAborting] = useState(false)
     const [isSwitching, setIsSwitching] = useState(false)
+    const [isClearingRemoteServer, setIsClearingRemoteServer] = useState(false)
+    const [showSideSessionMenu, setShowSideSessionMenu] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
     // pendingSchedule is controlled externally when onSchedule prop is provided; otherwise local state
     const [pendingScheduleLocal, setPendingScheduleLocal] = useState<PendingSchedule | null>(null)
@@ -460,9 +442,19 @@ export function HappyComposer(props: {
     const pendingSchedule = isControlled ? (pendingScheduleProp ?? null) : pendingScheduleLocal
     const setPendingSchedule = isControlled ? onScheduleProp : setPendingScheduleLocal
 
+    useEffect(() => {
+        if (activeSideSessions.length <= 1) {
+            setShowSideSessionMenu(false)
+        }
+    }, [activeSideSessions.length])
+
     const textareaRef = useRef<HTMLTextAreaElement>(null)
-    const inputPreviewRef = useRef<HTMLDivElement>(null)
     const prevControlledByUser = useRef(controlledByUser)
+    const skillsByName = useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills])
+    const { selected: selectedRemoteServer } = useRemoteServerContextSelection(
+        remoteServerContext?.api ?? null,
+        remoteServerContext?.session ?? null
+    )
 
     useComposerDraft(sessionId, composerText, (text) => api.composer().setText(text))
 
@@ -487,7 +479,13 @@ export function HappyComposer(props: {
         // but possible if isSending toggles before this effect runs), we
         // would otherwise stomp on their fresh input.
         if (composerText.length === 0 && sendError.text.length > 0) {
-            api.composer().setText(sendError.text)
+            const restored = extractLeadingSkillForComposer(sendError.text, skillsByName)
+            if (restored) {
+                setSelectedSkill(restored.skill)
+                api.composer().setText(restored.text)
+            } else {
+                api.composer().setText(sendError.text)
+            }
         }
         // Restore the pending schedule too.  `scheduledAt` was already
         // resolved to an absolute epoch-ms before the failed send (presets
@@ -498,7 +496,7 @@ export function HappyComposer(props: {
         if (sendError.scheduledAt !== null && onScheduleProp) {
             onScheduleProp({ type: 'absolute', ms: sendError.scheduledAt })
         }
-    }, [sendError, api, composerText, onScheduleProp])
+    }, [sendError, api, composerText, onScheduleProp, skillsByName])
 
     useEffect(() => {
         setInputState((prev) => {
@@ -522,8 +520,10 @@ export function HappyComposer(props: {
     }, [controlledByUser])
 
     const { haptic: platformHaptic } = usePlatform()
-    const bottomPaddingClass = 'pb-0'
-    const skillNames = useMemo(() => new Set(skills.map((skill) => skill.name)), [skills])
+    // The composer is an overlay, not scrollable message content. Keep its
+    // controls above the iOS home indicator, with a small visual breathing
+    // room, while the thread itself remains edge-to-edge.
+    const bottomPaddingClass = 'pb-[calc(0.5rem+var(--app-safe-area-bottom))]'
     const activeWord = useActiveWord(inputState.text, inputState.selection, autocompletePrefixes)
     const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions] = useActiveSuggestions(
         activeWord,
@@ -582,11 +582,62 @@ export function HappyComposer(props: {
         focusComposerInput()
     }, [focusComposerInput])
 
+    const handleSkillSelect = useCallback((skill: SkillSummary) => {
+        if (controlsDisabled) return
+
+        if (selectedSkill?.name === skill.name) {
+            setSelectedSkill(null)
+            clearSuggestions()
+            focusComposerInput()
+            haptic('light')
+            return
+        }
+
+        const result = activeWord?.startsWith('$')
+            ? removeActiveSkillWord(inputState.text, inputState.selection, autocompletePrefixes)
+            : removeLeadingKnownSkillToken(inputState.text, skillsByName)
+
+        markSkillUsed(skill.name)
+        setSelectedSkill(skill)
+        if (result) {
+            api.composer().setText(result.text)
+            setInputState({
+                text: result.text,
+                selection: { start: result.cursorPosition, end: result.cursorPosition }
+            })
+            focusComposerInputAt(result.cursorPosition)
+        } else {
+            focusComposerInput()
+        }
+        clearSuggestions()
+
+        haptic('light')
+    }, [
+        activeWord,
+        api,
+        autocompletePrefixes,
+        clearSuggestions,
+        controlsDisabled,
+        focusComposerInput,
+        focusComposerInputAt,
+        haptic,
+        inputState,
+        selectedSkill,
+        skillsByName
+    ])
+
     const handleSuggestionSelect = useCallback((index: number) => {
         const suggestion = suggestions[index]
         if (!suggestion || !textareaRef.current) return
+
         if (suggestion.text.startsWith('$')) {
-            markSkillUsed(suggestion.text.slice(1))
+            const skillName = suggestion.text.slice(1)
+            const skill = skillsByName.get(skillName)
+            if (skill) {
+                handleSkillSelect(skill)
+                return
+            }
+            markSkillUsed(skillName)
         }
 
         const result = applySuggestion(
@@ -606,34 +657,7 @@ export function HappyComposer(props: {
         focusComposerInputAt(result.cursorPosition)
 
         haptic('light')
-    }, [api, suggestions, inputState, autocompletePrefixes, focusComposerInputAt, haptic])
-
-    const handleSkillSelect = useCallback((skill: SkillSummary) => {
-        if (controlsDisabled) return
-
-        const skillText = `$${skill.name}`
-        const result = activeWord?.startsWith('$')
-            ? applySuggestion(
-                inputState.text,
-                inputState.selection,
-                skillText,
-                autocompletePrefixes,
-                true
-            )
-            : insertSkillTokenAtSelection(inputState.text, inputState.selection, skill.name)
-
-        markSkillUsed(skill.name)
-        api.composer().setText(result.text)
-        setInputState({
-            text: result.text,
-            selection: { start: result.cursorPosition, end: result.cursorPosition }
-        })
-        clearSuggestions()
-
-        focusComposerInputAt(result.cursorPosition)
-
-        haptic('light')
-    }, [activeWord, api, autocompletePrefixes, clearSuggestions, controlsDisabled, focusComposerInputAt, haptic, inputState])
+    }, [api, suggestions, inputState, autocompletePrefixes, focusComposerInputAt, haptic, skillsByName, handleSkillSelect])
 
     const abortDisabled = controlsDisabled || isAborting || !threadIsRunning
     const switchDisabled = controlsDisabled || isSwitching || !controlledByUser
@@ -672,6 +696,41 @@ export function HappyComposer(props: {
         }
     }, [switchDisabled, onSwitchToRemote, haptic])
 
+    const handleClearRemoteServer = useCallback(async () => {
+        if (!remoteServerContext || controlsDisabled || isClearingRemoteServer) return
+        setIsClearingRemoteServer(true)
+        try {
+            await remoteServerContext.api.setSessionRemoteServer(remoteServerContext.session.id, null)
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: queryKeys.session(remoteServerContext.session.id) }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+            ])
+            remoteServerContext.onChanged()
+            haptic('light')
+        } finally {
+            setIsClearingRemoteServer(false)
+        }
+    }, [controlsDisabled, haptic, isClearingRemoteServer, queryClient, remoteServerContext])
+
+    const sendComposerMessage = useCallback(() => {
+        if (selectedSkill) {
+            api.composer().setText(getComposerTextWithSelectedSkill(composerText, selectedSkill.name))
+            setSelectedSkill(null)
+        }
+        api.composer().send()
+        setShowContinueHint(false)
+        // SessionChat owns clearing the schedule — it clears only after awaiting
+        // the send hook's accepted result, which covers both pre-mutation guards
+        // and async inactive-session resume failure. Clearing here unconditionally
+        // would race ahead of that check and drop the user's schedule on every
+        // rejected send path.
+        //
+        // The inline send-error affordance is intentionally NOT cleared here:
+        // the route-level state (`onSuccess`/`onError` in router.tsx) replaces
+        // or clears it based on the actual mutation result, so the user keeps
+        // the error context while the new attempt is in flight.
+    }, [api, composerText, selectedSkill])
+
     const permissionModeOptions = useMemo(
         () => getPermissionModeOptionsForFlavor(agentFlavor),
         [agentFlavor]
@@ -689,7 +748,7 @@ export function HappyComposer(props: {
             ? getCodexComposerReasoningEffortOptions(
                 modelReasoningEffort,
                 agentFlavor,
-                agentFlavor === 'opencode' ? availableModelReasoningEffortOptions : undefined
+                availableModelReasoningEffortOptions
             )
             : [],
         [agentFlavor, modelReasoningEffort, availableModelReasoningEffortOptions]
@@ -760,15 +819,13 @@ export function HappyComposer(props: {
             if (composerEnterBehavior === 'newline') {
                 if ((e.ctrlKey || e.metaKey) && !e.altKey && canSend) {
                     e.preventDefault()
-                    api.composer().send()
-                    setShowContinueHint(false)
+                    sendComposerMessage()
                 }
                 return
             }
             e.preventDefault()
             if (!e.ctrlKey && !e.altKey && !e.metaKey && canSend) {
-                api.composer().send()
-                setShowContinueHint(false)
+                sendComposerMessage()
             }
             return
         }
@@ -824,9 +881,9 @@ export function HappyComposer(props: {
         permissionMode,
         permissionModes,
         canSend,
-        api,
         haptic,
-        composerEnterBehavior
+        composerEnterBehavior,
+        sendComposerMessage
     ])
 
     useEffect(() => {
@@ -896,12 +953,6 @@ export function HappyComposer(props: {
         }
     }, [api, pendingSchedule])
 
-    const handleInputScroll = useCallback((event: ReactSyntheticEvent<HTMLTextAreaElement>) => {
-        const preview = inputPreviewRef.current
-        if (!preview) return
-        preview.scrollTop = event.currentTarget.scrollTop
-    }, [])
-
     const handleSettingsToggle = useCallback(() => {
         haptic('light')
         setShowSettings(prev => {
@@ -961,6 +1012,22 @@ export function HappyComposer(props: {
         }, 0)
         haptic('light')
     }, [api, composerText, controlsDisabled, haptic])
+
+    const handleSideSessionChipClick = useCallback(() => {
+        if (!onSelectSideSession || activeSideSessions.length === 0) return
+        haptic('light')
+        const first = activeSideSessions[0]
+        if (activeSideSessions.length === 1 && first) {
+            onSelectSideSession(first.id)
+            return
+        }
+        setShowSideSessionMenu((open) => !open)
+    }, [activeSideSessions, haptic, onSelectSideSession])
+
+    const handleSideSessionSelect = useCallback((sessionId: string) => {
+        setShowSideSessionMenu(false)
+        onSelectSideSession?.(sessionId)
+    }, [onSelectSideSession])
 
     const handleModelChange = useCallback((nextModel: { provider: string; modelId: string } | string | null) => {
         if (!onModelChange || controlsDisabled) return
@@ -1041,15 +1108,25 @@ export function HappyComposer(props: {
     // Dropping this reserved height after the transition causes a second
     // layout pass, which shows up as a small upward twitch on mobile.
     const reserveAnchoredComposerHeight = compactTopAnchor
+    const showPlanSelectionChip = Boolean(showPlanModeTool && collaborationMode === 'plan')
+    const showGoalSelectionChip = Boolean(showGoalModeTool && threadGoal?.status === 'active')
+    const showSideSessionChip = Boolean(onSelectSideSession && activeSideSessions.length > 0)
+    const firstActiveSideSession = activeSideSessions[0] ?? null
+    const remoteServerAlias = selectedRemoteServer ? getRemoteServerButtonAlias(selectedRemoteServer) : null
+    const hasSelectionChips = selectedSkill !== null
+        || showPlanSelectionChip
+        || showGoalSelectionChip
+        || showSideSessionChip
+        || selectedRemoteServer !== null
+    const reservedComposerHeightClass = reserveAnchoredComposerHeight
+        ? hasSelectionChips
+            ? 'h-[150px]'
+            : 'h-[120px]'
+        : ''
     const expandedHeightClass = compactTopAnchor
         ? 'h-[112px] max-h-[112px]'
         : 'min-h-[112px] max-h-[360px]'
     const composerInputMaxRows = compactTopAnchor ? 2 : 6
-    const composerPreviewParts = useMemo(
-        () => getComposerPreviewParts(composerText, skillNames),
-        [composerText, skillNames]
-    )
-    const hasSkillPreviewToken = composerPreviewParts.some((part) => part.type === 'skill')
 
     const currentModelLabel = useMemo(() => {
         if (selectedModelBase !== undefined) {
@@ -1121,20 +1198,6 @@ export function HappyComposer(props: {
             remainingPercent
         }
     }, [agentFlavor, contextCacheRead, contextSize, contextWindow, model])
-
-    const handleSend = useCallback(() => {
-        api.composer().send()
-        // SessionChat owns clearing the schedule — it clears only after awaiting
-        // the send hook's accepted result, which covers both pre-mutation guards
-        // and async inactive-session resume failure. Clearing here unconditionally
-        // would race ahead of that check and drop the user's schedule on every
-        // rejected send path.
-        //
-        // The inline send-error affordance is intentionally NOT cleared here:
-        // the route-level state (`onSuccess`/`onError` in router.tsx) replaces
-        // or clears it based on the actual mutation result, so the user keeps
-        // the error context while the new attempt is in flight.
-    }, [api])
 
     // Pi: selected model info for UI labels and thinking level filtering
     const piModelLabel = agentFlavor === 'pi'
@@ -1476,7 +1539,7 @@ export function HappyComposer(props: {
     ])
 
     return (
-        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[height,margin] duration-[700ms] ease-in-out ${reserveAnchoredComposerHeight ? 'h-[120px]' : ''}`}>
+        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[height,margin] duration-[700ms] ease-in-out ${reservedComposerHeightClass}`}>
             <div
                 className="mx-auto w-full max-w-content"
             >
@@ -1524,6 +1587,103 @@ export function HappyComposer(props: {
                         </div>
                     ) : null}
 
+                    {hasSelectionChips ? (
+                        <div className="mb-1 flex min-w-0 gap-1.5 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                            {selectedSkill ? (
+                                <button
+                                    type="button"
+                                    data-testid="composer-selected-skill"
+                                    aria-label={`Cancel skill ${selectedSkill.name}`}
+                                    title={`$${selectedSkill.name}`}
+                                    className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-500/10 px-2.5 text-sm font-semibold text-[var(--app-link)] transition-colors hover:bg-blue-500/15 dark:border-blue-400/30 dark:bg-blue-400/15 [&_svg]:h-4 [&_svg]:w-4"
+                                    onClick={() => {
+                                        setSelectedSkill(null)
+                                        focusComposerInput()
+                                        haptic('light')
+                                    }}
+                                >
+                                    <Puzzle />
+                                    <span className="whitespace-nowrap">{selectedSkill.name}</span>
+                                </button>
+                            ) : null}
+
+                            {showPlanSelectionChip ? (
+                                <button
+                                    type="button"
+                                    data-testid="composer-selected-plan-mode"
+                                    aria-label={t('tool.exitPlan')}
+                                    title={t('tool.exitPlan')}
+                                    disabled={controlsDisabled}
+                                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-blue-500/10 text-sm font-semibold text-[var(--app-link)] transition-colors hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-400/30 dark:bg-blue-400/15 [&_svg]:h-4 [&_svg]:w-4"
+                                    onClick={handlePlanModeToggle}
+                                >
+                                    <PlanModeIcon />
+                                </button>
+                            ) : null}
+
+                            {showGoalSelectionChip ? (
+                                <button
+                                    type="button"
+                                    data-testid="composer-selected-goal-mode"
+                                    aria-label="目标模式"
+                                    title={threadGoal?.objective ? `目标模式: ${threadGoal.objective}` : '目标模式'}
+                                    disabled={controlsDisabled}
+                                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-blue-500/10 text-sm font-semibold text-[var(--app-link)] transition-colors hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-400/30 dark:bg-blue-400/15 [&_svg]:h-4 [&_svg]:w-4"
+                                    onClick={() => haptic('light')}
+                                >
+                                    <GoalModeIcon />
+                                </button>
+                            ) : null}
+
+                            {showSideSessionChip ? (
+                                <button
+                                    type="button"
+                                    data-testid="composer-active-side-session"
+                                    aria-label={activeSideSessions.length === 1 && firstActiveSideSession ? `打开侧边会话 ${firstActiveSideSession.title}` : '选择侧边会话'}
+                                    title={activeSideSessions.length === 1 && firstActiveSideSession ? firstActiveSideSession.title : `${activeSideSessions.length} 个侧边会话`}
+                                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-blue-500/10 text-sm font-semibold text-[var(--app-link)] transition-colors hover:bg-blue-500/15 dark:border-blue-400/30 dark:bg-blue-400/15 [&_svg]:h-4 [&_svg]:w-4"
+                                    onClick={handleSideSessionChipClick}
+                                >
+                                    <SideSessionChipIcon />
+                                </button>
+                            ) : null}
+
+                            {selectedRemoteServer && remoteServerAlias ? (
+                                <button
+                                    type="button"
+                                    data-testid="composer-selected-remote-server"
+                                    aria-label={`取消远程服务器 ${remoteServerAlias}`}
+                                    title={`远程服务器: ${remoteServerAlias}`}
+                                    disabled={controlsDisabled || isClearingRemoteServer}
+                                    className="inline-flex h-7 max-w-[12rem] shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-500/10 px-2.5 text-sm font-semibold text-[var(--app-link)] transition-colors hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-400/30 dark:bg-blue-400/15 [&_svg]:h-4 [&_svg]:w-4"
+                                    onClick={() => { void handleClearRemoteServer() }}
+                                >
+                                    <ServerIcon className="h-4 w-4 shrink-0" />
+                                    <span className="min-w-0 truncate">{remoteServerAlias}</span>
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null}
+
+                    {showSideSessionMenu && activeSideSessions.length > 1 ? (
+                        <div className="absolute bottom-[calc(100%_-_2rem)] left-1 z-30 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg">
+                            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                                侧边会话
+                            </div>
+                            {activeSideSessions.map((sideSession) => (
+                                <button
+                                    key={sideSession.id}
+                                    type="button"
+                                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                    onClick={() => handleSideSessionSelect(sideSession.id)}
+                                >
+                                    <SideSessionChipIcon />
+                                    <span className="min-w-0 flex-1 truncate">{sideSession.title}</span>
+                                </button>
+                            ))}
+                        </div>
+                    ) : null}
+
                     <div
                         className={`relative flex overflow-hidden rounded-[22px] border shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition-[min-height,max-height,height,border-color,box-shadow,background-color] duration-[700ms] ease-in-out ${
                             composerCompact
@@ -1549,14 +1709,6 @@ export function HappyComposer(props: {
                                         : 'relative flex min-h-[62px] max-h-[11rem] min-w-0 flex-none items-start px-4 py-2'
                             }
                         >
-                            {hasSkillPreviewToken ? (
-                                <ComposerInputPreview
-                                    text={composerText}
-                                    parts={composerPreviewParts}
-                                    previewRef={inputPreviewRef}
-                                    compactTopAnchor={compactTopAnchor}
-                                />
-                            ) : null}
                             <ComposerPrimitive.Input
                                 ref={textareaRef}
                                 placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
@@ -1568,12 +1720,7 @@ export function HappyComposer(props: {
                                 onSelect={handleSelect}
                                 onKeyDown={handleKeyDown}
                                 onPaste={handlePaste}
-                                onScroll={handleInputScroll}
-                                className={`relative z-10 flex-1 resize-none bg-transparent text-base placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                                    hasSkillPreviewToken
-                                        ? 'text-transparent caret-[var(--app-fg)] selection:bg-blue-200/60'
-                                        : 'text-[var(--app-fg)]'
-                                } ${
+                                className={`relative z-10 flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
                                     composerCompact
                                         ? 'h-6 max-h-6 overflow-hidden leading-6'
                                         : compactTopAnchor
@@ -1591,6 +1738,7 @@ export function HappyComposer(props: {
                             settingsLabel={settingsLabel}
                             settingsModelLabel={compactModelLabel}
                             settingsReasoningLabel={currentReasoningLabel}
+                            fastModeActive={serviceTier?.trim().toLowerCase() === 'fast'}
                             settingsOpen={showSettings}
                             contextUsagePercent={contextUsage?.percentage ?? null}
                             contextUsageLabel={contextUsage?.label}
@@ -1626,7 +1774,7 @@ export function HappyComposer(props: {
                             voiceMicMuted={voiceMicMuted}
                             onVoiceToggle={onVoiceToggle ?? (() => {})}
                             onVoiceMicToggle={onVoiceMicToggle}
-                            onSend={handleSend}
+                            onSend={sendComposerMessage}
                             pendingSchedule={pendingSchedule}
                             onSchedule={setPendingSchedule}
                             onClearSchedule={isControlled ? onClearScheduleProp : () => setPendingScheduleLocal(null)}

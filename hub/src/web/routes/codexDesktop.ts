@@ -63,9 +63,40 @@ type CodexLocalSessionSummary = {
     cliVersion?: string | null
 }
 
+type CodexTranscriptFileCandidate = {
+    file: string
+    modifiedAt: number
+}
+
 type CodexLocalSessionsResponse = {
     success: true
     sessions: CodexLocalSessionSummary[]
+}
+
+type CodexLocalSessionContextMessage = {
+    id: string
+    createdAt: number
+    content: CodexImportedMessageContent
+}
+
+type CodexLocalSessionContextResponse = {
+    success: true
+    session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt'>
+    messages: CodexLocalSessionContextMessage[]
+    page: {
+        limit: number
+        nextBefore: number | null
+        hasMore: boolean
+    }
+}
+
+type ForkCodexLocalSessionResponse = {
+    type: 'success'
+    sessionId: string
+    session?: unknown
+} | {
+    type: 'error'
+    message: string
 }
 
 type CodexImportedMessageContent = {
@@ -144,6 +175,8 @@ const NO_SYNC_SESSION_SELECTED_ERROR = '未选择需要导入的 Codex 会话'
 const CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR = 'Codex transcript import is not available outside the default namespace'
 const DEFAULT_SCRIPT_TIMEOUT_MS = 60_000
 const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 500
+const DEFAULT_RECENT_CODEX_SESSION_LIMIT = 5
+const DEFAULT_RECENT_CODEX_CONTEXT_PAGE_LIMIT = 50
 
 function resolveLocalPath(pathValue: string): string {
     return isAbsolute(pathValue) ? pathValue : resolve(process.cwd(), pathValue)
@@ -201,13 +234,18 @@ function getCodexHome(): string {
     return configured ? resolveLocalPath(expandHomePath(configured)) : join(homedir(), '.codex')
 }
 
+/** Codex transcripts read here live on the Hub host, never on an arbitrary runner. */
+function getCodexTranscriptHost(): string {
+    return process.env.HAPI_HOSTNAME?.trim() || hostname()
+}
+
 function getCodexSessionRoots(): string[] {
     const codexHome = getCodexHome()
     // 中文注释：当前 direct import 只从 sessions 目录解析 transcript，避免把 archived_sessions 中暂不参与导入的会话展示给用户。
     return [join(codexHome, 'sessions')]
 }
 
-function collectJsonlFiles(root: string, files: string[]): void {
+function collectJsonlFiles(root: string, files: CodexTranscriptFileCandidate[]): void {
     if (!existsSync(root)) return
     let entries
     try {
@@ -223,7 +261,14 @@ function collectJsonlFiles(root: string, files: string[]): void {
             continue
         }
         if (entry.isFile() && fullPath.toLowerCase().endsWith('.jsonl')) {
-            files.push(fullPath)
+            try {
+                files.push({
+                    file: fullPath,
+                    modifiedAt: statSync(fullPath).mtimeMs
+                })
+            } catch {
+                // The transcript can disappear while Codex rotates sessions.
+            }
         }
     }
 }
@@ -272,10 +317,23 @@ function truncateText(value: string, maxLength: number): string {
     return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
 }
 
+function getCodexRolloutTimestampKey(value: string | null): string | null {
+    if (!value) return null
+    const milliseconds = Date.parse(value)
+    // event_msg and response_item are emitted by separate streams and can
+    // differ by a few milliseconds for the same user-visible turn.
+    return Number.isFinite(milliseconds) ? String(Math.round(milliseconds / 1_000)) : value
+}
+
 function shouldIgnoreSyntheticUserMessage(text: string): boolean {
     const normalized = text.trim()
     return normalized.startsWith('# AGENTS.md instructions')
         || normalized.startsWith('<environment_context>')
+        || normalized.startsWith('<app-context>')
+        || normalized.startsWith('<skills_instructions>')
+        || normalized.startsWith('<permissions instructions>')
+        || normalized.startsWith('<collaboration_mode>')
+        || normalized.startsWith('<plugins_instructions>')
 }
 
 function inferSessionIdFromFileName(filePath: string): string | null {
@@ -410,7 +468,7 @@ function isSubagentSource(value: unknown): boolean {
     return record ? Object.prototype.hasOwnProperty.call(record, 'subagent') : false
 }
 
-function parseCodexLocalSession(filePath: string): CodexLocalSessionSummary | null {
+function parseCodexLocalSession(filePath: string, knownModifiedAt?: number): CodexLocalSessionSummary | null {
     let content: string
     try {
         content = readFileSync(filePath, 'utf-8')
@@ -474,12 +532,14 @@ function parseCodexLocalSession(filePath: string): CodexLocalSessionSummary | nu
     sessionId = sessionId ?? inferSessionIdFromFileName(filePath)
     if (!sessionId) return null
 
-    let modifiedAt = Date.now()
-    try {
-        modifiedAt = statSync(filePath).mtimeMs
-    } catch {
-        // Fall back to current time if stat fails during a concurrent file change.
-    }
+    const modifiedAt = knownModifiedAt ?? (() => {
+        try {
+            return statSync(filePath).mtimeMs
+        } catch {
+            // Fall back to current time if stat fails during a concurrent file change.
+            return Date.now()
+        }
+    })()
 
     return {
         id: sessionId,
@@ -493,25 +553,38 @@ function parseCodexLocalSession(filePath: string): CodexLocalSessionSummary | nu
     }
 }
 
-function listLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): CodexLocalSessionSummary[] {
-    const files: string[] = []
+function listCodexTranscriptFilesByRecency(): CodexTranscriptFileCandidate[] {
+    const files: CodexTranscriptFileCandidate[] = []
     for (const root of getCodexSessionRoots()) {
         collectJsonlFiles(root, files)
     }
+    return files.sort((left, right) => right.modifiedAt - left.modifiedAt)
+}
 
-    const deduped = new Map<string, CodexLocalSessionSummary>()
-    for (const filePath of files) {
-        const session = parseCodexLocalSession(filePath)
+function listLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): CodexLocalSessionSummary[] {
+    const sessions: CodexLocalSessionSummary[] = []
+    const seenSessionIds = new Set<string>()
+    // Stat every file cheaply, then only read enough newest rollouts to fill
+    // the requested page. The list page asks for five, not every transcript.
+    for (const candidate of listCodexTranscriptFilesByRecency()) {
+        const session = parseCodexLocalSession(candidate.file, candidate.modifiedAt)
         if (!session) continue
-        const previous = deduped.get(session.id)
-        if (!previous || previous.modifiedAt < session.modifiedAt) {
-            deduped.set(session.id, session)
-        }
+        if (seenSessionIds.has(session.id)) continue
+        seenSessionIds.add(session.id)
+        sessions.push(session)
+        if (sessions.length >= limit) break
     }
+    return sessions
+}
 
-    return Array.from(deduped.values())
-        .sort((a, b) => b.modifiedAt - a.modifiedAt)
-        .slice(0, limit)
+function findLocalCodexSession(sessionId: string): CodexLocalSessionSummary | null {
+    for (const candidate of listCodexTranscriptFilesByRecency()) {
+        const inferredId = inferSessionIdFromFileName(candidate.file)
+        if (inferredId && inferredId !== sessionId) continue
+        const session = parseCodexLocalSession(candidate.file, candidate.modifiedAt)
+        if (session?.id === sessionId) return session
+    }
+    return null
 }
 
 function buildImportedUserMessage(text: string): CodexImportedMessageContent {
@@ -639,6 +712,19 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
     return null
 }
 
+function importedChatMessageFingerprint(message: CodexImportedMessageContent): string | null {
+    if (message.role === 'user') {
+        return `user:${message.content.text.trim()}`
+    }
+
+    const data = asRecord(message.content.data)
+    if (data?.type !== 'message') {
+        return null
+    }
+    const text = asString(data.message)?.trim()
+    return text ? `assistant:${text}` : null
+}
+
 function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): CodexTranscriptImportData | null {
     let content: string
     try {
@@ -649,6 +735,7 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
 
     const lines = content.split(/\r?\n/).filter(Boolean)
     const messages: CodexImportedMessageContent[] = []
+    const canonicalChatMessageIndexByRolloutKey = new Map<string, number>()
 
     for (const line of lines) {
         let parsed: unknown
@@ -661,15 +748,113 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
         const record = asRecord(parsed)
         if (!record) continue
         const message = convertCodexRecordToImportedMessage(record)
-        if (message) {
-            messages.push(message)
+        if (!message) continue
+
+        const fingerprint = importedChatMessageFingerprint(message)
+        const timestamp = getCodexRolloutTimestampKey(asString(record.timestamp))
+        const rolloutKey = fingerprint && timestamp ? `${timestamp}\u0000${fingerprint}` : null
+        // Standard Codex rollouts write the same chat item in both formats at
+        // the same timestamp. Prefer response_item but do not globally dedupe
+        // identical text from separate turns.
+        if (rolloutKey) {
+            const existingIndex = canonicalChatMessageIndexByRolloutKey.get(rolloutKey)
+            if (existingIndex !== undefined) {
+                if (record.type === 'response_item') {
+                    messages[existingIndex] = message
+                }
+                continue
+            }
+            canonicalChatMessageIndexByRolloutKey.set(rolloutKey, messages.length)
         }
+        messages.push(message)
     }
 
     return {
         ...summary,
         messages
     }
+}
+
+function createCodexTranscriptContextMessages(
+    sessionId: string,
+    messages: CodexImportedMessageContent[],
+    startIndex = 0
+): CodexLocalSessionContextMessage[] {
+    return messages.map((content, index) => ({
+        // The imported transcript does not retain HAPI store row IDs. Stable
+        // local IDs keep React/thread reconciliation intact across pages.
+        id: `codex-local:${sessionId}:${startIndex + index}`,
+        createdAt: startIndex + index,
+        content
+    }))
+}
+
+function paginateCodexTranscriptMessages(
+    messages: CodexImportedMessageContent[],
+    limit: number,
+    before?: number
+): { messages: CodexImportedMessageContent[]; startIndex: number; page: CodexLocalSessionContextResponse['page'] } {
+    const endIndex = Math.min(Math.max(0, before ?? messages.length), messages.length)
+    const startIndex = Math.max(0, endIndex - limit)
+    return {
+        messages: messages.slice(startIndex, endIndex),
+        startIndex,
+        page: {
+            limit,
+            nextBefore: startIndex > 0 ? startIndex : null,
+            hasMore: startIndex > 0
+        }
+    }
+}
+
+function getCodexTranscriptContextPage(
+    summary: CodexLocalSessionSummary,
+    limit: number,
+    before?: number
+): { messages: CodexLocalSessionContextMessage[]; page: CodexLocalSessionContextResponse['page'] } {
+    const transcript = parseCodexTranscriptImportData(summary)
+    const transcriptPage = paginateCodexTranscriptMessages(transcript?.messages ?? [], limit, before)
+    return {
+        messages: createCodexTranscriptContextMessages(summary.id, transcriptPage.messages, transcriptPage.startIndex),
+        page: transcriptPage.page
+    }
+}
+
+function parseCodexSessionLimit(value: string | undefined): number | null {
+    if (value === undefined) return null
+    const parsed = Number(value)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) return null
+    return parsed
+}
+
+function parseCodexContextPageLimit(value: string | undefined): number | null {
+    if (value === undefined) return DEFAULT_RECENT_CODEX_CONTEXT_PAGE_LIMIT
+    const parsed = Number(value)
+    return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100 ? parsed : null
+}
+
+function parseCodexContextBefore(value: string | undefined): number | null | undefined {
+    if (value === undefined) return undefined
+    const parsed = Number(value)
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+}
+
+function parseCodexRunnerMachineId(value: string | undefined): string | null {
+    const machineId = value?.trim()
+    return machineId ? machineId : null
+}
+
+function parseForkCodexLocalSessionRequest(value: unknown): { machineId: string } | null {
+    if (value === null || value === undefined) return null
+    const record = asRecord(value)
+    if (!record) return null
+    const machineId = record.machineId
+    if (typeof machineId !== 'string' || !machineId.trim()) return null
+    return { machineId: machineId.trim() }
+}
+
+function getOnlineCodexRunner(engine: SyncEngine, namespace: string, machineId: string): Machine | null {
+    return engine.getOnlineMachinesByNamespace(namespace).find((machine) => machine.id === machineId) ?? null
 }
 
 function normalizeComparablePath(pathValue: string, options?: { caseInsensitive?: boolean }): string {
@@ -706,7 +891,20 @@ function isPathInsideWorkspaceRoot(pathValue: string, rootValue: string): boolea
 
 function machineOwnsCodexCwd(machine: Machine, cwd: string): boolean {
     const workspaceRoots = machine.metadata?.workspaceRoots ?? []
+    // 未配置 workspace roots 的 runner 保持项目既有的“任意目录可 spawn”语义；
+    // 此时它能运行 fork，只是在多个未限定 runner 同时在线时仍由调用方要求
+    // 显式选择，避免错误地挑中另一台机器。
+    if (workspaceRoots.length === 0) {
+        return true
+    }
     return workspaceRoots.some((workspaceRoot) => isPathInsideWorkspaceRoot(cwd, workspaceRoot))
+}
+
+function machineCanForkLocalCodexSession(machine: Machine, cwd: string): boolean {
+    // The selected runner supplied the transcript itself, so it owns that
+    // CODEX_HOME. Only ensure the runner can also spawn in its transcript cwd.
+    return typeof machine.metadata?.codexHome === 'string'
+        && machineOwnsCodexCwd(machine, cwd)
 }
 
 function resolveImportMachineId(
@@ -731,7 +929,7 @@ function buildImportedSessionMetadata(
 ): Record<string, unknown> {
     const now = Date.now()
     const path = data.cwd ?? (typeof existingMetadata?.path === 'string' ? existingMetadata.path : dirname(data.file))
-    const host = typeof existingMetadata?.host === 'string' ? existingMetadata.host : (process.env.HAPI_HOSTNAME || hostname())
+    const host = typeof existingMetadata?.host === 'string' ? existingMetadata.host : getCodexTranscriptHost()
     const osValue = typeof existingMetadata?.os === 'string' ? existingMetadata.os : platform()
     const summaryText = data.lastUserMessage ?? data.title
     const machineId = typeof existingMetadata?.machineId === 'string'
@@ -1634,7 +1832,11 @@ export async function importSelectedCodexSessions(options: {
         return createImportErrorResponse(codexSessionIds, NO_SYNC_SESSION_SELECTED_ERROR)
     }
 
-    const localSessionsById = new Map(listLocalCodexSessions().map((session) => [session.id, session]))
+    const localSessionsById = new Map<string, CodexLocalSessionSummary>()
+    for (const codexSessionId of new Set(codexSessionIds)) {
+        const session = findLocalCodexSession(codexSessionId)
+        if (session) localSessionsById.set(codexSessionId, session)
+    }
     const results: ScriptLaunchResponse[] = []
     for (const codexSessionId of codexSessionIds) {
         const result = importSingleCodexSession({
@@ -1684,11 +1886,200 @@ export function createCodexDesktopRoutes(options: {
         } satisfies CodexDesktopStatusResponse)
     })
 
-    app.get('/codex/sessions', (c) => {
+    app.get('/codex/sessions', async (c) => {
+        const limit = parseCodexSessionLimit(c.req.query('limit'))
+        if (c.req.query('limit') !== undefined && limit === null) {
+            return c.json({ success: false, error: 'limit must be an integer between 1 and 100' }, 400)
+        }
+        const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
+        if (!machineId) {
+            return c.json({
+                success: true,
+                sessions: listLocalCodexSessions(limit ?? DEFAULT_CODEX_SESSION_SCAN_LIMIT)
+            } satisfies CodexLocalSessionsResponse)
+        }
+        const engine = options.getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'HAPI hub is not connected' }, 503)
+        }
+        if (!getOnlineCodexRunner(engine, c.get('namespace'), machineId)) {
+            return c.json({ success: false, error: 'Selected runner is not online' }, 409)
+        }
+        try {
+            const result = await engine.listCodexLocalSessions(machineId, limit ?? DEFAULT_RECENT_CODEX_SESSION_LIMIT)
+            if (result.success !== true) {
+                return c.json({ success: false, error: result.error || 'Failed to list Codex sessions on the selected runner' }, 502)
+            }
+            return c.json({ success: true, sessions: result.sessions } satisfies CodexLocalSessionsResponse)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list Codex sessions on the selected runner'
+            }, 502)
+        }
+    })
+
+    app.get('/codex/sessions/:id/context', async (c) => {
+        const limit = parseCodexContextPageLimit(c.req.query('limit'))
+        if (limit === null) {
+            return c.json({ success: false, error: 'limit must be an integer between 1 and 100' }, 400)
+        }
+        const before = parseCodexContextBefore(c.req.query('before'))
+        if (before === null) {
+            return c.json({ success: false, error: 'before must be a non-negative integer' }, 400)
+        }
+        const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
+        if (!machineId) {
+            const summary = findLocalCodexSession(c.req.param('id'))
+            if (!summary) {
+                return c.json({ success: false, error: 'Codex session not found' }, 404)
+            }
+            const contextPage = getCodexTranscriptContextPage(summary, limit, before)
+            return c.json({
+                success: true,
+                session: {
+                    id: summary.id,
+                    title: summary.title,
+                    cwd: summary.cwd,
+                    modifiedAt: summary.modifiedAt
+                },
+                messages: contextPage.messages,
+                page: contextPage.page
+            } satisfies CodexLocalSessionContextResponse)
+        }
+        const engine = options.getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'HAPI hub is not connected' }, 503)
+        }
+        if (!getOnlineCodexRunner(engine, c.get('namespace'), machineId)) {
+            return c.json({ success: false, error: 'Selected runner is not online' }, 409)
+        }
+        try {
+            const result = await engine.readCodexLocalSession(machineId, c.req.param('id'), {
+                limit,
+                ...(before === undefined ? {} : { before })
+            })
+            if (result.success !== true) {
+                return c.json({ success: false, error: result.error || 'Codex session not found' }, 404)
+            }
+            const { session, importedMessages } = result.data
+            return c.json({
+                success: true,
+                session: {
+                    id: session.id,
+                    title: session.title,
+                    cwd: session.cwd,
+                    modifiedAt: session.modifiedAt
+                },
+                messages: createCodexTranscriptContextMessages(session.id, importedMessages, result.data.startIndex),
+                page: result.data.page
+            } satisfies CodexLocalSessionContextResponse)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to read Codex session on the selected runner'
+            }, 502)
+        }
+    })
+
+    app.post('/codex/sessions/:id/fork', async (c) => {
+        const engine = options.getSyncEngine()
+        if (!engine) {
+            return c.json({ type: 'error', message: 'HAPI hub is not connected' } satisfies ForkCodexLocalSessionResponse, 503)
+        }
+
+        const request = parseForkCodexLocalSessionRequest(await c.req.json().catch(() => null))
+        if (!request) {
+            return c.json({ type: 'error', message: 'Invalid fork request' } satisfies ForkCodexLocalSessionResponse, 400)
+        }
+
+        const namespace = c.get('namespace')
+        const machine = getOnlineCodexRunner(engine, namespace, request.machineId)
+        if (!machine) {
+            return c.json({
+                type: 'error',
+                message: 'Selected runner is not online'
+            } satisfies ForkCodexLocalSessionResponse, 409)
+        }
+
+        let localSession
+        try {
+            localSession = await engine.readCodexLocalSession(machine.id, c.req.param('id'))
+        } catch (error) {
+            return c.json({
+                type: 'error',
+                message: error instanceof Error ? error.message : 'Failed to read Codex session on the selected runner'
+            } satisfies ForkCodexLocalSessionResponse, 502)
+        }
+        if (localSession.success !== true) {
+            return c.json({ type: 'error', message: localSession.error || 'Codex session not found' } satisfies ForkCodexLocalSessionResponse, 404)
+        }
+
+        const summary = localSession.data.session
+        const cwd = summary.cwd?.trim()
+        if (!cwd) {
+            return c.json({ type: 'error', message: 'The Codex session does not have a workspace path' } satisfies ForkCodexLocalSessionResponse, 409)
+        }
+        if (!machineCanForkLocalCodexSession(machine, cwd)) {
+            return c.json({
+                type: 'error',
+                message: 'Selected runner does not advertise a Codex transcript home or cannot access this session workspace'
+            } satisfies ForkCodexLocalSessionResponse, 409)
+        }
+
+        const spawn = await engine.spawnSession(
+            machine.id,
+            cwd,
+            'codex',
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            summary.id
+        )
+        if (spawn.type !== 'success') {
+            return c.json({ type: 'error', message: spawn.message } satisfies ForkCodexLocalSessionResponse, 502)
+        }
+
+        const forkedSession = engine.getSessionByNamespace(spawn.sessionId, namespace)
+        if (forkedSession?.metadata) {
+            const metadata = {
+                ...forkedSession.metadata,
+                name: `${summary.title} (fork)`,
+                codexFork: {
+                    sourceCodexSessionId: summary.id,
+                    createdAt: Date.now(),
+                    mode: 'native_fork' as const
+                }
+            }
+            const updated = options.store.sessions.updateSessionMetadata(
+                spawn.sessionId,
+                metadata,
+                forkedSession.metadataVersion,
+                namespace
+            )
+            if (updated.result === 'success') {
+                engine.handleRealtimeEvent({ type: 'session-updated', sessionId: spawn.sessionId })
+            }
+        }
+
+        if (localSession.data.importedMessages.length) {
+            for (const message of localSession.data.importedMessages) {
+                options.store.messages.addMessage(spawn.sessionId, message)
+            }
+            engine.recordSessionActivity(spawn.sessionId, Date.now())
+        }
+
         return c.json({
-            success: true,
-            sessions: listLocalCodexSessions()
-        } satisfies CodexLocalSessionsResponse)
+            type: 'success',
+            sessionId: spawn.sessionId,
+            session: engine.getSessionByNamespace(spawn.sessionId, namespace)
+        } satisfies ForkCodexLocalSessionResponse)
     })
 
     app.post('/codex/sync-session', async (c) => {

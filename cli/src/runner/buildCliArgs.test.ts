@@ -84,6 +84,16 @@ describe('buildCliArgs', () => {
         expect(args).toContain('fast')
     })
 
+    it('passes a native Codex fork target without falling back to resume', () => {
+        const args = buildCliArgs('codex', {
+            directory: '/tmp',
+            forkSessionId: 'source-thread',
+            resumeSessionId: 'ignored-resume-thread'
+        })
+        expect(args.slice(0, 3)).toEqual(['codex', 'fork', 'source-thread'])
+        expect(args).not.toContain('ignored-resume-thread')
+    })
+
     it('does not pass --service-tier for non-codex agents', () => {
         const args = buildCliArgs('claude', {
             directory: '/tmp',

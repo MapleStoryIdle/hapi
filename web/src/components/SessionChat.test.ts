@@ -3,11 +3,11 @@ import {
     BOTTOM_FLOATING_CONTROL_GAP_PX,
     BOTTOM_OVERLAY_INSET_PX,
     buildGoalStateMessages,
+    canCreateSideSessionFromSession,
     getScrollButtonBottomInset,
     isScratchlistHotkeyBlockedTarget,
     isScratchlistToggleHotkey,
     shouldAutoClearPendingSchedule,
-    shouldInsetFirstUserMessage,
     shouldRouteToScratchlist,
 } from './SessionChat'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
@@ -87,7 +87,7 @@ describe('shouldAutoClearPendingSchedule', () => {
 describe('getScrollButtonBottomInset', () => {
     it('uses the scroll-to-bottom button gap as the shared bottom-control gap', () => {
         expect(BOTTOM_FLOATING_CONTROL_GAP_PX).toBe(8)
-        expect(BOTTOM_OVERLAY_INSET_PX).toBe(8)
+        expect(BOTTOM_OVERLAY_INSET_PX).toBe(0)
     })
 
     it('uses the shared floating-control gap once the composer height is known', () => {
@@ -101,25 +101,43 @@ describe('getScrollButtonBottomInset', () => {
     })
 })
 
-describe('shouldInsetFirstUserMessage', () => {
-    it('adds top inset only when the first loaded block is the first user message in history', () => {
-        expect(shouldInsetFirstUserMessage({
-            hasMoreMessages: false,
-            firstBlockKind: 'user-text'
+describe('canCreateSideSessionFromSession', () => {
+    it('allows active remote Codex root sessions', () => {
+        expect(canCreateSideSessionFromSession({
+            agentFlavor: 'codex',
+            active: true,
+            controlledByUser: false,
+            isSideSession: false
         })).toBe(true)
     })
 
-    it('does not add top inset when older history may still exist', () => {
-        expect(shouldInsetFirstUserMessage({
-            hasMoreMessages: true,
-            firstBlockKind: 'user-text'
+    it('hides the create action for existing side sessions', () => {
+        expect(canCreateSideSessionFromSession({
+            agentFlavor: 'codex',
+            active: true,
+            controlledByUser: false,
+            isSideSession: true
         })).toBe(false)
     })
 
-    it('does not add top inset for non-user first blocks', () => {
-        expect(shouldInsetFirstUserMessage({
-            hasMoreMessages: false,
-            firstBlockKind: 'agent-text'
+    it('hides the create action when the session is inactive, local-controlled, or non-Codex', () => {
+        expect(canCreateSideSessionFromSession({
+            agentFlavor: 'codex',
+            active: false,
+            controlledByUser: false,
+            isSideSession: false
+        })).toBe(false)
+        expect(canCreateSideSessionFromSession({
+            agentFlavor: 'codex',
+            active: true,
+            controlledByUser: true,
+            isSideSession: false
+        })).toBe(false)
+        expect(canCreateSideSessionFromSession({
+            agentFlavor: 'claude',
+            active: true,
+            controlledByUser: false,
+            isSideSession: false
         })).toBe(false)
     })
 })

@@ -15,6 +15,7 @@ export type {
     CodexSubscriptionLimits,
     CodexSubscriptionLimitWindow,
     CommandResponse,
+    CreateSideSessionResponse,
     CursorModelsResponse,
     CursorModelSummary,
     DeleteUploadResponse,
@@ -69,6 +70,7 @@ export type {
     SessionPatch,
     SessionSummary,
     SessionSummaryMetadata,
+    SideSessionMetadata,
     TeamMember,
     TeamMessage,
     TeamState,
@@ -199,6 +201,31 @@ export type CodexLocalSessionsResponse = {
     success: true
     sessions: CodexLocalSessionSummary[]
 }
+
+export type CodexLocalSessionContextMessage = {
+    id: string
+    createdAt: number
+    content: {
+        role: 'user' | 'agent'
+        content: unknown
+        meta?: unknown
+    }
+}
+
+export type CodexLocalSessionContextResponse = {
+    success: true
+    session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt'>
+    messages: CodexLocalSessionContextMessage[]
+    page: {
+        limit: number
+        nextBefore: number | null
+        hasMore: boolean
+    }
+}
+
+export type ForkCodexLocalSessionResponse =
+    | { type: 'success'; sessionId: string; session?: Session }
+    | { type: 'error'; message: string }
 
 export type CodexDesktopSyncRequest = {
     // 中文注释：前端弹窗直接提交 Codex thread ID，后端会按这些 transcript 直接导入到 Hapi。

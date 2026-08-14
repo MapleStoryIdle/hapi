@@ -1,11 +1,11 @@
 /**
- * Codex-specific system prompt for local mode.
+ * Codex-specific developer prompt for HAPI sessions.
  *
- * This prompt instructs Codex to call the hapi__change_title function
- * to set appropriate chat session titles.
+ * Injected into both local CLI and remote App Server sessions.
  */
 
 import { trimIdent } from '@/utils/trimIdent';
+import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation'
 
 /**
  * Title instruction for Codex to call the hapi MCP tool.
@@ -20,9 +20,22 @@ export const TITLE_INSTRUCTION = trimIdent(`
     Rename only when the user's primary objective changes substantially and the existing title would be misleading.
     When you create or find a local image file that the user should see, call functions.hapi__display_image with the image path. If that exact tool name is unavailable, use an equivalent alias such as hapi__display_image, mcp__hapi__display_image, or hapi_display_image.
     When an ssh, scp, or rsync command succeeds against a remote SSH server, call functions.hapi__verify_ssh_server_candidate with the user, host, port, command kind, optional SSH config Host alias, and optional tool call id. If that exact tool name is unavailable, use an equivalent alias such as hapi__verify_ssh_server_candidate, mcp__hapi__verify_ssh_server_candidate, or hapi_verify_ssh_server_candidate. Do not include or persist the full command.
+    ${buildSessionCitationSteerInstruction({
+        inspectTool: 'functions.hapi__inspect_peer',
+        pingTool: 'functions.hapi__ping_peer',
+        listPeersTool: 'functions.hapi__list_peers'
+    })}
+`);
+
+const REQUEST_USER_INPUT_INSTRUCTION = trimIdent(`
+    ## Structured user decisions
+    When the native request_user_input tool is available in the active Codex mode, use it before asking the user for a decision, confirmation, clarification, or choice that blocks progress. Do not ask the same decision first in normal assistant text.
+    Prefer 2–4 clear, mutually exclusive options with short labels and descriptions. Do not add an Other option: HAPI provides a separate Other control for free-form answers.
+    Do not interrupt for routine low-risk assumptions; make a reasonable assumption and continue. Do not use request_user_input for sandbox, command, file-edit, or other tool-permission approvals: use the normal permission flow for those.
+    If request_user_input is unavailable, ask one concise plain-text question instead of pretending a choice dialog exists.
 `);
 
 /**
- * The system prompt to inject via developer_instructions in local mode.
+ * The HAPI developer prompt injected into Codex local and app-server sessions.
  */
-export const codexSystemPrompt = TITLE_INSTRUCTION;
+export const codexSystemPrompt = `${TITLE_INSTRUCTION}\n\n${REQUEST_USER_INPUT_INSTRUCTION}`;

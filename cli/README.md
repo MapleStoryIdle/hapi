@@ -22,11 +22,15 @@ Run Claude Code, Codex, Cursor Agent, Gemini, or OpenCode sessions from your ter
 
 ## Commands
 
+For scripts and IDE integrations, run `hapi --hapi-capabilities` (or a supported
+subcommand with `--hapi-help-json`) to receive the stable JSON capability catalog.
+
 ### Session commands
 
 - `hapi` - Start a Claude Code session (passes through Claude CLI flags). See `src/index.ts`.
 - `hapi codex` - Start Codex mode. See `src/codex/runCodex.ts`.
 - `hapi codex resume <sessionId>` - Resume existing Codex session.
+- `hapi codex fork <sessionId>` - Fork a Codex CLI thread into a new HAPI session while preserving its native model and reasoning configuration. Remote forks read the source transcript from the selected runner's own `CODEX_HOME`; that runner must be allowed to spawn in the transcript workspace.
 - `hapi cursor` - Start Cursor Agent mode. See `src/cursor/runCursor.ts`.
   Supports `hapi cursor resume <chatId>`, `hapi cursor --continue`, `--mode plan|ask`, `--yolo`, `--model`.
   Local and remote modes supported; remote uses `agent -p` with stream-json.
@@ -35,6 +39,8 @@ Run Claude Code, Codex, Cursor Agent, Gemini, or OpenCode sessions from your ter
 - `hapi opencode` - Start OpenCode mode via ACP. See `src/opencode/runOpencode.ts`.
   Note: OpenCode supports local and remote modes; local mode streams via OpenCode plugins.
 - `hapi resume [sessionId]` - List resumable sessions for this machine or resume one locally.
+- `hapi inspect-peer <session-id-or-prefix>` - Read another same-namespace HAPI session's metadata and recent text; never resumes it.
+- `hapi ping-peer <session-id-or-prefix> <message>` - Resume a peer session when needed, then deliver a handoff/nudge message. It refuses to message the calling HAPI session itself; use `hapi ping-peer --list` for discovery.
 
 ### Resume a remote session locally
 
@@ -101,6 +107,10 @@ See `src/configuration.ts` for all options.
 - `HAPI_EXTRA_HEADERS_JSON` - JSON object of extra headers to send on CLI → hub requests, e.g. `{"Cookie":"CF_Authorization=..."}`.
 - `HAPI_CLAUDE_PATH` - Path to a specific `claude` executable.
 - `HAPI_HTTP_MCP_URL` - Default MCP target for `hapi mcp`.
+- `HAPI_SESSION_ID` - Current HAPI session ID exported into wrapped Agent processes.
+- `HAPI_WAIT_ACTIVE_SECS` - Timeout for `hapi ping-peer` to wait after resuming a session (default: 60).
+
+The recent Codex transcript API is runner-scoped: the selected runner reads its own `CODEX_HOME` through Hub RPC, so a remote Hub never needs access to your local transcript files.
 
 ### Runner
 

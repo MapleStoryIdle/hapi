@@ -160,6 +160,31 @@ function createApp(session: Session, opts?: {
 }
 
 describe('sessions routes', () => {
+    it('A2A peer discovery can request newest-updated sessions with a bounded result', async () => {
+        const sessions = [
+            createSession({ id: 'old-active', active: true, updatedAt: 10 }),
+            createSession({ id: 'new-inactive', active: false, updatedAt: 50 }),
+            createSession({ id: 'mid-active', active: true, updatedAt: 20 })
+        ]
+        const engine = {
+            getSessionsByNamespace: () => sessions,
+            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
+            getNextScheduledAtBySessionIds: () => new Map<string, number>(),
+            resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
+        } as unknown as SyncEngine
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine))
+
+        const response = await app.request('/api/sessions?limit=1&order=updatedAt')
+        expect(response.status).toBe(200)
+        const body = await response.json() as { sessions: Array<{ id: string }> }
+        expect(body.sessions.map((session) => session.id)).toEqual(['new-inactive'])
+    })
+
     it('uploads files as multipart bytes instead of base64 JSON', async () => {
         const session = createSession()
         const captured: Array<{ filename: string; bytes: Uint8Array; mimeType: string }> = []
