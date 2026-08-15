@@ -462,7 +462,7 @@ export function SessionHeader(props: {
         ? `pointer-events-none absolute inset-x-0 top-0 z-20 bg-transparent ${headerTopInsetClass}`
         : `bg-[var(--app-bg)] ${headerTopInsetClass}`
     const headerSurfaceClass = props.floating
-        ? 'border-[color-mix(in_srgb,var(--app-border)_70%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_24%,transparent)] shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl'
+        ? 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.08)]'
         : 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
     const menuButtonSurfaceClass = props.floating
         ? 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.08)]'

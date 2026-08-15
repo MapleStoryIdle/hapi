@@ -224,6 +224,54 @@ describe('CodexSessionContextPage', () => {
         expect(blocks).toHaveLength(3)
     })
 
+    it('renders local automation heartbeats as status events', () => {
+        const blocks = buildReadOnlyCodexBlocks([
+            {
+                id: 'codex-local:1:0',
+                createdAt: 0,
+                content: {
+                    role: 'user',
+                    content: {
+                        type: 'text',
+                        text: '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>No new or updated bugs require action.</message> </heartbeat>'
+                    }
+                }
+            },
+            {
+                id: 'codex-local:1:1',
+                createdAt: 1,
+                content: {
+                    role: 'user',
+                    content: {
+                        type: 'text',
+                        text: '<heartbeat> <automation_id>bug</automation_id> <current_time_iso>2026-08-15T00:54:47.781Z</current_time_iso> <instructions>自动改bug</instructions> </heartbeat>'
+                    }
+                }
+            }
+        ])
+
+        expect(blocks).toMatchObject([
+            {
+                kind: 'agent-event',
+                event: {
+                    type: 'automation-heartbeat',
+                    automationId: 'bug',
+                    decision: 'DONT_NOTIFY',
+                    message: 'No new or updated bugs require action.'
+                }
+            },
+            {
+                kind: 'agent-event',
+                event: {
+                    type: 'automation-heartbeat',
+                    automationId: 'bug',
+                    message: '自动改bug',
+                    currentTimeIso: '2026-08-15T00:54:47.781Z'
+                }
+            }
+        ])
+    })
+
     it('opens the read-only thread at its latest message', async () => {
         const scrollTo = vi.spyOn(HTMLElement.prototype, 'scrollTo')
         renderPage()

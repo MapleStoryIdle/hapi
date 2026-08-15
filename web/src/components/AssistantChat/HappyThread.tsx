@@ -323,8 +323,8 @@ export function ScrollToBottomButton(props: {
         : `${bottomOffsetPx}px`
     const rightOffset = 'max(1rem, calc((100% - var(--content-max-w, 960px)) / 2 + 0.75rem))'
     const contentClass = hasNewMessages
-        ? 'inline-flex h-8 items-center gap-1 rounded-full border border-white/25 bg-[color-mix(in_srgb,var(--app-button)_82%,transparent)] px-3 text-xs font-medium text-[var(--app-button-text)] shadow-[0_8px_22px_rgba(15,23,42,0.14)] backdrop-blur-md animate-bounce-in'
-        : 'flex h-8 w-8 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-border)_72%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_78%,transparent)] text-[var(--app-fg)] shadow-[0_8px_22px_rgba(15,23,42,0.14)] backdrop-blur-md animate-bounce-in'
+        ? 'inline-flex h-8 items-center gap-1 rounded-full border border-[var(--app-button)] bg-[var(--app-button)] px-3 text-xs font-medium text-[var(--app-button-text)] shadow-[0_8px_22px_rgba(15,23,42,0.14)] animate-bounce-in'
+        : 'flex h-8 w-8 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_8px_22px_rgba(15,23,42,0.14)] animate-bounce-in'
 
     return (
         <button
@@ -380,7 +380,7 @@ export function ReturnToUserMessageButton(props: {
             aria-label={label}
             title={label}
         >
-            <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-border)_72%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_82%,transparent)] text-[var(--app-fg)] shadow-[0_8px_22px_rgba(15,23,42,0.14)] backdrop-blur-md animate-bounce-in">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_8px_22px_rgba(15,23,42,0.14)] animate-bounce-in">
                 {props.loading ? (
                     <Spinner size="sm" label={null} className="text-current" />
                 ) : (
@@ -448,7 +448,7 @@ function PullToLoadOlderIndicator(props: PullToLoadOlderIndicatorState) {
             <div
                 role="status"
                 aria-live="polite"
-                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--app-border)_72%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_88%,transparent)] px-3 text-xs font-medium text-[var(--app-hint)] shadow-[0_8px_22px_rgba(15,23,42,0.10)] backdrop-blur-md"
+                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-xs font-medium text-[var(--app-hint)] shadow-[0_8px_22px_rgba(15,23,42,0.10)]"
             >
                 {isLoading ? (
                     <Spinner size="sm" label={null} className="text-current" />
@@ -1318,9 +1318,7 @@ export function HappyThread(props: {
                                     ) : null}
                                 </>
                             )}
-                            <div
-                                className="happy-thread-messages flex flex-col gap-4"
-                            >
+                            <div className="happy-thread-messages flex flex-col gap-4">
                                 <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
                             </div>
                         </div>

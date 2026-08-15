@@ -74,6 +74,7 @@
      */
     --app-safe-area-top: env(safe-area-inset-top, 0px);
     --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --app-composer-safe-area-bottom: var(--app-safe-area-bottom);
 
     --app-bg: var(--tg-theme-bg-color, #ffffff);
     --app-fg: var(--tg-theme-text-color, #111827);
@@ -167,6 +168,13 @@
  */
 html[data-ios-standalone="true"] {
     --app-safe-area-bottom: max(34px, env(safe-area-inset-bottom, 0px));
+}
+
+/* The keyboard owns the visual viewport bottom; only the composer drops the
+ * hardware-inset padding in that state. Keep --app-safe-area-bottom stable so
+ * a focus/resize race cannot make the first rendered composer flush. */
+html[data-app-keyboard-open="true"] {
+    --app-composer-safe-area-bottom: 0px;
 }
 
 [data-theme="dark"] {

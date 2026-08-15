@@ -33,6 +33,26 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('normalizes instruction-only automation heartbeats into formatted status events', () => {
+        const normalized = normalizeDecryptedMessage(makeMessage({
+            role: 'user',
+            content: {
+                type: 'text',
+                text: `<heartbeat>\n  <automation_id>bug</automation_id>\n  <current_time_iso>2026-08-15T00:54:47.781Z</current_time_iso>\n  <instructions>自动改bug</instructions>\n</heartbeat>`
+            }
+        }))
+
+        expect(normalized).toMatchObject({
+            role: 'event',
+            content: {
+                type: 'automation-heartbeat',
+                automationId: 'bug',
+                message: '自动改bug',
+                currentTimeIso: '2026-08-15T00:54:47.781Z'
+            }
+        })
+    })
+
     it('drops unsupported Claude system output records', () => {
         const message = makeMessage({
             role: 'agent',

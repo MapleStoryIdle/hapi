@@ -19,13 +19,20 @@
 
         <script>
             (function () {
-                var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-                    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-                var isStandalone = navigator.standalone === true
-                    || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
-                if (isIOS && isStandalone) {
-                    document.documentElement.setAttribute('data-ios-standalone', 'true')
+                function markIOSStandalone() {
+                    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+                        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+                    var isStandalone = navigator.standalone === true
+                        || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+                    if (isIOS && isStandalone) {
+                        document.documentElement.setAttribute('data-ios-standalone', 'true')
+                    }
                 }
+
+                markIOSStandalone()
+                window.addEventListener('pageshow', markIOSStandalone)
+                window.requestAnimationFrame(markIOSStandalone)
+                window.setTimeout(markIOSStandalone, 150)
             })()
         </script>
 

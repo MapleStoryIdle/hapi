@@ -111,7 +111,7 @@ function AutomationHeartbeatCard(props: { event: AutomationHeartbeatEvent; messa
     const { t } = useTranslation()
     const decision = props.event.decision === 'DONT_NOTIFY'
         ? t('automationHeartbeat.dontNotify')
-        : props.event.decision
+        : props.event.decision ?? null
 
     return (
         <MessagePrimitive.Root id={getConversationMessageAnchorId(props.messageId)} className="scroll-mt-4 py-1">
@@ -128,10 +128,14 @@ function AutomationHeartbeatCard(props: { event: AutomationHeartbeatEvent; messa
                             </div>
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--app-hint)]">
                                 <span>{props.event.automationId}</span>
-                                <span aria-hidden="true">·</span>
-                                <span>{decision}</span>
+                                {decision ? (
+                                    <>
+                                        <span aria-hidden="true">·</span>
+                                        <span>{decision}</span>
+                                    </>
+                                ) : null}
                             </div>
-                            <p className="mt-1 text-sm leading-5 text-[var(--app-fg)]">{props.event.message}</p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-[var(--app-fg)]">{props.event.message}</p>
                         </div>
                     </div>
                 </div>

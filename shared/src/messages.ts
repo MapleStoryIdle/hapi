@@ -13,12 +13,19 @@ const VISIBLE_CLAUDE_SYSTEM_SUBTYPES = new Set([
     'compact_boundary'
 ])
 
-const AUTOMATION_HEARTBEAT_PATTERN = /^<heartbeat(?:\s[^>]*)?>\s*<automation_id>([\s\S]*?)<\/automation_id>\s*<decision>([\s\S]*?)<\/decision>\s*<message>([\s\S]*?)<\/message>\s*<\/heartbeat>$/i
+const AUTOMATION_HEARTBEAT_PATTERN = /^<heartbeat(?:\s[^>]*)?>([\s\S]*?)<\/heartbeat>$/i
 
 export type AutomationHeartbeat = {
     automationId: string
-    decision: string
+    decision?: string
     message: string
+    currentTimeIso?: string
+}
+
+function getAutomationHeartbeatField(body: string, name: string): string | null {
+    const match = new RegExp(`<${name}>([\\s\\S]*?)<\\/${name}>`, 'i').exec(body)
+    const value = match?.[1]?.trim()
+    return value || null
 }
 
 function extractTextMessageContent(value: unknown): string | null {
@@ -45,12 +52,20 @@ export function parseAutomationHeartbeatMessageContent(value: unknown): Automati
     const match = text.trim().match(AUTOMATION_HEARTBEAT_PATTERN)
     if (!match) return null
 
-    const automationId = match[1].trim()
-    const decision = match[2].trim()
-    const message = match[3].trim()
-    if (!automationId || !decision || !message) return null
+    const body = match[1]
+    const automationId = getAutomationHeartbeatField(body, 'automation_id')
+    const decision = getAutomationHeartbeatField(body, 'decision')
+    const message = getAutomationHeartbeatField(body, 'message')
+        ?? getAutomationHeartbeatField(body, 'instructions')
+    const currentTimeIso = getAutomationHeartbeatField(body, 'current_time_iso')
+    if (!automationId || !message) return null
 
-    return { automationId, decision, message }
+    return {
+        automationId,
+        ...(decision ? { decision } : {}),
+        message,
+        ...(currentTimeIso ? { currentTimeIso } : {})
+    }
 }
 
 export function isAutomationHeartbeatMessageContent(value: unknown): boolean {

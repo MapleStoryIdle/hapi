@@ -523,7 +523,7 @@ export function HappyComposer(props: {
     // The composer is an overlay, not scrollable message content. Keep its
     // controls above the iOS home indicator, with a small visual breathing
     // room, while the thread itself remains edge-to-edge.
-    const bottomPaddingClass = 'pb-[calc(0.5rem+var(--app-safe-area-bottom))]'
+    const bottomPaddingClass = 'pb-[calc(0.5rem+var(--app-composer-safe-area-bottom))]'
     const activeWord = useActiveWord(inputState.text, inputState.selection, autocompletePrefixes)
     const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions] = useActiveSuggestions(
         activeWord,

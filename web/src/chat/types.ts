@@ -21,7 +21,7 @@ export type AgentEvent =
     | { type: 'limit-reached'; endsAt: number; limitType: string }
     | { type: 'limit-warning'; /** 0–1 ratio (e.g. 0.9 = 90%), integer-precision via CLI pipe format */ utilization: number; endsAt: number; limitType: string }
     | { type: 'ready' }
-    | { type: 'automation-heartbeat'; automationId: string; decision: string; message: string }
+    | { type: 'automation-heartbeat'; automationId: string; decision?: string; message: string; currentTimeIso?: string }
     | {
         type: 'task-status'
         status: 'retrying' | 'compacting' | 'compacted' | 'failed'

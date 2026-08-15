@@ -28,6 +28,22 @@ function hasFocusedTextEntry(): boolean {
     return activeElement instanceof HTMLElement && activeElement.isContentEditable
 }
 
+function markIosStandalone(root: HTMLElement): void {
+    const nav = navigator as Navigator & { standalone?: boolean }
+    const isIos = /iPad|iPhone|iPod/.test(nav.userAgent)
+        || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1)
+    const isStandalone = nav.standalone === true
+        || window.matchMedia('(display-mode: standalone)').matches
+
+    // The synchronous document-head check handles first paint. Re-check here
+    // because Home Screen WebKit can settle this state after the initial page
+    // lifecycle event. Never remove the marker during this page lifetime: an
+    // installed app cannot turn into browser Safari without a navigation.
+    if (isIos && isStandalone) {
+        root.setAttribute('data-ios-standalone', 'true')
+    }
+}
+
 /**
  * Sets a CSS custom property `--app-viewport-height` on <html> that tracks the
  * visual viewport height. This is a fallback for browsers that do not support
@@ -47,12 +63,17 @@ export function useViewportHeight(): void {
         if (isTelegramApp()) return
 
         const viewport = window.visualViewport
-        if (!viewport) return
-
         const root = document.documentElement
 
         function update() {
-            if (!viewport) return
+            markIosStandalone(root)
+
+            if (!viewport) {
+                root.removeAttribute('data-app-keyboard-open')
+                root.style.removeProperty('--app-viewport-height')
+                return
+            }
+
             // Do not treat every visual-viewport difference as a keyboard. In
             // particular, installed iOS PWAs with viewport-fit=cover can report
             // visualViewport.height minus the bottom safe area after the
@@ -60,10 +81,12 @@ export function useViewportHeight(): void {
             // sized delta before shrinking the app root.
             if (shouldUseVisualViewportHeight(window.innerHeight, viewport.height, hasFocusedTextEntry())) {
                 root.style.setProperty('--app-viewport-height', `${viewport.height}px`)
-                // The visual viewport ends at the keyboard, so retaining the
-                // hardware home-indicator fallback here would leave a gap
-                // above it.
-                root.style.setProperty('--app-safe-area-bottom', '0px')
+                // Keep the physical safe-area token immutable. The composer
+                // alone switches to a zero bottom inset while the visual
+                // viewport ends at the software keyboard. Reusing the same
+                // token for both states made iOS launch/focus event ordering
+                // visibly flip the composer between flush and safe-area modes.
+                root.setAttribute('data-app-keyboard-open', 'true')
                 // On iOS PWA (black-translucent status bar + viewport-fit=cover),
                 // the browser scrolls the page upward when the keyboard opens to
                 // keep the focused input visible. This pushes the header behind
@@ -75,22 +98,46 @@ export function useViewportHeight(): void {
                 }
             } else {
                 root.style.removeProperty('--app-viewport-height')
-                root.style.removeProperty('--app-safe-area-bottom')
+                root.removeAttribute('data-app-keyboard-open')
             }
         }
 
-        viewport.addEventListener('resize', update)
-        viewport.addEventListener('scroll', update)
+        const frameIds: number[] = []
+        const timerIds: number[] = []
+        const settle = () => {
+            update()
+            frameIds.push(window.requestAnimationFrame(update))
+            // Home Screen WebKit can update safe-area and viewport values one
+            // turn after pageshow. A short second pass covers that launch race.
+            timerIds.push(window.setTimeout(update, 150))
+        }
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                settle()
+            }
+        }
+
+        viewport?.addEventListener('resize', update)
+        viewport?.addEventListener('scroll', update)
         document.addEventListener('focusin', update)
         document.addEventListener('focusout', update)
+        window.addEventListener('pageshow', settle)
+        window.addEventListener('orientationchange', settle)
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+        settle()
 
         return () => {
-            viewport.removeEventListener('resize', update)
-            viewport.removeEventListener('scroll', update)
+            viewport?.removeEventListener('resize', update)
+            viewport?.removeEventListener('scroll', update)
             document.removeEventListener('focusin', update)
             document.removeEventListener('focusout', update)
+            window.removeEventListener('pageshow', settle)
+            window.removeEventListener('orientationchange', settle)
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
+            frameIds.forEach((id) => window.cancelAnimationFrame(id))
+            timerIds.forEach((id) => window.clearTimeout(id))
             root.style.removeProperty('--app-viewport-height')
-            root.style.removeProperty('--app-safe-area-bottom')
+            root.removeAttribute('data-app-keyboard-open')
         }
     }, [])
 }
