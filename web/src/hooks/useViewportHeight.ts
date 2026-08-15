@@ -17,6 +17,38 @@ export function shouldUseVisualViewportHeight(
         && layoutViewportHeight - visualViewportHeight > KEYBOARD_VIEWPORT_HEIGHT_DELTA_PX
 }
 
+export function getKeyboardViewportState(params: {
+    layoutViewportHeight: number
+    visualViewportHeight: number
+    hasFocusedTextEntry: boolean
+    stableViewportHeight: number
+}): {
+    keyboardOpen: boolean
+    stableViewportHeight: number
+} {
+    // On recent standalone iOS, window.innerHeight can follow the visual
+    // viewport while the keyboard is open. Use the document layout height plus
+    // the last stable value captured before the keyboard changed the root
+    // height. Without that remembered baseline, the next resize sees two equal
+    // heights and incorrectly removes the keyboard layout state again.
+    const referenceViewportHeight = Math.max(
+        params.layoutViewportHeight,
+        params.stableViewportHeight
+    )
+    const keyboardOpen = shouldUseVisualViewportHeight(
+        referenceViewportHeight,
+        params.visualViewportHeight,
+        params.hasFocusedTextEntry
+    )
+
+    return {
+        keyboardOpen,
+        stableViewportHeight: keyboardOpen
+            ? referenceViewportHeight
+            : Math.max(params.layoutViewportHeight, params.visualViewportHeight)
+    }
+}
+
 function hasFocusedTextEntry(): boolean {
     const activeElement = document.activeElement
     if (activeElement instanceof HTMLTextAreaElement) return true
@@ -64,6 +96,8 @@ export function useViewportHeight(): void {
 
         const viewport = window.visualViewport
         const root = document.documentElement
+        let stableViewportHeight = 0
+        let orientation = window.matchMedia('(orientation: portrait)').matches ? 'portrait' : 'landscape'
 
         function update() {
             markIosStandalone(root)
@@ -74,12 +108,29 @@ export function useViewportHeight(): void {
                 return
             }
 
+            const nextOrientation = window.matchMedia('(orientation: portrait)').matches ? 'portrait' : 'landscape'
+            if (nextOrientation !== orientation) {
+                orientation = nextOrientation
+                stableViewportHeight = 0
+            }
+
+            const keyboardViewportState = getKeyboardViewportState({
+                // `innerHeight` is still useful on browsers that retain the
+                // layout viewport there; `clientHeight` covers iOS versions
+                // where it follows visualViewport instead.
+                layoutViewportHeight: Math.max(document.documentElement.clientHeight, window.innerHeight),
+                visualViewportHeight: viewport.height,
+                hasFocusedTextEntry: hasFocusedTextEntry(),
+                stableViewportHeight
+            })
+            stableViewportHeight = keyboardViewportState.stableViewportHeight
+
             // Do not treat every visual-viewport difference as a keyboard. In
             // particular, installed iOS PWAs with viewport-fit=cover can report
             // visualViewport.height minus the bottom safe area after the
             // keyboard has closed. Require focused text entry and a keyboard-
             // sized delta before shrinking the app root.
-            if (shouldUseVisualViewportHeight(window.innerHeight, viewport.height, hasFocusedTextEntry())) {
+            if (keyboardViewportState.keyboardOpen) {
                 root.style.setProperty('--app-viewport-height', `${viewport.height}px`)
                 // Keep the physical safe-area token immutable. The composer
                 // alone switches to a zero bottom inset while the visual
@@ -116,13 +167,17 @@ export function useViewportHeight(): void {
                 settle()
             }
         }
+        const handleOrientationChange = () => {
+            stableViewportHeight = 0
+            settle()
+        }
 
         viewport?.addEventListener('resize', update)
         viewport?.addEventListener('scroll', update)
         document.addEventListener('focusin', update)
         document.addEventListener('focusout', update)
         window.addEventListener('pageshow', settle)
-        window.addEventListener('orientationchange', settle)
+        window.addEventListener('orientationchange', handleOrientationChange)
         document.addEventListener('visibilitychange', handleVisibilityChange)
         settle()
 
@@ -132,7 +187,7 @@ export function useViewportHeight(): void {
             document.removeEventListener('focusin', update)
             document.removeEventListener('focusout', update)
             window.removeEventListener('pageshow', settle)
-            window.removeEventListener('orientationchange', settle)
+            window.removeEventListener('orientationchange', handleOrientationChange)
             document.removeEventListener('visibilitychange', handleVisibilityChange)
             frameIds.forEach((id) => window.cancelAnimationFrame(id))
             timerIds.forEach((id) => window.clearTimeout(id))

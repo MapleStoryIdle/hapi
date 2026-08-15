@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+    getKeyboardViewportState,
     KEYBOARD_VIEWPORT_HEIGHT_DELTA_PX,
     shouldUseVisualViewportHeight
 } from './useViewportHeight'
@@ -20,5 +21,29 @@ describe('shouldUseVisualViewportHeight', () => {
     it('requires a delta larger than the keyboard threshold', () => {
         expect(shouldUseVisualViewportHeight(800, 800 - KEYBOARD_VIEWPORT_HEIGHT_DELTA_PX, true)).toBe(false)
         expect(shouldUseVisualViewportHeight(800, 800 - KEYBOARD_VIEWPORT_HEIGHT_DELTA_PX - 1, true)).toBe(true)
+    })
+
+    it('keeps the pre-keyboard height while the root has already shrunk', () => {
+        const keyboardOpen = getKeyboardViewportState({
+            layoutViewportHeight: 844,
+            visualViewportHeight: 520,
+            hasFocusedTextEntry: true,
+            stableViewportHeight: 844
+        })
+        expect(keyboardOpen).toEqual({
+            keyboardOpen: true,
+            stableViewportHeight: 844
+        })
+
+        const subsequentResize = getKeyboardViewportState({
+            layoutViewportHeight: 520,
+            visualViewportHeight: 520,
+            hasFocusedTextEntry: true,
+            stableViewportHeight: keyboardOpen.stableViewportHeight
+        })
+        expect(subsequentResize).toEqual({
+            keyboardOpen: true,
+            stableViewportHeight: 844
+        })
     })
 })
