@@ -281,7 +281,7 @@ function CodexSubscriptionLimitsBadge(props: {
                 type="button"
                 onClick={() => setOpen((value) => !value)}
                 className={[
-                    'flex h-12 min-w-[54px] flex-col items-start justify-center gap-1 rounded-[18px] border border-[var(--app-border)] bg-[var(--app-bg)] px-2 text-[11px] font-semibold leading-none tabular-nums text-[var(--app-hint)] shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                    'flex h-12 min-w-[54px] flex-col items-start justify-center gap-1 rounded-[18px] border border-[var(--app-border)] bg-[var(--app-bg)] px-2 text-[11px] font-semibold leading-none tabular-nums text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                     props.isFetching ? 'opacity-60' : ''
                 ].filter(Boolean).join(' ')}
                 title={title}
@@ -462,10 +462,10 @@ export function SessionHeader(props: {
         ? `pointer-events-none absolute inset-x-0 top-0 z-20 bg-transparent ${headerTopInsetClass}`
         : `bg-[var(--app-bg)] ${headerTopInsetClass}`
     const headerSurfaceClass = props.floating
-        ? 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.08)]'
-        : 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+        ? 'border-[color-mix(in_srgb,var(--app-border)_70%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_24%,transparent)] backdrop-blur-xl'
+        : 'border-[var(--app-border)] bg-[var(--app-bg)]'
     const menuButtonSurfaceClass = props.floating
-        ? 'border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.08)]'
+        ? 'border-[color-mix(in_srgb,var(--app-border)_70%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_24%,transparent)] backdrop-blur-xl'
         : headerSurfaceClass
 
     return (

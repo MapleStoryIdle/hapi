@@ -161,12 +161,12 @@
 }
 
 /*
- * Some installed iOS PWAs intermittently resolve safe-area-inset-bottom to
- * zero after the page settles. Portrait iPhones use a 34px home-indicator
- * inset, so keep it as the standalone fallback. The viewport hook clears it
- * while the software keyboard owns the lower part of the visual viewport.
+ * Some installed iOS PWAs intermittently resolve safe-area insets to zero
+ * after the page settles. Portrait iPhones need clearance for the Dynamic
+ * Island/notch and Home Indicator, so keep standalone fallbacks.
  */
 html[data-ios-standalone="true"] {
+    --app-safe-area-top: max(59px, env(safe-area-inset-top, 0px));
     --app-safe-area-bottom: max(34px, env(safe-area-inset-bottom, 0px));
 }
 
