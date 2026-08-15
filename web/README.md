@@ -161,6 +161,10 @@ The spec drives a Vite-served fixture page (`web/e2e-fixtures/scratchlist-fixtur
 that mounts the production `ScratchlistPanel` in isolation, so no hub /
 auth / socket setup is required.
 
+Mobile session layout has a separate product contract and build/test guard:
+[`MOBILE_LAYOUT_CONTRACT.md`](./MOBILE_LAYOUT_CONTRACT.md). Before changing
+the top/bottom safe areas or keyboard behavior, run `bun run test:mobile-layout`.
+
 ## Build
 
 ```bash

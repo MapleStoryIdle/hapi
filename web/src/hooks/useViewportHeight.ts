@@ -7,6 +7,34 @@ import { isTelegramApp } from '@/hooks/useTelegram'
  * A real software keyboard is substantially taller than that on mobile.
  */
 export const KEYBOARD_VIEWPORT_HEIGHT_DELTA_PX = 120
+// WebKit bug 301994 can reserve a status-bar-sized strip above the DOM in a
+// Home Screen PWA while reporting a zero top safe-area inset. Treat only a
+// status-bar-sized gap as system-owned; ordinary bottom safe areas are smaller.
+export const IOS_STANDALONE_SYSTEM_TOP_CHROME_MIN_PX = 48
+
+export function getIosStandaloneSystemTopChromeState(params: {
+    isIosStandalone: boolean
+    screenHeight: number
+    layoutViewportHeight: number
+    visualViewportOffsetTop: number
+    safeAreaTopInset: number
+    keyboardViewportActive: boolean
+}): {
+    unreachable: boolean
+    height: number
+} {
+    const height = Math.max(0, Math.round(params.screenHeight - params.layoutViewportHeight))
+    const unreachable = params.isIosStandalone
+        && params.safeAreaTopInset <= 0
+        && Math.abs(params.visualViewportOffsetTop) < 1
+        && !params.keyboardViewportActive
+        && height >= IOS_STANDALONE_SYSTEM_TOP_CHROME_MIN_PX
+
+    return {
+        unreachable,
+        height: unreachable ? height : 0
+    }
+}
 
 export function shouldUseVisualViewportHeight(
     layoutViewportHeight: number,
@@ -66,20 +94,59 @@ function hasFocusedTextEntry(): boolean {
     return activeElement instanceof HTMLElement && activeElement.isContentEditable
 }
 
-function markIosStandalone(root: HTMLElement): void {
+function isIosStandalone(): boolean {
     const nav = navigator as Navigator & { standalone?: boolean }
     const isIos = /iPad|iPhone|iPod/.test(nav.userAgent)
         || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1)
     const isStandalone = nav.standalone === true
         || window.matchMedia('(display-mode: standalone)').matches
 
+    return isIos && isStandalone
+}
+
+function markIosStandalone(root: HTMLElement): boolean {
+    const standalone = isIosStandalone()
+
     // The synchronous document-head check handles first paint. Re-check here
     // because Home Screen WebKit can settle this state after the initial page
     // lifecycle event. Never remove the marker during this page lifetime: an
     // installed app cannot turn into browser Safari without a navigation.
-    if (isIos && isStandalone) {
+    if (standalone) {
         root.setAttribute('data-ios-standalone', 'true')
     }
+
+    return standalone
+}
+
+function getBrowserSafeAreaTopInset(): number {
+    if (!document.body) {
+        return 0
+    }
+
+    const probe = document.createElement('div')
+    probe.style.cssText = [
+        'position:fixed',
+        'inset:0 auto auto 0',
+        'visibility:hidden',
+        'pointer-events:none',
+        'padding-top:env(safe-area-inset-top, 0px)'
+    ].join(';')
+    document.body.appendChild(probe)
+    const inset = Number.parseFloat(window.getComputedStyle(probe).paddingTop)
+    probe.remove()
+
+    return Number.isFinite(inset) ? inset : 0
+}
+
+function syncIosStandaloneSystemTopChrome(root: HTMLElement, state: {
+    unreachable: boolean
+}): void {
+    if (state.unreachable) {
+        root.setAttribute('data-ios-system-top-chrome', 'unreachable')
+        return
+    }
+
+    root.removeAttribute('data-ios-system-top-chrome')
 }
 
 /**
@@ -107,10 +174,11 @@ export function useViewportHeight(): void {
         let orientation = window.matchMedia('(orientation: portrait)').matches ? 'portrait' : 'landscape'
 
         function update(confirmKeyboardOpen = false) {
-            markIosStandalone(root)
+            const iosStandalone = markIosStandalone(root)
 
             if (!viewport) {
                 root.removeAttribute('data-app-keyboard-open')
+                root.removeAttribute('data-ios-system-top-chrome')
                 root.style.removeProperty('--app-viewport-height')
                 return
             }
@@ -121,11 +189,12 @@ export function useViewportHeight(): void {
                 stableViewportHeight = 0
             }
 
+            const layoutViewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight)
             const keyboardViewportState = getKeyboardViewportState({
                 // `innerHeight` is still useful on browsers that retain the
                 // layout viewport there; `clientHeight` covers iOS versions
                 // where it follows visualViewport instead.
-                layoutViewportHeight: Math.max(document.documentElement.clientHeight, window.innerHeight),
+                layoutViewportHeight,
                 visualViewportHeight: viewport.height,
                 hasFocusedTextEntry: hasFocusedTextEntry(),
                 stableViewportHeight,
@@ -134,6 +203,24 @@ export function useViewportHeight(): void {
             })
             stableViewportHeight = keyboardViewportState.stableViewportHeight
             keyboardOpen = keyboardViewportState.keyboardOpen
+
+            // During a keyboard transition, visualViewport is deliberately
+            // smaller than the layout viewport. Keep the prior top-chrome
+            // result rather than mistaking that keyboard delta for an iOS
+            // status-bar strip.
+            const keyboardViewportActive = layoutViewportHeight - viewport.height > KEYBOARD_VIEWPORT_HEIGHT_DELTA_PX
+            if (!iosStandalone) {
+                root.removeAttribute('data-ios-system-top-chrome')
+            } else if (!keyboardViewportActive && !keyboardOpen) {
+                syncIosStandaloneSystemTopChrome(root, getIosStandaloneSystemTopChromeState({
+                    isIosStandalone: true,
+                    screenHeight: window.screen.height,
+                    layoutViewportHeight,
+                    visualViewportOffsetTop: viewport.offsetTop,
+                    safeAreaTopInset: getBrowserSafeAreaTopInset(),
+                    keyboardViewportActive
+                }))
+            }
 
             // Do not treat every visual-viewport difference as a keyboard. In
             // particular, installed iOS PWAs with viewport-fit=cover can report
@@ -148,7 +235,7 @@ export function useViewportHeight(): void {
                 // token for both states made iOS launch/focus event ordering
                 // visibly flip the composer between flush and safe-area modes.
                 root.setAttribute('data-app-keyboard-open', 'true')
-                // On iOS PWA (black-translucent status bar + viewport-fit=cover),
+                // On an iOS PWA with viewport-fit=cover,
                 // the browser scrolls the page upward when the keyboard opens to
                 // keep the focused input visible. This pushes the header behind
                 // the iOS status bar. Reset the page scroll so the app stays
@@ -207,6 +294,7 @@ export function useViewportHeight(): void {
             timerIds.forEach((id) => window.clearTimeout(id))
             root.style.removeProperty('--app-viewport-height')
             root.removeAttribute('data-app-keyboard-open')
+            root.removeAttribute('data-ios-system-top-chrome')
         }
     }, [])
 }

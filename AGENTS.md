@@ -132,7 +132,22 @@ Before commit/push/PR: use the **`pre-push-review`** skill (`~/.cursor/skills/pr
 - Run: `bun run test` (from root) or `bun run test` (from package)
 - Hub tests: `hub/src/**/*.test.ts`
 - CLI tests: `cli/src/**/*.test.ts`
-- No web tests currently
+- Web tests: `web/src/**/*.test.{ts,tsx}`
+
+## Mobile layout regression contract
+
+Before changing session-header transparency, safe areas, the mobile composer,
+keyboard offsets, or message-to-composer clearance, read
+`web/MOBILE_LAYOUT_CONTRACT.md` and run `bun run test:mobile-layout`.
+
+- Treat every listed invariant as product-approved: do not alter it as a side
+  effect of another UI fix.
+- A contract change requires explicit user approval and must update the
+  implementation, contract document, guard script, and regression tests
+  together.
+- Do not deploy a mixed dirty worktree. Commit an accepted fix before starting
+  unrelated mobile-layout work, or explicitly list the included dirty files
+  and obtain approval.
 
 ## Common tasks
 

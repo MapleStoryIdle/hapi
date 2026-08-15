@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+    getIosStandaloneSystemTopChromeState,
     getKeyboardViewportState,
+    IOS_STANDALONE_SYSTEM_TOP_CHROME_MIN_PX,
     KEYBOARD_VIEWPORT_HEIGHT_DELTA_PX,
     shouldUseVisualViewportHeight
 } from './useViewportHeight'
@@ -71,6 +73,76 @@ describe('shouldUseVisualViewportHeight', () => {
         })).toEqual({
             keyboardOpen: true,
             stableViewportHeight: 844
+        })
+    })
+})
+
+describe('getIosStandaloneSystemTopChromeState', () => {
+    it('recognizes the iOS standalone system strip when the DOM cannot reach it', () => {
+        expect(getIosStandaloneSystemTopChromeState({
+            isIosStandalone: true,
+            screenHeight: 874,
+            layoutViewportHeight: 812,
+            visualViewportOffsetTop: 0,
+            safeAreaTopInset: 0,
+            keyboardViewportActive: false
+        })).toEqual({
+            unreachable: true,
+            height: 62
+        })
+    })
+
+    it('keeps the normal standalone fallback when WebKit reports a real top inset', () => {
+        expect(getIosStandaloneSystemTopChromeState({
+            isIosStandalone: true,
+            screenHeight: 874,
+            layoutViewportHeight: 812,
+            visualViewportOffsetTop: 0,
+            safeAreaTopInset: 44,
+            keyboardViewportActive: false
+        })).toEqual({
+            unreachable: false,
+            height: 0
+        })
+    })
+
+    it('does not confuse the keyboard viewport with unreachable top chrome', () => {
+        expect(getIosStandaloneSystemTopChromeState({
+            isIosStandalone: true,
+            screenHeight: 844,
+            layoutViewportHeight: 520,
+            visualViewportOffsetTop: 0,
+            safeAreaTopInset: 0,
+            keyboardViewportActive: true
+        })).toEqual({
+            unreachable: false,
+            height: 0
+        })
+    })
+
+    it('requires a status-bar-sized gap in an installed iOS web app', () => {
+        expect(getIosStandaloneSystemTopChromeState({
+            isIosStandalone: true,
+            screenHeight: 844,
+            layoutViewportHeight: 844 - IOS_STANDALONE_SYSTEM_TOP_CHROME_MIN_PX + 1,
+            visualViewportOffsetTop: 0,
+            safeAreaTopInset: 0,
+            keyboardViewportActive: false
+        })).toEqual({
+            unreachable: false,
+            height: 0
+        })
+
+        expect(getIosStandaloneSystemTopChromeState({
+            isIosStandalone: false,
+            screenHeight: 844,
+            layoutViewportHeight: 700,
+            visualViewportOffsetTop: 0,
+            safeAreaTopInset: 0,
+            keyboardViewportActive: false
+        })).toEqual({
+            unreachable: false,
+            height: 0
         })
     })
 })

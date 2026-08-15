@@ -13,6 +13,7 @@ import { AgentFlavorStatusIcon } from '@/components/AgentFlavorIcon'
 import { formatReopenError } from '@/lib/reopenError'
 import { useTranslation } from '@/lib/use-translation'
 import { parseStatusSummaryV2 } from '@/lib/gitParsers'
+import { MOBILE_LAYOUT_CONTRACT, mobileLayoutHeaderShellStyle } from '@/lib/mobileLayoutContract'
 import { queryKeys } from '@/lib/query-keys'
 import type { StatusBarProps } from '@/components/AssistantChat/StatusBar'
 import { CheckIcon, CopyIcon } from '@/components/icons'
@@ -491,14 +492,21 @@ export function SessionHeader(props: {
     // browser-provided inset remains the source of truth.
     const headerTopInsetClass = 'pt-[max(var(--app-safe-area-top),0.75rem)]'
     const headerShellClass = props.floating
-        ? `pointer-events-none absolute inset-x-0 top-0 z-20 bg-[var(--app-bg)] ${headerTopInsetClass}`
-        : `bg-[var(--app-bg)] ${headerTopInsetClass}`
+        ? `pointer-events-none absolute inset-x-0 top-0 z-20 ${headerTopInsetClass}`
+        : headerTopInsetClass
+    // Keep controls readable as an independent solid pill, but leave the
+    // surrounding top strip transparent. No backdrop filter is applied.
     const headerSurfaceClass = 'border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)]'
     const menuButtonSurfaceClass = headerSurfaceClass
 
     return (
         <>
-            <div className={headerShellClass}>
+            <div
+                className={headerShellClass}
+                style={mobileLayoutHeaderShellStyle}
+                data-testid={MOBILE_LAYOUT_CONTRACT.header.testId}
+                data-mobile-layout-contract={MOBILE_LAYOUT_CONTRACT.header.state}
+            >
                 <div className={`mx-auto flex w-full max-w-content items-center gap-2 px-3 pb-3 ${props.floating ? 'pt-0' : 'pt-3'}`}>
                     <div className={`${props.floating ? 'pointer-events-auto' : ''} flex min-w-0 items-center gap-0.5 rounded-[20px] border px-1.5 py-1.5 ${headerSurfaceClass}`}>
                         {/* Back button */}

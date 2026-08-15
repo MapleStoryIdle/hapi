@@ -72,6 +72,18 @@
      * add a visual minimum, but must still derive from this raw value so the
      * layout tracks iOS standalone/PWA safe-area changes.
      */
+    /*
+     * Mobile layout contract. These values are product-approved invariants;
+     * change them only with explicit approval and the matching regression
+     * guard/document update. See web/MOBILE_LAYOUT_CONTRACT.md.
+     */
+    --app-mobile-header-shell-background: transparent;
+    --app-mobile-header-shell-backdrop-filter: none;
+    --app-mobile-composer-expanded-keyboard-offset: 4px;
+    --app-mobile-standalone-top-safe-area-min: 50px;
+    --app-mobile-standalone-bottom-safe-area-min: 34px;
+    --app-mobile-composer-touch-safe-area-min: 12px;
+
     --app-safe-area-top: env(safe-area-inset-top, 0px);
     --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
     --app-composer-safe-area-bottom: var(--app-safe-area-bottom);
@@ -167,8 +179,19 @@
  * Island/notch and Home Indicator, so keep standalone fallbacks.
  */
 html[data-ios-standalone="true"] {
-    --app-safe-area-top: max(50px, env(safe-area-inset-top, 0px));
-    --app-safe-area-bottom: max(34px, env(safe-area-inset-bottom, 0px));
+    --app-safe-area-top: max(var(--app-mobile-standalone-top-safe-area-min), env(safe-area-inset-top, 0px));
+    --app-safe-area-bottom: max(var(--app-mobile-standalone-bottom-safe-area-min), env(safe-area-inset-bottom, 0px));
+}
+
+/*
+ * Some iOS Home Screen PWAs reserve a status-bar-sized strip above the DOM
+ * while reporting a zero top env() inset (WebKit 301994). That strip belongs
+ * to the system, so adding our 50px fallback below it creates a second,
+ * visible top gap. The runtime marker is set only after detecting that exact
+ * geometry; the header then starts from the visible web viewport instead.
+ */
+html[data-ios-standalone="true"][data-ios-system-top-chrome="unreachable"] {
+    --app-safe-area-top: env(safe-area-inset-top, 0px);
 }
 
 /*
@@ -179,18 +202,18 @@ html[data-ios-standalone="true"] {
  */
 @media (hover: none) and (pointer: coarse) {
     :root {
-        --app-composer-safe-area-bottom: max(12px, var(--app-safe-area-bottom));
+        --app-composer-safe-area-bottom: max(var(--app-mobile-composer-touch-safe-area-min), var(--app-safe-area-bottom));
     }
 }
 
 /* The keyboard owns the visual viewport bottom; only the composer drops the
  * hardware-inset padding in that state. Keep --app-safe-area-bottom stable so
  * a focus/resize race cannot make the first rendered composer flush. Leave a
- * small extra gap for the expanded composer, whose taller control surface can
+ * small 4px gap for the expanded composer, whose taller control surface can
  * otherwise touch an overlaying iOS keyboard. */
 html[data-app-keyboard-open="true"] {
     --app-composer-safe-area-bottom: 0px;
-    --app-composer-expanded-keyboard-offset: 12px;
+    --app-composer-expanded-keyboard-offset: var(--app-mobile-composer-expanded-keyboard-offset);
 }
 
 [data-theme="dark"] {
