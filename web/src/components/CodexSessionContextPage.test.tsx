@@ -230,10 +230,13 @@ describe('CodexSessionContextPage', () => {
                 id: 'codex-local:1:0',
                 createdAt: 0,
                 content: {
-                    role: 'user',
+                    role: 'agent',
                     content: {
-                        type: 'text',
-                        text: '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>No new or updated bugs require action.</message> </heartbeat>'
+                        type: 'codex',
+                        data: {
+                            type: 'message',
+                            message: '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>No new or updated bugs require action.</message> </heartbeat>'
+                        }
                     }
                 }
             },

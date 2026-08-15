@@ -20,22 +20,23 @@ export function normalizeDecryptedMessage(message: DecryptedMessage): Normalized
         }
     }
 
-    if (record.role === 'user') {
-        const heartbeat = parseAutomationHeartbeatMessageContent(record.content)
-        if (heartbeat) {
-            return {
-                id: message.id,
-                localId: message.localId,
-                createdAt: message.createdAt,
-                role: 'event',
-                isSidechain: false,
-                content: { type: 'automation-heartbeat', ...heartbeat },
-                meta: record.meta,
-                status: message.status,
-                originalText: message.originalText,
-                invokedAt: message.invokedAt
-            }
+    const heartbeat = parseAutomationHeartbeatMessageContent(record.content)
+    if (heartbeat) {
+        return {
+            id: message.id,
+            localId: message.localId,
+            createdAt: message.createdAt,
+            role: 'event',
+            isSidechain: false,
+            content: { type: 'automation-heartbeat', ...heartbeat },
+            meta: record.meta,
+            status: message.status,
+            originalText: message.originalText,
+            invokedAt: message.invokedAt
         }
+    }
+
+    if (record.role === 'user') {
         const normalized = normalizeUserRecord(message.id, message.localId, message.createdAt, record.content, record.meta)
         return normalized
             ? { ...normalized, status: message.status, originalText: message.originalText, invokedAt: message.invokedAt }

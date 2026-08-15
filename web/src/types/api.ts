@@ -205,6 +205,8 @@ export type CodexLocalSessionsResponse = {
 export type CodexLocalSessionContextMessage = {
     id: string
     createdAt: number
+    /** Stable transcript order when multiple entries share a timestamp. */
+    position?: number
     content: {
         role: 'user' | 'agent'
         content: unknown

@@ -15,10 +15,13 @@ function makeMessage(content: unknown): DecryptedMessage {
 describe('normalizeDecryptedMessage', () => {
     it('normalizes automation heartbeats into formatted status events', () => {
         const message = makeMessage({
-            role: 'user',
+            role: 'agent',
             content: {
-                type: 'text',
-                text: '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>Nothing to report.</message> </heartbeat>'
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>Nothing to report.</message> </heartbeat>'
+                }
             }
         })
 

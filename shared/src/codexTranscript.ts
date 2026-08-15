@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
+import { parseAutomationHeartbeatMessageContent } from './messages'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
 
 export type CodexLocalSessionSummary = {
@@ -21,6 +22,8 @@ export type CodexLocalSessionContextMessage = {
 }
 
 export type CodexImportedMessageContent = {
+    /** Original Codex rollout timestamp, in milliseconds. */
+    createdAt?: number
     role: 'user'
     content: {
         type: 'text'
@@ -30,6 +33,8 @@ export type CodexImportedMessageContent = {
         sentFrom: 'cli'
     }
 } | {
+    /** Original Codex rollout timestamp, in milliseconds. */
+    createdAt?: number
     role: 'agent'
     content: {
         type: typeof AGENT_MESSAGE_PAYLOAD_TYPE
@@ -378,12 +383,25 @@ export function findLocalCodexSession(sessionId: string): CodexLocalSessionSumma
     return null
 }
 
-function buildImportedUserMessage(text: string): CodexImportedMessageContent {
-    return { role: 'user', content: { type: 'text', text }, meta: { sentFrom: 'cli' } }
+function getCodexRecordTimestamp(record: Record<string, unknown>): number | undefined {
+    const timestamp = asString(record.timestamp)
+    if (!timestamp) return undefined
+    const parsed = Date.parse(timestamp)
+    return Number.isFinite(parsed) ? parsed : undefined
 }
 
-function buildImportedAgentMessage(data: unknown): CodexImportedMessageContent {
+function buildImportedUserMessage(text: string, createdAt?: number): CodexImportedMessageContent {
     return {
+        ...(createdAt === undefined ? {} : { createdAt }),
+        role: 'user',
+        content: { type: 'text', text },
+        meta: { sentFrom: 'cli' }
+    }
+}
+
+function buildImportedAgentMessage(data: unknown, createdAt?: number): CodexImportedMessageContent {
+    return {
+        ...(createdAt === undefined ? {} : { createdAt }),
         role: 'agent',
         content: { type: AGENT_MESSAGE_PAYLOAD_TYPE, data },
         meta: { sentFrom: 'cli' }
@@ -395,28 +413,30 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
     const payload = asRecord(record.payload)
     if (!type || !payload) return null
 
+    const createdAt = getCodexRecordTimestamp(record)
+
     if (type === 'event_msg') {
         const eventType = asString(payload.type)
         if (!eventType) return null
         if (eventType === 'user_message') {
             const text = asString(payload.message) ?? asString(payload.text) ?? asString(payload.content)
-            return text && !shouldIgnoreSyntheticUserMessage(text) ? buildImportedUserMessage(text) : null
+            return text && !shouldIgnoreSyntheticUserMessage(text) ? buildImportedUserMessage(text, createdAt) : null
         }
         if (eventType === 'agent_message') {
             const message = asString(payload.message)
-            return message ? buildImportedAgentMessage({ type: 'message', message, id: randomUUID() }) : null
+            return message ? buildImportedAgentMessage({ type: 'message', message, id: randomUUID() }, createdAt) : null
         }
         if (eventType === 'agent_reasoning') {
             const message = asString(payload.text) ?? asString(payload.message)
-            return message ? buildImportedAgentMessage({ type: 'reasoning', message, id: randomUUID() }) : null
+            return message ? buildImportedAgentMessage({ type: 'reasoning', message, id: randomUUID() }, createdAt) : null
         }
         if (eventType === 'agent_reasoning_delta') {
             const delta = asString(payload.delta) ?? asString(payload.text) ?? asString(payload.message)
-            return delta ? buildImportedAgentMessage({ type: 'reasoning-delta', delta }) : null
+            return delta ? buildImportedAgentMessage({ type: 'reasoning-delta', delta }, createdAt) : null
         }
         if (eventType === 'token_count') {
             const info = asRecord(payload.info)
-            return info ? buildImportedAgentMessage({ type: 'token_count', info, id: randomUUID() }) : null
+            return info ? buildImportedAgentMessage({ type: 'token_count', info, id: randomUUID() }, createdAt) : null
         }
         return null
     }
@@ -428,21 +448,21 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
         const role = asString(payload.role)
         const text = extractCodexText(payload.content)
         if (!text || shouldIgnoreSyntheticUserMessage(text)) return null
-        if (role === 'user') return buildImportedUserMessage(text)
-        if (role === 'assistant') return buildImportedAgentMessage({ type: 'message', message: text, id: randomUUID() })
+        if (role === 'user') return buildImportedUserMessage(text, createdAt)
+        if (role === 'assistant') return buildImportedAgentMessage({ type: 'message', message: text, id: randomUUID() }, createdAt)
         return null
     }
     if (itemType === 'function_call') {
         const name = asString(payload.name)
         const callId = extractCodexToolCallId(payload)
         return name && callId
-            ? buildImportedAgentMessage({ type: 'tool-call', name, callId, input: parseCodexFunctionArguments(payload.arguments), id: randomUUID() })
+            ? buildImportedAgentMessage({ type: 'tool-call', name, callId, input: parseCodexFunctionArguments(payload.arguments), id: randomUUID() }, createdAt)
             : null
     }
     if (itemType === 'function_call_output') {
         const callId = extractCodexToolCallId(payload)
         return callId
-            ? buildImportedAgentMessage({ type: 'tool-call-result', callId, output: payload.output, id: randomUUID() })
+            ? buildImportedAgentMessage({ type: 'tool-call-result', callId, output: payload.output, id: randomUUID() }, createdAt)
             : null
     }
     return null
@@ -456,6 +476,13 @@ function importedChatMessageFingerprint(message: CodexImportedMessageContent): s
     return text ? `assistant:${text}` : null
 }
 
+function getHeartbeatTimestamp(message: CodexImportedMessageContent): number | undefined {
+    const heartbeat = parseAutomationHeartbeatMessageContent(message.content)
+    if (!heartbeat?.currentTimeIso) return undefined
+    const timestamp = Date.parse(heartbeat.currentTimeIso)
+    return Number.isFinite(timestamp) ? timestamp : undefined
+}
+
 export function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): CodexTranscriptImportData | null {
     let content: string
     try {
@@ -466,12 +493,25 @@ export function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary
 
     const messages: CodexImportedMessageContent[] = []
     const canonicalChatMessageIndexByRolloutKey = new Map<string, number>()
+    let pendingHeartbeatTimestamp: number | undefined
     for (const line of content.split(/\r?\n/).filter(Boolean)) {
         try {
             const record = asRecord(JSON.parse(line))
             if (!record) continue
-            const message = convertCodexRecordToImportedMessage(record)
+            let message = convertCodexRecordToImportedMessage(record)
             if (!message) continue
+
+            const heartbeatTimestamp = getHeartbeatTimestamp(message)
+            if (message.role === 'user') {
+                pendingHeartbeatTimestamp = heartbeatTimestamp
+            }
+            if (heartbeatTimestamp !== undefined) {
+                message = { ...message, createdAt: heartbeatTimestamp }
+            } else if (message.role === 'agent' && pendingHeartbeatTimestamp !== undefined
+                && parseAutomationHeartbeatMessageContent(message.content)) {
+                message = { ...message, createdAt: pendingHeartbeatTimestamp }
+            }
+
             const fingerprint = importedChatMessageFingerprint(message)
             const timestamp = getCodexRolloutTimestampKey(asString(record.timestamp))
             const rolloutKey = fingerprint && timestamp ? `${timestamp}\u0000${fingerprint}` : null

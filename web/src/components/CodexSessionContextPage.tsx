@@ -26,7 +26,7 @@ function buildReadOnlyCodexMessages(
 ): DecryptedMessage[] {
     return messages.map((message) => ({
         id: message.id,
-        seq: message.createdAt + 1,
+        seq: (message.position ?? message.createdAt) + 1,
         localId: null,
         content: message.content,
         createdAt: message.createdAt

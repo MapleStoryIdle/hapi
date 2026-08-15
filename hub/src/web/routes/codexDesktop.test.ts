@@ -266,7 +266,7 @@ describe('Codex Desktop import routes', () => {
             const app = createRoutesApp('default')
             const contextResponse = await app.request(`/api/codex/sessions/${codexSessionId}/context`)
             const context = await contextResponse.json() as {
-                messages: Array<{ id: string; createdAt: number; content: { role: string; content: unknown } }>
+                messages: Array<{ id: string; createdAt: number; position: number; content: { role: string; content: unknown } }>
             }
             expect(context.messages.map(({ content }) => content)).toMatchObject([
                 { role: 'user', content: { type: 'text', text: 'duplicate user message' } },
@@ -274,11 +274,11 @@ describe('Codex Desktop import routes', () => {
                 { role: 'user', content: { type: 'text', text: 'duplicate user message' } },
                 { role: 'agent', content: { type: AGENT_MESSAGE_PAYLOAD_TYPE, data: { type: 'message', message: 'duplicate assistant message' } } }
             ])
-            expect(context.messages.map(({ id, createdAt }) => ({ id, createdAt }))).toEqual([
-                { id: `codex-local:${codexSessionId}:0`, createdAt: 0 },
-                { id: `codex-local:${codexSessionId}:1`, createdAt: 1 },
-                { id: `codex-local:${codexSessionId}:2`, createdAt: 2 },
-                { id: `codex-local:${codexSessionId}:3`, createdAt: 3 }
+            expect(context.messages.map(({ id, createdAt, position }) => ({ id, createdAt, position }))).toEqual([
+                { id: `codex-local:${codexSessionId}:0`, createdAt: Date.parse('2026-06-05T10:00:00.000Z'), position: 0 },
+                { id: `codex-local:${codexSessionId}:1`, createdAt: Date.parse('2026-06-05T10:00:01.000Z'), position: 1 },
+                { id: `codex-local:${codexSessionId}:2`, createdAt: Date.parse('2026-06-05T10:01:00.000Z'), position: 2 },
+                { id: `codex-local:${codexSessionId}:3`, createdAt: Date.parse('2026-06-05T10:01:01.000Z'), position: 3 }
             ])
 
             const result = await importSelectedCodexSessions({
@@ -502,7 +502,8 @@ describe('Codex Desktop import routes', () => {
                 messages: [
                     {
                         id: `codex-local:${codexSessionId}:1`,
-                        createdAt: 1,
+                        createdAt: expect.any(Number),
+                        position: 1,
                         content: {
                             role: 'agent',
                             content: {
@@ -522,7 +523,8 @@ describe('Codex Desktop import routes', () => {
                 messages: [
                     {
                         id: `codex-local:${codexSessionId}:0`,
-                        createdAt: 0,
+                        createdAt: expect.any(Number),
+                        position: 0,
                         content: {
                             role: 'user',
                             content: { type: 'text', text: 'normal user message' }
@@ -573,12 +575,14 @@ describe('Codex Desktop import routes', () => {
                 messages: [
                     {
                         id: `codex-local:${sessionId}:0`,
-                        createdAt: 0,
+                        createdAt: data.session.modifiedAt,
+                        position: 0,
                         content: data.importedMessages[0]
                     },
                     {
                         id: `codex-local:${sessionId}:1`,
-                        createdAt: 1,
+                        createdAt: data.session.modifiedAt,
+                        position: 1,
                         content: data.importedMessages[1]
                     }
                 ]

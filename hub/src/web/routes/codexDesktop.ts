@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { homedir, hostname, platform } from 'node:os'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
+import { parseAutomationHeartbeatMessageContent } from '@hapi/protocol/messages'
 import { Hono } from 'hono'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { Store, StoredMessage } from '../../store'
@@ -76,6 +77,7 @@ type CodexLocalSessionsResponse = {
 type CodexLocalSessionContextMessage = {
     id: string
     createdAt: number
+    position?: number
     content: CodexImportedMessageContent
 }
 
@@ -100,6 +102,7 @@ type ForkCodexLocalSessionResponse = {
 }
 
 type CodexImportedMessageContent = {
+    createdAt?: number
     role: 'user'
     content: {
         type: 'text'
@@ -109,6 +112,7 @@ type CodexImportedMessageContent = {
         sentFrom: 'cli'
     }
 } | {
+    createdAt?: number
     role: 'agent'
     content: {
         type: typeof AGENT_MESSAGE_PAYLOAD_TYPE
@@ -587,8 +591,16 @@ function findLocalCodexSession(sessionId: string): CodexLocalSessionSummary | nu
     return null
 }
 
-function buildImportedUserMessage(text: string): CodexImportedMessageContent {
+function getCodexRecordTimestamp(record: Record<string, unknown>): number | undefined {
+    const timestamp = asString(record.timestamp)
+    if (!timestamp) return undefined
+    const parsed = Date.parse(timestamp)
+    return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function buildImportedUserMessage(text: string, createdAt?: number): CodexImportedMessageContent {
     return {
+        ...(createdAt === undefined ? {} : { createdAt }),
         role: 'user',
         content: {
             type: 'text',
@@ -600,8 +612,9 @@ function buildImportedUserMessage(text: string): CodexImportedMessageContent {
     }
 }
 
-function buildImportedAgentMessage(data: unknown): CodexImportedMessageContent {
+function buildImportedAgentMessage(data: unknown, createdAt?: number): CodexImportedMessageContent {
     return {
+        ...(createdAt === undefined ? {} : { createdAt }),
         role: 'agent',
         content: {
             type: AGENT_MESSAGE_PAYLOAD_TYPE,
@@ -620,6 +633,8 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
         return null
     }
 
+    const createdAt = getCodexRecordTimestamp(record)
+
     if (type === 'event_msg') {
         const eventType = asString(payload.type)
         if (!eventType) {
@@ -633,27 +648,27 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
             if (!text || shouldIgnoreSyntheticUserMessage(text)) {
                 return null
             }
-            return buildImportedUserMessage(text)
+            return buildImportedUserMessage(text, createdAt)
         }
 
         if (eventType === 'agent_message') {
             const message = asString(payload.message)
-            return message ? buildImportedAgentMessage({ type: 'message', message, id: randomUUID() }) : null
+            return message ? buildImportedAgentMessage({ type: 'message', message, id: randomUUID() }, createdAt) : null
         }
 
         if (eventType === 'agent_reasoning') {
             const message = asString(payload.text) ?? asString(payload.message)
-            return message ? buildImportedAgentMessage({ type: 'reasoning', message, id: randomUUID() }) : null
+            return message ? buildImportedAgentMessage({ type: 'reasoning', message, id: randomUUID() }, createdAt) : null
         }
 
         if (eventType === 'agent_reasoning_delta') {
             const delta = asString(payload.delta) ?? asString(payload.text) ?? asString(payload.message)
-            return delta ? buildImportedAgentMessage({ type: 'reasoning-delta', delta }) : null
+            return delta ? buildImportedAgentMessage({ type: 'reasoning-delta', delta }, createdAt) : null
         }
 
         if (eventType === 'token_count') {
             const info = asRecord(payload.info)
-            return info ? buildImportedAgentMessage({ type: 'token_count', info, id: randomUUID() }) : null
+            return info ? buildImportedAgentMessage({ type: 'token_count', info, id: randomUUID() }, createdAt) : null
         }
 
         return null
@@ -672,10 +687,10 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
                 return null
             }
             if (role === 'user') {
-                return buildImportedUserMessage(text)
+                return buildImportedUserMessage(text, createdAt)
             }
             if (role === 'assistant') {
-                return buildImportedAgentMessage({ type: 'message', message: text, id: randomUUID() })
+                return buildImportedAgentMessage({ type: 'message', message: text, id: randomUUID() }, createdAt)
             }
             return null
         }
@@ -692,7 +707,7 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
                 callId,
                 input: parseCodexFunctionArguments(payload.arguments),
                 id: randomUUID()
-            })
+            }, createdAt)
         }
 
         if (itemType === 'function_call_output') {
@@ -705,7 +720,7 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
                 callId,
                 output: payload.output,
                 id: randomUUID()
-            })
+            }, createdAt)
         }
     }
 
@@ -725,6 +740,13 @@ function importedChatMessageFingerprint(message: CodexImportedMessageContent): s
     return text ? `assistant:${text}` : null
 }
 
+function getHeartbeatTimestamp(message: CodexImportedMessageContent): number | undefined {
+    const heartbeat = parseAutomationHeartbeatMessageContent(message.content)
+    if (!heartbeat?.currentTimeIso) return undefined
+    const timestamp = Date.parse(heartbeat.currentTimeIso)
+    return Number.isFinite(timestamp) ? timestamp : undefined
+}
+
 function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): CodexTranscriptImportData | null {
     let content: string
     try {
@@ -736,6 +758,7 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
     const lines = content.split(/\r?\n/).filter(Boolean)
     const messages: CodexImportedMessageContent[] = []
     const canonicalChatMessageIndexByRolloutKey = new Map<string, number>()
+    let pendingHeartbeatTimestamp: number | undefined
 
     for (const line of lines) {
         let parsed: unknown
@@ -747,8 +770,19 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
 
         const record = asRecord(parsed)
         if (!record) continue
-        const message = convertCodexRecordToImportedMessage(record)
+        let message = convertCodexRecordToImportedMessage(record)
         if (!message) continue
+
+        const heartbeatTimestamp = getHeartbeatTimestamp(message)
+        if (message.role === 'user') {
+            pendingHeartbeatTimestamp = heartbeatTimestamp
+        }
+        if (heartbeatTimestamp !== undefined) {
+            message = { ...message, createdAt: heartbeatTimestamp }
+        } else if (message.role === 'agent' && pendingHeartbeatTimestamp !== undefined
+            && parseAutomationHeartbeatMessageContent(message.content)) {
+            message = { ...message, createdAt: pendingHeartbeatTimestamp }
+        }
 
         const fingerprint = importedChatMessageFingerprint(message)
         const timestamp = getCodexRolloutTimestampKey(asString(record.timestamp))
@@ -778,13 +812,15 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
 function createCodexTranscriptContextMessages(
     sessionId: string,
     messages: CodexImportedMessageContent[],
-    startIndex = 0
+    startIndex = 0,
+    fallbackCreatedAt = Date.now()
 ): CodexLocalSessionContextMessage[] {
     return messages.map((content, index) => ({
         // The imported transcript does not retain HAPI store row IDs. Stable
         // local IDs keep React/thread reconciliation intact across pages.
         id: `codex-local:${sessionId}:${startIndex + index}`,
-        createdAt: startIndex + index,
+        createdAt: content.createdAt ?? fallbackCreatedAt,
+        position: startIndex + index,
         content
     }))
 }
@@ -815,7 +851,7 @@ function getCodexTranscriptContextPage(
     const transcript = parseCodexTranscriptImportData(summary)
     const transcriptPage = paginateCodexTranscriptMessages(transcript?.messages ?? [], limit, before)
     return {
-        messages: createCodexTranscriptContextMessages(summary.id, transcriptPage.messages, transcriptPage.startIndex),
+        messages: createCodexTranscriptContextMessages(summary.id, transcriptPage.messages, transcriptPage.startIndex, summary.modifiedAt),
         page: transcriptPage.page
     }
 }
@@ -1971,7 +2007,7 @@ export function createCodexDesktopRoutes(options: {
                     cwd: session.cwd,
                     modifiedAt: session.modifiedAt
                 },
-                messages: createCodexTranscriptContextMessages(session.id, importedMessages, result.data.startIndex),
+                messages: createCodexTranscriptContextMessages(session.id, importedMessages, result.data.startIndex, session.modifiedAt),
                 page: result.data.page
             } satisfies CodexLocalSessionContextResponse)
         } catch (error) {
