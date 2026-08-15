@@ -220,10 +220,15 @@ export class ApiClient {
         })
     }
 
-    async getCodexSessions(options?: { limit?: number; machineId?: string }): Promise<CodexLocalSessionsResponse> {
+    async getCodexSessions(options?: {
+        limit?: number
+        machineId?: string
+        excludeHapiInitiated?: boolean
+    }): Promise<CodexLocalSessionsResponse> {
         const queryParams = new URLSearchParams()
         if (options?.machineId) queryParams.set('machineId', options.machineId)
         if (options?.limit) queryParams.set('limit', String(options.limit))
+        if (options?.excludeHapiInitiated) queryParams.set('excludeHapiInitiated', 'true')
         const query = queryParams.size > 0 ? `?${queryParams.toString()}` : ''
         return await this.request<CodexLocalSessionsResponse>(`/api/codex/sessions${query}`)
     }

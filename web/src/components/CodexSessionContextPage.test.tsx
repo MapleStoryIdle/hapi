@@ -276,12 +276,29 @@ describe('CodexSessionContextPage', () => {
     })
 
     it('opens the read-only thread at its latest message', async () => {
-        const scrollTo = vi.spyOn(HTMLElement.prototype, 'scrollTo')
-        renderPage()
-
-        await screen.findByText('Original response')
-        await waitFor(() => {
-            expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'instant' }))
+        const originalScrollTop = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTop')
+        const setScrollTop = vi.fn()
+        Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+            configurable: true,
+            get: () => 0,
+            set(value: number) {
+                setScrollTop(value)
+            }
         })
+
+        try {
+            renderPage()
+
+            await screen.findByText('Original response')
+            await waitFor(() => {
+                expect(setScrollTop).toHaveBeenCalled()
+            })
+        } finally {
+            if (originalScrollTop) {
+                Object.defineProperty(HTMLElement.prototype, 'scrollTop', originalScrollTop)
+            } else {
+                delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollTop
+            }
+        }
     })
 })

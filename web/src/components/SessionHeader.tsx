@@ -356,9 +356,10 @@ export function SessionHeader(props: {
     const agentInfo = useMemo(() => formatSessionAgentInfo(session), [session])
     const sessionDetails = useMemo(() => [
         { key: 'title', label: '完整名称', value: title },
+        { key: 'session-id', label: '会话 ID', value: session.id },
         { key: 'path', label: '项目路径', value: projectPath ?? '—' },
         { key: 'agent', label: 'Agent 信息', value: agentInfo || '—' }
-    ], [agentInfo, projectPath, title])
+    ], [agentInfo, projectPath, session.id, title])
 
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -459,14 +460,10 @@ export function SessionHeader(props: {
     // browser-provided inset remains the source of truth.
     const headerTopInsetClass = 'pt-[max(var(--app-safe-area-top),0.75rem)]'
     const headerShellClass = props.floating
-        ? `pointer-events-none absolute inset-x-0 top-0 z-20 bg-transparent ${headerTopInsetClass}`
+        ? `pointer-events-none absolute inset-x-0 top-0 z-20 bg-[var(--app-bg)] ${headerTopInsetClass}`
         : `bg-[var(--app-bg)] ${headerTopInsetClass}`
-    const headerSurfaceClass = props.floating
-        ? 'border-[color-mix(in_srgb,var(--app-border)_70%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_24%,transparent)] backdrop-blur-xl'
-        : 'border-[var(--app-border)] bg-[var(--app-bg)]'
-    const menuButtonSurfaceClass = props.floating
-        ? 'border-[color-mix(in_srgb,var(--app-border)_70%,transparent)] bg-[color-mix(in_srgb,var(--app-bg)_24%,transparent)] backdrop-blur-xl'
-        : headerSurfaceClass
+    const headerSurfaceClass = 'border-[var(--app-border)] bg-[var(--app-bg)]'
+    const menuButtonSurfaceClass = headerSurfaceClass
 
     return (
         <>

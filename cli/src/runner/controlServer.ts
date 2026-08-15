@@ -6,23 +6,28 @@
 import fastify, { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod';
+import { ExternalCodexRequestPayloadSchema, type ExternalCodexRequestPayload } from '@hapi/protocol';
 import { logger } from '@/ui/logger';
 import { Metadata } from '@/api/types';
 import { TrackedSession } from './types';
 import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/rpcTypes';
+
+const externalCodexRequestSchema = ExternalCodexRequestPayloadSchema.omit({ machineId: true });
 
 export function startRunnerControlServer({
   getChildren,
   stopSession,
   spawnSession,
   requestShutdown,
-  onHappySessionWebhook
+  onHappySessionWebhook,
+  onExternalCodexRequest
 }: {
   getChildren: () => TrackedSession[];
   stopSession: (sessionId: string) => boolean;
   spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>;
   requestShutdown: () => void;
   onHappySessionWebhook: (sessionId: string, metadata: Metadata) => void;
+  onExternalCodexRequest: (request: Omit<ExternalCodexRequestPayload, 'machineId'>) => void;
 }): Promise<{ port: number; stop: () => Promise<void> }> {
   return new Promise((resolve) => {
     const app = fastify({
@@ -53,6 +58,23 @@ export function startRunnerControlServer({
       logger.debug(`[CONTROL SERVER] Session started: ${sessionId}`);
       onHappySessionWebhook(sessionId, metadata);
 
+      return { status: 'ok' as const };
+    });
+
+    // Global Codex hooks forward native permission prompts and
+    // request_user_input calls here. The hook payload has already been
+    // reduced to non-sensitive routing metadata by the forwarder.
+    typed.post('/codex-external-request', {
+      schema: {
+        body: externalCodexRequestSchema,
+        response: {
+          200: z.object({
+            status: z.literal('ok')
+          })
+        }
+      }
+    }, async (request) => {
+      onExternalCodexRequest(request.body);
       return { status: 'ok' as const };
     });
 

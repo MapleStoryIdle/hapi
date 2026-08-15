@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AttachmentMetadata } from '@/types/api'
 import { FileIcon } from '@/components/FileIcon'
 import { isPreviewableImageMimeType } from '@/lib/fileAttachments'
-import { ImagePreview } from '@/components/ImagePreview'
+import { ImagePreview, type ImagePreviewGalleryItem } from '@/components/ImagePreview'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 
 function formatFileSize(bytes: number): string {
@@ -11,57 +11,114 @@ function formatFileSize(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function ImageAttachment(props: { attachment: AttachmentMetadata }) {
-    const { attachment } = props
+type ImageAttachmentState = {
+    status: 'loading' | 'ready' | 'error'
+    src?: string
+}
+
+function ImageAttachmentGallery(props: { attachments: AttachmentMetadata[] }) {
+    const { attachments } = props
     const ctx = useHappyChatContext()
-    const [objectUrl, setObjectUrl] = useState<string | null>(null)
+    const [imageStates, setImageStates] = useState<Record<string, ImageAttachmentState>>({})
+    const attachmentSignature = attachments.map((attachment) => [
+        attachment.id,
+        attachment.path,
+        attachment.filename,
+        attachment.mimeType
+    ].join(':')).join('|')
 
     useEffect(() => {
         let disposed = false
-        let nextObjectUrl: string | null = null
-        setObjectUrl(null)
+        const objectUrls = new Set<string>()
+        setImageStates(Object.fromEntries(attachments.map((attachment) => [
+            attachment.id,
+            { status: 'loading' }
+        ])))
 
-        void ctx.api.getUploadedFileBlob(ctx.sessionId, attachment.path)
-            .then((blob) => {
-                if (disposed) return
-                if (!isPreviewableImageMimeType(blob.type)) {
-                    setObjectUrl(null)
-                    return
-                }
-                nextObjectUrl = URL.createObjectURL(blob)
-                setObjectUrl(nextObjectUrl)
-            })
-            .catch(() => {
-                if (!disposed) setObjectUrl(null)
-            })
+        for (const attachment of attachments) {
+            void ctx.api.getUploadedFileBlob(ctx.sessionId, attachment.path)
+                .then((blob) => {
+                    if (!isPreviewableImageMimeType(blob.type)) {
+                        throw new Error('Unsupported image type')
+                    }
+                    const src = URL.createObjectURL(blob)
+                    objectUrls.add(src)
+                    if (disposed) {
+                        URL.revokeObjectURL(src)
+                        return
+                    }
+                    setImageStates((current) => ({
+                        ...current,
+                        [attachment.id]: { status: 'ready', src }
+                    }))
+                })
+                .catch(() => {
+                    if (disposed) return
+                    setImageStates((current) => ({
+                        ...current,
+                        [attachment.id]: { status: 'error' }
+                    }))
+                })
+        }
 
         return () => {
             disposed = true
-            if (nextObjectUrl) {
-                URL.revokeObjectURL(nextObjectUrl)
+            for (const objectUrl of objectUrls) {
+                URL.revokeObjectURL(objectUrl)
             }
         }
-    }, [attachment.path, ctx.api, ctx.sessionId])
+    }, [attachmentSignature, ctx.api, ctx.sessionId])
 
-    if (!objectUrl) {
-        return <FileAttachment attachment={attachment} />
-    }
+    const gallery = useMemo<ImagePreviewGalleryItem[]>(() => (
+        attachments.flatMap((attachment) => {
+            const image = imageStates[attachment.id]
+            if (image?.status !== 'ready' || !image.src) return []
+            return [{
+                src: image.src,
+                fileName: attachment.filename,
+                label: attachment.filename
+            }]
+        })
+    ), [attachments, imageStates])
 
     return (
-        <ImagePreview
-            src={objectUrl}
-            fileName={attachment.filename}
-            label={attachment.filename}
-            buttonClassName="relative overflow-hidden rounded-lg text-left cursor-zoom-in"
-            imageClassName="max-h-48 max-w-full object-contain"
-            caption={(
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
-                    <span className="text-xs text-white/90 line-clamp-1">
-                        {attachment.filename}
-                    </span>
-                </div>
-            )}
-        />
+        <div className="flex flex-wrap gap-2">
+            {attachments.map((attachment) => {
+                const image = imageStates[attachment.id]
+                if (image?.status === 'ready' && image.src) {
+                    return (
+                        <ImagePreview
+                            key={attachment.id}
+                            src={image.src}
+                            fileName={attachment.filename}
+                            label={attachment.filename}
+                            gallery={gallery}
+                            buttonClassName="relative overflow-hidden rounded-lg text-left cursor-zoom-in"
+                            imageClassName="max-h-48 max-w-full object-contain"
+                            caption={(
+                                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
+                                    <span className="text-xs text-white/90 line-clamp-1">
+                                        {attachment.filename}
+                                    </span>
+                                </div>
+                            )}
+                        />
+                    )
+                }
+
+                if (image?.status === 'error') {
+                    return <FileAttachment key={attachment.id} attachment={attachment} />
+                }
+
+                return (
+                    <div
+                        key={attachment.id}
+                        className="h-32 w-40 max-w-full animate-pulse rounded-lg bg-[var(--app-subtle-bg)]"
+                        aria-label={attachment.filename}
+                    />
+                )
+            })}
+        </div>
     )
 }
 
@@ -92,11 +149,7 @@ export function MessageAttachments(props: { attachments: AttachmentMetadata[] })
     return (
         <div className="mt-2 flex flex-col gap-2">
             {images.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                    {images.map(attachment => (
-                        <ImageAttachment key={attachment.id} attachment={attachment} />
-                    ))}
-                </div>
+                <ImageAttachmentGallery attachments={images} />
             )}
             {files.length > 0 && (
                 <div className="flex flex-col gap-1.5">

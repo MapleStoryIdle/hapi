@@ -1,30 +1,28 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode, type SyntheticEvent, type WheelEvent } from 'react'
-import { CloseIcon } from '@/components/icons'
+import { useCallback, useMemo, useState, type ReactNode, type SyntheticEvent } from 'react'
+import Lightbox, { type Slide } from 'yet-another-react-lightbox'
+import Captions from 'yet-another-react-lightbox/plugins/captions'
+import Download from 'yet-another-react-lightbox/plugins/download'
+import Zoom from 'yet-another-react-lightbox/plugins/zoom'
+import 'yet-another-react-lightbox/styles.css'
+import 'yet-another-react-lightbox/plugins/captions.css'
+import { useTranslation } from '@/lib/use-translation'
 
-const MIN_IMAGE_SCALE = 0.25
-const MAX_IMAGE_SCALE = 8
-const IMAGE_SCALE_STEP = 0.25
-const BACKDROP_CLICK_MAX_MOVEMENT = 4
-const IMAGE_PAN_SCALE_EPSILON = 0.001
-
-function clampImageScale(value: number): number {
-    return Math.min(MAX_IMAGE_SCALE, Math.max(MIN_IMAGE_SCALE, value))
+export type ImagePreviewGalleryItem = {
+    src: string
+    fileName: string
+    label: string
+    viewerTitle?: string
 }
 
-function canPanImageAtScale(scale: number): boolean {
-    return Math.abs(scale - 1) > IMAGE_PAN_SCALE_EPSILON
-}
-
-type ImagePoint = { x: number; y: number }
-
-function getPointDistance(a: ImagePoint, b: ImagePoint): number {
-    return Math.hypot(a.x - b.x, a.y - b.y)
-}
-
-function getPointCenter(a: ImagePoint, b: ImagePoint): ImagePoint {
+function toSlide(item: ImagePreviewGalleryItem): Slide {
     return {
-        x: (a.x + b.x) / 2,
-        y: (a.y + b.y) / 2
+        src: item.src,
+        alt: item.label,
+        title: item.viewerTitle ?? item.fileName,
+        download: {
+            url: item.src,
+            filename: item.fileName
+        }
     }
 }
 
@@ -36,16 +34,31 @@ export function ImagePreview(props: {
     buttonClassName?: string
     imageClassName?: string
     caption?: ReactNode
+    gallery?: readonly ImagePreviewGalleryItem[]
 }) {
+    const { t } = useTranslation()
     const [viewerOpen, setViewerOpen] = useState(false)
-    const [scale, setScale] = useState(1)
-    const [offset, setOffset] = useState({ x: 0, y: 0 })
-    const scaleRef = useRef(scale)
-    const offsetRef = useRef(offset)
-    const activePointersRef = useRef(new Map<number, ImagePoint>())
-    const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null)
-    const pinchRef = useRef<{ startDistance: number; startScale: number; startCenter: ImagePoint; origin: ImagePoint } | null>(null)
-    const backdropPressRef = useRef<{ pointerId: number; x: number; y: number } | null>(null)
+    const items = useMemo<ImagePreviewGalleryItem[]>(() => {
+        if (props.gallery && props.gallery.length > 0) {
+            return [...props.gallery]
+        }
+        return [{
+            src: props.src,
+            fileName: props.fileName,
+            label: props.label,
+            viewerTitle: props.viewerTitle
+        }]
+    }, [props.fileName, props.gallery, props.label, props.src, props.viewerTitle])
+    const currentIndex = useMemo(() => {
+        const index = items.findIndex((item) => item.src === props.src)
+        return index >= 0 ? index : 0
+    }, [items, props.src])
+    const [activeSource, setActiveSource] = useState(props.src)
+    const viewerIndex = useMemo(() => {
+        const index = items.findIndex((item) => item.src === activeSource)
+        return index >= 0 ? index : currentIndex
+    }, [activeSource, currentIndex, items])
+    const slides = useMemo(() => items.map(toSlide), [items])
 
     const stopEvent = useCallback((event: SyntheticEvent) => {
         event.stopPropagation()
@@ -54,185 +67,13 @@ export function ImagePreview(props: {
     const openViewer = useCallback((event: SyntheticEvent) => {
         event.preventDefault()
         event.stopPropagation()
+        setActiveSource(props.src)
         setViewerOpen(true)
-    }, [])
-
-    const updateScale = useCallback((next: number | ((current: number) => number)) => {
-        setScale((current) => {
-            const value = typeof next === 'function' ? next(current) : next
-            scaleRef.current = value
-            return value
-        })
-    }, [])
-
-    const updateOffset = useCallback((next: ImagePoint) => {
-        offsetRef.current = next
-        setOffset(next)
-    }, [])
-
-    const resetView = useCallback(() => {
-        updateScale(1)
-        updateOffset({ x: 0, y: 0 })
-    }, [updateOffset, updateScale])
+    }, [props.src])
 
     const closeViewer = useCallback(() => {
         setViewerOpen(false)
-        activePointersRef.current.clear()
-        dragRef.current = null
-        pinchRef.current = null
-        backdropPressRef.current = null
-        resetView()
-    }, [resetView])
-
-    const zoomBy = useCallback((delta: number) => {
-        const nextScale = clampImageScale(scaleRef.current + delta)
-        updateScale(nextScale)
-        if (!canPanImageAtScale(nextScale)) {
-            updateOffset({ x: 0, y: 0 })
-        }
-    }, [updateOffset, updateScale])
-
-    const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
-        event.preventDefault()
-        const delta = event.deltaY < 0 ? IMAGE_SCALE_STEP : -IMAGE_SCALE_STEP
-        zoomBy(delta)
-    }, [zoomBy])
-
-    const beginPinch = useCallback(() => {
-        const pointers = Array.from(activePointersRef.current.values())
-        if (pointers.length < 2) return
-
-        const [first, second] = pointers
-        pinchRef.current = {
-            startDistance: getPointDistance(first, second),
-            startScale: scaleRef.current,
-            startCenter: getPointCenter(first, second),
-            origin: offsetRef.current
-        }
-        dragRef.current = null
     }, [])
-
-    const handlePointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
-        if (event.button !== 0) return
-        event.currentTarget.setPointerCapture(event.pointerId)
-        activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
-        backdropPressRef.current = event.target === event.currentTarget
-            ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
-            : null
-
-        if (activePointersRef.current.size >= 2) {
-            backdropPressRef.current = null
-            beginPinch()
-            return
-        }
-
-        if (!canPanImageAtScale(scaleRef.current)) {
-            dragRef.current = null
-            return
-        }
-
-        dragRef.current = {
-            pointerId: event.pointerId,
-            startX: event.clientX,
-            startY: event.clientY,
-            originX: offsetRef.current.x,
-            originY: offsetRef.current.y
-        }
-    }, [beginPinch])
-
-    const handlePointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
-        if (!activePointersRef.current.has(event.pointerId)) return
-        activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
-
-        if (activePointersRef.current.size >= 2 && pinchRef.current) {
-            const pointers = Array.from(activePointersRef.current.values())
-            const [first, second] = pointers
-            const distance = getPointDistance(first, second)
-            const center = getPointCenter(first, second)
-            const pinch = pinchRef.current
-            const nextScale = pinch.startDistance > 0
-                ? clampImageScale(pinch.startScale * (distance / pinch.startDistance))
-                : pinch.startScale
-
-            updateScale(nextScale)
-            updateOffset(canPanImageAtScale(nextScale)
-                ? {
-                    x: pinch.origin.x + center.x - pinch.startCenter.x,
-                    y: pinch.origin.y + center.y - pinch.startCenter.y
-                }
-                : { x: 0, y: 0 })
-            return
-        }
-
-        const drag = dragRef.current
-        if (!drag || drag.pointerId !== event.pointerId) return
-        if (!canPanImageAtScale(scaleRef.current)) return
-        updateOffset({
-            x: drag.originX + event.clientX - drag.startX,
-            y: drag.originY + event.clientY - drag.startY
-        })
-    }, [updateOffset, updateScale])
-
-    const handlePointerUp = useCallback((event: PointerEvent<HTMLDivElement>) => {
-        const backdropPress = backdropPressRef.current
-        const moved = backdropPress
-            ? Math.hypot(event.clientX - backdropPress.x, event.clientY - backdropPress.y)
-            : Number.POSITIVE_INFINITY
-        const shouldCloseFromBackdrop = event.type === 'pointerup'
-            && backdropPress?.pointerId === event.pointerId
-            && event.target === event.currentTarget
-            && activePointersRef.current.size === 1
-            && moved <= BACKDROP_CLICK_MAX_MOVEMENT
-
-        activePointersRef.current.delete(event.pointerId)
-        if (backdropPress?.pointerId === event.pointerId) {
-            backdropPressRef.current = null
-        }
-        if (dragRef.current?.pointerId === event.pointerId) {
-            dragRef.current = null
-        }
-        pinchRef.current = null
-
-        const remainingPointer = activePointersRef.current.entries().next().value as [number, ImagePoint] | undefined
-        if (remainingPointer && canPanImageAtScale(scaleRef.current)) {
-            dragRef.current = {
-                pointerId: remainingPointer[0],
-                startX: remainingPointer[1].x,
-                startY: remainingPointer[1].y,
-                originX: offsetRef.current.x,
-                originY: offsetRef.current.y
-            }
-        }
-        if (shouldCloseFromBackdrop) {
-            closeViewer()
-        }
-    }, [closeViewer])
-
-    const imageViewportCursor = canPanImageAtScale(scale)
-        ? 'cursor-grab active:cursor-grabbing'
-        : 'cursor-default'
-
-    useEffect(() => {
-        if (!viewerOpen) return
-
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                closeViewer()
-            }
-            if (event.key === '0') {
-                resetView()
-            }
-            if (event.key === '+' || event.key === '=') {
-                zoomBy(IMAGE_SCALE_STEP)
-            }
-            if (event.key === '-') {
-                zoomBy(-IMAGE_SCALE_STEP)
-            }
-        }
-
-        window.addEventListener('keydown', handleKeyDown)
-        return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [closeViewer, resetView, viewerOpen, zoomBy])
 
     return (
         <>
@@ -243,7 +84,7 @@ export function ImagePreview(props: {
                 onTouchStart={stopEvent}
                 onClick={openViewer}
                 className={props.buttonClassName ?? 'group flex min-h-[18rem] w-full items-center justify-center overflow-auto rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)] p-3 text-left'}
-                title="Click to zoom"
+                title={t('imagePreview.open')}
             >
                 <img
                     src={props.src}
@@ -255,72 +96,57 @@ export function ImagePreview(props: {
                 <span className="sr-only">{props.fileName}</span>
             </button>
 
-            {viewerOpen ? (
-                <div
-                    className="fixed inset-0 z-50 flex flex-col bg-black/90 text-white"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={props.label}
-                >
-                    <div className="flex items-center gap-2 border-b border-white/10 bg-black/50 px-3 py-2">
-                        <div className="min-w-0 flex-1 truncate text-sm font-medium">{props.viewerTitle ?? props.fileName}</div>
-                        <button
-                            type="button"
-                            onClick={() => zoomBy(-IMAGE_SCALE_STEP)}
-                            className="rounded bg-white/10 px-3 py-1 text-sm hover:bg-white/20 disabled:opacity-40"
-                            disabled={scale <= MIN_IMAGE_SCALE}
-                            title="Zoom out"
-                        >
-                            −
-                        </button>
-                        <button
-                            type="button"
-                            onClick={resetView}
-                            className="rounded bg-white/10 px-3 py-1 text-sm hover:bg-white/20"
-                            title="Reset zoom"
-                        >
-                            {Math.round(scale * 100)}%
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => zoomBy(IMAGE_SCALE_STEP)}
-                            className="rounded bg-white/10 px-3 py-1 text-sm hover:bg-white/20 disabled:opacity-40"
-                            disabled={scale >= MAX_IMAGE_SCALE}
-                            title="Zoom in"
-                        >
-                            +
-                        </button>
-                        <button
-                            type="button"
-                            onClick={closeViewer}
-                            className="flex h-8 w-8 items-center justify-center rounded bg-white/10 hover:bg-white/20"
-                            title="Close"
-                        >
-                            <CloseIcon className="h-4 w-4" />
-                        </button>
-                    </div>
-                    <div
-                        className={`relative min-h-0 flex-1 touch-none overflow-hidden ${imageViewportCursor}`}
-                        onWheel={handleWheel}
-                        onPointerDown={handlePointerDown}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp}
-                        onPointerCancel={handlePointerUp}
-                        onDoubleClick={resetView}
-                    >
-                        <img
-                            src={props.src}
-                            alt={props.label}
-                            draggable={false}
-                            className="absolute left-1/2 top-1/2 max-h-[90vh] max-w-[90vw] select-none object-contain"
-                            style={{
-                                transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
-                                transformOrigin: 'center center'
-                            }}
-                        />
-                    </div>
-                </div>
-            ) : null}
+            <Lightbox
+                open={viewerOpen}
+                close={closeViewer}
+                index={viewerIndex}
+                slides={slides}
+                plugins={[Captions, Download, Zoom]}
+                animation={{ fade: 160, swipe: 220 }}
+                carousel={{
+                    finite: items.length <= 1,
+                    preload: Math.min(2, Math.max(0, items.length - 1)),
+                    padding: '5%'
+                }}
+                controller={{
+                    closeOnBackdropClick: true,
+                    closeOnPullDown: true,
+                    closeOnPullUp: false
+                }}
+                zoom={{
+                    maxZoomPixelRatio: 4,
+                    scrollToZoom: true
+                }}
+                captions={{
+                    showToggle: false,
+                    descriptionMaxLines: 1
+                }}
+                labels={{
+                    Close: t('imagePreview.close'),
+                    Previous: t('imagePreview.previous'),
+                    Next: t('imagePreview.next'),
+                    Download: t('imagePreview.download'),
+                    'Zoom in': t('imagePreview.zoomIn'),
+                    'Zoom out': t('imagePreview.zoomOut'),
+                    'Photo gallery': t('imagePreview.gallery'),
+                    '{index} of {total}': t('imagePreview.counter')
+                }}
+                on={{
+                    view: ({ index }) => setActiveSource(items[index]?.src ?? props.src)
+                }}
+                styles={{
+                    container: {
+                        backgroundColor: 'rgba(10, 12, 16, 0.96)'
+                    },
+                    button: {
+                        filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45))'
+                    },
+                    toolbar: {
+                        paddingTop: 'calc(env(safe-area-inset-top) + 8px)',
+                        paddingRight: 'calc(env(safe-area-inset-right) + 8px)'
+                    }
+                }}
+            />
         </>
     )
 }

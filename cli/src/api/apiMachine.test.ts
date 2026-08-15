@@ -189,6 +189,22 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
             const listed = await callMachineRpc(client, machine.id, 'listCodexLocalSessions', { limit: 5 }) as { success: boolean; sessions?: Array<{ id: string }> }
             expect(listed).toMatchObject({ success: true, sessions: [{ id: sessionId }] })
 
+            const hapiSessionId = '87654321-4321-4321-8321-210987654321'
+            writeFileSync(join(transcriptDir, `rollout-${hapiSessionId}.jsonl`), JSON.stringify({
+                type: 'session_meta',
+                payload: {
+                    id: hapiSessionId,
+                    cwd: '/workspace/project',
+                    originator: 'hapi-codex-client'
+                }
+            }))
+            const externalOnly = await callMachineRpc(client, machine.id, 'listCodexLocalSessions', {
+                limit: 5,
+                excludeHapiInitiated: true
+            }) as { success: boolean; sessions?: Array<{ id: string }> }
+            expect(externalOnly).toMatchObject({ success: true, sessions: [{ id: sessionId }] })
+            expect(externalOnly.sessions?.map((session) => session.id)).not.toContain(hapiSessionId)
+
             const read = await callMachineRpc(client, machine.id, 'readCodexLocalSession', { sessionId }) as {
                 success: boolean
                 data?: { context: unknown[]; importedMessages: unknown[] }
@@ -324,5 +340,29 @@ describe('ApiMachineClient keepAlive lifecycle', () => {
 
         expect(emit).toHaveBeenCalledTimes(1)
         expect(priv.keepAliveInterval).toBeNull()
+    })
+})
+
+describe('ApiMachineClient external Codex requests', () => {
+    it('emits external Codex requests through the authenticated machine socket', () => {
+        const machine = makeMachine('machine-external-codex')
+        const client = new ApiMachineClient('cli-token', machine)
+        const emit = vi.fn()
+        ;(client as unknown as { socket: { emit: typeof emit } }).socket = { emit } as never
+
+        expect(client.reportExternalCodexRequest({
+            codexSessionId: 'codex-thread-1',
+            requestId: 'turn-1:Bash',
+            kind: 'permission',
+            toolName: 'Bash'
+        })).toBe(true)
+
+        expect(emit).toHaveBeenCalledWith('external-codex-request', {
+            machineId: 'machine-external-codex',
+            codexSessionId: 'codex-thread-1',
+            requestId: 'turn-1:Bash',
+            kind: 'permission',
+            toolName: 'Bash'
+        })
     })
 })

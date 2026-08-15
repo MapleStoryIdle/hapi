@@ -1990,8 +1990,12 @@ export class SyncEngine {
         return await this.rpcGateway.listMachineDirectory(machineId, path)
     }
 
-    async listCodexLocalSessions(machineId: string, limit: number): Promise<RpcCodexLocalSessionsResponse> {
-        return await this.rpcGateway.listCodexLocalSessions(machineId, limit)
+    async listCodexLocalSessions(
+        machineId: string,
+        limit: number,
+        options?: { excludeHapiInitiated?: boolean }
+    ): Promise<RpcCodexLocalSessionsResponse> {
+        return await this.rpcGateway.listCodexLocalSessions(machineId, limit, options)
     }
 
     async readCodexLocalSession(

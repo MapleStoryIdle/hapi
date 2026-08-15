@@ -70,7 +70,11 @@ export function RecentCodexSessions(props: {
             return
         }
         try {
-            const response = await props.api.getCodexSessions({ machineId, limit: 5 })
+            const response = await props.api.getCodexSessions({
+                machineId,
+                limit: 10,
+                excludeHapiInitiated: true
+            })
             setSessions(response.sessions)
             setLastUpdatedAt(Date.now())
         } catch (error) {

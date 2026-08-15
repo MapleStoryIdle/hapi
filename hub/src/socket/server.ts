@@ -14,6 +14,7 @@ import type { SyncEvent } from '../sync/syncEngine'
 import { TerminalRegistry } from './terminalRegistry'
 import type { CliSocketWithData, SocketData, SocketServer } from './socketTypes'
 import type { GeneratedImageStore } from '../generatedImages/store'
+import type { ExternalCodexRequestPayload } from '@hapi/protocol'
 
 const jwtPayloadSchema = z.object({
     uid: z.number(),
@@ -42,6 +43,7 @@ export type SocketServerDeps = {
     onSessionReady?: (payload: { sid: string; time: number }) => void
     onSessionEnd?: (payload: { sid: string; time: number }) => void
     onMachineAlive?: (payload: { machineId: string; time: number; health?: unknown }) => void
+    onExternalCodexRequest?: (payload: ExternalCodexRequestPayload & { namespace: string }) => void
     onBackgroundTaskDelta?: (sessionId: string, delta: { started: number; completed: number }) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
@@ -125,6 +127,7 @@ export function createSocketServer(deps: SocketServerDeps): {
         onSessionReady: deps.onSessionReady,
         onSessionEnd: deps.onSessionEnd,
         onMachineAlive: deps.onMachineAlive,
+        onExternalCodexRequest: deps.onExternalCodexRequest,
         onWebappEvent: deps.onWebappEvent,
         onBackgroundTaskDelta: deps.onBackgroundTaskDelta,
         onSessionActivity: deps.onSessionActivity,

@@ -1,4 +1,8 @@
-import { parseAutomationHeartbeatMessageContent, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import {
+    isMalformedAutomationHeartbeatMessageContent,
+    parseAutomationHeartbeatMessageContent,
+    unwrapRoleWrappedRecordEnvelope
+} from '@hapi/protocol/messages'
 import { safeStringify } from '@hapi/protocol'
 import type { DecryptedMessage } from '@/types/api'
 import type { NormalizedMessage } from '@/chat/types'
@@ -34,6 +38,10 @@ export function normalizeDecryptedMessage(message: DecryptedMessage): Normalized
             originalText: message.originalText,
             invokedAt: message.invokedAt
         }
+    }
+
+    if (isMalformedAutomationHeartbeatMessageContent(record.content)) {
+        return null
     }
 
     if (record.role === 'user') {

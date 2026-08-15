@@ -803,7 +803,12 @@ export function HappyThread(props: {
     const scrollToBottomInstant = useCallback(() => {
         const viewport = viewportRef.current
         if (viewport) {
-            viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'instant' })
+            // Do not use ScrollToOptions' non-standard `instant` behavior
+            // here. WebKit can defer/ignore it during a keyboard or layout
+            // transition, leaving a freshly-sent message behind the bottom
+            // overlay. Assigning scrollTop always lands on the padded end of
+            // the thread in the same layout pass.
+            viewport.scrollTop = viewport.scrollHeight
             lastScrollTopRef.current = viewport.scrollTop
             requestReturnToUserMessageVisibilityUpdate()
         }
@@ -825,6 +830,21 @@ export function HappyThread(props: {
         onFlushPendingRef.current()
         requestReturnToUserMessageVisibilityUpdate()
     }, [requestReturnToUserMessageVisibilityUpdate])
+
+    // A send is an explicit request to return to the newest message. Unlike
+    // the indicator button, do this before paint and without a smooth-scroll
+    // animation: the message list may grow in the same commit, while its end
+    // padding reserves the measured composer + safe-area clearance.
+    const forceScrollToBottom = useCallback(() => {
+        scrollToBottomInstant()
+        autoScrollEnabledRef.current = true
+        if (!atBottomRef.current) {
+            atBottomRef.current = true
+            onAtBottomChangeRef.current(true)
+        }
+        setIsAwayFromBottom(false)
+        onFlushPendingRef.current()
+    }, [scrollToBottomInstant])
 
     // Reset state when session changes
     useLayoutEffect(() => {
@@ -894,13 +914,13 @@ export function HappyThread(props: {
         }
     }, [clearInitialScrollTimers, settlePendingLoad])
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (forceScrollTokenRef.current === props.forceScrollToken) {
             return
         }
         forceScrollTokenRef.current = props.forceScrollToken
-        scrollToBottom()
-    }, [props.forceScrollToken, scrollToBottom])
+        forceScrollToBottom()
+    }, [props.forceScrollToken, forceScrollToBottom])
 
     const loadOlderPreservingScroll = useCallback((): Promise<boolean> => {
         if (pendingLoadPromiseRef.current) {
@@ -1296,7 +1316,7 @@ export function HappyThread(props: {
                     >
                         <div
                             ref={contentRef}
-                            className="mx-auto w-full max-w-content min-w-0 p-3"
+                            className="mx-auto min-h-full w-full max-w-content min-w-0 bg-[var(--app-bg)] p-3"
                             style={getThreadContentPadding(props)}
                             data-testid="happy-thread-content"
                         >

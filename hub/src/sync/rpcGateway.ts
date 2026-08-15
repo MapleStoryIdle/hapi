@@ -228,8 +228,15 @@ export class RpcGateway {
         return result as RpcListDirectoryResponse
     }
 
-    async listCodexLocalSessions(machineId: string, limit: number): Promise<RpcCodexLocalSessionsResponse> {
-        return await this.machineRpc(machineId, RPC_METHODS.ListCodexLocalSessions, { limit }) as RpcCodexLocalSessionsResponse
+    async listCodexLocalSessions(
+        machineId: string,
+        limit: number,
+        options?: { excludeHapiInitiated?: boolean }
+    ): Promise<RpcCodexLocalSessionsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListCodexLocalSessions, {
+            limit,
+            ...(options ?? {})
+        }) as RpcCodexLocalSessionsResponse
     }
 
     async readCodexLocalSession(

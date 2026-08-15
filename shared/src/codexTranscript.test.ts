@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { getLocalCodexSessionData } from './codexTranscript'
+import { getLocalCodexSessionData, listLocalCodexSessions } from './codexTranscript'
 
 const originalCodexHome = process.env.CODEX_HOME
 
@@ -53,6 +53,38 @@ describe('getLocalCodexSessionData', () => {
                 Date.parse(heartbeatTime),
                 Date.parse(heartbeatTime)
             ])
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+})
+
+describe('listLocalCodexSessions', () => {
+    it('can exclude HAPI-initiated threads before applying the limit', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-list-test-'))
+        const sessionDir = join(codexHome, 'sessions', '2026', '08', '15')
+        const hapiSessionId = '11111111-1111-4111-8111-111111111111'
+        const externalSessionId = '22222222-2222-4222-8222-222222222222'
+        mkdirSync(sessionDir, { recursive: true })
+
+        const writeTranscript = (sessionId: string, originator: string) => {
+            const file = join(sessionDir, `rollout-${sessionId}.jsonl`)
+            writeFileSync(file, `${JSON.stringify({
+                type: 'session_meta',
+                payload: { id: sessionId, cwd: '/workspace/project', originator }
+            })}\n`, 'utf-8')
+            return file
+        }
+
+        const externalFile = writeTranscript(externalSessionId, 'codex-tui')
+        const hapiFile = writeTranscript(hapiSessionId, 'hapi-codex-client')
+        utimesSync(externalFile, new Date('2026-08-15T00:00:00.000Z'), new Date('2026-08-15T00:00:00.000Z'))
+        utimesSync(hapiFile, new Date('2026-08-15T00:01:00.000Z'), new Date('2026-08-15T00:01:00.000Z'))
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            expect(listLocalCodexSessions(1).map((session) => session.id)).toEqual([hapiSessionId])
+            expect(listLocalCodexSessions(1, { excludeHapiInitiated: true }).map((session) => session.id)).toEqual([externalSessionId])
         } finally {
             rmSync(codexHome, { recursive: true, force: true })
         }

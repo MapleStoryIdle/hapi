@@ -43,6 +43,7 @@ ${chalk.bold('Usage:')}
   hapi codex
   hapi codex resume <session-id>
   hapi codex fork <source-session-id>
+  hapi codex notifications enable
 
 ${chalk.bold('Fork semantics:')}
   Uses native Codex thread/fork. The source conversation history, model,
@@ -67,6 +68,20 @@ export const codexCommand: CommandDefinition = {
             }
             if (commandArgs.length === 1 && commandArgs[0] === '--hapi-help-json') {
                 printHapiCliCapabilities('codex')
+                return
+            }
+            if (commandArgs[0] === 'notifications') {
+                if (commandArgs.length !== 2 || commandArgs[1] !== 'enable') {
+                    throw new Error('Usage: hapi codex notifications enable')
+                }
+                const { installExternalCodexNotificationHooks } = await import('@/codex/utils/externalCodexNotificationHooks')
+                const result = await installExternalCodexNotificationHooks()
+                if (result.addedKinds.length === 0) {
+                    console.log(`HAPI Codex mobile notification hooks are already installed in ${result.hooksPath}`)
+                } else {
+                    console.log(`Installed HAPI Codex mobile notification hooks in ${result.hooksPath}`)
+                }
+                console.log('In Codex, run /hooks once and trust the new HAPI hooks to activate them.')
                 return
             }
             const { runCodex } = await import('@/codex/runCodex')

@@ -15,6 +15,7 @@ import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquire
 import { getCliArgs } from '@/utils/cliArgs';
 import { isProcessAlive, isWindows, killProcess, killProcessByChildProcess } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
+import type { ExternalCodexRequestPayload } from '@hapi/protocol';
 import { withRetry } from '@/utils/time';
 import { isRetryableConnectionError } from '@/utils/errorUtils';
 
@@ -203,6 +204,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       signal?: NodeJS.Signals | null
     };
     let reportSpawnOutcomeToHub: ((outcome: { type: 'success' } | { type: 'error'; details: SpawnFailureDetails }) => void) | null = null;
+    type ExternalCodexRequest = Omit<ExternalCodexRequestPayload, 'machineId'>;
+    let reportExternalCodexRequestToHub: ((request: ExternalCodexRequest) => void) | null = null;
+    const pendingExternalCodexRequests: ExternalCodexRequest[] = [];
     const formatSpawnError = (error: unknown): string => {
       if (error instanceof Error) {
         return error.message;
@@ -278,6 +282,20 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         };
         pidToTrackedSession.set(pid, trackedSession);
         logger.debug(`[RUNNER RUN] Registered externally-started session ${sessionId}`);
+      }
+    };
+
+    const onExternalCodexRequest = (request: ExternalCodexRequest) => {
+      if (reportExternalCodexRequestToHub) {
+        reportExternalCodexRequestToHub(request);
+        return;
+      }
+
+      // A global Codex hook can fire while the runner is still connecting to
+      // the Hub. Keep this short startup window lossless without retaining
+      // unbounded local request history.
+      if (pendingExternalCodexRequests.length < 20) {
+        pendingExternalCodexRequests.push(request);
       }
     };
 
@@ -690,7 +708,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       stopSession,
       spawnSession,
       requestShutdown: () => requestShutdown('hapi-cli'),
-      onHappySessionWebhook
+      onHappySessionWebhook,
+      onExternalCodexRequest
     });
 
     // Baseline mtime at runner-process start. Immutable: per Codex review #814
@@ -791,6 +810,15 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
     // Connect to server
     apiMachine.connect();
+    reportExternalCodexRequestToHub = (request) => {
+      const sent = apiMachine.reportExternalCodexRequest(request);
+      if (!sent) {
+        logger.debug('[RUNNER RUN] External Codex request arrived before the machine socket was initialized');
+      }
+    };
+    for (const request of pendingExternalCodexRequests.splice(0)) {
+      reportExternalCodexRequestToHub(request);
+    }
     scheduleCursorModelsPrewarm();
 
     // Visible startup banner. Use console.log so it always appears on stdout,

@@ -170,6 +170,18 @@ html[data-ios-standalone="true"] {
     --app-safe-area-bottom: max(34px, env(safe-area-inset-bottom, 0px));
 }
 
+/*
+ * Some mobile browsers expose no bottom safe-area value even though a
+ * flush-to-edge composer is uncomfortable or conflicts with gesture areas.
+ * Keep the session surface full-height, but give the composer a modest visual
+ * floor on touch devices. Real device insets still win when they are larger.
+ */
+@media (hover: none) and (pointer: coarse) {
+    :root {
+        --app-composer-safe-area-bottom: max(12px, var(--app-safe-area-bottom));
+    }
+}
+
 /* The keyboard owns the visual viewport bottom; only the composer drops the
  * hardware-inset padding in that state. Keep --app-safe-area-bottom stable so
  * a focus/resize race cannot make the first rendered composer flush. */

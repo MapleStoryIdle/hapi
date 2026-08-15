@@ -14,6 +14,9 @@ const VISIBLE_CLAUDE_SYSTEM_SUBTYPES = new Set([
 ])
 
 const AUTOMATION_HEARTBEAT_PATTERN = /^<heartbeat(?:\s[^>]*)?>([\s\S]*?)<\/heartbeat>$/i
+const AUTOMATION_HEARTBEAT_PREFIX_PATTERN = /^<heartbeat(?:\s[^>]*)?>/i
+const AUTOMATION_HEARTBEAT_AUTOMATION_ID_PATTERN = /<automation_id\b/i
+const AUTOMATION_HEARTBEAT_CLOSING_PATTERN = /<\/heartbeat>\s*$/i
 
 export type AutomationHeartbeat = {
     automationId: string
@@ -78,6 +81,25 @@ export function parseAutomationHeartbeatMessageContent(value: unknown): Automati
 
 export function isAutomationHeartbeatMessageContent(value: unknown): boolean {
     return parseAutomationHeartbeatMessageContent(value) !== null
+}
+
+/**
+ * Identifies a broken automation heartbeat envelope. These control messages
+ * are emitted by the runtime, not authored by the user, so showing a partial
+ * XML payload in the chat only exposes transport noise.
+ */
+export function isMalformedAutomationHeartbeatMessageContent(value: unknown): boolean {
+    if (parseAutomationHeartbeatMessageContent(value)) return false
+
+    const text = extractTextMessageContent(value)
+    if (text === null) return false
+
+    const trimmed = text.trim()
+    return AUTOMATION_HEARTBEAT_PREFIX_PATTERN.test(trimmed)
+        && (
+            AUTOMATION_HEARTBEAT_AUTOMATION_ID_PATTERN.test(trimmed)
+            || !AUTOMATION_HEARTBEAT_CLOSING_PATTERN.test(trimmed)
+        )
 }
 
 export function isRoleWrappedRecord(value: unknown): value is RoleWrappedRecord {

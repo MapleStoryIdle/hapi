@@ -56,6 +56,19 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('drops malformed automation heartbeat control messages', () => {
+        expect(normalizeDecryptedMessage(makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: '<heartbeat>truncated'
+                }
+            }
+        }))).toBeNull()
+    })
+
     it('drops unsupported Claude system output records', () => {
         const message = makeMessage({
             role: 'agent',

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { homedir, hostname, platform } from 'node:os'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
+import { isHapiInitiatedCodexSession } from '@hapi/protocol/codexTranscript'
 import { parseAutomationHeartbeatMessageContent } from '@hapi/protocol/messages'
 import { Hono } from 'hono'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
@@ -565,15 +566,19 @@ function listCodexTranscriptFilesByRecency(): CodexTranscriptFileCandidate[] {
     return files.sort((left, right) => right.modifiedAt - left.modifiedAt)
 }
 
-function listLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): CodexLocalSessionSummary[] {
+function listLocalCodexSessions(
+    limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT,
+    options: { excludeHapiInitiated?: boolean } = {}
+): CodexLocalSessionSummary[] {
     const sessions: CodexLocalSessionSummary[] = []
     const seenSessionIds = new Set<string>()
     // Stat every file cheaply, then only read enough newest rollouts to fill
-    // the requested page. The list page asks for five, not every transcript.
+    // the requested page instead of every transcript.
     for (const candidate of listCodexTranscriptFilesByRecency()) {
         const session = parseCodexLocalSession(candidate.file, candidate.modifiedAt)
         if (!session) continue
         if (seenSessionIds.has(session.id)) continue
+        if (options.excludeHapiInitiated && isHapiInitiatedCodexSession(session)) continue
         seenSessionIds.add(session.id)
         sessions.push(session)
         if (sessions.length >= limit) break
@@ -861,6 +866,12 @@ function parseCodexSessionLimit(value: string | undefined): number | null {
     const parsed = Number(value)
     if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) return null
     return parsed
+}
+
+function parseExcludeHapiInitiated(value: string | undefined): boolean | null {
+    if (value === undefined || value === 'false') return false
+    if (value === 'true') return true
+    return null
 }
 
 function parseCodexContextPageLimit(value: string | undefined): number | null {
@@ -1927,11 +1938,15 @@ export function createCodexDesktopRoutes(options: {
         if (c.req.query('limit') !== undefined && limit === null) {
             return c.json({ success: false, error: 'limit must be an integer between 1 and 100' }, 400)
         }
+        const excludeHapiInitiated = parseExcludeHapiInitiated(c.req.query('excludeHapiInitiated'))
+        if (excludeHapiInitiated === null) {
+            return c.json({ success: false, error: 'excludeHapiInitiated must be true or false' }, 400)
+        }
         const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
         if (!machineId) {
             return c.json({
                 success: true,
-                sessions: listLocalCodexSessions(limit ?? DEFAULT_CODEX_SESSION_SCAN_LIMIT)
+                sessions: listLocalCodexSessions(limit ?? DEFAULT_CODEX_SESSION_SCAN_LIMIT, { excludeHapiInitiated })
             } satisfies CodexLocalSessionsResponse)
         }
         const engine = options.getSyncEngine()
@@ -1942,11 +1957,23 @@ export function createCodexDesktopRoutes(options: {
             return c.json({ success: false, error: 'Selected runner is not online' }, 409)
         }
         try {
-            const result = await engine.listCodexLocalSessions(machineId, limit ?? DEFAULT_RECENT_CODEX_SESSION_LIMIT)
+            const result = excludeHapiInitiated
+                ? await engine.listCodexLocalSessions(
+                    machineId,
+                    limit ?? DEFAULT_RECENT_CODEX_SESSION_LIMIT,
+                    { excludeHapiInitiated: true }
+                )
+                : await engine.listCodexLocalSessions(machineId, limit ?? DEFAULT_RECENT_CODEX_SESSION_LIMIT)
             if (result.success !== true) {
                 return c.json({ success: false, error: result.error || 'Failed to list Codex sessions on the selected runner' }, 502)
             }
-            return c.json({ success: true, sessions: result.sessions } satisfies CodexLocalSessionsResponse)
+            // The runner normally filters before applying its limit. Filter a
+            // second time at the hub boundary so a rolling upgrade cannot leak
+            // a HAPI-created thread from an older runner implementation.
+            const sessions = excludeHapiInitiated
+                ? result.sessions.filter((session) => !isHapiInitiatedCodexSession(session))
+                : result.sessions
+            return c.json({ success: true, sessions } satisfies CodexLocalSessionsResponse)
         } catch (error) {
             return c.json({
                 success: false,

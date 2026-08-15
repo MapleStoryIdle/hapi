@@ -46,4 +46,31 @@ describe('shouldUseVisualViewportHeight', () => {
             stableViewportHeight: 844
         })
     })
+
+    it('keeps the safe area until a visual viewport resize confirms the keyboard', () => {
+        const beforeKeyboardResize = getKeyboardViewportState({
+            layoutViewportHeight: 844,
+            visualViewportHeight: 520,
+            hasFocusedTextEntry: true,
+            stableViewportHeight: 844,
+            wasKeyboardOpen: false,
+            confirmKeyboardOpen: false
+        })
+        expect(beforeKeyboardResize).toEqual({
+            keyboardOpen: false,
+            stableViewportHeight: 844
+        })
+
+        expect(getKeyboardViewportState({
+            layoutViewportHeight: 844,
+            visualViewportHeight: 520,
+            hasFocusedTextEntry: true,
+            stableViewportHeight: beforeKeyboardResize.stableViewportHeight,
+            wasKeyboardOpen: beforeKeyboardResize.keyboardOpen,
+            confirmKeyboardOpen: true
+        })).toEqual({
+            keyboardOpen: true,
+            stableViewportHeight: 844
+        })
+    })
 })

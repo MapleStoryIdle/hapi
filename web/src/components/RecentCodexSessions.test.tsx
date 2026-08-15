@@ -53,7 +53,11 @@ describe('RecentCodexSessions', () => {
         await waitFor(() => {
             expect(screen.getByText('Recent Codex task')).toBeInTheDocument()
         })
-        expect(api.getCodexSessions).toHaveBeenCalledWith({ machineId: 'machine-1', limit: 5 })
+        expect(api.getCodexSessions).toHaveBeenCalledWith({
+            machineId: 'machine-1',
+            limit: 10,
+            excludeHapiInitiated: true
+        })
         expect(screen.getByText('project')).toBeInTheDocument()
         expect(screen.queryByText('Original prompt')).toBeNull()
         expect(screen.queryByText('/workspace/project')).toBeNull()

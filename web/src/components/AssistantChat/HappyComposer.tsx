@@ -3,6 +3,7 @@ import { ComposerPrimitive, useAssistantApi, useAssistantState } from '@assistan
 import {
     type ChangeEvent as ReactChangeEvent,
     type ClipboardEvent as ReactClipboardEvent,
+    type FocusEvent as ReactFocusEvent,
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
     type PointerEvent as ReactPointerEvent,
@@ -436,6 +437,9 @@ export function HappyComposer(props: {
     const [isClearingRemoteServer, setIsClearingRemoteServer] = useState(false)
     const [showSideSessionMenu, setShowSideSessionMenu] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
+    // Start small, expand while the text field is active, then return to the
+    // compact entry point when focus leaves the composer.
+    const [composerExpanded, setComposerExpanded] = useState(false)
     // pendingSchedule is controlled externally when onSchedule prop is provided; otherwise local state
     const [pendingScheduleLocal, setPendingScheduleLocal] = useState<PendingSchedule | null>(null)
     const isControlled = onScheduleProp !== undefined
@@ -448,6 +452,8 @@ export function HappyComposer(props: {
         }
     }, [activeSideSessions.length])
 
+    const composerRootRef = useRef<HTMLDivElement>(null)
+    const composerBlurFrameRef = useRef<number | null>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const prevControlledByUser = useRef(controlledByUser)
     const skillsByName = useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills])
@@ -523,7 +529,9 @@ export function HappyComposer(props: {
     // The composer is an overlay, not scrollable message content. Keep its
     // controls above the iOS home indicator, with a small visual breathing
     // room, while the thread itself remains edge-to-edge.
-    const bottomPaddingClass = 'pb-[calc(0.5rem+var(--app-composer-safe-area-bottom))]'
+    const bottomPaddingClass = composerExpanded
+        ? 'pb-[calc(0.5rem+var(--app-composer-safe-area-bottom))]'
+        : 'pb-[calc(1.25rem+var(--app-composer-safe-area-bottom))]'
     const activeWord = useActiveWord(inputState.text, inputState.selection, autocompletePrefixes)
     const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions] = useActiveSuggestions(
         activeWord,
@@ -1101,9 +1109,7 @@ export function HappyComposer(props: {
     )
     const showAbortButton = true
     const voiceEnabled = Boolean(onVoiceToggle)
-    // Keep the session composer expanded by default; the compact pill state
-    // hides controls and makes the bottom input jump after blur.
-    const composerCompact = false
+    const composerCompact = !composerExpanded
     // Keep the anchored composer slot stable during and after expansion.
     // Dropping this reserved height after the transition causes a second
     // layout pass, which shows up as a small upward twitch on mobile.
@@ -1118,15 +1124,62 @@ export function HappyComposer(props: {
         || showGoalSelectionChip
         || showSideSessionChip
         || selectedRemoteServer !== null
+    const requiresExpandedComposer = hasAttachments
+        || pendingSchedule !== null
+        || sendError !== null
+        || hasSelectionChips
+
+    useEffect(() => {
+        if (requiresExpandedComposer) {
+            setComposerExpanded(true)
+        }
+    }, [requiresExpandedComposer])
+
+    const handleComposerFocus = useCallback(() => {
+        if (composerCompact) {
+            setComposerExpanded(true)
+        }
+    }, [composerCompact])
+    const handleComposerBlur = useCallback((_event: ReactFocusEvent<HTMLTextAreaElement>) => {
+        if (composerBlurFrameRef.current !== null) {
+            window.cancelAnimationFrame(composerBlurFrameRef.current)
+        }
+        // Let a click on a toolbar control settle first. Collapsing during the
+        // input's blur phase would unmount that control before its click fires.
+        composerBlurFrameRef.current = window.requestAnimationFrame(() => {
+            composerBlurFrameRef.current = null
+            if (requiresExpandedComposer) {
+                return
+            }
+            const activeElement = document.activeElement
+            if (activeElement instanceof Node && composerRootRef.current?.contains(activeElement)) {
+                return
+            }
+            setComposerExpanded(false)
+        })
+    }, [requiresExpandedComposer])
+    useEffect(() => {
+        return () => {
+            if (composerBlurFrameRef.current !== null) {
+                window.cancelAnimationFrame(composerBlurFrameRef.current)
+            }
+        }
+    }, [])
     const reservedComposerHeightClass = reserveAnchoredComposerHeight
         ? hasSelectionChips
             ? 'h-[150px]'
             : 'h-[120px]'
         : ''
-    const expandedHeightClass = compactTopAnchor
-        ? 'h-[112px] max-h-[112px]'
-        : 'min-h-[112px] max-h-[360px]'
     const composerInputMaxRows = compactTopAnchor ? 2 : 6
+    // Keep one surface mounted and morph its grid tracks instead of swapping
+    // a pill for a panel. This is the web equivalent of a container transform:
+    // the input remains the visual anchor while the toolbar fades in after the
+    // surface starts opening.
+    const composerGridRowsClass = composerCompact
+        ? 'grid-rows-[0fr_48px_0fr]'
+        : hasAttachments
+            ? 'grid-rows-[auto_62px_1fr]'
+            : 'grid-rows-[0fr_62px_1fr]'
 
     const currentModelLabel = useMemo(() => {
         if (selectedModelBase !== undefined) {
@@ -1539,12 +1592,13 @@ export function HappyComposer(props: {
     ])
 
     return (
-        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[height,margin] duration-[700ms] ease-in-out ${reservedComposerHeightClass}`}>
+        <div className={`px-3 ${bottomPaddingClass} pt-2 transition-[padding] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${reservedComposerHeightClass}`}>
             <div
+                ref={composerRootRef}
                 className="mx-auto w-full max-w-content"
             >
                 <ComposerPrimitive.Root className="relative" onSubmit={handleSubmit}>
-                    {overlays}
+                    {!composerCompact ? overlays : null}
 
                     {showStatusBar && shouldShowComposerStatusBar(agentFlavor) ? (
                         <StatusBar
@@ -1566,7 +1620,7 @@ export function HappyComposer(props: {
                         />
                     ) : null}
 
-                    {sendError ? (
+                    {!composerCompact && sendError ? (
                         <div
                             role="alert"
                             data-testid="composer-send-error"
@@ -1587,7 +1641,7 @@ export function HappyComposer(props: {
                         </div>
                     ) : null}
 
-                    {hasSelectionChips ? (
+                    {!composerCompact && hasSelectionChips ? (
                         <div className="mb-1 flex min-w-0 gap-1.5 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                             {selectedSkill ? (
                                 <button
@@ -1665,7 +1719,7 @@ export function HappyComposer(props: {
                         </div>
                     ) : null}
 
-                    {showSideSessionMenu && activeSideSessions.length > 1 ? (
+                    {!composerCompact && showSideSessionMenu && activeSideSessions.length > 1 ? (
                         <div className="absolute bottom-[calc(100%_-_2rem)] left-1 z-30 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg">
                             <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
                                 侧边会话
@@ -1685,42 +1739,46 @@ export function HappyComposer(props: {
                     ) : null}
 
                     <div
-                        className={`relative flex overflow-hidden rounded-[22px] border shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition-[min-height,max-height,height,border-color,box-shadow,background-color] duration-[700ms] ease-in-out ${
+                        className={`relative grid overflow-hidden border shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition-[grid-template-rows,border-radius,border-color,box-shadow,background-color] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${composerGridRowsClass} ${
                             composerCompact
-                                ? 'h-12 min-h-12 max-h-12 border-[var(--app-border)] bg-[var(--app-bg)]'
-                                : `${expandedHeightClass} flex-col border-[var(--app-composer-expanded-border)] [background:var(--app-composer-expanded-bg)] [box-shadow:var(--app-composer-expanded-shadow)]`
+                                ? 'rounded-full border-[var(--app-border)] bg-[var(--app-bg)]'
+                                : 'rounded-[22px] border-[var(--app-composer-expanded-border)] [background:var(--app-composer-expanded-bg)] [box-shadow:var(--app-composer-expanded-shadow)]'
                         } ${
                             sendError ? 'ring-1 ring-red-500' : ''
                         }`}
                     >
-                        {attachments.length > 0 ? (
-                            <div className="flex flex-wrap gap-2 px-4 pt-3">
-                                <ComposerPrimitive.Attachments components={{ Attachment: AttachmentItem }} />
-                            </div>
-                        ) : null}
+                        <div className="row-start-1 min-h-0 overflow-hidden">
+                            {attachments.length > 0 ? (
+                                <div className="flex flex-wrap gap-2 px-4 pt-3">
+                                    <ComposerPrimitive.Attachments components={{ Attachment: AttachmentItem }} />
+                                </div>
+                            ) : null}
+                        </div>
 
                         <div
                             onPointerDownCapture={handleComposerPointerDownCapture}
-                            className={
+                            className={`relative row-start-2 flex min-w-0 px-4 transition-[padding] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${
                                 composerCompact
-                                    ? 'relative flex h-12 min-w-0 flex-1 items-center px-14 py-0'
-                                    : compactTopAnchor
-                                        ? 'relative flex h-[62px] min-h-[62px] max-h-[62px] min-w-0 flex-none items-start px-4 py-2'
-                                        : 'relative flex min-h-[62px] max-h-[11rem] min-w-0 flex-none items-start px-4 py-2'
-                            }
+                                    ? 'items-start py-3'
+                                    : 'items-start py-2'
+                            }`}
                         >
                             <ComposerPrimitive.Input
                                 ref={textareaRef}
-                                placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
+                                placeholder={composerCompact
+                                    ? t('misc.compactComposerPrompt')
+                                    : showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
                                 disabled={controlsDisabled}
-                                maxRows={composerInputMaxRows}
+                                maxRows={composerCompact ? 1 : composerInputMaxRows}
                                 submitOnEnter={false}
                                 cancelOnEscape={false}
+                                onFocus={handleComposerFocus}
+                                onBlur={handleComposerBlur}
                                 onChange={handleChange}
                                 onSelect={handleSelect}
                                 onKeyDown={handleKeyDown}
                                 onPaste={handlePaste}
-                                className={`relative z-10 flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                                className={`relative z-10 flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] transition-[height,min-height,max-height] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none ${
                                     composerCompact
                                         ? 'h-6 max-h-6 overflow-hidden leading-6'
                                         : compactTopAnchor
@@ -1730,69 +1788,79 @@ export function HappyComposer(props: {
                             />
                         </div>
 
-                        <ComposerButtons
-                            canSend={canSend}
-                            controlsDisabled={controlsDisabled}
-                            showSettingsButton={showSettingsButton}
-                            onSettingsToggle={handleSettingsToggle}
-                            settingsLabel={settingsLabel}
-                            settingsModelLabel={compactModelLabel}
-                            settingsReasoningLabel={currentReasoningLabel}
-                            fastModeActive={serviceTier?.trim().toLowerCase() === 'fast'}
-                            settingsOpen={showSettings}
-                            contextUsagePercent={contextUsage?.percentage ?? null}
-                            contextUsageLabel={contextUsage?.label}
-                            contextUsageDetails={contextUsageDetails}
-                            permissionMode={permissionMode}
-                            permissionLabel={permissionLabel}
-                            permissionModeOptions={permissionModeOptions}
-                            onPermissionModeChange={showPermissionSettings ? handlePermissionChange : undefined}
-                            skills={skills}
-                            skillsLoading={skillsLoading}
-                            skillsError={skillsError}
-                            onSkillSelect={handleSkillSelect}
-                            showPlanModeButton={showPlanModeTool}
-                            planModeActive={collaborationMode === 'plan'}
-                            onPlanModeToggle={showPlanModeTool ? handlePlanModeToggle : undefined}
-                            showGoalModeButton={showGoalModeTool}
-                            goalModeActive={threadGoal?.status === 'active'}
-                            onGoalModeOpen={showGoalModeTool ? handleGoalModeOpen : undefined}
-                            showTerminalButton={showTerminalButton}
-                            terminalDisabled={terminalDisabled}
-                            terminalLabel={terminalLabel}
-                            onTerminal={onTerminal ?? (() => {})}
-                            showAbortButton={showAbortButton}
-                            abortDisabled={abortDisabled}
-                            isAborting={isAborting}
-                            onAbort={handleAbort}
-                            showSwitchButton={showSwitchButton}
-                            switchDisabled={switchDisabled}
-                            isSwitching={isSwitching}
-                            onSwitch={handleSwitch}
-                            voiceEnabled={voiceEnabled}
-                            voiceStatus={voiceStatus}
-                            voiceMicMuted={voiceMicMuted}
-                            onVoiceToggle={onVoiceToggle ?? (() => {})}
-                            onVoiceMicToggle={onVoiceMicToggle}
-                            onSend={sendComposerMessage}
-                            pendingSchedule={pendingSchedule}
-                            onSchedule={setPendingSchedule}
-                            onClearSchedule={isControlled ? onClearScheduleProp : () => setPendingScheduleLocal(null)}
-                            hasAttachments={hasAttachments}
-                            piModelLabel={piModelLabel}
-                            piModelDisabled={controlsDisabled || !piHasModels}
-                            piModelOpen={showPiModelPanel}
-                            onPiModelToggle={handlePiModelToggle}
-                            piThinkingLabel={piThinkingLabel}
-                            piThinkingDisabled={controlsDisabled || !piHasModels || !selectedPiModel || selectedPiModel.reasoning === false}
-                            piThinkingOpen={showPiThinkingPanel}
-                            onPiThinkingToggle={handlePiThinkingToggle}
-                            scratchlistMode={props.scratchlistMode}
-                            scratchlistCount={props.scratchlistCount}
-                            onScratchlistToggle={props.onScratchlistToggle}
-                            remoteServerContext={remoteServerContext}
-                            compact={composerCompact}
-                        />
+                        <div
+                            aria-hidden={composerCompact || undefined}
+                            inert={composerCompact}
+                            className={`row-start-3 min-h-0 overflow-hidden transition-opacity motion-reduce:transition-none motion-reduce:delay-0 ${
+                                composerCompact
+                                    ? 'pointer-events-none opacity-0 duration-100 ease-in'
+                                    : 'opacity-100 delay-[70ms] duration-[150ms] ease-out'
+                            }`}
+                        >
+                            <ComposerButtons
+                                canSend={canSend}
+                                controlsDisabled={controlsDisabled}
+                                showSettingsButton={showSettingsButton}
+                                onSettingsToggle={handleSettingsToggle}
+                                settingsLabel={settingsLabel}
+                                settingsModelLabel={compactModelLabel}
+                                settingsReasoningLabel={currentReasoningLabel}
+                                fastModeActive={serviceTier?.trim().toLowerCase() === 'fast'}
+                                settingsOpen={showSettings}
+                                contextUsagePercent={contextUsage?.percentage ?? null}
+                                contextUsageLabel={contextUsage?.label}
+                                contextUsageDetails={contextUsageDetails}
+                                permissionMode={permissionMode}
+                                permissionLabel={permissionLabel}
+                                permissionModeOptions={permissionModeOptions}
+                                onPermissionModeChange={showPermissionSettings ? handlePermissionChange : undefined}
+                                skills={skills}
+                                skillsLoading={skillsLoading}
+                                skillsError={skillsError}
+                                onSkillSelect={handleSkillSelect}
+                                showPlanModeButton={showPlanModeTool}
+                                planModeActive={collaborationMode === 'plan'}
+                                onPlanModeToggle={showPlanModeTool ? handlePlanModeToggle : undefined}
+                                showGoalModeButton={showGoalModeTool}
+                                goalModeActive={threadGoal?.status === 'active'}
+                                onGoalModeOpen={showGoalModeTool ? handleGoalModeOpen : undefined}
+                                showTerminalButton={showTerminalButton}
+                                terminalDisabled={terminalDisabled}
+                                terminalLabel={terminalLabel}
+                                onTerminal={onTerminal ?? (() => {})}
+                                showAbortButton={showAbortButton}
+                                abortDisabled={abortDisabled}
+                                isAborting={isAborting}
+                                onAbort={handleAbort}
+                                showSwitchButton={showSwitchButton}
+                                switchDisabled={switchDisabled}
+                                isSwitching={isSwitching}
+                                onSwitch={handleSwitch}
+                                voiceEnabled={voiceEnabled}
+                                voiceStatus={voiceStatus}
+                                voiceMicMuted={voiceMicMuted}
+                                onVoiceToggle={onVoiceToggle ?? (() => {})}
+                                onVoiceMicToggle={onVoiceMicToggle}
+                                onSend={sendComposerMessage}
+                                pendingSchedule={pendingSchedule}
+                                onSchedule={setPendingSchedule}
+                                onClearSchedule={isControlled ? onClearScheduleProp : () => setPendingScheduleLocal(null)}
+                                hasAttachments={hasAttachments}
+                                piModelLabel={piModelLabel}
+                                piModelDisabled={controlsDisabled || !piHasModels}
+                                piModelOpen={showPiModelPanel}
+                                onPiModelToggle={handlePiModelToggle}
+                                piThinkingLabel={piThinkingLabel}
+                                piThinkingDisabled={controlsDisabled || !piHasModels || !selectedPiModel || selectedPiModel.reasoning === false}
+                                piThinkingOpen={showPiThinkingPanel}
+                                onPiThinkingToggle={handlePiThinkingToggle}
+                                scratchlistMode={props.scratchlistMode}
+                                scratchlistCount={props.scratchlistCount}
+                                onScratchlistToggle={props.onScratchlistToggle}
+                                remoteServerContext={remoteServerContext}
+                                compact={false}
+                            />
+                        </div>
                     </div>
                 </ComposerPrimitive.Root>
             </div>

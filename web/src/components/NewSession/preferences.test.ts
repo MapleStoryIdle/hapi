@@ -56,9 +56,8 @@ describe('NewSession preferences', () => {
         expect(localStorage.getItem('hapi:newSession:yolo')).toBe('true')
     })
 
-    it('ignores invalid cached reasoning effort for the selected agent', () => {
-        // Codex intentionally does not expose OpenCode's "max" effort level.
-        localStorage.setItem('hapi:newSession:reasoningEffort:codex', 'max')
+    it('ignores an unknown cached reasoning effort for the selected agent', () => {
+        localStorage.setItem('hapi:newSession:reasoningEffort:codex', 'invalid-effort')
 
         expect(loadPreferredReasoningEffort('codex')).toBe('default')
     })

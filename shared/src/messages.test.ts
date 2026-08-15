@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test'
-import { isAutomationHeartbeatMessageContent, parseAutomationHeartbeatMessageContent } from './messages'
+import {
+    isAutomationHeartbeatMessageContent,
+    isMalformedAutomationHeartbeatMessageContent,
+    parseAutomationHeartbeatMessageContent
+} from './messages'
 
 const heartbeat = '<heartbeat> <automation_id>bug</automation_id> <decision>DONT_NOTIFY</decision> <message>Nothing to report.</message> </heartbeat>'
 
@@ -34,5 +38,17 @@ describe('parseAutomationHeartbeatMessageContent', () => {
     it('does not parse ordinary XML-like user text', () => {
         expect(parseAutomationHeartbeatMessageContent('<heartbeat>please check status</heartbeat>')).toBeNull()
         expect(parseAutomationHeartbeatMessageContent('How do I handle <heartbeat> payloads?')).toBeNull()
+    })
+
+    it('identifies malformed automation heartbeat control messages', () => {
+        const malformed = '<heartbeat> <automation_id>bug</automation_id> truncated'
+
+        expect(isMalformedAutomationHeartbeatMessageContent(malformed)).toBe(true)
+        expect(isMalformedAutomationHeartbeatMessageContent({
+            type: 'codex',
+            data: { type: 'message', message: malformed }
+        })).toBe(true)
+        expect(isMalformedAutomationHeartbeatMessageContent('<heartbeat>truncated')).toBe(true)
+        expect(isMalformedAutomationHeartbeatMessageContent('<heartbeat>please check status</heartbeat>')).toBe(false)
     })
 })

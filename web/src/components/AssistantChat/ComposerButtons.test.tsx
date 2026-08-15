@@ -122,6 +122,31 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
 
         expect(onVoiceToggle).not.toHaveBeenCalled()
     })
+
+    it('shows Send and sends a draft instead of aborting a running session', () => {
+        const onSend = vi.fn()
+        const onAbort = vi.fn()
+
+        renderInProviders(
+            <UnifiedButton
+                canSend
+                voiceStatus="disconnected"
+                voiceEnabled={false}
+                controlsDisabled={false}
+                onSend={onSend}
+                onVoiceToggle={noop}
+                showAbortButton
+                abortDisabled={false}
+                onAbort={onAbort}
+            />,
+        )
+
+        expect(screen.queryByRole('button', { name: 'Abort' })).not.toBeInTheDocument()
+        fireEvent.click(getButton('Send'))
+
+        expect(onSend).toHaveBeenCalledOnce()
+        expect(onAbort).not.toHaveBeenCalled()
+    })
 })
 
 describe('getRemoteServerButtonAlias', () => {

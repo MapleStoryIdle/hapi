@@ -16,6 +16,18 @@ export type CodexLocalSessionSummary = {
     cliVersion?: string | null
 }
 
+export type CodexLocalSessionListOptions = {
+    /** Exclude threads created through HAPI's Codex app-server client. */
+    excludeHapiInitiated?: boolean
+}
+
+/**
+ * Codex persists the app-server client's `clientInfo.name` as the transcript
+ * originator. Keep this in one place so the runner and hub apply the same
+ * definition of a HAPI-initiated thread.
+ */
+export const HAPI_CODEX_ORIGINATOR = 'hapi-codex-client'
+
 export type CodexLocalSessionContextMessage = {
     role: 'user' | 'assistant'
     text: string
@@ -290,6 +302,12 @@ function isSubagentSource(value: unknown): boolean {
     return record ? Object.prototype.hasOwnProperty.call(record, 'subagent') : false
 }
 
+export function isHapiInitiatedCodexSession(
+    session: Pick<CodexLocalSessionSummary, 'originator'>
+): boolean {
+    return session.originator?.trim().toLowerCase() === HAPI_CODEX_ORIGINATOR
+}
+
 function parseCodexLocalSession(filePath: string, knownModifiedAt?: number): CodexLocalSessionSummary | null {
     let content: string
     try {
@@ -360,12 +378,16 @@ function listCodexTranscriptFilesByRecency(): CodexTranscriptFileCandidate[] {
     return files.sort((left, right) => right.modifiedAt - left.modifiedAt)
 }
 
-export function listLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): CodexLocalSessionSummary[] {
+export function listLocalCodexSessions(
+    limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT,
+    options: CodexLocalSessionListOptions = {}
+): CodexLocalSessionSummary[] {
     const sessions: CodexLocalSessionSummary[] = []
     const seenSessionIds = new Set<string>()
     for (const candidate of listCodexTranscriptFilesByRecency()) {
         const session = parseCodexLocalSession(candidate.file, candidate.modifiedAt)
         if (!session || seenSessionIds.has(session.id)) continue
+        if (options.excludeHapiInitiated && isHapiInitiatedCodexSession(session)) continue
         seenSessionIds.add(session.id)
         sessions.push(session)
         if (sessions.length >= limit) break

@@ -5,6 +5,24 @@ export { SessionEndReasonSchema, type SessionEndReason } from './schemas'
 
 export type SocketErrorReason = 'namespace-missing' | 'access-denied' | 'not-found'
 
+/**
+ * A pending request reported by a Codex session that was launched outside of
+ * HAPI.  The runner forwards only routing metadata; command contents and
+ * question text deliberately stay on the local machine.
+ */
+export const ExternalCodexRequestKindSchema = z.enum(['permission', 'user-input'])
+export type ExternalCodexRequestKind = z.infer<typeof ExternalCodexRequestKindSchema>
+
+export const ExternalCodexRequestPayloadSchema = z.object({
+    machineId: z.string().min(1).max(200),
+    codexSessionId: z.string().min(1).max(200),
+    requestId: z.string().min(1).max(300),
+    kind: ExternalCodexRequestKindSchema,
+    toolName: z.string().min(1).max(200).optional()
+})
+
+export type ExternalCodexRequestPayload = z.infer<typeof ExternalCodexRequestPayloadSchema>
+
 export const TerminalOpenPayloadSchema = z.object({
     sessionId: z.string().min(1),
     terminalId: z.string().min(1),
@@ -286,6 +304,7 @@ export interface ClientToServerEvents {
     'machine-alive': (data: { machineId: string; time: number; health?: unknown }) => void
     'machine-update-metadata': (data: { machineId: string; expectedVersion: number; metadata: unknown }, cb: (answer: MachineUpdateMetadataAck) => void) => void
     'machine-update-state': (data: { machineId: string; expectedVersion: number; runnerState: unknown | null }, cb: (answer: MachineUpdateStateAck) => void) => void
+    'external-codex-request': (data: ExternalCodexRequestPayload) => void
     'rpc-register': (data: { method: string }) => void
     'rpc-unregister': (data: { method: string }) => void
     'terminal:ready': (data: TerminalReadyPayload) => void

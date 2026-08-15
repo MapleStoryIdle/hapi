@@ -22,6 +22,10 @@ export function getKeyboardViewportState(params: {
     visualViewportHeight: number
     hasFocusedTextEntry: boolean
     stableViewportHeight: number
+    /** A keyboard-sized visual viewport shrink was previously confirmed. */
+    wasKeyboardOpen?: boolean
+    /** Only visualViewport.resize may confirm that the keyboard opened. */
+    confirmKeyboardOpen?: boolean
 }): {
     keyboardOpen: boolean
     stableViewportHeight: number
@@ -35,11 +39,13 @@ export function getKeyboardViewportState(params: {
         params.layoutViewportHeight,
         params.stableViewportHeight
     )
-    const keyboardOpen = shouldUseVisualViewportHeight(
+    const hasKeyboardSizedViewport = shouldUseVisualViewportHeight(
         referenceViewportHeight,
         params.visualViewportHeight,
         params.hasFocusedTextEntry
     )
+    const keyboardOpen = hasKeyboardSizedViewport
+        && (params.wasKeyboardOpen === true || params.confirmKeyboardOpen !== false)
 
     return {
         keyboardOpen,
@@ -97,9 +103,10 @@ export function useViewportHeight(): void {
         const viewport = window.visualViewport
         const root = document.documentElement
         let stableViewportHeight = 0
+        let keyboardOpen = false
         let orientation = window.matchMedia('(orientation: portrait)').matches ? 'portrait' : 'landscape'
 
-        function update() {
+        function update(confirmKeyboardOpen = false) {
             markIosStandalone(root)
 
             if (!viewport) {
@@ -121,16 +128,19 @@ export function useViewportHeight(): void {
                 layoutViewportHeight: Math.max(document.documentElement.clientHeight, window.innerHeight),
                 visualViewportHeight: viewport.height,
                 hasFocusedTextEntry: hasFocusedTextEntry(),
-                stableViewportHeight
+                stableViewportHeight,
+                wasKeyboardOpen: keyboardOpen,
+                confirmKeyboardOpen
             })
             stableViewportHeight = keyboardViewportState.stableViewportHeight
+            keyboardOpen = keyboardViewportState.keyboardOpen
 
             // Do not treat every visual-viewport difference as a keyboard. In
             // particular, installed iOS PWAs with viewport-fit=cover can report
             // visualViewport.height minus the bottom safe area after the
             // keyboard has closed. Require focused text entry and a keyboard-
             // sized delta before shrinking the app root.
-            if (keyboardViewportState.keyboardOpen) {
+            if (keyboardOpen) {
                 root.style.setProperty('--app-viewport-height', `${viewport.height}px`)
                 // Keep the physical safe-area token immutable. The composer
                 // alone switches to a zero bottom inset while the visual
@@ -157,7 +167,7 @@ export function useViewportHeight(): void {
         const timerIds: number[] = []
         const settle = () => {
             update()
-            frameIds.push(window.requestAnimationFrame(update))
+            frameIds.push(window.requestAnimationFrame(() => update()))
             // Home Screen WebKit can update safe-area and viewport values one
             // turn after pageshow. A short second pass covers that launch race.
             timerIds.push(window.setTimeout(update, 150))
@@ -169,23 +179,27 @@ export function useViewportHeight(): void {
         }
         const handleOrientationChange = () => {
             stableViewportHeight = 0
+            keyboardOpen = false
             settle()
         }
+        const handleViewportResize = () => update(true)
+        const handleViewportScroll = () => update()
+        const handleFocusChange = () => update()
 
-        viewport?.addEventListener('resize', update)
-        viewport?.addEventListener('scroll', update)
-        document.addEventListener('focusin', update)
-        document.addEventListener('focusout', update)
+        viewport?.addEventListener('resize', handleViewportResize)
+        viewport?.addEventListener('scroll', handleViewportScroll)
+        document.addEventListener('focusin', handleFocusChange)
+        document.addEventListener('focusout', handleFocusChange)
         window.addEventListener('pageshow', settle)
         window.addEventListener('orientationchange', handleOrientationChange)
         document.addEventListener('visibilitychange', handleVisibilityChange)
         settle()
 
         return () => {
-            viewport?.removeEventListener('resize', update)
-            viewport?.removeEventListener('scroll', update)
-            document.removeEventListener('focusin', update)
-            document.removeEventListener('focusout', update)
+            viewport?.removeEventListener('resize', handleViewportResize)
+            viewport?.removeEventListener('scroll', handleViewportScroll)
+            document.removeEventListener('focusin', handleFocusChange)
+            document.removeEventListener('focusout', handleFocusChange)
             window.removeEventListener('pageshow', settle)
             window.removeEventListener('orientationchange', handleOrientationChange)
             document.removeEventListener('visibilitychange', handleVisibilityChange)

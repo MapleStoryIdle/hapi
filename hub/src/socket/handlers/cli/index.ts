@@ -1,4 +1,5 @@
 import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import type { ExternalCodexRequestPayload } from '@hapi/protocol'
 import type { Store, StoredMachine, StoredSession } from '../../../store'
 import type { RpcRegistry } from '../../rpcRegistry'
 import type { SyncEvent } from '../../../sync/syncEngine'
@@ -47,6 +48,7 @@ export type CliHandlersDeps = {
     onSessionReady?: (payload: SessionReadyPayload) => void
     onSessionEnd?: (payload: SessionEndPayload) => void
     onMachineAlive?: (payload: MachineAlivePayload) => void
+    onExternalCodexRequest?: (payload: ExternalCodexRequestPayload & { namespace: string }) => void
     onWebappEvent?: (event: SyncEvent) => void
     onBackgroundTaskDelta?: (sessionId: string, delta: { started: number; completed: number }) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
@@ -56,7 +58,7 @@ export type CliHandlersDeps = {
 }
 
 export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlersDeps): void {
-    const { io, store, rpcRegistry, terminalRegistry, onSessionAlive, onSessionReady, onSessionEnd, onMachineAlive, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued, onMessagesConsumed, generatedImageStore } = deps
+    const { io, store, rpcRegistry, terminalRegistry, onSessionAlive, onSessionReady, onSessionEnd, onMachineAlive, onExternalCodexRequest, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued, onMessagesConsumed, generatedImageStore } = deps
     const terminalNamespace = io.of('/terminal')
     const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null
 
@@ -128,7 +130,8 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
         resolveMachineAccess,
         emitAccessError,
         onMachineAlive,
-        onWebappEvent
+        onWebappEvent,
+        onExternalCodexRequest
     })
     registerTerminalHandlers(socket, {
         terminalRegistry,

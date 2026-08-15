@@ -830,7 +830,14 @@ export function UnifiedButton(props: {
     const isVoiceActive = isConnecting || isConnected
     const hasText = props.canSend
     const routesToScratchlist = props.routesToScratchlist ?? false
-    const showAbort = Boolean(props.showAbortButton && (!(props.abortDisabled ?? false) || props.isAborting))
+    // Preserve a drafted message while the session is running: sending the
+    // draft takes precedence over aborting the current response. An empty
+    // composer still exposes the abort control as before.
+    const showAbort = Boolean(
+        props.showAbortButton
+        && !hasText
+        && (!(props.abortDisabled ?? false) || props.isAborting)
+    )
 
     const handleClick = () => {
         if (showAbort) {

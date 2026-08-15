@@ -8,7 +8,7 @@ import { realpathSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
-import type { BinaryFileReadRequest, BinaryFileReadResponse, ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
+import type { BinaryFileReadRequest, BinaryFileReadResponse, ClientToServerEvents, ExternalCodexRequestPayload, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
 import type { MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
 import {
     getLocalCodexSessionData,
@@ -50,6 +50,7 @@ interface ListMachineDirectoryRequest {
 
 interface ListCodexLocalSessionsRequest {
     limit?: unknown
+    excludeHapiInitiated?: unknown
 }
 
 interface ReadCodexLocalSessionRequest {
@@ -155,7 +156,14 @@ export class ApiMachineClient {
                 if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100)) {
                     return { success: false, error: 'limit must be an integer between 1 and 100' }
                 }
-                return { success: true, sessions: listLocalCodexSessions(limit) }
+                const excludeHapiInitiated = params?.excludeHapiInitiated
+                if (excludeHapiInitiated !== undefined && typeof excludeHapiInitiated !== 'boolean') {
+                    return { success: false, error: 'excludeHapiInitiated must be a boolean' }
+                }
+                return {
+                    success: true,
+                    sessions: listLocalCodexSessions(limit, { excludeHapiInitiated })
+                }
             }
         )
 
@@ -460,6 +468,25 @@ export class ApiMachineClient {
                 versionMismatchMessage: 'Runner state version mismatch'
             })
         })
+    }
+
+    /**
+     * Forward a pending request from a locally launched, non-HAPI Codex
+     * session. This is intentionally best-effort, but Socket.IO may queue a
+     * request during the runner's initial connection handshake.
+     */
+    reportExternalCodexRequest(request: Omit<ExternalCodexRequestPayload, 'machineId'>): boolean {
+        const socket = this.socket as Socket<ServerToClientEvents, ClientToServerEvents> | undefined
+        if (!socket) {
+            logger.debug('[API MACHINE] Dropping external Codex request before socket setup')
+            return false
+        }
+
+        socket.emit('external-codex-request', {
+            machineId: this.machine.id,
+            ...request
+        })
+        return true
     }
 
     connect(): void {

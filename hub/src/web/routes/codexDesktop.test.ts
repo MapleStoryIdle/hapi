@@ -593,6 +593,41 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('asks the selected runner to exclude HAPI-initiated Codex threads', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const listCalls: unknown[][] = []
+        const hapiSession = {
+            ...createRunnerLocalSessionData('hapi-thread').session,
+            id: 'hapi-thread',
+            originator: 'hapi-codex-client'
+        }
+        const externalSession = {
+            ...createRunnerLocalSessionData('external-thread').session,
+            id: 'external-thread',
+            originator: 'codex-tui'
+        }
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            listCodexLocalSessions: async (...args: unknown[]) => {
+                listCalls.push(args)
+                return { success: true as const, sessions: [hapiSession, externalSession] }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request('/api/codex/sessions?machineId=mac-runner&limit=10&excludeHapiInitiated=true')
+            expect(response.status).toBe(200)
+            expect(listCalls).toEqual([['mac-runner', 10, { excludeHapiInitiated: true }]])
+            const body = await response.json() as { success: boolean; sessions: Array<{ id: string }> }
+            expect(body.success).toBe(true)
+            expect(body.sessions.map((session) => session.id)).toEqual(['external-thread'])
+        } finally {
+            store.close()
+        }
+    })
+
     it('forks the selected runner-local Codex thread and copies visible history', async () => {
         const store = new Store(':memory:')
         const codexSessionId = '66666666-6666-4666-8666-666666666666'

@@ -11,6 +11,7 @@ import { SSEManager } from './sse/sseManager'
 import { getOrCreateVapidKeys } from './config/vapidKeys'
 import { PushService } from './push/pushService'
 import { PushNotificationChannel } from './push/pushNotificationChannel'
+import { ExternalCodexPushNotifier } from './push/externalCodexPushNotifier'
 import { VisibilityTracker } from './visibility/visibilityTracker'
 import { TunnelManager } from './tunnel'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
@@ -88,6 +89,18 @@ function mergeCorsOrigins(base: string[], extra: string[]): string[] {
         merged.add(origin)
     }
     return Array.from(merged)
+}
+
+function isActiveHapiCodexSession(
+    engine: SyncEngine | null,
+    request: { namespace: string; machineId: string; codexSessionId: string }
+): boolean {
+    return engine?.getSessionsByNamespace(request.namespace).some((session) => {
+        return session.active
+            && session.metadata?.flavor === 'codex'
+            && session.metadata.machineId === request.machineId
+            && session.metadata.codexSessionId === request.codexSessionId
+    }) ?? false
 }
 
 export interface HubInstance {
@@ -172,6 +185,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     const vapidKeys = await getOrCreateVapidKeys(config.dataDir)
     const vapidSubject = process.env.VAPID_SUBJECT ?? 'mailto:admin@hapi.run'
     const pushService = new PushService(vapidKeys, vapidSubject, store)
+    const externalCodexPushNotifier = new ExternalCodexPushNotifier(pushService)
 
     visibilityTracker = new VisibilityTracker()
     sseManager = new SSEManager(30_000, visibilityTracker)
@@ -191,6 +205,14 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         onSessionReady: (payload) => syncEngine?.handleSessionReady(payload),
         onSessionEnd: (payload) => syncEngine?.handleSessionEnd(payload),
         onMachineAlive: (payload) => syncEngine?.handleMachineAlive(payload),
+        onExternalCodexRequest: (request) => {
+            if (isActiveHapiCodexSession(syncEngine, request)) {
+                return
+            }
+            void externalCodexPushNotifier.send(request).catch((error) => {
+                console.error('[ExternalCodexPushNotifier] Failed to send external Codex request notification:', error)
+            })
+        },
         onBackgroundTaskDelta: (sessionId, delta) => syncEngine?.handleBackgroundTaskDelta(sessionId, delta),
         onSessionActivity: (sessionId, updatedAt) => syncEngine?.recordSessionActivity(sessionId, updatedAt),
         onSweepImmediateQueued: (sessionId, now) => syncEngine?.sweepImmediateQueuedOnSessionEnd(sessionId, now),

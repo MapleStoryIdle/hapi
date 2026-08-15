@@ -1,4 +1,4 @@
-import type { ClientToServerEvents } from '@hapi/protocol'
+import { ExternalCodexRequestPayloadSchema, type ClientToServerEvents, type ExternalCodexRequestPayload } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { Store, StoredMachine } from '../../../store'
@@ -37,10 +37,11 @@ export type MachineHandlersDeps = {
     emitAccessError: EmitAccessError
     onMachineAlive?: (payload: MachineAlivePayload) => void
     onWebappEvent?: (event: SyncEvent) => void
+    onExternalCodexRequest?: (payload: ExternalCodexRequestPayload & { namespace: string }) => void
 }
 
 export function registerMachineHandlers(socket: CliSocketWithData, deps: MachineHandlersDeps): void {
-    const { store, resolveMachineAccess, emitAccessError, onMachineAlive, onWebappEvent } = deps
+    const { store, resolveMachineAccess, emitAccessError, onMachineAlive, onWebappEvent, onExternalCodexRequest } = deps
 
     socket.on('machine-alive', (data: MachineAlivePayload) => {
         if (!data || typeof data.machineId !== 'string' || typeof data.time !== 'number') {
@@ -141,4 +142,35 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
 
     socket.on('machine-update-metadata', handleMachineMetadataUpdate)
     socket.on('machine-update-state', handleMachineStateUpdate)
+
+    socket.on('external-codex-request', (data: unknown) => {
+        const parsed = ExternalCodexRequestPayloadSchema.safeParse(data)
+        if (!parsed.success) {
+            return
+        }
+
+        const machineAccess = resolveMachineAccess(parsed.data.machineId)
+        if (!machineAccess.ok) {
+            emitAccessError('machine', parsed.data.machineId, machineAccess.reason)
+            return
+        }
+
+        const auth = socket.handshake.auth as Record<string, unknown> | undefined
+        const authenticatedMachineId = typeof auth?.machineId === 'string' ? auth.machineId : null
+        if (authenticatedMachineId !== parsed.data.machineId) {
+            emitAccessError('machine', parsed.data.machineId, 'access-denied')
+            return
+        }
+
+        const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null
+        if (!namespace) {
+            emitAccessError('machine', parsed.data.machineId, 'namespace-missing')
+            return
+        }
+
+        onExternalCodexRequest?.({
+            ...parsed.data,
+            namespace
+        })
+    })
 }
