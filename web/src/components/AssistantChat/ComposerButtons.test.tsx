@@ -147,6 +147,56 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
         expect(onSend).toHaveBeenCalledOnce()
         expect(onAbort).not.toHaveBeenCalled()
     })
+
+    it('keeps the composer focused while pressing Send', () => {
+        const onParentPointerDown = vi.fn()
+        const onSend = vi.fn()
+
+        renderInProviders(
+            <div onPointerDown={(event) => onParentPointerDown(event.defaultPrevented)}>
+                <UnifiedButton
+                    canSend
+                    voiceStatus="disconnected"
+                    voiceEnabled={false}
+                    controlsDisabled={false}
+                    onSend={onSend}
+                    onVoiceToggle={noop}
+                />
+            </div>,
+        )
+
+        const button = getButton('Send')
+        fireEvent.pointerDown(button)
+        fireEvent.click(button)
+
+        expect(onParentPointerDown).toHaveBeenCalledWith(true)
+        expect(onSend).toHaveBeenCalledOnce()
+    })
+
+    it('keeps the composer focused for WebViews that dispatch mouse events', () => {
+        const onParentMouseDown = vi.fn()
+        const onSend = vi.fn()
+
+        renderInProviders(
+            <div onMouseDown={(event) => onParentMouseDown(event.defaultPrevented)}>
+                <UnifiedButton
+                    canSend
+                    voiceStatus="disconnected"
+                    voiceEnabled={false}
+                    controlsDisabled={false}
+                    onSend={onSend}
+                    onVoiceToggle={noop}
+                />
+            </div>,
+        )
+
+        const button = getButton('Send')
+        fireEvent.mouseDown(button)
+        fireEvent.click(button)
+
+        expect(onParentMouseDown).toHaveBeenCalledWith(true)
+        expect(onSend).toHaveBeenCalledOnce()
+    })
 })
 
 describe('getRemoteServerButtonAlias', () => {

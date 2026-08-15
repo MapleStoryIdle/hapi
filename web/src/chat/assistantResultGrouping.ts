@@ -39,6 +39,19 @@ function flattenSourceBlock(
     detailBlocks.push(block)
 }
 
+function collectExpansionStateKeys(blocks: readonly VisibleChatBlock[]): string[] {
+    const keys: string[] = []
+    for (const block of blocks) {
+        if (!isToolGroupBlock(block)) continue
+        for (const key of block.expansionStateKeys ?? [block.id]) {
+            if (!keys.includes(key)) {
+                keys.push(key)
+            }
+        }
+    }
+    return keys
+}
+
 function createResultDetailsGroup(
     sourceBlocks: VisibleChatBlock[],
     tools: ToolCallBlock[],
@@ -60,6 +73,7 @@ function createResultDetailsGroup(
         historyState: 'complete',
         needsOlderHistory: false,
         summary: summarizeToolGroup(tools),
+        expansionStateKeys: collectExpansionStateKeys(sourceBlocks),
         detailBlocks,
         showAgentIcon: true,
         forceGenericCompactTitle: true
@@ -97,24 +111,35 @@ export function groupAssistantResultDetails(
     blocks: VisibleChatBlock[],
     options: { runActive?: boolean } = {}
 ): VisibleChatBlock[] {
-    if (options.runActive) {
+    const transformed: VisibleChatBlock[] = []
+    let group: VisibleChatBlock[] = []
+    let groupStartIndex = -1
+    const latestUserIndex = blocks.findLastIndex((block) => block.kind === 'user-text')
+    if (options.runActive && latestUserIndex === -1) {
         return blocks
     }
 
-    const transformed: VisibleChatBlock[] = []
-    let group: VisibleChatBlock[] = []
-
     const flushGroup = () => {
         if (group.length === 0) return
-        transformed.push(...transformAssistantGroup(group))
+        const isCurrentTurnGroup = groupStartIndex > latestUserIndex
+        transformed.push(...(
+            options.runActive && isCurrentTurnGroup
+                ? group
+                : transformAssistantGroup(group)
+        ))
         group = []
+        groupStartIndex = -1
     }
 
-    for (const block of blocks) {
+    for (let index = 0; index < blocks.length; index += 1) {
+        const block = blocks[index]!
         if (!isAssistantVisibleBlock(block)) {
             flushGroup()
             transformed.push(block)
             continue
+        }
+        if (group.length === 0) {
+            groupStartIndex = index
         }
         group.push(block)
     }

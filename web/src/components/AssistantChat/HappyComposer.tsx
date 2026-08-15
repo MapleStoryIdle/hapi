@@ -33,7 +33,7 @@ import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { shouldShowComposerStatusBar, StatusBar } from '@/components/AssistantChat/StatusBar'
-import { ComposerButtons, GoalModeIcon, PlanModeIcon, getRemoteServerButtonAlias, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
+import { ComposerButtons, GoalModeIcon, PlanModeIcon, UnifiedButton, getRemoteServerButtonAlias, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
 import { ServerIcon, useRemoteServerContextSelection } from '@/components/RemoteServers'
@@ -530,7 +530,7 @@ export function HappyComposer(props: {
     // controls above the iOS home indicator, with a small visual breathing
     // room, while the thread itself remains edge-to-edge.
     const bottomPaddingClass = composerExpanded
-        ? 'pb-[calc(0.5rem+var(--app-composer-safe-area-bottom))]'
+        ? 'pb-[calc(0.75rem+var(--app-composer-safe-area-bottom)+var(--app-composer-expanded-keyboard-offset))]'
         : 'pb-[calc(1.25rem+var(--app-composer-safe-area-bottom))]'
     const activeWord = useActiveWord(inputState.text, inputState.selection, autocompletePrefixes)
     const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions] = useActiveSuggestions(
@@ -589,6 +589,16 @@ export function HappyComposer(props: {
         }
         focusComposerInput()
     }, [focusComposerInput])
+
+    const preserveComposerFocusForAction = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+        const target = event.target
+        if (target instanceof Element && target.closest('button')) {
+            // On mobile a button tap blurs the textarea before `click`. The
+            // compact/expanded transition can then hide the toolbar and eat
+            // that click. Keep focus until the action has been dispatched.
+            event.preventDefault()
+        }
+    }, [])
 
     const handleSkillSelect = useCallback((skill: SkillSummary) => {
         if (controlsDisabled) return
@@ -1110,6 +1120,11 @@ export function HappyComposer(props: {
     const showAbortButton = true
     const voiceEnabled = Boolean(onVoiceToggle)
     const composerCompact = !composerExpanded
+    const compactRoutesToScratchlist = Boolean(
+        props.scratchlistMode
+        && !hasAttachments
+        && pendingSchedule === null
+    )
     // Keep the anchored composer slot stable during and after expansion.
     // Dropping this reserved height after the transition causes a second
     // layout pass, which shows up as a small upward twitch on mobile.
@@ -1739,6 +1754,7 @@ export function HappyComposer(props: {
                     ) : null}
 
                     <div
+                        onPointerDownCapture={preserveComposerFocusForAction}
                         className={`relative grid overflow-hidden border shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition-[grid-template-rows,border-radius,border-color,box-shadow,background-color] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${composerGridRowsClass} ${
                             composerCompact
                                 ? 'rounded-full border-[var(--app-border)] bg-[var(--app-bg)]'
@@ -1780,12 +1796,29 @@ export function HappyComposer(props: {
                                 onPaste={handlePaste}
                                 className={`relative z-10 flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] transition-[height,min-height,max-height] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none ${
                                     composerCompact
-                                        ? 'h-6 max-h-6 overflow-hidden leading-6'
+                                        ? 'h-6 max-h-6 overflow-hidden pr-12 leading-6'
                                         : compactTopAnchor
                                             ? 'min-h-[44px] h-[44px] max-h-[44px] overflow-y-auto overscroll-contain leading-snug'
                                             : 'min-h-[44px] max-h-[10rem] overflow-y-auto overscroll-contain leading-snug'
                                 }`}
                             />
+                            {composerCompact ? (
+                                <div className="absolute right-1 top-1/2 z-20 -translate-y-1/2">
+                                    <UnifiedButton
+                                        canSend={canSend}
+                                        voiceStatus={voiceStatus}
+                                        voiceEnabled={voiceEnabled}
+                                        controlsDisabled={controlsDisabled}
+                                        onSend={sendComposerMessage}
+                                        onVoiceToggle={onVoiceToggle ?? (() => {})}
+                                        showAbortButton={showAbortButton}
+                                        abortDisabled={abortDisabled}
+                                        isAborting={isAborting}
+                                        onAbort={handleAbort}
+                                        routesToScratchlist={compactRoutesToScratchlist}
+                                    />
+                                </div>
+                            ) : null}
                         </div>
 
                         <div

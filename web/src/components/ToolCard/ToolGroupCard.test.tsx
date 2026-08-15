@@ -371,6 +371,60 @@ describe('ToolGroupCard', () => {
         expect(screen.queryByText(/Ran \d+s/i)).not.toBeInTheDocument()
     })
 
+    it('uses the raw command when a mutation has no parsed file target', () => {
+        const view = renderCard(makeGroup({
+            tools: [makeToolBlock('patch-1', 'Bash', { command: 'apply_patch <<PATCH\n*** Begin Patch' })],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 0,
+                    mutation: 1,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: [],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        expect(within(view.container).getByRole('button', { name: /ran apply_patch <<patch.*0s/i })).toBeInTheDocument()
+    })
+
+    it('uses the parsed file target for a mutation when available', () => {
+        const view = renderCard(makeGroup({
+            tools: [makeToolBlock('edit-1', 'Edit', { file_path: 'src/example.ts' })],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 0,
+                    mutation: 1,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: ['src/example.ts'],
+                commandTargets: [],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        expect(within(view.container).getByRole('button', { name: /modified src\/example\.ts 0s/i })).toBeInTheDocument()
+    })
+
     it('uses a generic compact title and renders detail blocks for result detail groups', () => {
         const tools = [
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
@@ -519,7 +573,7 @@ describe('ToolGroupCard', () => {
         expect(text.indexOf('Second process note')).toBeGreaterThan(text.indexOf('Ran'))
     })
 
-    it('keeps compact groups expanded while tools are still active', () => {
+    it('lets users collapse compact groups while tools are still active', () => {
         const startedAt = Date.now() - 8_000
         const tools = [
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
@@ -559,11 +613,11 @@ describe('ToolGroupCard', () => {
 
         fireEvent.click(toggle)
 
-        expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.getByText('Ran')).toBeInTheDocument()
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByText('Ran')).not.toBeInTheDocument()
     })
 
-    it('auto-collapses compact groups when the active batch completes', async () => {
+    it('keeps an auto-open compact group open until an explicit turn completion', async () => {
         const startedAt = Date.now() - 10_000
 
         function makeActiveGroup(active: boolean): ToolGroupBlock {
@@ -635,9 +689,9 @@ describe('ToolGroupCard', () => {
 
         await waitFor(() => {
             toggle = within(view.container).getByRole('button', { name: /processed/i })
-            expect(toggle).toHaveAttribute('aria-expanded', 'false')
+            expect(toggle).toHaveAttribute('aria-expanded', 'true')
         })
-        expect(screen.queryByText('Ran')).not.toBeInTheDocument()
+        expect(screen.getByText('Ran')).toBeInTheDocument()
     })
 
     it('auto-loads older history after expand when the group is incomplete', async () => {

@@ -3,6 +3,7 @@ import { createContext, useContext } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import type { SessionMetadataSummary } from '@/types/api'
+import type { ToolGroupExpansionState, ToolGroupExpansionStates } from '@/components/ToolCard/toolGroupExpansion'
 
 export type HappyChatContextValue = {
     api: ApiClient
@@ -15,6 +16,11 @@ export type HappyChatContextValue = {
     hasMoreMessages: boolean
     isLoadingMoreMessages: boolean
     loadOlderMessagesPreservingScroll: () => Promise<boolean>
+    /** Per-session expansion state for grouped tool cards. */
+    toolGroupExpansionStates?: ToolGroupExpansionStates
+    setToolGroupExpansionState?: (key: string, state: ToolGroupExpansionState) => void
+    /** True from turn start until the current turn receives a completion event. */
+    toolGroupRunActive?: boolean
 }
 
 const HappyChatContext = createContext<HappyChatContextValue | null>(null)

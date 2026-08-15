@@ -75,6 +75,7 @@
     --app-safe-area-top: env(safe-area-inset-top, 0px);
     --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
     --app-composer-safe-area-bottom: var(--app-safe-area-bottom);
+    --app-composer-expanded-keyboard-offset: 0px;
 
     --app-bg: var(--tg-theme-bg-color, #ffffff);
     --app-fg: var(--tg-theme-text-color, #111827);
@@ -166,7 +167,7 @@
  * Island/notch and Home Indicator, so keep standalone fallbacks.
  */
 html[data-ios-standalone="true"] {
-    --app-safe-area-top: max(59px, env(safe-area-inset-top, 0px));
+    --app-safe-area-top: max(50px, env(safe-area-inset-top, 0px));
     --app-safe-area-bottom: max(34px, env(safe-area-inset-bottom, 0px));
 }
 
@@ -184,9 +185,12 @@ html[data-ios-standalone="true"] {
 
 /* The keyboard owns the visual viewport bottom; only the composer drops the
  * hardware-inset padding in that state. Keep --app-safe-area-bottom stable so
- * a focus/resize race cannot make the first rendered composer flush. */
+ * a focus/resize race cannot make the first rendered composer flush. Leave a
+ * small extra gap for the expanded composer, whose taller control surface can
+ * otherwise touch an overlaying iOS keyboard. */
 html[data-app-keyboard-open="true"] {
     --app-composer-safe-area-bottom: 0px;
+    --app-composer-expanded-keyboard-offset: 12px;
 }
 
 [data-theme="dark"] {

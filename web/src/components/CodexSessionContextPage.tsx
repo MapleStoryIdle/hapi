@@ -101,6 +101,8 @@ function ReadOnlyCodexThread(props: {
                 rawMessagesCount={props.messages.length}
                 normalizedMessagesCount={ungroupedBlocks.length}
                 messagesVersion={props.version}
+                toolGroupRunActive={false}
+                toolGroupCompletionKey={null}
                 forceScrollToken={0}
                 outlineOpen={outlineOpen}
                 outlineTitle={props.title}

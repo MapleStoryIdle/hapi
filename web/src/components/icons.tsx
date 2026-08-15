@@ -69,6 +69,14 @@ export function ArrowDownIcon(props: IconProps) {
     )
 }
 
+export function ArrowRightIcon(props: IconProps) {
+    return createIcon(
+        <path d="M5 12h14m-7-7 7 7-7 7" />,
+        props,
+        2
+    )
+}
+
 /** Composer schedule-send clock — circle + hands (matches ComposerButtons). */
 export function ScheduleIcon(props: IconProps) {
     return createIcon(

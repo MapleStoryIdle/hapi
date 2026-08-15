@@ -35,6 +35,8 @@ function OptionRow(props: {
     return (
         <button
             type="button"
+            role="radio"
+            aria-checked={props.checked}
             className={cn(
                 'flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-[var(--app-subtle-bg)] disabled:pointer-events-none disabled:opacity-50',
                 props.checked ? 'bg-[var(--app-subtle-bg)]' : null
@@ -87,7 +89,11 @@ export function RequestUserInputFooter(props: {
         setStep(0)
         const initial: Record<string, QuestionState> = {}
         for (const q of questions) {
-            initial[q.id] = { selected: null, userNote: '', customAnswer: false }
+            initial[q.id] = {
+                selected: q.options[0]?.label ?? null,
+                userNote: '',
+                customAnswer: false
+            }
         }
         setStateByQuestion(initial)
         setDialogOpen(true)

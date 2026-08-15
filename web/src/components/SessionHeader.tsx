@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { CodexSubscriptionLimits, CodexSubscriptionLimitWindow, Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -11,6 +12,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { AgentFlavorStatusIcon } from '@/components/AgentFlavorIcon'
 import { formatReopenError } from '@/lib/reopenError'
 import { useTranslation } from '@/lib/use-translation'
+import { parseStatusSummaryV2 } from '@/lib/gitParsers'
+import { queryKeys } from '@/lib/query-keys'
 import type { StatusBarProps } from '@/components/AssistantChat/StatusBar'
 import { CheckIcon, CopyIcon } from '@/components/icons'
 
@@ -30,6 +33,18 @@ function getSessionTitle(session: Session): string {
 
 function getSessionProjectPath(session: Session): string | null {
     return session.metadata?.worktree?.basePath ?? session.metadata?.path ?? null
+}
+
+function normalizeBranch(value: string | null | undefined): string | null {
+    const branch = value?.trim()
+    return branch ? branch : null
+}
+
+export function getSessionCurrentBranch(
+    gitBranch: string | null | undefined,
+    worktreeBranch: string | null | undefined
+): string | null {
+    return normalizeBranch(gitBranch) ?? normalizeBranch(worktreeBranch)
 }
 
 function formatSessionAgentInfo(session: Session): string {
@@ -354,12 +369,29 @@ export function SessionHeader(props: {
     const title = useMemo(() => getSessionTitle(session), [session])
     const projectPath = useMemo(() => getSessionProjectPath(session), [session])
     const agentInfo = useMemo(() => formatSessionAgentInfo(session), [session])
+    const [detailsOpen, setDetailsOpen] = useState(false)
+    const gitBranchQuery = useQuery({
+        queryKey: queryKeys.sessionGitBranch(session.id),
+        queryFn: async () => {
+            if (!api) return null
+            const result = await api.getGitStatus(session.id)
+            if (!result.success) return null
+            return normalizeBranch(parseStatusSummaryV2(result.stdout ?? '').branch.head)
+        },
+        enabled: detailsOpen && Boolean(api && projectPath),
+        staleTime: 30_000
+    })
+    const currentBranch = getSessionCurrentBranch(
+        gitBranchQuery.data,
+        session.metadata?.worktree?.branch
+    )
     const sessionDetails = useMemo(() => [
         { key: 'title', label: '完整名称', value: title },
         { key: 'session-id', label: '会话 ID', value: session.id },
         { key: 'path', label: '项目路径', value: projectPath ?? '—' },
+        ...(currentBranch ? [{ key: 'branch', label: '当前分支', value: currentBranch }] : []),
         { key: 'agent', label: 'Agent 信息', value: agentInfo || '—' }
-    ], [agentInfo, projectPath, session.id, title])
+    ], [agentInfo, currentBranch, projectPath, session.id, title])
 
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -368,7 +400,6 @@ export function SessionHeader(props: {
     const detailsId = useId()
     const titleDetailsRef = useRef<HTMLDivElement | null>(null)
     const copyResetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-    const [detailsOpen, setDetailsOpen] = useState(false)
     const [copiedDetailKey, setCopiedDetailKey] = useState<string | null>(null)
     const [renameOpen, setRenameOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
@@ -462,7 +493,7 @@ export function SessionHeader(props: {
     const headerShellClass = props.floating
         ? `pointer-events-none absolute inset-x-0 top-0 z-20 bg-[var(--app-bg)] ${headerTopInsetClass}`
         : `bg-[var(--app-bg)] ${headerTopInsetClass}`
-    const headerSurfaceClass = 'border-[var(--app-border)] bg-[var(--app-bg)]'
+    const headerSurfaceClass = 'border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)]'
     const menuButtonSurfaceClass = headerSurfaceClass
 
     return (

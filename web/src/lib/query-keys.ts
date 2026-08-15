@@ -7,6 +7,7 @@ export const queryKeys = {
     remoteServerCandidates: ['remote-server-candidates'] as const,
     machineCodexModels: (machineId: string) => ['machine-codex-models', machineId] as const,
     gitStatus: (sessionId: string) => ['git-status', sessionId] as const,
+    sessionGitBranch: (sessionId: string) => ['session-git-branch', sessionId] as const,
     sessionFiles: (sessionId: string, query: string) => ['session-files', sessionId, query] as const,
     sessionDirectory: (sessionId: string, path: string) => ['session-directory', sessionId, path] as const,
     sessionFile: (sessionId: string, path: string) => ['session-file', sessionId, path] as const,

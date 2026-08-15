@@ -195,7 +195,10 @@ function findWebappDistDir(): { distDir: string; indexHtmlPath: string } {
 function serveEmbeddedAsset(asset: EmbeddedWebAsset): Response {
     return new Response(Bun.file(asset.sourcePath), {
         headers: {
-            'Content-Type': asset.mimeType
+            'Content-Type': asset.mimeType,
+            // The browser must revalidate the fixed service-worker URL on
+            // every registration, otherwise a deployed PWA can stay stale.
+            ...(asset.path === '/sw.js' ? { 'Cache-Control': 'no-cache' } : {})
         }
     })
 }

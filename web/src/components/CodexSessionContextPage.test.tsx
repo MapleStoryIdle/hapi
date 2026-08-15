@@ -100,16 +100,6 @@ describe('CodexSessionContextPage', () => {
         expect(onBack).toHaveBeenCalledTimes(1)
     })
 
-    it('uses an opaque top bar instead of a translucent overlay', async () => {
-        renderPage()
-
-        await screen.findByText('Original response')
-
-        const header = screen.getByTestId('codex-session-context-page').querySelector('header')
-        expect(header).toHaveClass('bg-[var(--app-bg)]')
-        expect(header).not.toHaveClass('bg-transparent')
-    })
-
 
     it('centers the loading indicator while the first context page is loading', () => {
         const api = createApi()

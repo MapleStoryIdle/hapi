@@ -139,6 +139,15 @@ async function checkLocalPreview(rawRequest: unknown): Promise<LocalPreviewProbe
         })
 
         const contentType = response.headers.get('content-type')
+        if (!response.ok) {
+            return {
+                ok: false,
+                status: response.status,
+                contentType,
+                error: `Local preview returned HTTP ${response.status}`
+            }
+        }
+
         let title: string | null = null
         const contentLength = Number(response.headers.get('content-length') ?? '0')
         if (

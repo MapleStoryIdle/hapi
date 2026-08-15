@@ -58,17 +58,33 @@ describe('RequestUserInputFooter', () => {
         renderFooter(optionQuestion)
 
         expect(screen.getByRole('dialog', { name: 'Answer question' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /Continue/ })).toBeInTheDocument()
+        expect(screen.getByRole('radio', { name: /Continue/ })).toBeChecked()
+        expect(screen.getByRole('radio', { name: /Stop/ })).not.toBeChecked()
         expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    })
+
+    it('submits the first option without requiring a selection', async () => {
+        const approvePermission = vi.fn().mockResolvedValue(undefined)
+        renderFooter(optionQuestion, { approvePermission } as unknown as ApiClient)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
+
+        await waitFor(() => {
+            expect(approvePermission).toHaveBeenCalledWith('session-1', 'permission-1', {
+                answers: {
+                    confirm: { answers: ['Continue'] }
+                }
+            })
+        })
     })
 
     it('only shows text input after choosing Other and hides it again for an option', () => {
         renderFooter(optionQuestion)
 
-        fireEvent.click(screen.getByRole('button', { name: /Other/ }))
+        fireEvent.click(screen.getByRole('radio', { name: /Other/ }))
         expect(screen.getByRole('textbox')).toBeInTheDocument()
 
-        fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+        fireEvent.click(screen.getByRole('radio', { name: /Continue/ }))
         expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     })
 
@@ -76,7 +92,7 @@ describe('RequestUserInputFooter', () => {
         const approvePermission = vi.fn().mockResolvedValue(undefined)
         const { onDone } = renderFooter(optionQuestion, { approvePermission } as unknown as ApiClient)
 
-        fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+        fireEvent.click(screen.getByRole('radio', { name: /Continue/ }))
         fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
 
         await waitFor(() => {
@@ -93,7 +109,7 @@ describe('RequestUserInputFooter', () => {
         const approvePermission = vi.fn().mockResolvedValue(undefined)
         renderFooter(optionQuestion, { approvePermission } as unknown as ApiClient)
 
-        fireEvent.click(screen.getByRole('button', { name: /Other/ }))
+        fireEvent.click(screen.getByRole('radio', { name: /Other/ }))
         fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Wait for review' } })
         fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
 

@@ -11,6 +11,11 @@ import { HappySystemMessage } from '@/components/AssistantChat/messages/SystemMe
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
+import {
+    closeAutoExpandedToolGroups,
+    type ToolGroupExpansionState,
+    type ToolGroupExpansionStates
+} from '@/components/ToolCard/toolGroupExpansion'
 import { useTranslation } from '@/lib/use-translation'
 import { cn } from '@/lib/utils'
 import { ArrowDownIcon, CloseIcon } from '@/components/icons'
@@ -125,6 +130,14 @@ export function getThreadContentPadding(props: {
                 : `${props.bottomInset + 12}px`
             : undefined
     }
+}
+
+export function shouldFollowBottomInsetChange(params: {
+    autoScrollEnabled: boolean
+    atBottom: boolean
+    restoringScroll: boolean
+}): boolean {
+    return params.autoScrollEnabled && params.atBottom && !params.restoringScroll
 }
 
 export function shouldLoadOlderFromTopWheel(params: {
@@ -581,6 +594,8 @@ export function HappyThread(props: {
     rawMessagesCount: number
     normalizedMessagesCount: number
     messagesVersion: number
+    toolGroupRunActive: boolean
+    toolGroupCompletionKey: string | null
     forceScrollToken: number
     outlineOpen: boolean
     outlineTitle: string
@@ -628,6 +643,7 @@ export function HappyThread(props: {
     const [returnToUserMessageLoading, setReturnToUserMessageLoading] = useState(false)
     const [pullToLoadDistance, setPullToLoadDistanceState] = useState(0)
     const [pullToLoadLoading, setPullToLoadLoading] = useState(false)
+    const [toolGroupExpansionStates, setToolGroupExpansionStates] = useState<ToolGroupExpansionStates>({})
     const pullToLoadDistanceRef = useRef(0)
     const pullToLoadLoadingRef = useRef(false)
     const pullGestureRef = useRef<PullToLoadOlderGestureState>({
@@ -635,6 +651,25 @@ export function HappyThread(props: {
         startY: 0,
         active: false
     })
+    const previousToolGroupCompletionKeyRef = useRef(props.toolGroupCompletionKey)
+
+    const setToolGroupExpansionState = useCallback((key: string, state: ToolGroupExpansionState) => {
+        setToolGroupExpansionStates((current) => current[key] === state
+            ? current
+            : { ...current, [key]: state })
+    }, [])
+
+    useLayoutEffect(() => {
+        const previous = previousToolGroupCompletionKeyRef.current
+        if (previous === props.toolGroupCompletionKey) {
+            return
+        }
+        previousToolGroupCompletionKeyRef.current = props.toolGroupCompletionKey
+        if (props.toolGroupCompletionKey === null) {
+            return
+        }
+        setToolGroupExpansionStates(closeAutoExpandedToolGroups)
+    }, [props.toolGroupCompletionKey])
 
     // Smart scroll state: enabled only while the user is intentionally at the bottom.
     const autoScrollEnabledRef = useRef(true)
@@ -921,6 +956,22 @@ export function HappyThread(props: {
         forceScrollTokenRef.current = props.forceScrollToken
         forceScrollToBottom()
     }, [props.forceScrollToken, forceScrollToBottom])
+
+    // The bottom overlay lives outside the thread and is measured by
+    // SessionChat. Its updated height arrives after the composer has changed
+    // size, while the thread's ResizeObserver only observes the content box
+    // (not its padding). Re-align after the new endpoint padding commits so a
+    // just-sent message never remains behind the input capsule.
+    useLayoutEffect(() => {
+        if (!shouldFollowBottomInsetChange({
+            autoScrollEnabled: autoScrollEnabledRef.current,
+            atBottom: atBottomRef.current,
+            restoringScroll: pendingScrollRef.current !== null
+        })) {
+            return
+        }
+        scrollToBottomInstant()
+    }, [props.bottomInset, props.bottomSafeAreaInset, scrollToBottomInstant])
 
     const loadOlderPreservingScroll = useCallback((): Promise<boolean> => {
         if (pendingLoadPromiseRef.current) {
@@ -1220,11 +1271,11 @@ export function HappyThread(props: {
             // Message DOM can grow after messagesVersion commits (assistant-ui
             // updates its external runtime in an effect, then markdown/tool
             // content may resize). Keep following while the user is at bottom.
-            if (
-                autoScrollEnabledRef.current
-                && atBottomRef.current
-                && !pendingScrollRef.current
-            ) {
+            if (shouldFollowBottomInsetChange({
+                autoScrollEnabled: autoScrollEnabledRef.current,
+                atBottom: atBottomRef.current,
+                restoringScroll: pendingScrollRef.current !== null
+            })) {
                 scrollToBottomInstant()
             }
             requestReturnToUserMessageVisibilityUpdate()
@@ -1251,7 +1302,11 @@ export function HappyThread(props: {
             settlePendingLoad(true)
             return
         }
-        if (atBottomRef.current && autoScrollEnabledRef.current) {
+        if (shouldFollowBottomInsetChange({
+            autoScrollEnabled: autoScrollEnabledRef.current,
+            atBottom: atBottomRef.current,
+            restoringScroll: false
+        })) {
             scrollToBottomInstant()
         }
     }, [props.messagesVersion, scrollToBottomInstant, settlePendingLoad])
@@ -1299,7 +1354,10 @@ export function HappyThread(props: {
             onRetryMessage: props.onRetryMessage,
             hasMoreMessages: props.hasMoreMessages,
             isLoadingMoreMessages: props.isLoadingMoreMessages,
-            loadOlderMessagesPreservingScroll: loadOlderPreservingScroll
+            loadOlderMessagesPreservingScroll: loadOlderPreservingScroll,
+            toolGroupExpansionStates,
+            setToolGroupExpansionState,
+            toolGroupRunActive: props.toolGroupRunActive
         }}>
             <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col relative">
                 <ThreadPrimitive.Viewport

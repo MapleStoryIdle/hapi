@@ -41,18 +41,19 @@ describe('setupRegistrationUpdateChecks', () => {
         vi.useRealTimers()
     })
 
-    it('checks for updates on an hourly interval', () => {
+    it('checks immediately and then on an hourly interval', () => {
         const registration = {
             update: vi.fn().mockResolvedValue(undefined),
         } as unknown as ServiceWorkerRegistration
 
         const cleanup = setupRegistrationUpdateChecks(registration)
-
-        vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
         expect(registration.update).toHaveBeenCalledTimes(1)
 
         vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
         expect(registration.update).toHaveBeenCalledTimes(2)
+
+        vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
+        expect(registration.update).toHaveBeenCalledTimes(3)
 
         cleanup()
     })
@@ -69,14 +70,14 @@ describe('setupRegistrationUpdateChecks', () => {
             value: 'hidden',
         })
         document.dispatchEvent(new Event('visibilitychange'))
-        expect(registration.update).not.toHaveBeenCalled()
+        expect(registration.update).toHaveBeenCalledTimes(1)
 
         Object.defineProperty(document, 'visibilityState', {
             configurable: true,
             value: 'visible',
         })
         document.dispatchEvent(new Event('visibilitychange'))
-        expect(registration.update).toHaveBeenCalledTimes(1)
+        expect(registration.update).toHaveBeenCalledTimes(2)
 
         cleanup()
     })
@@ -222,8 +223,10 @@ describe('usePwaUpdate', () => {
             capturedOptions.onRegistered?.(registration)
         })
 
-        vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
         expect(registration.update).toHaveBeenCalledTimes(1)
+
+        vi.advanceTimersByTime(PWA_UPDATE_CHECK_INTERVAL_MS)
+        expect(registration.update).toHaveBeenCalledTimes(2)
 
         vi.useRealTimers()
     })

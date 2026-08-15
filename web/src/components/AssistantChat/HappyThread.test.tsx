@@ -19,6 +19,7 @@ import {
     scrollElementToViewportTop,
     shouldCancelInitialScrollSettling,
     shouldEnableTopSentinelAutoLoad,
+    shouldFollowBottomInsetChange,
     shouldHideScrollToBottomButton,
     shouldLoadOlderFromTopWheel,
     shouldShowReturnToUserMessageButton,
@@ -239,6 +240,29 @@ describe('thread endpoint insets', () => {
 
         expect(padding.paddingTop).toBeUndefined()
         expect(padding.paddingBottom).toBe('116px')
+    })
+})
+
+describe('bottom inset follow behavior', () => {
+    it('keeps a just-sent thread aligned after the composer height changes', () => {
+        expect(shouldFollowBottomInsetChange({
+            autoScrollEnabled: true,
+            atBottom: true,
+            restoringScroll: false
+        })).toBe(true)
+    })
+
+    it('does not pull a manually scrolled or anchor-restoring thread to the composer', () => {
+        expect(shouldFollowBottomInsetChange({
+            autoScrollEnabled: false,
+            atBottom: false,
+            restoringScroll: false
+        })).toBe(false)
+        expect(shouldFollowBottomInsetChange({
+            autoScrollEnabled: true,
+            atBottom: true,
+            restoringScroll: true
+        })).toBe(false)
     })
 })
 

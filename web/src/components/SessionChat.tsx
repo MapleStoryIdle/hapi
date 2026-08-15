@@ -18,6 +18,7 @@ import type {
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
+import { getPendingCodexQuickReplyPrompt } from '@/chat/codexQuickReply'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { buildConversationOutline } from '@/chat/outline'
@@ -87,6 +88,7 @@ import { registerSessionStore } from '@/realtime/realtimeClientTools'
 import { registerVoiceHooksStore, voiceHooks } from '@/realtime/hooks/voiceHooks'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 import { RemoteServerCandidatePrompt } from '@/components/RemoteServers'
+import { ArrowRightIcon } from '@/components/icons'
 import { encodeBase64 } from '@/lib/utils'
 import { queryKeys } from '@/lib/query-keys'
 
@@ -96,6 +98,7 @@ const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSessio
 
 const RUN_SETTLE_DELAY_MS = 1500
 const RUN_ACTIVITY_KEY_LOOKBACK = 12
+const CODEX_QUICK_REPLY_CONTINUE_TEXT = '继续'
 export const BOTTOM_FLOATING_CONTROL_GAP_PX = 8
 export const BOTTOM_OVERLAY_INSET_PX = 0
 // 50px control surface (including border) + 12px bottom breathing room.
@@ -646,6 +649,8 @@ function SessionChatInner(props: SessionChatProps) {
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
     const [forceScrollToken, setForceScrollToken] = useState(0)
+    const [dismissedCodexQuickReplyPromptId, setDismissedCodexQuickReplyPromptId] = useState<string | null>(null)
+    const [codexQuickReplySending, setCodexQuickReplySending] = useState(false)
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
     const bottomOverlayRef = useRef<HTMLDivElement | null>(null)
     const composerOverlayRef = useRef<HTMLDivElement | null>(null)
@@ -1233,6 +1238,15 @@ function SessionChatInner(props: SessionChatProps) {
         return normalized
     }, [goalStateSourceMessages])
 
+    const codexQuickReplyPrompt = useMemo(() => {
+        if (agentFlavor !== 'codex') {
+            return null
+        }
+        return getPendingCodexQuickReplyPrompt(normalizedGoalStateMessages)
+    }, [agentFlavor, normalizedGoalStateMessages])
+    const showCodexQuickReply = codexQuickReplyPrompt !== null
+        && codexQuickReplyPrompt.messageId !== dismissedCodexQuickReplyPromptId
+
     const reduced = useMemo(
         () => reduceChatBlocks(normalizedMessages, props.session.agentState, {
             goalStateMessages: normalizedGoalStateMessages
@@ -1559,6 +1573,16 @@ function SessionChatInner(props: SessionChatProps) {
         return () => clearTimeout(timer)
     }, [pendingSchedule])
 
+    useEffect(() => {
+        if (
+            dismissedCodexQuickReplyPromptId === null
+            || props.sendError?.text !== CODEX_QUICK_REPLY_CONTINUE_TEXT
+        ) {
+            return
+        }
+        setDismissedCodexQuickReplyPromptId(null)
+    }, [dismissedCodexQuickReplyPromptId, props.sendError?.id, props.sendError?.text])
+
     const handleSend = useCallback(async (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => {
         // Route through the scratchlist-aware wrapper. When scratchlistMode
         // is on AND the payload is pure text, this turns into
@@ -1586,6 +1610,27 @@ function SessionChatInner(props: SessionChatProps) {
             setForceScrollToken((token) => token + 1)
         }
     }, [onSendForComposer, scratchlistMode])
+
+    const handleCodexQuickReplyContinue = useCallback(async () => {
+        const prompt = codexQuickReplyPrompt
+        if (!prompt || codexQuickReplySending || prompt.messageId === dismissedCodexQuickReplyPromptId) {
+            return
+        }
+
+        setCodexQuickReplySending(true)
+        try {
+            // This deliberately bypasses scratchlist mode: a response to a
+            // Codex confirmation question must go back to the Codex chat.
+            const accepted = await props.onSend(CODEX_QUICK_REPLY_CONTINUE_TEXT)
+            if (!accepted) {
+                return
+            }
+            setDismissedCodexQuickReplyPromptId(prompt.messageId)
+            setForceScrollToken((token) => token + 1)
+        } finally {
+            setCodexQuickReplySending(false)
+        }
+    }, [codexQuickReplyPrompt, codexQuickReplySending, dismissedCodexQuickReplyPromptId, props.onSend])
 
     const attachmentAdapter = useMemo(() => {
         if (!props.session.active) {
@@ -1731,6 +1776,8 @@ function SessionChatInner(props: SessionChatProps) {
                         rawMessagesCount={visibleMessages.length}
                         normalizedMessagesCount={normalizedMessages.length}
                         messagesVersion={props.messagesVersion}
+                        toolGroupRunActive={runActive}
+                        toolGroupCompletionKey={turnCompletionKey}
                         forceScrollToken={forceScrollToken}
                         outlineOpen={outlineOpen}
                         outlineTitle={outlineTitle}
@@ -1751,6 +1798,23 @@ function SessionChatInner(props: SessionChatProps) {
                         scrollButtonPositionReady={scrollButtonPositionReady}
                         onOutlineOpenChange={setOutlineOpen}
                     />
+
+                    {showCodexQuickReply ? (
+                        <button
+                            type="button"
+                            data-testid="codex-quick-reply-continue"
+                            aria-label="继续并发送"
+                            title="继续"
+                            disabled={codexQuickReplySending}
+                            aria-busy={codexQuickReplySending}
+                            onClick={() => { void handleCodexQuickReplyContinue() }}
+                            className="absolute right-3 top-1/2 z-20 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-button)] text-[var(--app-button-text)] shadow-[0_12px_28px_rgba(37,99,235,0.24)] transition-[transform,box-shadow,opacity] duration-150 hover:-translate-y-[55%] hover:shadow-[0_16px_32px_rgba(37,99,235,0.3)] active:-translate-y-1/2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:pointer-events-none disabled:opacity-60 motion-reduce:transition-none"
+                        >
+                            <span aria-hidden="true">
+                                <ArrowRightIcon className="h-5 w-5" />
+                            </span>
+                        </button>
+                    ) : null}
 
                     {codexCollaborationModeSupported && codexModelsState.error ? (
                         <div className="px-3 pb-2">

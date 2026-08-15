@@ -60,6 +60,10 @@ export async function requestPwaUpdateReload(
 export function setupRegistrationUpdateChecks(
     registration: ServiceWorkerRegistration,
 ): () => void {
+    // A fresh PWA launch creates a new registration too. Check immediately so
+    // an update deployed while the app was closed can show its reload prompt.
+    void registration.update()
+
     const intervalId = window.setInterval(() => {
         void registration.update()
     }, PWA_UPDATE_CHECK_INTERVAL_MS)

@@ -896,6 +896,13 @@ export function UnifiedButton(props: {
     return (
         <button
             type="button"
+            // Keep the textarea focused while tapping Send. Otherwise a mobile
+            // browser blurs it first, which can collapse the compact composer
+            // before this button receives its click event.
+            onPointerDown={(event) => event.preventDefault()}
+            // Pointer Events cover current mobile browsers; retain the mouse
+            // fallback for embedded WebViews that dispatch only mouse events.
+            onMouseDown={(event) => event.preventDefault()}
             onClick={handleClick}
             disabled={isDisabled}
             aria-label={ariaLabel}

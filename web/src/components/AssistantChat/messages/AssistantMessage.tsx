@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
 import { MarkdownText } from '@/components/assistant-ui/markdown-text'
 import { Reasoning, ReasoningGroup } from '@/components/assistant-ui/reasoning'
@@ -21,6 +21,12 @@ import { MessageDetailsFooter, shouldIgnoreMessageDetailsToggle } from '@/compon
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
+import {
+    getDefaultToolGroupExpansionState,
+    getPrimaryToolGroupExpansionStateKey,
+    isToolGroupExpansionOpen,
+    resolveToolGroupExpansionState
+} from '@/components/ToolCard/toolGroupExpansion'
 
 const TOOL_COMPONENTS = {
     Fallback: HappyToolMessage
@@ -96,7 +102,7 @@ export function HappyAssistantMessage() {
     const { copied, copy } = useCopyToClipboard()
     const [detailsVisible, setDetailsVisible] = useState(false)
     const [showMetadata, setShowMetadata] = useState(false)
-    const [compactToolGroupOpen, setCompactToolGroupOpen] = useState(false)
+    const [unmanagedCompactToolGroupOpen, setUnmanagedCompactToolGroupOpen] = useState(false)
     const messageId = useAssistantState(({ message }) => message.id)
     const isCliOutput = useAssistantState(({ message }) => {
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
@@ -153,6 +159,33 @@ export function HappyAssistantMessage() {
     const showCompactToolGroupHeader = ctx.terminalToolDisplayMode === 'compact' && firstToolGroup !== null && !toolOnly
     const compactToolGroupId = firstToolGroup?.id ?? null
     const firstToolGroupActive = firstToolGroup ? isToolGroupActive(firstToolGroup) : false
+    const firstToolGroupManaged = ctx.setToolGroupExpansionState !== undefined
+    const firstToolGroupDefaultExpansionState = getDefaultToolGroupExpansionState(
+        firstToolGroupActive || ctx.toolGroupRunActive === true
+    )
+    const firstToolGroupExpansionState = firstToolGroup
+        ? resolveToolGroupExpansionState(
+            firstToolGroup,
+            ctx.toolGroupExpansionStates,
+            firstToolGroupDefaultExpansionState
+        )
+        : 'auto-closed'
+    const compactToolGroupOpen = firstToolGroupManaged
+        ? isToolGroupExpansionOpen(firstToolGroupExpansionState)
+        : unmanagedCompactToolGroupOpen
+    const setCompactToolGroupOpen = useCallback((nextOpen: boolean | ((current: boolean) => boolean)) => {
+        const resolvedOpen = typeof nextOpen === 'function'
+            ? nextOpen(compactToolGroupOpen)
+            : nextOpen
+        if (firstToolGroup && firstToolGroupManaged) {
+            ctx.setToolGroupExpansionState?.(
+                getPrimaryToolGroupExpansionStateKey(firstToolGroup),
+                resolvedOpen ? 'user-open' : 'user-closed'
+            )
+            return
+        }
+        setUnmanagedCompactToolGroupOpen(resolvedOpen)
+    }, [compactToolGroupOpen, ctx, firstToolGroup, firstToolGroupManaged])
     const compactToolGroupContext = useMemo(() => {
         if (!showCompactToolGroupHeader || compactToolGroupId === null) {
             return null
@@ -162,22 +195,10 @@ export function HappyAssistantMessage() {
             open: compactToolGroupOpen,
             setOpen: setCompactToolGroupOpen,
         }
-    }, [compactToolGroupId, compactToolGroupOpen, showCompactToolGroupHeader])
-
-    useEffect(() => {
-        if (!showCompactToolGroupHeader || firstToolGroup === null) {
-            setCompactToolGroupOpen(false)
-            return
-        }
-        setCompactToolGroupOpen(firstToolGroupActive)
-    }, [firstToolGroup?.id, firstToolGroupActive, showCompactToolGroupHeader])
+    }, [compactToolGroupId, compactToolGroupOpen, setCompactToolGroupOpen, showCompactToolGroupHeader])
 
     const toggleCompactToolGroup = () => {
         if (!firstToolGroup) {
-            return
-        }
-        if (isToolGroupActive(firstToolGroup)) {
-            setCompactToolGroupOpen(true)
             return
         }
         setCompactToolGroupOpen((open) => !open)

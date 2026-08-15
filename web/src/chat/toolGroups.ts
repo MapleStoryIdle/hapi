@@ -32,6 +32,8 @@ export type ToolGroupBlock = {
     historyState: 'complete' | 'needs-older-history'
     needsOlderHistory: boolean
     summary: ToolGroupSummary
+    /** Stable keys used to retain expansion state when completed groups merge. */
+    expansionStateKeys?: string[]
     detailBlocks?: ChatBlock[]
     showAgentIcon?: boolean
     forceGenericCompactTitle?: boolean
@@ -300,9 +302,10 @@ export function buildVisibleChatBlocks(
 
         const startsAtOldestVisibleBoundary = visibleBlocks.length === 0
         const needsOlderHistory = options.hasMoreMessages && startsAtOldestVisibleBoundary
+        const id = createToolGroupId(tools, needsOlderHistory, previousGroups)
         visibleBlocks.push({
             kind: 'tool-group',
-            id: createToolGroupId(tools, needsOlderHistory, previousGroups),
+            id,
             createdAt: tools[0].createdAt,
             invokedAt: tools[0].invokedAt,
             firstToolId: tools[0].id,
@@ -311,7 +314,8 @@ export function buildVisibleChatBlocks(
             defaultOpen: false,
             historyState: needsOlderHistory ? 'needs-older-history' : 'complete',
             needsOlderHistory,
-            summary: summarizeToolGroup(tools)
+            summary: summarizeToolGroup(tools),
+            expansionStateKeys: [id]
         })
         index = cursor - 1
     }

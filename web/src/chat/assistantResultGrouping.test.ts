@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentTextBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
 import { groupAssistantResultDetails } from '@/chat/assistantResultGrouping'
-import { isToolGroupBlock, type VisibleChatBlock } from '@/chat/toolGroups'
+import { isToolGroupBlock, summarizeToolGroup, type ToolGroupBlock, type VisibleChatBlock } from '@/chat/toolGroups'
 
 function userText(id: string): UserTextBlock {
     return {
@@ -77,6 +77,62 @@ describe('groupAssistantResultDetails', () => {
         const visible = groupAssistantResultDetails(blocks, { runActive: true })
 
         expect(visible).toBe(blocks)
+    })
+
+    it('still groups completed history while the latest turn is active', () => {
+        const historicalTool = toolCall('tool-history')
+        const historicalProcess = agentText('history-process', '历史过程')
+        const historicalResult = agentText('history-result', '历史结果')
+        const currentUser = userText('user-current')
+        const currentTool = toolCall('tool-current')
+        const currentProcess = agentText('current-process', '当前过程')
+        const blocks: VisibleChatBlock[] = [
+            historicalTool,
+            historicalProcess,
+            historicalResult,
+            currentUser,
+            currentTool,
+            currentProcess
+        ]
+
+        const visible = groupAssistantResultDetails(blocks, { runActive: true })
+
+        expect(visible).toHaveLength(5)
+        expect(isToolGroupBlock(visible[0])).toBe(true)
+        expect(visible[1]).toBe(historicalResult)
+        expect(visible[2]).toBe(currentUser)
+        expect(visible[3]).toBe(currentTool)
+        expect(visible[4]).toBe(currentProcess)
+    })
+
+    it('preserves source group expansion keys after result aggregation', () => {
+        const tool = toolCall('tool-1')
+        const sourceGroup: ToolGroupBlock = {
+            kind: 'tool-group',
+            id: 'tool-group:live-1',
+            createdAt: 1,
+            invokedAt: null,
+            firstToolId: tool.id,
+            lastToolId: tool.id,
+            tools: [tool],
+            defaultOpen: false,
+            historyState: 'complete',
+            needsOlderHistory: false,
+            summary: summarizeToolGroup([tool]),
+            expansionStateKeys: ['tool-group:live-1']
+        }
+
+        const visible = groupAssistantResultDetails([
+            sourceGroup,
+            agentText('text-1', '过程'),
+            agentText('text-2', '最终结果')
+        ])
+
+        expect(isToolGroupBlock(visible[0])).toBe(true)
+        if (!isToolGroupBlock(visible[0])) {
+            throw new Error('expected result detail group')
+        }
+        expect(visible[0].expansionStateKeys).toEqual(['tool-group:live-1'])
     })
 
     it('preserves the original detail order inside the result detail group', () => {

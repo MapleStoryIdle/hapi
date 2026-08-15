@@ -627,7 +627,7 @@ export function NewSession(props: {
     const canCreate = Boolean(machineId && trimmedDirectory && !isFormDisabled && !missingWorktreeDirectory)
 
     return (
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-3 py-3">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-3 pb-[calc(var(--app-safe-area-bottom)+6rem)] pt-3">
             <AgentSelector
                 agent={agent}
                 isDisabled={isFormDisabled}

@@ -15,6 +15,13 @@ import { usePointerFocusRing } from '@/hooks/usePointerFocusRing'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { getInputStringAny } from '@/lib/toolInputUtils'
+import {
+    getDefaultToolGroupExpansionState,
+    getPrimaryToolGroupExpansionStateKey,
+    getToolGroupExpansionStateKeys,
+    isToolGroupExpansionOpen,
+    resolveToolGroupExpansionState
+} from '@/components/ToolCard/toolGroupExpansion'
 
 const COMPACT_ELAPSED_INTERVAL_MS = 1000
 
@@ -116,6 +123,49 @@ function getToolGroupSkillName(block: ToolGroupBlock): string | null {
     return null
 }
 
+function getCompactFileTarget(tool: ToolCallBlock): string | null {
+    const direct = getInputStringAny(tool.tool.input, [
+        'file_path',
+        'path',
+        'file',
+        'filePath',
+        'notebook_path',
+        'name'
+    ])
+    if (direct) return direct
+
+    if (!tool.tool.input || typeof tool.tool.input !== 'object') return null
+    const parsedCommands = (tool.tool.input as { parsed_cmd?: unknown }).parsed_cmd
+    if (!Array.isArray(parsedCommands)) return null
+
+    for (const command of parsedCommands) {
+        if (!command || typeof command !== 'object') continue
+        const parsed = command as { type?: unknown; name?: unknown }
+        if (parsed.type !== 'write' || typeof parsed.name !== 'string') continue
+        const name = parsed.name.trim()
+        if (name) return name
+    }
+
+    return null
+}
+
+function getCompactRawCommand(tool: ToolCallBlock): string | null {
+    const direct = getInputStringAny(tool.tool.input, ['command', 'cmd'])
+    if (direct) return direct
+
+    if (!tool.tool.input || typeof tool.tool.input !== 'object') return null
+    const command = (tool.tool.input as { command?: unknown }).command
+    if (!Array.isArray(command)) return null
+
+    const parts = command.filter((part): part is string => typeof part === 'string' && part.length > 0)
+    return parts.length > 0 ? parts.join(' ') : null
+}
+
+function formatCompactRawText(value: string): string {
+    const normalized = value.replace(/\s+/g, ' ').trim()
+    return normalized.length > 96 ? `${normalized.slice(0, 95)}…` : normalized
+}
+
 export function formatToolGroupCompactTitle(
     block: ToolGroupBlock,
     now: number,
@@ -135,6 +185,23 @@ export function formatToolGroupCompactTitle(
     if (singleTool) {
         const status = active ? 'processing' : 'processed'
         const kind = getToolGroupActionKind(singleTool)
+        if (kind === 'mutation') {
+            const fileTarget = getCompactFileTarget(singleTool)
+            if (fileTarget) {
+                return t(`toolGroup.compact.single.${status}.mutationTarget`, {
+                    target: formatCompactRawText(fileTarget),
+                    duration: renderedDuration
+                }).trim()
+            }
+
+            const command = getCompactRawCommand(singleTool)
+            if (command) {
+                return t(`toolGroup.compact.single.${status}.commandFallback`, {
+                    command: formatCompactRawText(command),
+                    duration: renderedDuration
+                }).trim()
+            }
+        }
         if (kind !== 'other') {
             return t(`toolGroup.compact.single.${status}.${kind}`, { duration: renderedDuration }).trim()
         }
@@ -338,7 +405,7 @@ export function ToolGroupCard(props: {
 }) {
     const { t } = useTranslation()
     const ctx = useHappyChatContext()
-    const [open, setOpen] = useState(props.block.defaultOpen)
+    const [unmanagedOpen, setUnmanagedOpen] = useState(() => props.block.defaultOpen || isToolGroupActive(props.block))
     const [selectedToolId, setSelectedToolId] = useState<string | null>(null)
     const [isHydratingHistory, setIsHydratingHistory] = useState(false)
     const [historyExhausted, setHistoryExhausted] = useState(false)
@@ -346,21 +413,56 @@ export function ToolGroupCard(props: {
     const [now, setNow] = useState(() => Date.now())
     const hydrationRunRef = useRef(0)
     const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const wasActiveRef = useRef(isToolGroupActive(props.block))
     const { suppressFocusRing, onTriggerPointerDown, onTriggerKeyDown, onTriggerBlur } = usePointerFocusRing()
     const compactHeaderState = useContext(ToolGroupCompactHeaderContext)
     const compactMode = ctx.terminalToolDisplayMode === 'compact'
     const hasActiveTools = isToolGroupActive(props.block)
     const useExternalCompactHeader = compactMode && compactHeaderState?.groupId === props.block.id
-    const displayedOpen = useExternalCompactHeader ? compactHeaderState.open : open
+    const expansionStateKeys = getToolGroupExpansionStateKeys(props.block)
+    const primaryExpansionStateKey = getPrimaryToolGroupExpansionStateKey(props.block)
+    const usesManagedExpansionState = ctx.setToolGroupExpansionState !== undefined
+    const defaultExpansionState = getDefaultToolGroupExpansionState(
+        props.block.defaultOpen || ctx.toolGroupRunActive === true || hasActiveTools
+    )
+    const expansionState = resolveToolGroupExpansionState(
+        props.block,
+        ctx.toolGroupExpansionStates,
+        defaultExpansionState
+    )
+    const managedOpen = isToolGroupExpansionOpen(expansionState)
+    const displayedOpen = useExternalCompactHeader
+        ? compactHeaderState.open
+        : usesManagedExpansionState
+            ? managedOpen
+            : unmanagedOpen
     const externalSetOpen = compactHeaderState?.setOpen
     const setDisplayedOpen = useCallback((nextOpen: SetStateAction<boolean>) => {
         if (useExternalCompactHeader && externalSetOpen) {
             externalSetOpen(nextOpen)
             return
         }
-        setOpen(nextOpen)
-    }, [externalSetOpen, useExternalCompactHeader])
+        const resolvedOpen = typeof nextOpen === 'function'
+            ? nextOpen(displayedOpen)
+            : nextOpen
+        if (usesManagedExpansionState) {
+            ctx.setToolGroupExpansionState?.(
+                primaryExpansionStateKey,
+                resolvedOpen ? 'user-open' : 'user-closed'
+            )
+            return
+        }
+        setUnmanagedOpen(resolvedOpen)
+    }, [ctx, displayedOpen, externalSetOpen, primaryExpansionStateKey, useExternalCompactHeader, usesManagedExpansionState])
+
+    useEffect(() => {
+        if (!usesManagedExpansionState) {
+            return
+        }
+        if (expansionStateKeys.some((key) => ctx.toolGroupExpansionStates?.[key] !== undefined)) {
+            return
+        }
+        ctx.setToolGroupExpansionState?.(primaryExpansionStateKey, defaultExpansionState)
+    }, [ctx, defaultExpansionState, expansionStateKeys, primaryExpansionStateKey, usesManagedExpansionState])
 
     function clearRetryTimer() {
         if (retryTimerRef.current === null) {
@@ -373,20 +475,11 @@ export function ToolGroupCard(props: {
     useEffect(() => {
         clearRetryTimer()
         hydrationRunRef.current += 1
-        setDisplayedOpen(compactMode && hasActiveTools ? true : props.block.defaultOpen)
         setSelectedToolId(null)
         setIsHydratingHistory(false)
         setHistoryExhausted(false)
-        wasActiveRef.current = hasActiveTools
     }, [
-        ctx.terminalToolDisplayMode,
-        compactMode,
-        hasActiveTools,
-        props.block.defaultOpen,
-        props.block.id,
-        props.block.summary.pendingCount,
-        props.block.summary.runningCount,
-        setDisplayedOpen,
+        props.block.id
     ])
 
     useEffect(() => {
@@ -394,24 +487,6 @@ export function ToolGroupCard(props: {
             clearRetryTimer()
         }
     }, [])
-
-    useEffect(() => {
-        if (!compactMode) {
-            wasActiveRef.current = hasActiveTools
-            return
-        }
-
-        if (hasActiveTools) {
-            wasActiveRef.current = true
-            setDisplayedOpen(true)
-            return
-        }
-
-        if (wasActiveRef.current) {
-            wasActiveRef.current = false
-            setDisplayedOpen(false)
-        }
-    }, [compactMode, hasActiveTools, setDisplayedOpen])
 
     useEffect(() => {
         if (!compactMode || !hasActiveTools) {
@@ -509,10 +584,6 @@ export function ToolGroupCard(props: {
     const fileCount = props.block.summary.fileTargets.length
     const compactTitle = formatToolGroupCompactTitle(props.block, now, t)
     const toggleOpen = () => {
-        if (compactMode && hasActiveTools) {
-            setDisplayedOpen(true)
-            return
-        }
         setDisplayedOpen((value) => !value)
     }
 
