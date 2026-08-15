@@ -896,12 +896,9 @@ export function UnifiedButton(props: {
     return (
         <button
             type="button"
-            // Keep the textarea focused while tapping Send. Otherwise a mobile
-            // browser blurs it first, which can collapse the compact composer
-            // before this button receives its click event.
-            onPointerDown={(event) => event.preventDefault()}
-            // Pointer Events cover current mobile browsers; retain the mouse
-            // fallback for embedded WebViews that dispatch only mouse events.
+            // Do not cancel pointerdown here. iOS WebKit can then suppress the
+            // compatibility mouse/click sequence. Mousedown still retains the
+            // textarea focus while letting the button action fire.
             onMouseDown={(event) => event.preventDefault()}
             onClick={handleClick}
             disabled={isDisabled}
@@ -1582,7 +1579,7 @@ export function ComposerButtons(props: {
                     aria-label={t('composer.moreTools')}
                     title={t('composer.moreTools')}
                     className="pointer-events-auto flex h-[42px] w-[42px] items-center justify-center rounded-full text-[var(--app-fg)]/80 transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] [&_svg]:h-[22px] [&_svg]:w-[22px]"
-                    onPointerDown={(event) => {
+                    onMouseDown={(event) => {
                         event.preventDefault()
                         event.stopPropagation()
                     }}
@@ -1711,7 +1708,7 @@ export function ComposerButtons(props: {
                         ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
                         : 'text-[var(--app-fg)]/65 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
                 }`}
-                onPointerDown={(event) => {
+                onMouseDown={(event) => {
                     event.preventDefault()
                     event.stopPropagation()
                 }}

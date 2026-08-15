@@ -20,6 +20,7 @@ const css = source('web/src/index.css')
 const contract = source('web/src/lib/mobileLayoutContract.ts')
 const header = source('web/src/components/SessionHeader.tsx')
 const composer = source('web/src/components/AssistantChat/HappyComposer.tsx')
+const composerButtons = source('web/src/components/AssistantChat/ComposerButtons.tsx')
 const sessionChat = source('web/src/components/SessionChat.tsx')
 const viewportHeight = source('web/src/hooks/useViewportHeight.ts')
 
@@ -48,6 +49,17 @@ requireMatch(header, /style=\{mobileLayoutHeaderShellStyle\}/, 'session header m
 requireMatch(header, /data-testid=\{MOBILE_LAYOUT_CONTRACT\.header\.testId\}/, 'session header must expose its contract target')
 requireMatch(header, /data-mobile-layout-contract=\{MOBILE_LAYOUT_CONTRACT\.header\.state\}/, 'session header must expose its contract state')
 requireMatch(composer, /var\(--app-composer-expanded-keyboard-offset\)/, 'expanded composer must consume the keyboard offset token')
+requireMatch(composer, /const requiresExpandedComposer = hasText\s*\|\|/, 'a non-empty draft must keep the composer expanded')
+requireMatch(composer, /const composerCompact = !composerExpanded && !requiresExpandedComposer/, 'the visual compact state must honor the non-empty draft invariant')
+requireMatch(composer, /<ComposerPrimitive\.Root[\s\S]*?onMouseDownCapture=\{preserveComposerFocusForAction\}/, 'every composer action must preserve focus at mousedown')
+requireMatch(composerButtons, /onMouseDown=\{\(event\) => event\.preventDefault\(\)\}/, 'send button must preserve focus at mousedown')
+if (/onPointerDownCapture=\{preserveComposerFocusForAction\}/.test(composer)) {
+    throw new Error('Mobile layout contract violation: composer actions must not cancel pointerdown')
+}
+if (/onPointerDown=\{\(event\) => event\.preventDefault\(\)\}/.test(composerButtons)
+    || /onPointerDown=\{\(event\) => \{\s*event\.preventDefault\(\)/.test(composerButtons)) {
+    throw new Error('Mobile layout contract violation: composer buttons must not cancel pointerdown')
+}
 requireMatch(sessionChat, /bottomInset=\{bottomOverlayHeight \|\| undefined\}/, 'message thread must reserve the measured composer height')
 requireMatch(viewportHeight, /getIosStandaloneSystemTopChromeState/, 'viewport hook must detect unreachable iOS top chrome')
 requireMatch(viewportHeight, /data-ios-system-top-chrome', 'unreachable'/, 'viewport hook must mark unreachable iOS top chrome')

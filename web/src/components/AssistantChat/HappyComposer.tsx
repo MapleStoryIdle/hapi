@@ -6,6 +6,7 @@ import {
     type FocusEvent as ReactFocusEvent,
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
+    type MouseEvent as ReactMouseEvent,
     type PointerEvent as ReactPointerEvent,
     type SyntheticEvent as ReactSyntheticEvent,
     useCallback,
@@ -438,7 +439,8 @@ export function HappyComposer(props: {
     const [showSideSessionMenu, setShowSideSessionMenu] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
     // Start small, expand while the text field is active, then return to the
-    // compact entry point when focus leaves the composer.
+    // compact entry point when focus leaves an empty composer. A typed draft
+    // is always expanded, even after the textarea temporarily loses focus.
     const [composerExpanded, setComposerExpanded] = useState(false)
     // pendingSchedule is controlled externally when onSchedule prop is provided; otherwise local state
     const [pendingScheduleLocal, setPendingScheduleLocal] = useState<PendingSchedule | null>(null)
@@ -529,7 +531,7 @@ export function HappyComposer(props: {
     // The composer is an overlay, not scrollable message content. Keep its
     // controls above the iOS home indicator, with a small visual breathing
     // room, while the thread itself remains edge-to-edge.
-    const bottomPaddingClass = composerExpanded
+    const bottomPaddingClass = composerExpanded || hasText
         ? 'pb-[calc(0.75rem+var(--app-composer-safe-area-bottom)+var(--app-composer-expanded-keyboard-offset))]'
         : 'pb-[calc(1.25rem+var(--app-composer-safe-area-bottom))]'
     const activeWord = useActiveWord(inputState.text, inputState.selection, autocompletePrefixes)
@@ -590,12 +592,14 @@ export function HappyComposer(props: {
         focusComposerInput()
     }, [focusComposerInput])
 
-    const preserveComposerFocusForAction = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const preserveComposerFocusForAction = useCallback((event: ReactMouseEvent<HTMLElement>) => {
         const target = event.target
         if (target instanceof Element && target.closest('button')) {
-            // On mobile a button tap blurs the textarea before `click`. The
-            // compact/expanded transition can then hide the toolbar and eat
-            // that click. Keep focus until the action has been dispatched.
+            // Keep the textarea focused while a composer action is tapped.
+            // Do this at `mousedown`, not `pointerdown`: current iOS WebKit
+            // can suppress the compatibility mouse/click sequence when a
+            // pointerdown is cancelled, leaving the keyboard dismissed and
+            // the action unhandled.
             event.preventDefault()
         }
     }, [])
@@ -1119,7 +1123,6 @@ export function HappyComposer(props: {
     )
     const showAbortButton = true
     const voiceEnabled = Boolean(onVoiceToggle)
-    const composerCompact = !composerExpanded
     const compactRoutesToScratchlist = Boolean(
         props.scratchlistMode
         && !hasAttachments
@@ -1139,10 +1142,16 @@ export function HappyComposer(props: {
         || showGoalSelectionChip
         || showSideSessionChip
         || selectedRemoteServer !== null
-    const requiresExpandedComposer = hasAttachments
+    const requiresExpandedComposer = hasText
+        || hasAttachments
         || pendingSchedule !== null
         || sendError !== null
         || hasSelectionChips
+
+    // Derive the visual state from the draft too, rather than waiting for the
+    // effect below. This prevents one compact render between the first typed
+    // character and the persistent expanded state.
+    const composerCompact = !composerExpanded && !requiresExpandedComposer
 
     useEffect(() => {
         if (requiresExpandedComposer) {
@@ -1616,7 +1625,11 @@ export function HappyComposer(props: {
                 ref={composerRootRef}
                 className="mx-auto w-full max-w-content"
             >
-                <ComposerPrimitive.Root className="relative" onSubmit={handleSubmit}>
+                <ComposerPrimitive.Root
+                    className="relative"
+                    onSubmit={handleSubmit}
+                    onMouseDownCapture={preserveComposerFocusForAction}
+                >
                     {!composerCompact ? overlays : null}
 
                     {showStatusBar && shouldShowComposerStatusBar(agentFlavor) ? (
@@ -1758,7 +1771,6 @@ export function HappyComposer(props: {
                     ) : null}
 
                     <div
-                        onPointerDownCapture={preserveComposerFocusForAction}
                         className={`relative grid overflow-hidden border shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition-[grid-template-rows,border-radius,border-color,box-shadow,background-color] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${composerGridRowsClass} ${
                             composerCompact
                                 ? 'rounded-full border-[var(--app-border)] bg-[var(--app-bg)]'

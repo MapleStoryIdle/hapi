@@ -148,12 +148,16 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
         expect(onAbort).not.toHaveBeenCalled()
     })
 
-    it('keeps the composer focused while pressing Send', () => {
+    it('preserves the iOS click sequence while retaining composer focus for Send', () => {
         const onParentPointerDown = vi.fn()
+        const onParentMouseDown = vi.fn()
         const onSend = vi.fn()
 
         renderInProviders(
-            <div onPointerDown={(event) => onParentPointerDown(event.defaultPrevented)}>
+            <div
+                onPointerDown={(event) => onParentPointerDown(event.defaultPrevented)}
+                onMouseDown={(event) => onParentMouseDown(event.defaultPrevented)}
+            >
                 <UnifiedButton
                     canSend
                     voiceStatus="disconnected"
@@ -167,33 +171,12 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
 
         const button = getButton('Send')
         fireEvent.pointerDown(button)
-        fireEvent.click(button)
-
-        expect(onParentPointerDown).toHaveBeenCalledWith(true)
-        expect(onSend).toHaveBeenCalledOnce()
-    })
-
-    it('keeps the composer focused for WebViews that dispatch mouse events', () => {
-        const onParentMouseDown = vi.fn()
-        const onSend = vi.fn()
-
-        renderInProviders(
-            <div onMouseDown={(event) => onParentMouseDown(event.defaultPrevented)}>
-                <UnifiedButton
-                    canSend
-                    voiceStatus="disconnected"
-                    voiceEnabled={false}
-                    controlsDisabled={false}
-                    onSend={onSend}
-                    onVoiceToggle={noop}
-                />
-            </div>,
-        )
-
-        const button = getButton('Send')
         fireEvent.mouseDown(button)
         fireEvent.click(button)
 
+        // Cancelling pointerdown can suppress iOS's compatibility mouse and
+        // click events. Focus retention must happen at mousedown instead.
+        expect(onParentPointerDown).toHaveBeenCalledWith(false)
         expect(onParentMouseDown).toHaveBeenCalledWith(true)
         expect(onSend).toHaveBeenCalledOnce()
     })
@@ -322,38 +305,42 @@ describe('ComposerButtons — permission mode button', () => {
      * the grouped "+" menu for the mobile fallback.
      */
     it('shows permission mode when space is available and keeps it in the grouped tools menu', () => {
+        const onParentPointerDown = vi.fn()
+
         renderInProviders(
-            <ComposerButtons
-                canSend={false}
-                controlsDisabled={false}
-                showSettingsButton={false}
-                onSettingsToggle={noop}
-                permissionMode="yolo"
-                permissionLabel="Yolo"
-                permissionModeOptions={[
-                    { mode: 'default', label: 'Default' },
-                    { mode: 'read-only', label: 'Read Only' },
-                    { mode: 'safe-yolo', label: 'Safe Yolo' },
-                    { mode: 'yolo', label: 'Yolo' }
-                ]}
-                onPermissionModeChange={noop}
-                showTerminalButton={false}
-                terminalDisabled={false}
-                terminalLabel="Terminal"
-                onTerminal={noop}
-                showAbortButton={false}
-                abortDisabled={false}
-                isAborting={false}
-                onAbort={noop}
-                showSwitchButton={false}
-                switchDisabled={false}
-                isSwitching={false}
-                onSwitch={noop}
-                voiceEnabled={false}
-                voiceStatus="disconnected"
-                onVoiceToggle={noop}
-                onSend={noop}
-            />
+            <div onPointerDown={(event) => onParentPointerDown(event.defaultPrevented)}>
+                <ComposerButtons
+                    canSend={false}
+                    controlsDisabled={false}
+                    showSettingsButton={false}
+                    onSettingsToggle={noop}
+                    permissionMode="yolo"
+                    permissionLabel="Yolo"
+                    permissionModeOptions={[
+                        { mode: 'default', label: 'Default' },
+                        { mode: 'read-only', label: 'Read Only' },
+                        { mode: 'safe-yolo', label: 'Safe Yolo' },
+                        { mode: 'yolo', label: 'Yolo' }
+                    ]}
+                    onPermissionModeChange={noop}
+                    showTerminalButton={false}
+                    terminalDisabled={false}
+                    terminalLabel="Terminal"
+                    onTerminal={noop}
+                    showAbortButton={false}
+                    abortDisabled={false}
+                    isAborting={false}
+                    onAbort={noop}
+                    showSwitchButton={false}
+                    switchDisabled={false}
+                    isSwitching={false}
+                    onSwitch={noop}
+                    voiceEnabled={false}
+                    voiceStatus="disconnected"
+                    onVoiceToggle={noop}
+                    onSend={noop}
+                />
+            </div>
         )
 
         expect(screen.getByRole('button', { name: /Permission Mode: Yolo/ })).toBeInTheDocument()
@@ -365,7 +352,12 @@ describe('ComposerButtons — permission mode button', () => {
             buttonsBeforeMenu.indexOf(screen.getByRole('button', { name: 'Send' })),
         )
 
-        fireEvent.click(screen.getByRole('button', { name: 'More tools' }))
+        const moreToolsButton = screen.getByRole('button', { name: 'More tools' })
+        fireEvent.pointerDown(moreToolsButton)
+        // The iOS click path must remain intact; focus is retained at
+        // mousedown by HappyComposer, never by cancelling pointerdown.
+        expect(onParentPointerDown).toHaveBeenCalledWith(false)
+        fireEvent.click(moreToolsButton)
 
         expect(screen.getByText('Input')).toBeInTheDocument()
         expect(screen.getByText('Execution')).toBeInTheDocument()
