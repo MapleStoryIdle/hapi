@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
+import { RefreshCw } from 'lucide-react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
+import { usePwaUpdateContext } from '@/lib/pwa-update-context'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
 import { VOICES, getFallbackVoices } from '@/lib/voices'
 import { useAppContext } from '@/lib/app-context'
@@ -372,6 +374,7 @@ function ThemeColorControl(props: { t: (key: string) => string }) {
 export default function SettingsPage() {
     const { t, locale, setLocale } = useTranslation()
     const { api } = useAppContext()
+    const { forceReload } = usePwaUpdateContext()
     const goBack = useAppGoBack()
     const [isOpen, setIsOpen] = useState(false)
     const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
@@ -1262,6 +1265,17 @@ export default function SettingsPage() {
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
                             {t('settings.about.title')}
                         </div>
+                        <button
+                            type="button"
+                            onClick={forceReload}
+                            className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                        >
+                            <span className="flex min-w-0 flex-col gap-0.5">
+                                <span className="text-[var(--app-fg)]">{t('settings.about.forceRefresh')}</span>
+                                <span className="text-xs text-[var(--app-hint)]">{t('settings.about.forceRefresh.description')}</span>
+                            </span>
+                            <RefreshCw className="h-4 w-4 shrink-0 text-[var(--app-hint)]" aria-hidden="true" />
+                        </button>
                         <div className="flex w-full items-center justify-between px-3 py-3">
                             <span className="text-[var(--app-fg)]">{t('settings.about.website')}</span>
                             <a

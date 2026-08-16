@@ -26,51 +26,52 @@ export function PiThinkingLevelPanel(props: {
     controlsDisabled?: boolean
     onSelect: (level: string | null) => void
     onClose: () => void
+    embedded?: boolean
 }) {
     const supportedLevels = getSupportedLevels(props.reasoning, props.thinkingLevelMap)
     const disabled = props.controlsDisabled ?? false
 
     if (supportedLevels.length === 0) return null
 
-    return (
-        <FloatingOverlay maxHeight={240}>
-            <div className="py-2">
-                <div className="px-3 pb-1 text-xs font-semibold text-[var(--app-hint)]">
-                    Thinking Level
-                </div>
-                {supportedLevels.map((level) => (
-                    <button
-                        key={level}
-                        type="button"
-                        disabled={disabled}
-                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
-                            disabled
-                                ? 'cursor-not-allowed opacity-50'
-                                : 'cursor-pointer hover:bg-[var(--app-secondary-bg)]'
-                        }`}
-                        onClick={() => {
-                            props.onSelect(props.currentLevel === level ? null : level)
-                            props.onClose()
-                        }}
-                        onMouseDown={(e) => e.preventDefault()}
-                    >
-                        <div
-                            className={`flex h-4 w-4 items-center justify-center rounded-full border-2 ${
-                                props.currentLevel === level
-                                    ? 'border-[var(--app-link)]'
-                                    : 'border-[var(--app-hint)]'
-                            }`}
-                        >
-                            {props.currentLevel === level && (
-                                <div className="h-2 w-2 rounded-full bg-[var(--app-link)]" />
-                            )}
-                        </div>
-                        <span className={props.currentLevel === level ? 'text-[var(--app-link)]' : ''}>
-                            {PI_THINKING_LEVEL_LABELS[level as keyof typeof PI_THINKING_LEVEL_LABELS] ?? level}
-                        </span>
-                    </button>
-                ))}
+    const content = (
+        <div className="py-2">
+            <div className="px-3 pb-1 text-xs font-semibold text-[var(--app-hint)]">
+                Thinking Level
             </div>
-        </FloatingOverlay>
+            {supportedLevels.map((level) => (
+                <button
+                    key={level}
+                    type="button"
+                    disabled={disabled}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                        disabled
+                            ? 'cursor-not-allowed opacity-50'
+                            : 'cursor-pointer hover:bg-[var(--app-secondary-bg)]'
+                    }`}
+                    onClick={() => {
+                        props.onSelect(props.currentLevel === level ? null : level)
+                        props.onClose()
+                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                >
+                    <div
+                        className={`flex h-4 w-4 items-center justify-center rounded-full border-2 ${
+                            props.currentLevel === level
+                                ? 'border-[var(--app-link)]'
+                                : 'border-[var(--app-hint)]'
+                        }`}
+                    >
+                        {props.currentLevel === level && (
+                            <div className="h-2 w-2 rounded-full bg-[var(--app-link)]" />
+                        )}
+                    </div>
+                    <span className={props.currentLevel === level ? 'text-[var(--app-link)]' : ''}>
+                        {PI_THINKING_LEVEL_LABELS[level as keyof typeof PI_THINKING_LEVEL_LABELS] ?? level}
+                    </span>
+                </button>
+            ))}
+        </div>
     )
+
+    return props.embedded ? content : <FloatingOverlay maxHeight={240}>{content}</FloatingOverlay>
 }

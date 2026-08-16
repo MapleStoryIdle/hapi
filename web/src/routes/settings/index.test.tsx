@@ -104,7 +104,7 @@ vi.mock('@/lib/languages', () => ({
 }))
 
 // Use vi.hoisted so these mocks are available when vi.mock factories run
-const { mockFetchVoices, mockFetchVoiceBackend, mockApi } = vi.hoisted(() => {
+const { mockFetchVoices, mockFetchVoiceBackend, mockApi, mockForceReload } = vi.hoisted(() => {
     const mockFetchVoices = vi.fn(() => Promise.resolve<unknown[]>([]))
     const mockFetchVoiceBackend = vi.fn(() => Promise.resolve({
         backend: 'elevenlabs' as 'elevenlabs' | 'gemini-live' | 'qwen-realtime',
@@ -113,7 +113,8 @@ const { mockFetchVoices, mockFetchVoiceBackend, mockApi } = vi.hoisted(() => {
     const mockApi = {
         fetchVoices: vi.fn(() => Promise.resolve({ voices: [] })),
     }
-    return { mockFetchVoices, mockFetchVoiceBackend, mockApi }
+    const mockForceReload = vi.fn()
+    return { mockFetchVoices, mockFetchVoiceBackend, mockApi, mockForceReload }
 })
 
 // Mock static voices list
@@ -136,6 +137,14 @@ vi.mock('@/api/voice', () => ({
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({ api: mockApi, token: 'test', baseUrl: '' }),
     AppContextProvider: ({ children }: { children: React.ReactNode }) => children,
+}))
+
+vi.mock('@/lib/pwa-update-context', () => ({
+    usePwaUpdateContext: () => ({
+        needRefresh: false,
+        reload: vi.fn(),
+        forceReload: mockForceReload,
+    }),
 }))
 
 
@@ -190,6 +199,14 @@ describe('SettingsPage', () => {
         expect(screen.getAllByText(__APP_VERSION__).length).toBeGreaterThanOrEqual(1)
     })
 
+    it('provides an always-visible PWA force refresh action', () => {
+        renderWithProviders(<SettingsPage />)
+
+        fireEvent.click(screen.getByRole('button', { name: /Force refresh/i }))
+
+        expect(mockForceReload).toHaveBeenCalledTimes(1)
+    })
+
     it('displays the Protocol Version with correct value', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getAllByText('Protocol Version').length).toBeGreaterThanOrEqual(1)
@@ -214,6 +231,8 @@ describe('SettingsPage', () => {
         expect(calledKeys).toContain('settings.about.website')
         expect(calledKeys).toContain('settings.about.appVersion')
         expect(calledKeys).toContain('settings.about.protocolVersion')
+        expect(calledKeys).toContain('settings.about.forceRefresh')
+        expect(calledKeys).toContain('settings.about.forceRefresh.description')
     })
 
     it('renders the Appearance setting', () => {

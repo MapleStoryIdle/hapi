@@ -10,6 +10,7 @@ import {
     findNearestUserMessageAnchorAbove,
     findVisibleUserMessageAnchor,
     getThreadContentPadding,
+    getThreadViewportPadding,
     getPullToLoadOlderIndicator,
     getScrollIntent,
     hasUserMessageAnchor,
@@ -223,14 +224,15 @@ describe('ScrollToBottomButton', () => {
 })
 
 describe('thread endpoint insets', () => {
-    it('keeps the first iPhone PWA message below the notch and floating title bar', () => {
-        const padding = getThreadContentPadding({ topInset: 62 })
+    it('keeps all iPhone PWA messages below the notch and transparent floating title bar', () => {
+        const viewportPadding = getThreadViewportPadding({ topInset: 62 })
+        const contentPadding = getThreadContentPadding({})
 
-        // `--app-safe-area-top` resolves to the device notch inset in an
-        // installed PWA. The additional 62px is the measured title-bar
-        // surface; 12px is the normal message breathing room.
-        expect(padding.paddingTop).toBe('calc(var(--app-safe-area-top) + 74px)')
-        expect(padding.paddingBottom).toBeUndefined()
+        // The scroll viewport begins after the installed-PWA safe area and
+        // measured title shell. `p-3` on the content retains the normal 12px
+        // message breathing room without allowing later messages underneath.
+        expect(viewportPadding.paddingTop).toBe('calc(var(--app-safe-area-top) + 62px)')
+        expect(contentPadding.paddingBottom).toBeUndefined()
     })
 
     it('keeps the latest message above an iPhone composer without duplicating its safe area', () => {
@@ -238,7 +240,6 @@ describe('thread endpoint insets', () => {
         // area (e.g. input + 34px home-indicator inset on a current iPhone).
         const padding = getThreadContentPadding({ bottomInset: 104 })
 
-        expect(padding.paddingTop).toBeUndefined()
         expect(padding.paddingBottom).toBe('116px')
     })
 })

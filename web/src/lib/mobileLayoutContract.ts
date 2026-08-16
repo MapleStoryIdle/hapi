@@ -17,6 +17,15 @@ export const MOBILE_LAYOUT_CONTRACT = {
         background: 'transparent',
         backdropFilter: 'none'
     },
+    thread: {
+        testId: 'mobile-layout-thread-root',
+        state: 'below-transparent-header',
+        topSafeAreaVariable: '--app-safe-area-top'
+    },
+    bottomAccessory: {
+        testId: 'mobile-layout-bottom-accessory',
+        state: 'floating-above-composer'
+    },
     composer: {
         keyboardOpenExpandedOffsetVariable: '--app-mobile-composer-expanded-keyboard-offset',
         keyboardOpenExpandedOffset: '4px'
@@ -25,8 +34,7 @@ export const MOBILE_LAYOUT_CONTRACT = {
 
 /**
  * Inline contract style deliberately wins over incidental utility classes.
- * The header controls remain their own solid pill; only the full-width shell
- * is transparent.
+ * The full-width header shell stays transparent while avoiding a backdrop filter.
  */
 export const mobileLayoutHeaderShellStyle: CSSProperties = {
     backgroundColor: `var(${MOBILE_LAYOUT_CONTRACT.header.backgroundVariable})`,

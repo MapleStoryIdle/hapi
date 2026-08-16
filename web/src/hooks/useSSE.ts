@@ -586,11 +586,13 @@ export function useSSE(options: {
         }
         eventSource.onerror = (error) => {
             onErrorRef.current?.(error)
-            if (eventSource.readyState === EventSource.CLOSED) {
-                requestReconnect('closed')
+            // Safari/iOS PWA can leave EventSource in CONNECTING indefinitely
+            // after a background transition. Close and rebuild it ourselves
+            // instead of relying on the browser's opaque retry loop.
+            if (eventSourceRef.current !== eventSource) {
                 return
             }
-            notifyDisconnect('error')
+            requestReconnect(eventSource.readyState === EventSource.CLOSED ? 'closed' : 'error')
         }
 
         const watchdogTimer = setInterval(() => {
@@ -606,16 +608,13 @@ export function useSSE(options: {
             requestReconnect('heartbeat-timeout')
         }, HEARTBEAT_WATCHDOG_INTERVAL_MS)
 
-        // When the tab becomes visible again, check immediately whether the
-        // SSE connection went stale while hidden (the watchdog skips checks
-        // for hidden tabs).  This avoids the user having to wait up to
-        // HEARTBEAT_WATCHDOG_INTERVAL_MS after switching back.
+        // iOS PWA can preserve a seemingly-open EventSource across a background
+        // transition while silently dropping future events. Rebuild every stream
+        // on foreground instead of waiting for its 90-second heartbeat watchdog.
         const onVisibilityChange = () => {
             if (getVisibilityState() !== 'visible') return
             if (eventSourceRef.current !== eventSource) return
-            if (Date.now() - lastActivityAtRef.current >= HEARTBEAT_STALE_MS) {
-                requestReconnect('visibility-recovery')
-            }
+            requestReconnect('visibility-recovery')
         }
         document.addEventListener('visibilitychange', onVisibilityChange)
 

@@ -1,8 +1,11 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+    PWA_FORCE_RELOAD_QUERY_PARAM,
     PWA_UPDATE_CHECK_INTERVAL_MS,
     PWA_UPDATE_RELOAD_FALLBACK_MS,
+    buildPwaForceReloadUrl,
+    requestPwaForceReload,
     requestPwaUpdateReload,
     setupRegistrationUpdateChecks,
     usePwaUpdate,
@@ -141,6 +144,48 @@ describe('requestPwaUpdateReload', () => {
         expect(reloadPage).toHaveBeenCalledTimes(1)
 
         vi.useRealTimers()
+    })
+})
+
+describe('requestPwaForceReload', () => {
+    it('checks for an update before activating it and reloading', async () => {
+        const registration = {
+            update: vi.fn().mockResolvedValue(undefined),
+        } as unknown as ServiceWorkerRegistration
+        const getRegistration = vi.fn().mockResolvedValue(registration)
+        Object.defineProperty(navigator, 'serviceWorker', {
+            configurable: true,
+            value: {
+                addEventListener: (type: string, listener: EventListener) => {
+                    const bucket = serviceWorkerListeners.get(type) ?? new Set<EventListener>()
+                    bucket.add(listener)
+                    serviceWorkerListeners.set(type, bucket)
+                },
+                removeEventListener: (type: string, listener: EventListener) => {
+                    serviceWorkerListeners.get(type)?.delete(listener)
+                },
+                getRegistration,
+            },
+        })
+        const updateSW = vi.fn().mockImplementation(async () => {
+            for (const listener of serviceWorkerListeners.get('controllerchange') ?? []) {
+                listener(new Event('controllerchange'))
+            }
+        })
+        const reloadPage = vi.fn()
+
+        await requestPwaForceReload(updateSW, { reloadPage })
+
+        expect(getRegistration).toHaveBeenCalledTimes(1)
+        expect(registration.update).toHaveBeenCalledTimes(1)
+        expect(updateSW).toHaveBeenCalledWith(true)
+        expect(reloadPage).toHaveBeenCalledTimes(1)
+    })
+
+    it('uses a cache-busting marker while preserving the current route', () => {
+        expect(buildPwaForceReloadUrl('https://hapi.test/sessions/a?tab=chat#latest', 42)).toBe(
+            `https://hapi.test/sessions/a?tab=chat&${PWA_FORCE_RELOAD_QUERY_PARAM}=42#latest`,
+        )
     })
 })
 

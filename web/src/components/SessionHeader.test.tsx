@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
 import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
@@ -78,5 +78,38 @@ describe('mobile layout contract', () => {
         expect(shell).toHaveAttribute('data-mobile-layout-contract', MOBILE_LAYOUT_CONTRACT.header.state)
         expect(shell.style.backgroundColor).toBe(`var(${MOBILE_LAYOUT_CONTRACT.header.backgroundVariable})`)
         expect(shell.style.backdropFilter).toBe(`var(${MOBILE_LAYOUT_CONTRACT.header.backdropFilterVariable})`)
+    })
+})
+
+describe('SessionHeader back action', () => {
+    it('uses the explicit back callback from the floating header control', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const onBack = vi.fn()
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={createSession()}
+                            api={null}
+                            onBack={onBack}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const backButton = screen.getByTestId('session-header-back')
+        expect(backButton).toHaveClass('pointer-events-auto', 'touch-manipulation')
+        fireEvent.click(backButton)
+
+        expect(onBack).toHaveBeenCalledTimes(1)
     })
 })

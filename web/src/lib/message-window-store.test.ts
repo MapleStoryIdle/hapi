@@ -254,6 +254,70 @@ describe('message-window-store async generations', () => {
         expect(state.messages.map((message) => message.id)).toEqual(['fresh-message'])
     })
 
+    it('queues a forced reconciliation behind an in-flight latest read', async () => {
+        const firstRequest = deferred<Awaited<ReturnType<ApiClient['getMessages']>>>()
+        const secondRequest = deferred<Awaited<ReturnType<ApiClient['getMessages']>>>()
+        const api = {
+            getMessages: vi.fn(async () => {
+                return api.getMessages.mock.calls.length === 1
+                    ? await firstRequest.promise
+                    : await secondRequest.promise
+            })
+        } as Pick<ApiClient, 'getMessages'> & {
+            getMessages: ReturnType<typeof vi.fn>
+        }
+
+        const initialLoad = fetchLatestMessages(api as unknown as ApiClient, SESSION_ID)
+        const forcedReconciliation = fetchLatestMessages(
+            api as unknown as ApiClient,
+            SESSION_ID,
+            { force: true }
+        )
+
+        expect(api.getMessages).toHaveBeenCalledTimes(1)
+
+        firstRequest.resolve({
+            messages: [makeAgentMessage({
+                id: 'first-snapshot-message',
+                seq: 1,
+                createdAt: 1_700_000_300_000
+            })],
+            page: {
+                limit: 50,
+                nextBeforeSeq: null,
+                nextBeforeAt: null,
+                hasMore: false
+            }
+        })
+        await initialLoad
+
+        expect(api.getMessages).toHaveBeenCalledTimes(2)
+        expect(getMessageWindowState(SESSION_ID).messages.map((message) => message.id))
+            .toContain('first-snapshot-message')
+
+        secondRequest.resolve({
+            messages: [makeAgentMessage({
+                id: 'post-sse-reconciliation-message',
+                seq: 2,
+                createdAt: 1_700_000_300_100
+            })],
+            page: {
+                limit: 50,
+                nextBeforeSeq: null,
+                nextBeforeAt: null,
+                hasMore: false
+            }
+        })
+        await forcedReconciliation
+
+        const state = getMessageWindowState(SESSION_ID)
+        expect(state.isLoading).toBe(false)
+        expect(state.messages.map((message) => message.id)).toEqual([
+            'first-snapshot-message',
+            'post-sse-reconciliation-message'
+        ])
+    })
+
     it('hydrates persisted window state for progressive re-entry', async () => {
         ingestIncomingMessages(SESSION_ID, [
             makeAgentMessage({

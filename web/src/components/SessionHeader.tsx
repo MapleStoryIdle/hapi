@@ -513,7 +513,10 @@ export function SessionHeader(props: {
                         <button
                             type="button"
                             onClick={props.onBack}
-                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
+                            data-testid="session-header-back"
+                            aria-label={t('session.back')}
+                            title={t('session.back')}
+                            className="pointer-events-auto touch-manipulation flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                         >
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"

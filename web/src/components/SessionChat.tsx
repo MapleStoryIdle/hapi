@@ -32,7 +32,7 @@ import { codexModelAdvertisesFastTier } from '@/components/AssistantChat/codexFa
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
-import { QueuedMessagesBar } from '@/components/AssistantChat/QueuedMessagesBar'
+import { QueuedMessagesBar, useQueuedMessages } from '@/components/AssistantChat/QueuedMessagesBar'
 import { ScratchlistDrawer } from '@/components/AssistantChat/ScratchlistPanel'
 import { SubagentDock } from '@/components/AssistantChat/SubagentDock'
 import { GitDiffSummary, summarizeGitStatusFiles } from '@/components/AssistantChat/GitDiffSummary'
@@ -91,6 +91,7 @@ import { RemoteServerCandidatePrompt } from '@/components/RemoteServers'
 import { ArrowRightIcon } from '@/components/icons'
 import { encodeBase64 } from '@/lib/utils'
 import { queryKeys } from '@/lib/query-keys'
+import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
 
 const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSession').then((module) => ({
     default: module.VoiceBackendSession
@@ -105,19 +106,37 @@ export const BOTTOM_OVERLAY_INSET_PX = 0
 export const FLOATING_SESSION_HEADER_HEIGHT_PX = 62
 
 /**
- * The scroll-to-bottom button is the visual reference for bottom spacing;
- * keep the plan/git pill on that same composer gap. The bottom overlay inset
- * is part of the visual composer position, so callers include it here instead
- * of making the button/pill use independent absolute coordinates.
+ * The plan/git pill floats above the stable bottom overlay. When it is visible,
+ * align the scroll controls with that pill; otherwise align them with the
+ * composer as usual.
  */
 export function getScrollButtonBottomInset(
     composerOverlayHeight: number,
     bottomOverlayHeight: number,
     bottomOverlayInset: number = 0,
+    bottomAccessoryVisible = false,
 ): number {
+    if (bottomAccessoryVisible) {
+        return bottomOverlayHeight + bottomOverlayInset + BOTTOM_FLOATING_CONTROL_GAP_PX
+    }
+
     return composerOverlayHeight > 0
         ? composerOverlayHeight + bottomOverlayInset + BOTTOM_FLOATING_CONTROL_GAP_PX
         : bottomOverlayHeight + bottomOverlayInset
+}
+
+/**
+ * The status pill is visually above the bottom overlay, but must still be
+ * reserved by the message thread. It must never change the composer's anchor.
+ */
+export function getBottomOverlayThreadInset(
+    bottomOverlayHeight: number,
+    bottomAccessoryHeight: number,
+    bottomAccessoryVisible: boolean,
+): number {
+    return bottomOverlayHeight + (bottomAccessoryVisible
+        ? bottomAccessoryHeight + BOTTOM_FLOATING_CONTROL_GAP_PX
+        : 0)
 }
 
 export function canCreateSideSessionFromSession(params: {
@@ -654,12 +673,14 @@ function SessionChatInner(props: SessionChatProps) {
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
     const bottomOverlayRef = useRef<HTMLDivElement | null>(null)
     const composerOverlayRef = useRef<HTMLDivElement | null>(null)
+    const bottomAccessoryRef = useRef<HTMLDivElement | null>(null)
     const [bottomOverlayHeight, setBottomOverlayHeight] = useState(0)
     const [composerOverlayHeight, setComposerOverlayHeight] = useState(0)
-    const [bottomAccessoryExpanded, setBottomAccessoryExpanded] = useState(false)
+    const [bottomAccessoryHeight, setBottomAccessoryHeight] = useState(0)
+    const [statusAccessoryExpanded, setStatusAccessoryExpanded] = useState(false)
+    const [queueAccessoryExpanded, setQueueAccessoryExpanded] = useState(false)
     const [clearedPlanSourceBlockId, setClearedPlanSourceBlockId] = useState<string | null>(null)
     const scrollButtonPositionReady = bottomOverlayHeight > 0 && !(gitSessionId && gitStatusLoading)
-    const scrollButtonBottomInset = getScrollButtonBottomInset(composerOverlayHeight, bottomOverlayHeight, BOTTOM_OVERLAY_INSET_PX)
     const lastGitRefreshUpdatedAtRef = useRef(props.session.updatedAt)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
@@ -1124,10 +1145,11 @@ function SessionChatInner(props: SessionChatProps) {
         setOutlineOpen(false)
     }, [props.session.id])
 
+    const queuedMessages = useQueuedMessages(props.session.id)
+
     // Exclude user messages that haven't been invoked yet — those appear in the
-    // QueuedMessagesBar above the composer, not in the thread timeline. The
-    // `isQueuedForInvocation` predicate is shared with the window store and the
-    // floating bar so the three views never disagree about queued state.
+    // queue drawer, not in the thread timeline. The shared predicate keeps the
+    // thread, message window, and floating queue entry point in agreement.
     const visibleMessages = useMemo(
         () => props.messages.filter((m) => !isQueuedForInvocation(m)),
         [props.messages]
@@ -1289,7 +1311,20 @@ function SessionChatInner(props: SessionChatProps) {
     })
     const planStatusVisible = activePlanStatus !== null
     const gitDiffAccessoryVisible = !runActive && gitDiffSummaryVisible
-    const bottomAccessoryVisible = planStatusVisible || gitDiffAccessoryVisible
+    const queueAccessoryVisible = queuedMessages.length > 0
+    const bottomAccessoryVisible = queueAccessoryVisible || planStatusVisible || gitDiffAccessoryVisible
+    const bottomAccessoryExpanded = statusAccessoryExpanded || queueAccessoryExpanded
+    const threadBottomInset = getBottomOverlayThreadInset(
+        bottomOverlayHeight,
+        bottomAccessoryHeight,
+        bottomAccessoryVisible,
+    )
+    const scrollButtonBottomInset = getScrollButtonBottomInset(
+        composerOverlayHeight,
+        bottomOverlayHeight,
+        BOTTOM_OVERLAY_INSET_PX,
+        bottomAccessoryVisible,
+    )
     const displayBlocks = useMemo(
         () => (
             activePlanStatus
@@ -1491,7 +1526,11 @@ function SessionChatInner(props: SessionChatProps) {
     }, [])
 
     const handleBottomAccessoryExpandedChange = useCallback((expanded: boolean) => {
-        setBottomAccessoryExpanded(expanded)
+        setStatusAccessoryExpanded(expanded)
+    }, [])
+
+    const handleQueueAccessoryExpandedChange = useCallback((expanded: boolean) => {
+        setQueueAccessoryExpanded(expanded)
     }, [])
 
     const handleViewTerminal = useCallback(() => {
@@ -1509,14 +1548,21 @@ function SessionChatInner(props: SessionChatProps) {
     }, [gitSessionId, props.session.updatedAt, refetchGitStatus])
 
     useEffect(() => {
-        if (!bottomAccessoryVisible) {
-            setBottomAccessoryExpanded(false)
+        if (!planStatusVisible && !gitDiffAccessoryVisible) {
+            setStatusAccessoryExpanded(false)
         }
-    }, [bottomAccessoryVisible])
+    }, [gitDiffAccessoryVisible, planStatusVisible])
+
+    useEffect(() => {
+        if (!queueAccessoryVisible) {
+            setQueueAccessoryExpanded(false)
+        }
+    }, [queueAccessoryVisible])
 
     useLayoutEffect(() => {
         const bottomNode = bottomOverlayRef.current
         const composerNode = composerOverlayRef.current
+        const bottomAccessoryNode = bottomAccessoryRef.current
         if (!bottomNode) return
 
         const measure = () => {
@@ -1525,6 +1571,11 @@ function SessionChatInner(props: SessionChatProps) {
 
             const composerHeight = Math.ceil(composerNode?.getBoundingClientRect().height ?? 0)
             setComposerOverlayHeight((current) => current === composerHeight ? current : composerHeight)
+
+            const accessoryHeight = bottomAccessoryVisible
+                ? Math.ceil(bottomAccessoryNode?.getBoundingClientRect().height ?? 0)
+                : 0
+            setBottomAccessoryHeight((current) => current === accessoryHeight ? current : accessoryHeight)
         }
 
         measure()
@@ -1538,12 +1589,15 @@ function SessionChatInner(props: SessionChatProps) {
         if (composerNode) {
             observer.observe(composerNode)
         }
+        if (bottomAccessoryNode) {
+            observer.observe(bottomAccessoryNode)
+        }
         window.addEventListener('resize', measure)
         return () => {
             observer.disconnect()
             window.removeEventListener('resize', measure)
         }
-    }, [])
+    }, [bottomAccessoryVisible])
 
     // Scheduled message state — lifted here so useHappyRuntime can read the ref.
     //
@@ -1782,16 +1836,15 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineOpen={outlineOpen}
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
-                        // The scroll viewport remains edge-to-edge. Only its
-                        // initial scroll position is padded: first message
-                        // starts below the notch + floating title bar, while
-                        // later messages can pass behind that overlay.
-                        topInset={visibleBlocks.length > 0 ? FLOATING_SESSION_HEADER_HEIGHT_PX : undefined}
+                        // The transparent title shell is not a message overlay:
+                        // the scroll viewport itself begins below the notch +
+                        // title bar, so scrolling content never enters it.
+                        topInset={FLOATING_SESSION_HEADER_HEIGHT_PX}
                         // The measured bottom overlay includes the composer
                         // and its iOS home-indicator padding. Reserving that
                         // measured height keeps the latest message visible
                         // without adding a second safe-area strip.
-                        bottomInset={bottomOverlayHeight || undefined}
+                        bottomInset={threadBottomInset || undefined}
                         scrollButtonBottomInset={scrollButtonBottomInset}
                         bottomAccessoryVisible={bottomAccessoryVisible}
                         bottomAccessoryExpanded={bottomAccessoryExpanded}
@@ -1855,33 +1908,6 @@ function SessionChatInner(props: SessionChatProps) {
                                     onExitScratchlistMode={() => setScratchlistMode(false)}
                                 />
                             ) : null}
-                            <QueuedMessagesBar
-                                sessionId={props.session.id}
-                                api={props.api}
-                                onEdit={({ pendingSchedule: restored }) => {
-                                    // Restore the schedule so the clock button re-activates
-                                    setPendingSchedule(restored)
-                                }}
-                            />
-                        </div>
-
-                        <div
-                            className="pointer-events-none"
-                            style={{ paddingBottom: BOTTOM_FLOATING_CONTROL_GAP_PX }}
-                        >
-                            {planStatusVisible ? (
-                                <PlanStatusSummary
-                                    plan={activePlanStatus}
-                                    onExpandedChange={handleBottomAccessoryExpandedChange}
-                                />
-                            ) : (
-                                <GitDiffSummary
-                                    status={gitDiffAccessoryVisible ? gitDiffDisplayStatus : null}
-                                    onViewDiff={handleViewDiff}
-                                    onViewFileDiff={handleViewFileDiff}
-                                    onExpandedChange={handleBottomAccessoryExpandedChange}
-                                />
-                            )}
                         </div>
 
                         <div
@@ -2045,10 +2071,48 @@ function SessionChatInner(props: SessionChatProps) {
                                 onSelectSideSession={handleSelectSideSession}
                                 sendError={props.sendError ?? null}
                                 onClearSendError={props.onClearSendError}
-                                compactTopAnchor={bottomAccessoryVisible}
                             />
                             </div>
                         </div>
+
+                        {bottomAccessoryVisible ? (
+                            <div
+                                ref={bottomAccessoryRef}
+                                className="pointer-events-none absolute inset-x-0"
+                                style={{ bottom: `calc(100% + ${BOTTOM_FLOATING_CONTROL_GAP_PX}px)` }}
+                                data-testid={MOBILE_LAYOUT_CONTRACT.bottomAccessory.testId}
+                                data-mobile-layout-contract={MOBILE_LAYOUT_CONTRACT.bottomAccessory.state}
+                            >
+                                <div className="mx-auto flex w-full max-w-content flex-col items-center gap-2">
+                                    {planStatusVisible ? (
+                                        <PlanStatusSummary
+                                            plan={activePlanStatus}
+                                            onExpandedChange={handleBottomAccessoryExpandedChange}
+                                        />
+                                    ) : gitDiffAccessoryVisible ? (
+                                        <GitDiffSummary
+                                            status={gitDiffDisplayStatus}
+                                            onViewDiff={handleViewDiff}
+                                            onViewFileDiff={handleViewFileDiff}
+                                            onExpandedChange={handleBottomAccessoryExpandedChange}
+                                        />
+                                    ) : null}
+
+                                    {queueAccessoryVisible ? (
+                                        <QueuedMessagesBar
+                                            sessionId={props.session.id}
+                                            api={props.api}
+                                            queuedMessages={queuedMessages}
+                                            onExpandedChange={handleQueueAccessoryExpandedChange}
+                                            onEdit={({ pendingSchedule: restored }) => {
+                                                // Restore the schedule so the clock button re-activates.
+                                                setPendingSchedule(restored)
+                                            }}
+                                        />
+                                    ) : null}
+                                </div>
+                            </div>
+                        ) : null}
                     </div>
                 </DragDropZone>
             </AssistantRuntimeProvider>

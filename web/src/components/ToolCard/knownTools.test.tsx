@@ -1,6 +1,40 @@
 import { describe, expect, it } from 'vitest'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
 
+describe('getToolPresentation — MCP invocation titles', () => {
+    it('shows an MCP-provided title as the visible action label', () => {
+        const presentation = getToolPresentation({
+            toolName: 'mcp__node_repl__js',
+            input: {
+                title: '查看本地会话',
+                code: 'await viewportCapability.set({ width: 390, height: 844 })',
+            },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation.title).toBe('查看本地会话')
+        expect(presentation.subtitle).toBe('MCP: Node Repl Js')
+        expect(presentation.minimal).toBe(true)
+    })
+
+    it('keeps the MCP tool name when no usable title is provided', () => {
+        const presentation = getToolPresentation({
+            toolName: 'mcp__node_repl__js',
+            input: { title: '   ', code: 'nodeRepl.write("ok")' },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation.title).toBe('MCP: Node Repl Js')
+        expect(presentation.subtitle).toBeNull()
+    })
+})
+
 describe('getToolPresentation — unknown tool semantic title + subtitle dedup', () => {
     it('promotes semantic title "Run shell" when toolName equals input.command (Gemini ACP case)', () => {
         const presentation = getToolPresentation({

@@ -49,6 +49,17 @@ type PendingVisibilityCacheEntry = {
 
 type AsyncGenerationKind = 'latest' | 'older'
 
+export type FetchLatestMessagesOptions = {
+    /**
+     * Request one more latest-page read after an in-flight read completes.
+     *
+     * A newly opened SSE stream has no replay cursor, so its connection can
+     * race the initial HTTP load. Queuing instead of cancelling the active
+     * load preserves the first snapshot if the follow-up request fails.
+     */
+    force?: boolean
+}
+
 type PersistedMessageWindowState = {
     messages: DecryptedMessage[]
     pending: DecryptedMessage[]
@@ -64,6 +75,10 @@ type PersistedMessageWindowState = {
 const states = new Map<string, InternalState>()
 const listeners = new Map<string, Set<() => void>>()
 const pendingVisibilityCacheBySession = new Map<string, Map<string, PendingVisibilityCacheEntry>>()
+const pendingForcedLatestRefreshes = new Map<string, {
+    api: ApiClient
+    resolvers: Array<() => void>
+}>()
 
 // Throttled notification: coalesce rapid state updates into at most one
 // notification per NOTIFY_THROTTLE_MS during streaming. This prevents
@@ -76,6 +91,38 @@ const pendingPersistSessionIds = new Set<string>()
 let notifyRafId: ReturnType<typeof requestAnimationFrame> | null = null
 let persistTimerId: ReturnType<typeof setTimeout> | null = null
 let lastNotifyAt = 0
+
+function resolveForcedLatestRefresh(refresh: { resolvers: Array<() => void> }): void {
+    for (const resolve of refresh.resolvers) {
+        resolve()
+    }
+}
+
+function clearPendingForcedLatestRefresh(sessionId: string): void {
+    const refresh = pendingForcedLatestRefreshes.get(sessionId)
+    if (!refresh) {
+        return
+    }
+    pendingForcedLatestRefreshes.delete(sessionId)
+    resolveForcedLatestRefresh(refresh)
+}
+
+function queueForcedLatestRefresh(api: ApiClient, sessionId: string): Promise<void> {
+    let refresh = pendingForcedLatestRefreshes.get(sessionId)
+    if (!refresh) {
+        refresh = { api, resolvers: [] }
+        pendingForcedLatestRefreshes.set(sessionId, refresh)
+    } else {
+        // Token/base-url changes can replace the API client while a previous
+        // request is still settling. The queued reconciliation must use the
+        // most recent authenticated client.
+        refresh.api = api
+    }
+
+    return new Promise((resolve) => {
+        refresh.resolvers.push(resolve)
+    })
+}
 
 function scheduleNotify(sessionId: string): void {
     pendingNotifySessionIds.add(sessionId)
@@ -780,6 +827,7 @@ export function subscribeMessageWindow(sessionId: string, listener: () => void):
 }
 
 export function clearMessageWindow(sessionId: string): void {
+    clearPendingForcedLatestRefresh(sessionId)
     clearPendingVisibilityCache(sessionId)
     clearPersistedState(sessionId)
     const previous = states.get(sessionId)
@@ -819,9 +867,16 @@ export function seedMessageWindowFromSession(fromSessionId: string, toSessionId:
     })
 }
 
-export async function fetchLatestMessages(api: ApiClient, sessionId: string): Promise<void> {
+export async function fetchLatestMessages(
+    api: ApiClient,
+    sessionId: string,
+    options: FetchLatestMessagesOptions = {}
+): Promise<void> {
     const initial = getState(sessionId)
     if (initial.isLoading) {
+        if (options.force) {
+            return queueForcedLatestRefresh(api, sessionId)
+        }
         return
     }
     // Snapshot the queued rows that exist now, before awaiting the HTTP fetch.
@@ -888,6 +943,15 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
         }
         const message = error instanceof Error ? error.message : 'Failed to load messages'
         updateStateForGeneration(sessionId, 'latest', generation, (prev) => buildState(prev, { isLoading: false, warning: message }))
+    } finally {
+        const refresh = pendingForcedLatestRefreshes.get(sessionId)
+        if (!refresh) {
+            return
+        }
+        pendingForcedLatestRefreshes.delete(sessionId)
+        void fetchLatestMessages(refresh.api, sessionId).finally(() => {
+            resolveForcedLatestRefresh(refresh)
+        })
     }
 }
 

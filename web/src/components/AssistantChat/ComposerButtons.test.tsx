@@ -15,7 +15,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
     }
 })
 
-import { ComposerButtons, UnifiedButton, getComposerOptionalControlsVisibility, getRemoteServerButtonAlias } from './ComposerButtons'
+import { ComposerButtons, UnifiedButton, computeToolbarMenuPlacement, getComposerOptionalControlsVisibility, getRemoteServerButtonAlias } from './ComposerButtons'
 
 function renderInProviders(ui: ReactElement) {
     return render(<I18nProvider>{ui}</I18nProvider>)
@@ -197,6 +197,39 @@ describe('getRemoteServerButtonAlias', () => {
      */
     it('falls back to name when alias is blank', () => {
         expect(getRemoteServerButtonAlias({ alias: '   ', name: 'Production Server' })).toBe('Production Server')
+    })
+})
+
+describe('computeToolbarMenuPlacement', () => {
+    it('caps a keyboard-open menu to the tappable visual viewport above its toolbar', () => {
+        const placement = computeToolbarMenuPlacement({
+            anchor: { top: 246, right: 382, bottom: 288, left: 340, width: 42 },
+            panelWidth: 210,
+            panelHeight: 320,
+            viewport: { width: 390, height: 300 },
+            align: 'right'
+        })
+
+        expect(placement.placement).toBe('above')
+        expect(placement.top).toBe(8)
+        expect(placement.maxHeight).toBe(230)
+        expect(placement.top + placement.maxHeight).toBeLessThanOrEqual(238)
+    })
+
+    it('uses the visible viewport when the keyboard leaves no usable adjacent space', () => {
+        const placement = computeToolbarMenuPlacement({
+            anchor: { top: 50, right: 302, bottom: 92, left: 260, width: 42 },
+            panelWidth: 340,
+            panelHeight: 320,
+            viewport: { width: 320, height: 130 },
+            align: 'right'
+        })
+
+        expect(placement.placement).toBe('viewport')
+        expect(placement.top).toBe(8)
+        expect(placement.left).toBe(8)
+        expect(placement.width).toBe(304)
+        expect(placement.maxHeight).toBe(114)
     })
 })
 

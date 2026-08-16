@@ -15,7 +15,7 @@ import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
-import { clearMessageWindow, fetchLatestMessages } from '@/lib/message-window-store'
+import { clearMessageWindow, fetchLatestMessages, ingestIncomingMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
@@ -201,6 +201,16 @@ function AppInner() {
         void run()
     }, [api, isPushSupported, pushPermission, requestPermission, subscribe, token])
 
+    const reconcileSelectedSessionMessages = useCallback((): Promise<void> => {
+        if (!api || !selectedSessionId) {
+            return Promise.resolve()
+        }
+        // SSE has no replay cursor. A connection or foreground transition can
+        // therefore have a gap even when EventSource reports itself as open.
+        // `force` queues one follow-up read behind an in-flight initial load.
+        return fetchLatestMessages(api, selectedSessionId, { force: true })
+    }, [api, selectedSessionId])
+
     const handleSseConnect = useCallback(() => {
         // Clear disconnected state on successful connection
         setSseDisconnected(false)
@@ -227,9 +237,7 @@ function AppInner() {
             // cached data on remount.  See tiann/hapi#884.
             queryClient.invalidateQueries({ queryKey: ['session'] })
         ]
-        const refreshMessages = (selectedSessionId && api)
-            ? fetchLatestMessages(api, selectedSessionId)
-            : Promise.resolve()
+        const refreshMessages = reconcileSelectedSessionMessages()
         Promise.all([...invalidations, refreshMessages])
             .catch((error) => {
                 console.error('Failed to invalidate queries on SSE connect:', error)
@@ -240,7 +248,7 @@ function AppInner() {
                     endSync()
                 }
             })
-    }, [api, queryClient, selectedSessionId, startSync, endSync])
+    }, [queryClient, reconcileSelectedSessionMessages, startSync, endSync])
 
     const handleSseDisconnect = useCallback((reason: string) => {
         // Only show reconnecting banner if we've already connected once
@@ -258,8 +266,23 @@ function AppInner() {
             return
         }
         clearMessageWindow(event.sessionId)
-        void fetchLatestMessages(api, event.sessionId)
-    }, [api, selectedSessionId])
+        void reconcileSelectedSessionMessages()
+    }, [api, reconcileSelectedSessionMessages, selectedSessionId])
+
+    const handleGlobalSseEvent = useCallback((event: SyncEvent) => {
+        // The all-session stream stays connected while the selected-session
+        // stream is being opened or recovered. Feed its copy of a visible
+        // message into the window as a lossless fallback; merge is idempotent
+        // when the session stream also delivers the same event.
+        if (event.type === 'message-received' && event.sessionId === selectedSessionId) {
+            ingestIncomingMessages(event.sessionId, [event.message])
+        }
+        handleSseEvent(event)
+    }, [handleSseEvent, selectedSessionId])
+
+    const handleSessionSseConnect = useCallback(() => {
+        void reconcileSelectedSessionMessages()
+    }, [reconcileSelectedSessionMessages])
     const translateIncomingToast = useCallback((title: string, body: string): { title: string; body: string } => {
         const normalizedTitle = title.trim()
         const normalizedBody = body.trim()
@@ -329,7 +352,7 @@ function AppInner() {
         scope: 'global',
         onConnect: handleSseConnect,
         onDisconnect: handleSseDisconnect,
-        onEvent: () => {},
+        onEvent: handleGlobalSseEvent,
         onToast: handleToast
     })
 
@@ -339,8 +362,23 @@ function AppInner() {
         baseUrl,
         subscription: sessionEventSubscription ?? undefined,
         scope: 'full',
+        onConnect: handleSessionSseConnect,
         onEvent: handleSseEvent
     })
+
+    useEffect(() => {
+        const onVisibilityChange = () => {
+            if (document.visibilityState !== 'visible') {
+                return
+            }
+            void reconcileSelectedSessionMessages()
+        }
+
+        document.addEventListener('visibilitychange', onVisibilityChange)
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibilityChange)
+        }
+    }, [reconcileSelectedSessionMessages])
 
     useVisibilityReporter({
         api,

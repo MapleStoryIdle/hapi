@@ -452,7 +452,98 @@ function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max)
 }
 
-function ToolbarMenu(props: {
+type ToolbarMenuRect = Pick<DOMRect, 'top' | 'right' | 'bottom' | 'left' | 'width'>
+
+export type ToolbarMenuViewport = {
+    width: number
+    height: number
+    offsetTop?: number
+    offsetLeft?: number
+}
+
+export type ToolbarMenuPlacement = {
+    top: number
+    left: number
+    width: number
+    maxHeight: number
+    arrowLeft: number
+    placement: 'above' | 'below' | 'viewport'
+}
+
+/**
+ * Keep every composer menu inside the visual viewport. This matters while an
+ * iOS keyboard is open: the layout viewport can remain tall, while only the
+ * visual viewport is actually tappable.
+ */
+export function computeToolbarMenuPlacement(params: {
+    anchor: ToolbarMenuRect
+    panelWidth: number
+    panelHeight: number
+    viewport: ToolbarMenuViewport
+    align?: 'left' | 'right'
+    margin?: number
+    gap?: number
+}): ToolbarMenuPlacement {
+    const margin = params.margin ?? 8
+    const gap = params.gap ?? 8
+    const viewportLeft = params.viewport.offsetLeft ?? 0
+    const viewportTop = params.viewport.offsetTop ?? 0
+    const viewportRight = viewportLeft + params.viewport.width
+    const viewportBottom = viewportTop + params.viewport.height
+    const availableWidth = Math.max(1, params.viewport.width - margin * 2)
+    const width = Math.min(params.panelWidth, availableWidth)
+    const minLeft = viewportLeft + margin
+    const maxLeft = viewportRight - margin - width
+    const preferredLeft = params.align === 'right'
+        ? params.anchor.right - width
+        : params.anchor.left
+    const left = clamp(preferredLeft, minLeft, Math.max(minLeft, maxLeft))
+    const spaceAbove = Math.max(0, params.anchor.top - gap - (viewportTop + margin))
+    const spaceBelow = Math.max(0, viewportBottom - margin - (params.anchor.bottom + gap))
+    const viewportMaxHeight = Math.max(0, params.viewport.height - margin * 2)
+    const smallestUsableHeight = Math.min(params.panelHeight, Math.min(120, viewportMaxHeight))
+    const largestAdjacentSpace = Math.max(spaceAbove, spaceBelow)
+    const arrowLeft = clamp(
+        params.anchor.left + params.anchor.width / 2 - left - 6,
+        20,
+        Math.max(20, width - 20)
+    )
+
+    // When the keyboard leaves too little room above or below its toolbar,
+    // use the entire visible viewport instead of clipping a partially usable
+    // menu behind the keyboard. It remains scrollable and every action stays
+    // reachable without dismissing the keyboard.
+    if (largestAdjacentSpace < smallestUsableHeight && viewportMaxHeight > largestAdjacentSpace) {
+        const maxHeight = Math.min(params.panelHeight, viewportMaxHeight)
+        return {
+            top: viewportTop + margin + Math.max(0, (viewportMaxHeight - maxHeight) / 2),
+            left,
+            width,
+            maxHeight,
+            arrowLeft,
+            placement: 'viewport'
+        }
+    }
+
+    const placement = params.panelHeight <= spaceAbove
+        || (params.panelHeight > spaceBelow && spaceAbove >= spaceBelow)
+        ? 'above'
+        : 'below'
+    const maxHeight = Math.min(params.panelHeight, placement === 'above' ? spaceAbove : spaceBelow)
+
+    return {
+        top: placement === 'above'
+            ? params.anchor.top - gap - maxHeight
+            : params.anchor.bottom + gap,
+        left,
+        width,
+        maxHeight,
+        arrowLeft,
+        placement
+    }
+}
+
+export function ToolbarMenu(props: {
     anchorRef: RefObject<HTMLElement | null>
     align?: 'left' | 'right'
     width?: number
@@ -463,16 +554,12 @@ function ToolbarMenu(props: {
     children: ReactNode
 }) {
     const panelRef = useRef<HTMLDivElement>(null)
-    const [position, setPosition] = useState<{
-        top: number
-        left: number
-        maxHeight: number
-        arrowLeft: number
+    const [position, setPosition] = useState<(ToolbarMenuPlacement & {
         enterY: string
         bounceY: string
         settleY: string
         transformOrigin: string
-    } | null>(null)
+    }) | null>(null)
     const [entered, setEntered] = useState(false)
 
     useLayoutEffect(() => {
@@ -481,36 +568,30 @@ function ToolbarMenu(props: {
             if (!anchor) return
             const panel = panelRef.current
             const viewport = window.visualViewport
-            const viewportLeft = viewport?.offsetLeft ?? 0
-            const viewportTop = viewport?.offsetTop ?? 0
-            const viewportWidth = viewport?.width ?? window.innerWidth
-            const viewportHeight = viewport?.height ?? window.innerHeight
-            const margin = 8
-            const gap = 8
             const panelWidth = props.width ?? panel?.offsetWidth ?? 220
             const fullHeight = Math.min(panel?.scrollHeight ?? props.maxHeight ?? 260, props.maxHeight ?? 260)
             const rect = anchor.getBoundingClientRect()
-            const minLeft = viewportLeft + margin
-            const maxLeft = viewportLeft + viewportWidth - panelWidth - margin
-            const preferredLeft = props.align === 'right' ? rect.right - panelWidth : rect.left
-            const left = clamp(preferredLeft, minLeft, Math.max(minLeft, maxLeft))
-            const aboveTop = rect.top - gap - fullHeight
-            const belowTop = rect.bottom + gap
-            const opensAbove = aboveTop >= viewportTop + margin
-            const top = opensAbove
-                ? aboveTop
-                : clamp(belowTop, viewportTop + margin, viewportTop + viewportHeight - margin - fullHeight)
-            const maxHeight = Math.max(120, Math.min(fullHeight, viewportTop + viewportHeight - margin - top))
-            const arrowLeft = clamp(rect.left + rect.width / 2 - left - 6, 20, panelWidth - 20)
+            const placement = computeToolbarMenuPlacement({
+                anchor: rect,
+                panelWidth,
+                panelHeight: fullHeight,
+                viewport: {
+                    width: viewport?.width ?? window.innerWidth,
+                    height: viewport?.height ?? window.innerHeight,
+                    offsetLeft: viewport?.offsetLeft ?? 0,
+                    offsetTop: viewport?.offsetTop ?? 0
+                },
+                align: props.align
+            })
+            const opensAbove = placement.placement === 'above'
             setPosition({
-                top,
-                left,
-                maxHeight,
-                arrowLeft,
-                enterY: opensAbove ? '8px' : '-8px',
-                bounceY: opensAbove ? '-3px' : '3px',
-                settleY: opensAbove ? '1px' : '-1px',
-                transformOrigin: `${arrowLeft + 6}px ${opensAbove ? 'bottom' : 'top'}`
+                ...placement,
+                enterY: opensAbove ? '8px' : placement.placement === 'below' ? '-8px' : '4px',
+                bounceY: opensAbove ? '-3px' : placement.placement === 'below' ? '3px' : '-2px',
+                settleY: opensAbove ? '1px' : placement.placement === 'below' ? '-1px' : '0px',
+                transformOrigin: placement.placement === 'viewport'
+                    ? 'center center'
+                    : `${placement.arrowLeft + 6}px ${opensAbove ? 'bottom' : 'top'}`
             })
         }
 
@@ -525,7 +606,7 @@ function ToolbarMenu(props: {
             window.visualViewport?.removeEventListener('resize', measure)
             window.visualViewport?.removeEventListener('scroll', measure)
         }
-    }, [props.anchorRef, props.align, props.width, props.maxHeight])
+    }, [props.anchorRef, props.align, props.width, props.maxHeight, props.children])
 
     const isPositioned = position !== null
 
@@ -566,7 +647,7 @@ function ToolbarMenu(props: {
                     position: 'fixed',
                     top: position.top,
                     left: position.left,
-                    width: props.width ?? 220,
+                    width: position.width,
                     maxHeight: position.maxHeight,
                     transformOrigin: position.transformOrigin,
                     opacity: entered ? 1 : 0,
@@ -576,7 +657,12 @@ function ToolbarMenu(props: {
                     '--hapi-menu-bounce-y': position.bounceY,
                     '--hapi-menu-settle-y': position.settleY
                 } as CSSProperties
-                : { position: 'fixed', visibility: 'hidden', width: props.width ?? 220 }
+                : {
+                    position: 'fixed',
+                    visibility: 'hidden',
+                    width: props.width ?? 220,
+                    maxWidth: 'calc(100vw - 16px)'
+                }
             }
             className={
                 props.surface === 'permission'
@@ -585,7 +671,7 @@ function ToolbarMenu(props: {
             }
             onPointerDown={(event) => event.stopPropagation()}
         >
-            {props.showArrow && position ? (
+            {props.showArrow && position && position.placement !== 'viewport' ? (
                 <div
                     className="pointer-events-none absolute -bottom-1.5 h-3 w-3 rotate-45 border-b border-r border-[var(--app-divider)] bg-[var(--app-bg)]"
                     style={{ left: position.arrowLeft }}
@@ -972,6 +1058,7 @@ export function ComposerButtons(props: {
     controlsDisabled: boolean
     showSettingsButton: boolean
     onSettingsToggle: () => void
+    settingsButtonRef?: RefObject<HTMLButtonElement | null>
     settingsLabel?: string
     settingsModelLabel?: string
     settingsReasoningLabel?: string | null
@@ -1022,6 +1109,7 @@ export function ComposerButtons(props: {
     hasAttachments?: boolean
     // Pi-specific toolbar buttons
     piModelLabel?: string
+    piModelButtonRef?: RefObject<HTMLButtonElement | null>
     piModelDisabled?: boolean
     piModelOpen?: boolean
     onPiModelToggle?: () => void
@@ -1837,6 +1925,7 @@ export function ComposerButtons(props: {
                 <div ref={requiredControlsRef} className="flex shrink-0 items-center gap-0.5">
                     {props.piModelLabel ? (
                         <button
+                            ref={props.piModelButtonRef}
                             type="button"
                             aria-label={props.piModelLabel}
                             title={props.piModelLabel}
@@ -1855,6 +1944,7 @@ export function ComposerButtons(props: {
 
                     {props.showSettingsButton ? (
                         <button
+                            ref={props.settingsButtonRef}
                             type="button"
                             aria-label={t('composer.settings')}
                             title={t('composer.settings')}

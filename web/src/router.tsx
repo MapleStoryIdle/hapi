@@ -1153,7 +1153,6 @@ function classifySendError(
 function SessionPage() {
     const { api } = useAppContext()
     const { t } = useTranslation()
-    const defaultGoBack = useAppGoBack()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
     const { addToast } = useToast()
@@ -1422,12 +1421,16 @@ function SessionPage() {
         if (fromSessionId && fromSessionId !== sessionId) {
             navigate({
                 to: '/sessions/$sessionId',
-                params: { sessionId: fromSessionId }
+                params: { sessionId: fromSessionId },
+                search: {},
             })
             return
         }
-        defaultGoBack()
-    }, [defaultGoBack, fromSessionId, navigate, sessionId])
+
+        // The detail page has one unambiguous parent. Avoid deriving a parent
+        // from the restored PWA URL; that can leave the route unchanged.
+        navigate({ to: '/sessions' })
+    }, [fromSessionId, navigate, sessionId])
 
     if (!session) {
         if (sessionError) {

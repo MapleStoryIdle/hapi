@@ -239,7 +239,15 @@ function isInteractiveToolBlock(block: ToolCallBlock): boolean {
         || isRequestUserInputToolName(block.tool.name)
 }
 
+function hasMcpInvocationTitle(block: ToolCallBlock): boolean {
+    return block.tool.name.startsWith('mcp__')
+        && Boolean(getInputStringAny(block.tool.input, ['title'])?.trim())
+}
+
 export function isEligibleForToolGrouping(block: ToolCallBlock): boolean {
+    // A title is an MCP client's explicit, user-facing label for this action.
+    // Keep it visible instead of collapsing it into a generic tool activity row.
+    if (hasMcpInvocationTitle(block)) return false
     if (isSubagentToolName(block.tool.name)) return false
     if (PLAN_TOOL_NAMES.has(block.tool.name)) return false
     if (MILESTONE_TOOL_NAMES.has(block.tool.name)) return false

@@ -4,6 +4,7 @@ import {
     BOTTOM_OVERLAY_INSET_PX,
     buildGoalStateMessages,
     canCreateSideSessionFromSession,
+    getBottomOverlayThreadInset,
     getScrollButtonBottomInset,
     isScratchlistHotkeyBlockedTarget,
     isScratchlistToggleHotkey,
@@ -98,6 +99,22 @@ describe('getScrollButtonBottomInset', () => {
 
     it('falls back to the full bottom overlay height before composer measurement', () => {
         expect(getScrollButtonBottomInset(0, 320, BOTTOM_OVERLAY_INSET_PX)).toBe(320 + BOTTOM_OVERLAY_INSET_PX)
+    })
+
+    it('aligns controls with the stable overlay when the floating status pill is visible', () => {
+        expect(getScrollButtonBottomInset(128, 320, BOTTOM_OVERLAY_INSET_PX, true)).toBe(
+            320 + BOTTOM_OVERLAY_INSET_PX + BOTTOM_FLOATING_CONTROL_GAP_PX
+        )
+    })
+})
+
+describe('getBottomOverlayThreadInset', () => {
+    it('reserves a floating status pill without changing the stable overlay height', () => {
+        expect(getBottomOverlayThreadInset(104, 34, true)).toBe(146)
+    })
+
+    it('does not reserve an absent status pill', () => {
+        expect(getBottomOverlayThreadInset(104, 34, false)).toBe(104)
     })
 })
 

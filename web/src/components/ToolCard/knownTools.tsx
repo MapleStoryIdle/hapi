@@ -54,6 +54,11 @@ function formatMCPTitle(toolName: string): string {
     return `MCP: ${snakeToTitleWithSpaces(withoutPrefix)}`
 }
 
+function getMcpInvocationTitle(input: unknown): string | null {
+    const title = getInputStringAny(input, ['title'])?.trim()
+    return title || null
+}
+
 type ToolOpts = {
     toolName: string
     input: unknown
@@ -540,10 +545,15 @@ export function getToolPresentation(
     t?: Translator
 ): ToolPresentation {
     if (opts.toolName.startsWith('mcp__')) {
+        const mcpTitle = formatMCPTitle(opts.toolName)
+        const invocationTitle = getMcpInvocationTitle(opts.input)
         return {
             icon: <PuzzleIcon className={DEFAULT_ICON_CLASS} />,
-            title: formatMCPTitle(opts.toolName),
-            subtitle: null,
+            // MCP clients commonly provide a short operator-facing title
+            // alongside their raw arguments. Make it the visible action label
+            // while retaining the MCP identity as the secondary detail.
+            title: invocationTitle ?? mcpTitle,
+            subtitle: invocationTitle ? mcpTitle : null,
             minimal: true
         }
     }

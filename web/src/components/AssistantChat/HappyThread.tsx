@@ -18,6 +18,7 @@ import {
 } from '@/components/ToolCard/toolGroupExpansion'
 import { useTranslation } from '@/lib/use-translation'
 import { cn } from '@/lib/utils'
+import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
 import { ArrowDownIcon, CloseIcon } from '@/components/icons'
 
 type ScrollAnchor = {
@@ -109,21 +110,30 @@ export function shouldEnableTopSentinelAutoLoad(matchMedia: ((query: string) => 
 }
 
 /**
- * The thread viewport itself always reaches both physical viewport edges.
- * These paddings apply only at the two natural scroll endpoints: the first
- * message clears the floating header, and the latest message clears the
- * bottom overlay. Every intermediate message can still scroll beneath those
- * overlays.
+ * The transparent header must not turn into a message overlay. Move
+ * the scroll viewport itself below the safe area + measured header shell so
+ * no message can enter that zone at any scroll position.
  */
-export function getThreadContentPadding(props: {
+export function getThreadViewportPadding(props: {
     topInset?: number
-    bottomInset?: number
-    bottomSafeAreaInset?: boolean
-}): Pick<CSSProperties, 'paddingTop' | 'paddingBottom'> {
+}): Pick<CSSProperties, 'paddingTop'> {
     return {
         paddingTop: props.topInset !== undefined
-            ? `calc(var(--app-safe-area-top) + ${props.topInset + 12}px)`
-            : undefined,
+            ? `calc(var(${MOBILE_LAYOUT_CONTRACT.thread.topSafeAreaVariable}) + ${props.topInset}px)`
+            : undefined
+    }
+}
+
+/**
+ * The content keeps only its natural endpoint spacing. Top clearance belongs
+ * to the non-scrolling thread root; the bottom keeps reserving the measured
+ * composer overlay so the latest message remains visible.
+ */
+export function getThreadContentPadding(props: {
+    bottomInset?: number
+    bottomSafeAreaInset?: boolean
+}): Pick<CSSProperties, 'paddingBottom'> {
+    return {
         paddingBottom: props.bottomInset
             ? props.bottomSafeAreaInset
                 ? `calc(${props.bottomInset + 12}px + var(--app-safe-area-bottom))`
@@ -1359,7 +1369,12 @@ export function HappyThread(props: {
             setToolGroupExpansionState,
             toolGroupRunActive: props.toolGroupRunActive
         }}>
-            <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col relative">
+            <ThreadPrimitive.Root
+                className="relative flex min-h-0 flex-1 flex-col"
+                style={getThreadViewportPadding(props)}
+                data-testid={MOBILE_LAYOUT_CONTRACT.thread.testId}
+                data-mobile-layout-contract={MOBILE_LAYOUT_CONTRACT.thread.state}
+            >
                 <ThreadPrimitive.Viewport
                     asChild
                     autoScroll={false}

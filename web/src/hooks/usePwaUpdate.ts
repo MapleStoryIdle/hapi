@@ -3,14 +3,23 @@ import { registerSW } from 'virtual:pwa-register'
 
 export const PWA_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
 export const PWA_UPDATE_RELOAD_FALLBACK_MS = 2000
+export const PWA_FORCE_RELOAD_QUERY_PARAM = '__hapi_force_refresh'
+
+type PwaReloadOptions = {
+    reloadPage?: () => void
+    setTimeoutFn?: typeof setTimeout
+    clearTimeoutFn?: typeof clearTimeout
+}
+
+export function buildPwaForceReloadUrl(url: string, timestamp = Date.now()): string {
+    const forceReloadUrl = new URL(url)
+    forceReloadUrl.searchParams.set(PWA_FORCE_RELOAD_QUERY_PARAM, String(timestamp))
+    return forceReloadUrl.toString()
+}
 
 export async function requestPwaUpdateReload(
     updateSW: ((reloadPage?: boolean) => Promise<void>) | null | undefined,
-    options: {
-        reloadPage?: () => void
-        setTimeoutFn?: typeof setTimeout
-        clearTimeoutFn?: typeof clearTimeout
-    } = {},
+    options: PwaReloadOptions = {},
 ): Promise<void> {
     const reloadPage = options.reloadPage ?? (() => window.location.reload())
     const setTimeoutFn = options.setTimeoutFn ?? setTimeout
@@ -55,6 +64,25 @@ export async function requestPwaUpdateReload(
         navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange)
         doReload()
     }, PWA_UPDATE_RELOAD_FALLBACK_MS)
+}
+
+export async function requestPwaForceReload(
+    updateSW: ((reloadPage?: boolean) => Promise<void>) | null | undefined,
+    options: PwaReloadOptions = {},
+): Promise<void> {
+    try {
+        const registration = await navigator.serviceWorker?.getRegistration?.()
+        await registration?.update()
+    } catch (error) {
+        console.warn('PWA force update check failed', error)
+    }
+
+    await requestPwaUpdateReload(updateSW, {
+        ...options,
+        reloadPage: options.reloadPage ?? (() => {
+            window.location.replace(buildPwaForceReloadUrl(window.location.href))
+        }),
+    })
 }
 
 export function setupRegistrationUpdateChecks(
@@ -123,5 +151,9 @@ export function usePwaUpdate() {
         void requestPwaUpdateReload(updateSWRef.current)
     }, [])
 
-    return { needRefresh, reload }
+    const forceReload = useCallback(() => {
+        void requestPwaForceReload(updateSWRef.current)
+    }, [])
+
+    return { needRefresh, reload, forceReload }
 }

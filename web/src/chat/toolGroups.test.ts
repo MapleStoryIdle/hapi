@@ -137,6 +137,20 @@ describe('isEligibleForToolGrouping', () => {
             }
         }))).toBe(false)
     })
+
+    it('keeps titled MCP calls standalone so their operator title stays visible', () => {
+        expect(isEligibleForToolGrouping(makeToolBlock(
+            'mcp-titled-1',
+            'mcp__node_repl__js',
+            { title: '查看本地会话', code: 'nodeRepl.write("ok")' }
+        ))).toBe(false)
+
+        expect(isEligibleForToolGrouping(makeToolBlock(
+            'mcp-untitled-1',
+            'mcp__node_repl__js',
+            { code: 'nodeRepl.write("ok")' }
+        ))).toBe(true)
+    })
 })
 
 describe('buildVisibleChatBlocks', () => {
@@ -221,6 +235,20 @@ describe('buildVisibleChatBlocks', () => {
         expect(visible[0].summary.runningCount).toBe(1)
         expect(visible[2].tools).toEqual([completedTool])
         expect(visible[2].summary.totalTools).toBe(1)
+    })
+
+    it('does not group titled MCP calls in compact display mode', () => {
+        const titledMcp = makeToolBlock(
+            'mcp-titled-1',
+            'mcp__node_repl__js',
+            { title: '查看本地会话', code: 'nodeRepl.write("ok")' }
+        )
+        const visible = buildVisibleChatBlocks([titledMcp], {
+            hasMoreMessages: false,
+            terminalToolDisplayMode: 'compact'
+        })
+
+        expect(visible).toEqual([titledMcp])
     })
 
     it('keeps interactive cards standalone and uses them as hard boundaries', () => {

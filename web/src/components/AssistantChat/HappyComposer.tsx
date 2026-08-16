@@ -34,7 +34,7 @@ import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { shouldShowComposerStatusBar, StatusBar } from '@/components/AssistantChat/StatusBar'
-import { ComposerButtons, GoalModeIcon, PlanModeIcon, UnifiedButton, getRemoteServerButtonAlias, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
+import { ComposerButtons, GoalModeIcon, PlanModeIcon, ToolbarMenu, UnifiedButton, getRemoteServerButtonAlias, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
 import { ServerIcon, useRemoteServerContextSelection } from '@/components/RemoteServers'
@@ -331,7 +331,6 @@ export function HappyComposer(props: {
     }
     activeSideSessions?: ActiveSideSessionChip[]
     onSelectSideSession?: (sessionId: string) => void
-    compactTopAnchor?: boolean
 }) {
     const { t, locale } = useTranslation()
     const {
@@ -388,8 +387,7 @@ export function HappyComposer(props: {
         showStatusBar = true,
         remoteServerContext,
         activeSideSessions = [],
-        onSelectSideSession,
-        compactTopAnchor = false
+        onSelectSideSession
     } = props
 
     // Use ?? so missing values fall back to default (destructuring defaults only handle undefined)
@@ -457,6 +455,9 @@ export function HappyComposer(props: {
     const composerRootRef = useRef<HTMLDivElement>(null)
     const composerBlurFrameRef = useRef<number | null>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const settingsButtonRef = useRef<HTMLButtonElement>(null)
+    const piModelButtonRef = useRef<HTMLButtonElement>(null)
+    const sideSessionButtonRef = useRef<HTMLButtonElement>(null)
     const prevControlledByUser = useRef(controlledByUser)
     const skillsByName = useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills])
     const { selected: selectedRemoteServer } = useRemoteServerContextSelection(
@@ -532,7 +533,7 @@ export function HappyComposer(props: {
     // controls above the iOS home indicator, with a small visual breathing
     // room, while the thread itself remains edge-to-edge.
     const bottomPaddingClass = composerExpanded || hasText
-        ? 'pb-[calc(0.75rem+var(--app-composer-safe-area-bottom)+var(--app-composer-expanded-keyboard-offset))]'
+        ? 'pb-[calc(var(--app-composer-expanded-bottom-gap)+var(--app-composer-safe-area-bottom)+var(--app-composer-expanded-keyboard-offset))]'
         : 'pb-[calc(1.25rem+var(--app-composer-safe-area-bottom))]'
     const activeWord = useActiveWord(inputState.text, inputState.selection, autocompletePrefixes)
     const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions] = useActiveSuggestions(
@@ -1128,10 +1129,6 @@ export function HappyComposer(props: {
         && !hasAttachments
         && pendingSchedule === null
     )
-    // Keep the anchored composer slot stable during and after expansion.
-    // Dropping this reserved height after the transition causes a second
-    // layout pass, which shows up as a small upward twitch on mobile.
-    const reserveAnchoredComposerHeight = compactTopAnchor
     const showPlanSelectionChip = Boolean(showPlanModeTool && collaborationMode === 'plan')
     const showGoalSelectionChip = Boolean(showGoalModeTool && threadGoal?.status === 'active')
     const showSideSessionChip = Boolean(onSelectSideSession && activeSideSessions.length > 0)
@@ -1189,12 +1186,6 @@ export function HappyComposer(props: {
             }
         }
     }, [])
-    const reservedComposerHeightClass = reserveAnchoredComposerHeight
-        ? hasSelectionChips
-            ? 'h-[150px]'
-            : 'h-[120px]'
-        : ''
-    const composerInputMaxRows = compactTopAnchor ? 2 : 6
     // Keep one surface mounted and morph its grid tracks instead of swapping
     // a pill for a panel. This is the web equivalent of a container transform:
     // the input remains the visual anchor while the toolbar fades in after the
@@ -1339,7 +1330,14 @@ export function HappyComposer(props: {
             if (showPiModelPanel && piModels && piModels.length > 0) {
                 const currentPiModel = selectedPiModel ?? null
                 panels.push(
-                    <div key="model" className="absolute bottom-[100%] mb-2 left-2 w-64">
+                    <ToolbarMenu
+                        key="model"
+                        anchorRef={piModelButtonRef}
+                        align="right"
+                        width={256}
+                        maxHeight={360}
+                        onClose={closeAllPanels}
+                    >
                         <PiModelPanel
                             models={piModels}
                             currentModel={currentPiModel ? { provider: currentPiModel.provider, modelId: currentPiModel.modelId } : null}
@@ -1348,15 +1346,23 @@ export function HappyComposer(props: {
                                 handleModelChange({ provider: piModel.provider, modelId: piModel.modelId })
                             }}
                             onClose={closeAllPanels}
+                            embedded
                         />
-                    </div>
+                    </ToolbarMenu>
                 )
             }
 
             // Thinking level panel
             if (showPiThinkingPanel && selectedPiModel?.reasoning !== false) {
                 panels.push(
-                    <div key="thinking" className="absolute bottom-[100%] mb-2 left-2 w-48">
+                    <ToolbarMenu
+                        key="thinking"
+                        anchorRef={piModelButtonRef}
+                        align="right"
+                        width={192}
+                        maxHeight={240}
+                        onClose={closeAllPanels}
+                    >
                         <PiThinkingLevelPanel
                             currentLevel={effort}
                             reasoning={selectedPiModel?.reasoning}
@@ -1364,8 +1370,9 @@ export function HappyComposer(props: {
                             controlsDisabled={controlsDisabled}
                             onSelect={(level) => handleEffortChange(level)}
                             onClose={closeAllPanels}
+                            embedded
                         />
-                    </div>
+                    </ToolbarMenu>
                 )
             }
 
@@ -1426,8 +1433,14 @@ export function HappyComposer(props: {
         if (showSettings && (showCollaborationSettings || showModelSettings || showModelEffortSettings || showModelReasoningEffortSettings || showEffortSettings || showFastModeSettings)) {
             if (settingsPanel === 'model') {
                 return (
-                    <div data-composer-settings-menu className="absolute bottom-[100%] right-0 mb-2 w-[210px]">
-                        <FloatingOverlay maxHeight={320}>
+                    <div data-composer-settings-menu>
+                        <ToolbarMenu
+                            anchorRef={settingsButtonRef}
+                            align="right"
+                            width={210}
+                            maxHeight={320}
+                            onClose={() => setShowSettings(false)}
+                        >
                             {renderBackRow(t('misc.model'))}
                             {sectionDivider}
                             {showModelSettings ? (
@@ -1468,15 +1481,21 @@ export function HappyComposer(props: {
                                     () => handleModelEffortChange(option.value)
                                 ))
                             ) : null}
-                        </FloatingOverlay>
+                        </ToolbarMenu>
                     </div>
                 )
             }
 
             if (settingsPanel === 'speed') {
                 return (
-                    <div data-composer-settings-menu className="absolute bottom-[100%] right-0 mb-2 w-[210px]">
-                        <FloatingOverlay maxHeight={240}>
+                    <div data-composer-settings-menu>
+                        <ToolbarMenu
+                            anchorRef={settingsButtonRef}
+                            align="right"
+                            width={210}
+                            maxHeight={240}
+                            onClose={() => setShowSettings(false)}
+                        >
                             {renderBackRow(t('misc.speed'))}
                             {sectionDivider}
                             {fastModeOptions.map((option) => renderMenuOption(
@@ -1485,14 +1504,20 @@ export function HappyComposer(props: {
                                 option.label,
                                 () => handleServiceTierChange(option.value)
                             ))}
-                        </FloatingOverlay>
+                        </ToolbarMenu>
                     </div>
                 )
             }
 
             return (
-                <div data-composer-settings-menu className="absolute bottom-[100%] right-0 mb-2 w-[210px]">
-                    <FloatingOverlay maxHeight={320}>
+                <div data-composer-settings-menu>
+                    <ToolbarMenu
+                        anchorRef={settingsButtonRef}
+                        align="right"
+                        width={210}
+                        maxHeight={320}
+                        onClose={() => setShowSettings(false)}
+                    >
                         {showModelReasoningEffortSettings ? (
                             <div className="py-2">
                                 <div className="px-3 pb-1 text-xs font-semibold text-[var(--app-hint)]">
@@ -1547,7 +1572,7 @@ export function HappyComposer(props: {
                                 </div>
                             </>
                         ) : null}
-                    </FloatingOverlay>
+                    </ToolbarMenu>
                 </div>
             )
         }
@@ -1617,7 +1642,7 @@ export function HappyComposer(props: {
 
     return (
         <div
-            className={`px-3 ${bottomPaddingClass} pt-2 transition-[padding] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${reservedComposerHeightClass}`}
+            className={`px-3 ${bottomPaddingClass} pt-2 transition-[padding] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none`}
             data-testid="happy-composer"
             data-mobile-layout-state={composerCompact ? 'compact' : 'expanded'}
         >
@@ -1723,6 +1748,7 @@ export function HappyComposer(props: {
 
                             {showSideSessionChip ? (
                                 <button
+                                    ref={sideSessionButtonRef}
                                     type="button"
                                     data-testid="composer-active-side-session"
                                     aria-label={activeSideSessions.length === 1 && firstActiveSideSession ? `打开侧边会话 ${firstActiveSideSession.title}` : '选择侧边会话'}
@@ -1752,22 +1778,30 @@ export function HappyComposer(props: {
                     ) : null}
 
                     {!composerCompact && showSideSessionMenu && activeSideSessions.length > 1 ? (
-                        <div className="absolute bottom-[calc(100%_-_2rem)] left-1 z-30 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg">
-                            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
-                                侧边会话
+                        <ToolbarMenu
+                            anchorRef={sideSessionButtonRef}
+                            align="left"
+                            width={288}
+                            maxHeight={320}
+                            onClose={() => setShowSideSessionMenu(false)}
+                        >
+                            <div className="p-1">
+                                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                                    侧边会话
+                                </div>
+                                {activeSideSessions.map((sideSession) => (
+                                    <button
+                                        key={sideSession.id}
+                                        type="button"
+                                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                        onClick={() => handleSideSessionSelect(sideSession.id)}
+                                    >
+                                        <SideSessionChipIcon />
+                                        <span className="min-w-0 flex-1 truncate">{sideSession.title}</span>
+                                    </button>
+                                ))}
                             </div>
-                            {activeSideSessions.map((sideSession) => (
-                                <button
-                                    key={sideSession.id}
-                                    type="button"
-                                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)]"
-                                    onClick={() => handleSideSessionSelect(sideSession.id)}
-                                >
-                                    <SideSessionChipIcon />
-                                    <span className="min-w-0 flex-1 truncate">{sideSession.title}</span>
-                                </button>
-                            ))}
-                        </div>
+                        </ToolbarMenu>
                     ) : null}
 
                     <div
@@ -1801,7 +1835,7 @@ export function HappyComposer(props: {
                                     ? t('misc.compactComposerPrompt')
                                     : showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
                                 disabled={controlsDisabled}
-                                maxRows={composerCompact ? 1 : composerInputMaxRows}
+                                maxRows={composerCompact ? 1 : 6}
                                 submitOnEnter={false}
                                 cancelOnEscape={false}
                                 onFocus={handleComposerFocus}
@@ -1813,9 +1847,7 @@ export function HappyComposer(props: {
                                 className={`relative z-10 flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] transition-[height,min-height,max-height] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none ${
                                     composerCompact
                                         ? 'h-6 max-h-6 overflow-hidden pr-12 leading-6'
-                                        : compactTopAnchor
-                                            ? 'min-h-[44px] h-[44px] max-h-[44px] overflow-y-auto overscroll-contain leading-snug'
-                                            : 'min-h-[44px] max-h-[10rem] overflow-y-auto overscroll-contain leading-snug'
+                                        : 'min-h-[44px] max-h-[10rem] overflow-y-auto overscroll-contain leading-snug'
                                 }`}
                             />
                             {composerCompact ? (
@@ -1851,6 +1883,7 @@ export function HappyComposer(props: {
                                 controlsDisabled={controlsDisabled}
                                 showSettingsButton={showSettingsButton}
                                 onSettingsToggle={handleSettingsToggle}
+                                settingsButtonRef={settingsButtonRef}
                                 settingsLabel={settingsLabel}
                                 settingsModelLabel={compactModelLabel}
                                 settingsReasoningLabel={currentReasoningLabel}
@@ -1896,6 +1929,7 @@ export function HappyComposer(props: {
                                 onClearSchedule={isControlled ? onClearScheduleProp : () => setPendingScheduleLocal(null)}
                                 hasAttachments={hasAttachments}
                                 piModelLabel={piModelLabel}
+                                piModelButtonRef={piModelButtonRef}
                                 piModelDisabled={controlsDisabled || !piHasModels}
                                 piModelOpen={showPiModelPanel}
                                 onPiModelToggle={handlePiModelToggle}
