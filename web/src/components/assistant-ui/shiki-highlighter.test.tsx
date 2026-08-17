@@ -46,5 +46,7 @@ describe('SyntaxHighlighter plaintext rendering', () => {
         // Highlighted blocks keep line numbers but share the same radius and text scale.
         expect(view.container.querySelector('.aui-md-codeblock')).toHaveClass('rounded-b-[18px]', 'overflow-x-auto')
         expect(view.container.querySelector('.aui-md-codeblock > div')).toHaveClass('text-[0.93rem]', 'leading-6')
+        expect(view.container.querySelector('pre[aria-hidden="true"]')).toHaveClass('py-3')
+        expect(view.container.querySelector('pre.shiki')).toHaveClass('py-3')
     })
 })
