@@ -1396,7 +1396,7 @@ export function HappyThread(props: {
                     >
                         <div
                             ref={contentRef}
-                            className="mx-auto min-h-full w-full max-w-content min-w-0 bg-[var(--app-bg)] p-3"
+                            className="session-thread-content mx-auto min-h-full w-full max-w-content min-w-0 bg-[var(--app-bg)] p-3"
                             style={getThreadContentPadding(props)}
                             data-testid="happy-thread-content"
                         >
@@ -1418,7 +1418,7 @@ export function HappyThread(props: {
                                     ) : null}
                                 </>
                             )}
-                            <div className="happy-thread-messages flex flex-col gap-4">
+                            <div className="happy-thread-messages flex flex-col gap-5 sm:gap-6">
                                 <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
                             </div>
                         </div>

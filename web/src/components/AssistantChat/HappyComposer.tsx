@@ -1642,7 +1642,7 @@ export function HappyComposer(props: {
 
     return (
         <div
-            className={`px-3 ${bottomPaddingClass} pt-2 transition-[padding] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none`}
+            className={`session-composer px-3 ${bottomPaddingClass} pt-2 transition-[padding] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none`}
             data-testid="happy-composer"
             data-mobile-layout-state={composerCompact ? 'compact' : 'expanded'}
         >

@@ -297,7 +297,7 @@ function CodexSubscriptionLimitsBadge(props: {
                 type="button"
                 onClick={() => setOpen((value) => !value)}
                 className={[
-                    'flex h-12 min-w-[54px] flex-col items-start justify-center gap-1 rounded-[18px] border border-[var(--app-border)] bg-[var(--app-bg)] px-2 text-[11px] font-semibold leading-none tabular-nums text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                    'flex h-11 min-w-[50px] flex-col items-start justify-center gap-1 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-2 text-[11px] font-semibold leading-none tabular-nums text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                     props.isFetching ? 'opacity-60' : ''
                 ].filter(Boolean).join(' ')}
                 title={title}
@@ -506,7 +506,7 @@ export function SessionHeader(props: {
     return (
         <>
             <div
-                className={headerShellClass}
+                className={`${headerShellClass} session-header-shell`}
                 style={mobileLayoutHeaderShellStyle}
                 data-testid={MOBILE_LAYOUT_CONTRACT.header.testId}
                 data-mobile-layout-contract={MOBILE_LAYOUT_CONTRACT.header.state}
@@ -514,7 +514,7 @@ export function SessionHeader(props: {
                 <div className={`mx-auto flex w-full max-w-content items-center gap-2 px-3 pb-3 ${props.floating ? 'pt-0' : 'pt-3'}`}>
                     <div
                         data-testid="session-header-controls"
-                        className={`pointer-events-auto flex min-w-0 items-center gap-0.5 rounded-[20px] border px-1.5 py-1.5 ${headerSurfaceClass}`}
+                        className={`pointer-events-auto flex min-w-0 items-center gap-1 rounded-full border px-1 py-1 ${headerSurfaceClass}`}
                     >
                         {/* Back button */}
                         <button
@@ -540,11 +540,11 @@ export function SessionHeader(props: {
                             </svg>
                         </button>
 
-                        <div ref={titleDetailsRef} className="relative min-w-0">
+                        <div ref={titleDetailsRef} className="relative min-w-0 max-w-[min(58vw,22rem)]">
                             <button
                                 type="button"
                                 onClick={() => setDetailsOpen((open) => !open)}
-                                className="pointer-events-auto touch-manipulation block max-w-full truncate rounded-full px-0.5 pr-1 text-left font-semibold transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                className="pointer-events-auto touch-manipulation block max-w-full truncate rounded-full px-1.5 pr-2 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                 aria-haspopup="dialog"
                                 aria-expanded={detailsOpen}
                                 aria-controls={detailsOpen ? detailsId : undefined}
@@ -577,7 +577,7 @@ export function SessionHeader(props: {
                         </div>
                     </div>
 
-                    <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                    <div className="ml-auto flex shrink-0 items-center gap-1">
                         {session.metadata?.flavor === 'codex' ? (
                             <CodexSubscriptionLimitsBadge
                                 limits={codexLimitsState.limits}
@@ -594,7 +594,7 @@ export function SessionHeader(props: {
                             aria-haspopup="menu"
                             aria-expanded={menuOpen}
                             aria-controls={menuOpen ? menuId : undefined}
-                            className={`pointer-events-auto touch-manipulation flex h-12 w-12 items-center justify-center rounded-[18px] border text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] ${menuButtonSurfaceClass}`}
+                            className={`pointer-events-auto touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] ${menuButtonSurfaceClass}`}
                             title={t('session.more')}
                         >
                             <AgentFlavorStatusIcon

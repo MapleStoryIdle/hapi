@@ -102,11 +102,11 @@
     --app-secondary-bg: var(--tg-theme-secondary-bg-color, #f3f4f6);
 
     --app-dialog-bg: #ffffff;
-    --app-chat-user-bg: #1f2937;
+    --app-chat-user-bg: #f1f1f1;
     --app-chat-user-surface-bg: var(--app-chat-user-bg);
-    --app-chat-user-fg: #ffffff;
-    --app-chat-user-chip-bg: rgba(255, 255, 255, 0.14);
-    --app-chat-user-chip-fg: #ffffff;
+    --app-chat-user-fg: #202020;
+    --app-chat-user-chip-bg: #e3e3e3;
+    --app-chat-user-chip-fg: #202020;
     --app-tool-card-bg: #f2f4f6;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #e9edf2;
@@ -169,8 +169,9 @@
     --app-font-scale: 1;
     --app-font-family: "Test Tiempos Text", "Tiempos Text", "Tiempos", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
     --app-control-font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --app-chat-font-size: 0.9rem;
-    --app-chat-line-height: 1.65rem;
+    --app-chat-font-family: var(--app-control-font-family);
+    --app-chat-font-size: 0.95rem;
+    --app-chat-line-height: 1.7rem;
     --app-message-action-size: 1.75rem;
 }
 
@@ -231,11 +232,11 @@ html[data-app-keyboard-open="true"] {
     --app-secondary-bg: var(--tg-theme-secondary-bg-color, #2C2C2E);
 
     --app-dialog-bg: #202226;
-    --app-chat-user-bg: #3a414a;
+    --app-chat-user-bg: #303030;
     --app-chat-user-surface-bg: var(--app-chat-user-bg);
-    --app-chat-user-fg: #f8fafc;
-    --app-chat-user-chip-bg: rgba(255, 255, 255, 0.12);
-    --app-chat-user-chip-fg: #f8fafc;
+    --app-chat-user-fg: #f5f5f5;
+    --app-chat-user-chip-bg: #414141;
+    --app-chat-user-chip-fg: #f5f5f5;
     --app-tool-card-bg: #2b2f34;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #343a41;
@@ -312,11 +313,11 @@ html[data-app-keyboard-open="true"] {
     --app-secondary-bg: #0a0a0b;
 
     --app-dialog-bg: #0c0c0e;
-    --app-chat-user-bg: #252a32;
+    --app-chat-user-bg: #242424;
     --app-chat-user-surface-bg: var(--app-chat-user-bg);
-    --app-chat-user-fg: #f8fafc;
-    --app-chat-user-chip-bg: rgba(255, 255, 255, 0.12);
-    --app-chat-user-chip-fg: #f8fafc;
+    --app-chat-user-fg: #f5f5f5;
+    --app-chat-user-chip-bg: #363636;
+    --app-chat-user-chip-fg: #f5f5f5;
     --app-tool-card-bg: #0e0e10;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #161618;
@@ -465,6 +466,12 @@ body {
     font-size: 1rem;
     background: var(--app-bg);
     color: var(--app-fg);
+}
+
+.session-header-shell,
+.session-thread-content,
+.session-composer {
+    font-family: var(--app-chat-font-family);
 }
 
 select,
