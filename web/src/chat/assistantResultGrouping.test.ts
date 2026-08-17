@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentTextBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
+import type { AgentTextBlock, GeneratedImageBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
 import { groupAssistantResultDetails } from '@/chat/assistantResultGrouping'
 import { isToolGroupBlock, summarizeToolGroup, type ToolGroupBlock, type VisibleChatBlock } from '@/chat/toolGroups'
 
@@ -43,6 +43,18 @@ function toolCall(id: string, name = 'Bash'): ToolCallBlock {
             permission: undefined,
         },
         children: [],
+    }
+}
+
+function generatedImage(id: string): GeneratedImageBlock {
+    return {
+        kind: 'generated-image',
+        id,
+        localId: null,
+        createdAt: 1,
+        imageId: 'image-1',
+        fileName: 'generated.png',
+        mimeType: 'image/png'
     }
 }
 
@@ -187,6 +199,25 @@ describe('groupAssistantResultDetails', () => {
         expect(visible).toEqual([processText, resultText])
         expect(visible[0]).toBe(processText)
         expect(visible[1]).toBe(resultText)
+    })
+
+    it('keeps a standalone Skill card separate from its final assistant result', () => {
+        const skill = toolCall('skill-1', 'Skill')
+        const result = agentText('result-1', '已生成。')
+
+        const visible = groupAssistantResultDetails([skill, result])
+
+        expect(visible).toEqual([skill, result])
+    })
+
+    it('keeps generated images and preceding Skill cards out of result details', () => {
+        const skill = toolCall('skill-1', 'Skill')
+        const image = generatedImage('image-1')
+        const result = agentText('result-1', '已生成。')
+
+        const visible = groupAssistantResultDetails([skill, image, result])
+
+        expect(visible).toEqual([skill, image, result])
     })
 
     it('splits assistant groups on user boundaries', () => {

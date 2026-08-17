@@ -783,7 +783,6 @@ html[data-theme="oled"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-typ
 
 .aui-md-codeblock pre.shiki {
     margin: 0;
-    padding: 0;
     background-color: transparent !important;
     font-size: inherit;
     line-height: inherit;

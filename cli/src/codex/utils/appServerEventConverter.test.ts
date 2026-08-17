@@ -193,6 +193,47 @@ describe('AppServerEventConverter', () => {
         }]);
     });
 
+    it('normalizes file change arrays by file path and preserves their diffs', () => {
+        const converter = new AppServerEventConverter();
+        const change = {
+            path: 'web/src/App.tsx',
+            kind: { type: 'update', move_path: null },
+            diff: '@@ -4,2 +4,3 @@\n old\n+new\n'
+        };
+
+        const started = converter.handleNotification('item/started', {
+            item: {
+                id: 'patch-1',
+                type: 'fileChange',
+                changes: [change],
+                autoApproved: true
+            }
+        });
+
+        expect(started).toEqual([{
+            type: 'patch_apply_begin',
+            call_id: 'patch-1',
+            changes: { 'web/src/App.tsx': change },
+            auto_approved: true
+        }]);
+
+        const completed = converter.handleNotification('item/completed', {
+            item: {
+                id: 'patch-1',
+                type: 'fileChange',
+                status: 'completed'
+            }
+        });
+
+        expect(completed).toEqual([{
+            type: 'patch_apply_end',
+            call_id: 'patch-1',
+            changes: { 'web/src/App.tsx': change },
+            auto_approved: true,
+            success: true
+        }]);
+    });
+
     it('maps MCP tool call items', () => {
         const converter = new AppServerEventConverter();
 

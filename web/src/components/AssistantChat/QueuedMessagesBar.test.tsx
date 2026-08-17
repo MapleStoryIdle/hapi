@@ -208,6 +208,8 @@ describe('QueuedMessagesBar drawer', () => {
         )
 
         const trigger = screen.getByTestId('queued-messages-trigger')
+        expect(trigger).toHaveClass('w-full')
+        expect(trigger).toHaveTextContent('Review the deployment log')
         expect(trigger).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByTestId('queued-messages-drawer')).not.toBeInTheDocument()
 

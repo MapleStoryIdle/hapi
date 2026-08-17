@@ -10,6 +10,7 @@ import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { getConversationMessageAnchorId } from '@/chat/outline'
 import { MessageDetailsFooter, shouldIgnoreMessageDetailsToggle } from '@/components/AssistantChat/messages/MessageDetails'
+import { QuestionAnswerBubble } from '@/components/AssistantChat/messages/QuestionAnswerBubble'
 
 export function HappyUserMessage() {
     const ctx = useHappyChatContext()
@@ -52,6 +53,9 @@ export function HappyUserMessage() {
         return message.content.find((part) => part.type === 'text')?.text ?? ''
     })
     const invokedAt = useAssistantState(({ message }) => (message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined)?.invokedAt)
+    const questionAnswer = useAssistantState(({ message }) => (
+        message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+    )?.questionAnswer)
 
     const hasMetadata = invokedAt != null
 
@@ -103,7 +107,7 @@ export function HappyUserMessage() {
             <div className="flex flex-col gap-1">
                 <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
-                        {hasText ? <UserBubbleContent text={text} /> : null}
+                        {questionAnswer ? <QuestionAnswerBubble answer={questionAnswer} /> : hasText ? <UserBubbleContent text={text} /> : null}
                         {hasAttachments ? <MessageAttachments attachments={attachments} /> : null}
                         {remoteServer ? (
                             <div className="mt-1 flex justify-end">

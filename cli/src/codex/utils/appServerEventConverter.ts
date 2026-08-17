@@ -79,9 +79,6 @@ function extractGeneratedImageFileName(item: Record<string, unknown>, savedPath:
 }
 
 function extractChanges(value: unknown): Record<string, unknown> | null {
-    const record = asRecord(value);
-    if (record) return record;
-
     if (Array.isArray(value)) {
         const changes: Record<string, unknown> = {};
         for (const entry of value) {
@@ -95,7 +92,15 @@ function extractChanges(value: unknown): Record<string, unknown> | null {
         return Object.keys(changes).length > 0 ? changes : null;
     }
 
-    return null;
+    const record = asRecord(value);
+    if (!record) return null;
+
+    const path = asString(record.path ?? record.file ?? record.filePath ?? record.file_path);
+    if (path) {
+        return { [path]: record };
+    }
+
+    return record;
 }
 
 function extractTextFromContent(value: unknown): string | null {

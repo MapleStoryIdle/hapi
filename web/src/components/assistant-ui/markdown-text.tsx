@@ -376,7 +376,7 @@ function CodeHeader(props: CodeHeaderProps) {
     const language = props.language && props.language !== 'unknown' ? props.language : 'text'
 
     return (
-        <div className="aui-code-shell-header flex items-center justify-between gap-2 rounded-t-[18px] border border-b-0 border-[var(--app-border)] bg-[var(--app-code-bg)] px-4 py-2 text-xs font-medium leading-5 text-[var(--app-hint)]">
+        <div className="aui-code-shell-header flex items-center justify-between gap-2 rounded-t-[16px] border border-b-0 border-[var(--app-border)] bg-[var(--app-code-bg)] px-3.5 py-2 text-xs font-medium leading-5 text-[var(--app-hint)]">
             <div className="min-w-0 flex-1 truncate">
                 {language}
             </div>
@@ -396,10 +396,10 @@ function Pre(props: ComponentPropsWithoutRef<'pre'>) {
     const { className, ...rest } = props
 
     return (
-        <div className="aui-md-pre-wrapper min-w-0 w-full max-w-full overflow-x-auto overflow-y-hidden rounded-b-[18px] border border-t-0 border-[var(--app-border)] bg-[var(--app-code-bg)]">
+        <div className="aui-md-pre-wrapper min-w-0 w-full max-w-full overflow-x-auto overflow-y-hidden rounded-b-[16px] border border-t-0 border-[var(--app-border)] bg-[var(--app-code-bg)]">
             <pre
                 {...rest}
-                className={cn('aui-md-pre m-0 w-max min-w-full bg-transparent px-4 py-3 text-[0.93rem] leading-6', className)}
+                className={cn('aui-md-pre m-0 w-max min-w-full bg-transparent px-3.5 py-2.5 text-[0.875rem] leading-6', className)}
             />
         </div>
     )

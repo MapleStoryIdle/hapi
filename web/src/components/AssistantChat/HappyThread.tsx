@@ -33,8 +33,10 @@ type PendingScrollRestore = {
 }
 
 const MESSAGE_ANCHOR_SELECTOR = '.happy-thread-messages > [id]'
-const USER_MESSAGE_ANCHOR_SELECTOR = '.happy-thread-messages > [id^="hapi-message-user-text:"]'
-const AUTO_SCROLL_RESUME_THRESHOLD_PX = 120
+const USER_MESSAGE_ANCHOR_SELECTOR = [
+    '.happy-thread-messages > [id^="hapi-message-user-text:"]',
+    '.happy-thread-messages > [id^="hapi-message-question-answer:"]'
+].join(', ')
 const MANUAL_SCROLL_EPSILON_PX = 1
 const INITIAL_SCROLL_SETTLE_MS = 1800
 const INITIAL_SCROLL_SETTLE_DELAYS_MS = [0, 16, 50, 120, 250, 500, 900, 1400, 1800] as const
@@ -61,7 +63,7 @@ type PullToLoadOlderGestureState = {
 
 type ScrollIntent = {
     distanceFromBottom: number
-    isNearBottom: boolean
+    isAtBottom: boolean
     isScrollingUp: boolean
 }
 
@@ -87,13 +89,11 @@ export function getScrollIntent(params: {
     scrollHeight: number
     clientHeight: number
     previousScrollTop: number
-    thresholdPx?: number
 }): ScrollIntent {
-    const thresholdPx = params.thresholdPx ?? AUTO_SCROLL_RESUME_THRESHOLD_PX
     const distanceFromBottom = params.scrollHeight - params.scrollTop - params.clientHeight
     return {
         distanceFromBottom,
-        isNearBottom: distanceFromBottom < thresholdPx,
+        isAtBottom: distanceFromBottom <= MANUAL_SCROLL_EPSILON_PX,
         isScrollingUp: params.scrollTop < params.previousScrollTop - MANUAL_SCROLL_EPSILON_PX
     }
 }
@@ -818,13 +818,10 @@ export function HappyThread(props: {
                 return
             }
 
-            if (intent.isScrollingUp && intent.distanceFromBottom > MANUAL_SCROLL_EPSILON_PX) {
-                setAutoScrollMode(false)
-                setAtBottomMode(false)
-                return
-            }
-
-            if (intent.isNearBottom) {
+            // A manual move must keep tracking paused even when it ends only
+            // a few pixels above the end. Sending or reaching the exact end
+            // explicitly resumes following.
+            if (intent.isAtBottom) {
                 setAutoScrollMode(true)
                 setAtBottomMode(true)
                 return

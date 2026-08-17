@@ -263,6 +263,8 @@ export function HappyComposer(props: {
     effort?: string | null
     active?: boolean
     allowSendWhenInactive?: boolean
+    /** Session state guidance shown in the textarea when the session is paused. */
+    inactiveNotice?: string | null
     thinking?: boolean
     agentState?: AgentState | null
     backgroundTaskCount?: number
@@ -344,6 +346,7 @@ export function HappyComposer(props: {
         effort: rawEffort,
         active = true,
         allowSendWhenInactive = false,
+        inactiveNotice = null,
         thinking = false,
         agentState,
         backgroundTaskCount,
@@ -1149,6 +1152,10 @@ export function HappyComposer(props: {
     // effect below. This prevents one compact render between the first typed
     // character and the persistent expanded state.
     const composerCompact = !composerExpanded && !requiresExpandedComposer
+    const composerPlaceholder = inactiveNotice
+        ?? (composerCompact
+            ? t('misc.compactComposerPrompt')
+            : showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage'))
 
     useEffect(() => {
         if (requiresExpandedComposer) {
@@ -1831,9 +1838,7 @@ export function HappyComposer(props: {
                         >
                             <ComposerPrimitive.Input
                                 ref={textareaRef}
-                                placeholder={composerCompact
-                                    ? t('misc.compactComposerPrompt')
-                                    : showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
+                                placeholder={composerPlaceholder}
                                 disabled={controlsDisabled}
                                 maxRows={composerCompact ? 1 : 6}
                                 submitOnEnter={false}

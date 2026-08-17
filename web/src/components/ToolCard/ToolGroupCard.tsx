@@ -3,8 +3,10 @@ import { getToolGroupActionKind, type ToolGroupBlock } from '@/chat/toolGroups'
 import type { ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
-import { ToolDetailDialogContent, ToolStatusIcon, toolStatusColorClass } from '@/components/ToolCard/ToolCard'
+import { shouldUseFullScreenToolDetail, ToolDetailDialogContent, ToolStatusIcon, toolStatusColorClass } from '@/components/ToolCard/ToolCard'
+import { getTerminalExecutionToolState, isTerminalExecutionTool } from '@/components/ToolCard/terminalExecution'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
+import { getTerminalCommandIntent, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -15,6 +17,7 @@ import { usePointerFocusRing } from '@/hooks/usePointerFocusRing'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { getInputStringAny } from '@/lib/toolInputUtils'
+import { detectExplicitSkillName } from '@/chat/skillUsage'
 import {
     getDefaultToolGroupExpansionState,
     getPrimaryToolGroupExpansionStateKey,
@@ -47,9 +50,21 @@ function getToolStartMs(tool: ToolCallBlock): number {
     return tool.tool.startedAt ?? tool.tool.createdAt
 }
 
+function getRecordedToolDurationMs(tool: ToolCallBlock): number | null {
+    return typeof tool.tool.durationMs === 'number' && Number.isFinite(tool.tool.durationMs)
+        ? Math.max(0, tool.tool.durationMs)
+        : typeof tool.durationMs === 'number' && Number.isFinite(tool.durationMs)
+            ? Math.max(0, tool.durationMs)
+            : null
+}
+
 function getToolEndMs(tool: ToolCallBlock, now: number): number {
     if (tool.tool.state === 'running' || tool.tool.state === 'pending') {
         return now
+    }
+    const recordedDurationMs = getRecordedToolDurationMs(tool)
+    if (recordedDurationMs !== null) {
+        return getToolStartMs(tool) + recordedDurationMs
     }
     return tool.tool.completedAt ?? tool.tool.startedAt ?? tool.tool.createdAt
 }
@@ -83,39 +98,21 @@ export function formatCompactDuration(durationMs: number): string {
     return `${seconds}s`
 }
 
-const SKILL_NAME_RE = /(?:skill|技能)\s*[:：]?\s*[$`]?([A-Za-z][\w-]{1,50})/i
-const USE_SKILL_RE = /(?:使用|用|using|use)\s+[$`]?([A-Za-z][\w-]{1,50})(?=\s*[:：,，。.]|\s|$)/i
-const IGNORED_SKILL_WORDS = new Set(['skill', 'tool', 'tools', 'function', 'mode', 'builtin'])
-
-function normalizeDetectedSkillName(value: string | null): string | null {
-    const normalized = value?.trim().replace(/^[$`]+|[`]+$/g, '') ?? ''
-    if (!normalized) return null
-    if (IGNORED_SKILL_WORDS.has(normalized.toLowerCase())) return null
-    return normalized
-}
-
-function detectSkillNameFromText(text: string): string | null {
-    const explicit = normalizeDetectedSkillName(text.match(SKILL_NAME_RE)?.[1] ?? null)
-    if (explicit) return explicit
-
-    return normalizeDetectedSkillName(text.match(USE_SKILL_RE)?.[1] ?? null)
-}
-
 function getToolGroupSkillName(block: ToolGroupBlock): string | null {
     for (const tool of block.tools) {
         if (tool.tool.name !== 'Skill') continue
-        const skill = normalizeDetectedSkillName(getInputStringAny(tool.tool.input, ['skill', 'name']))
+        const skill = getInputStringAny(tool.tool.input, ['skill', 'name'])?.trim() ?? null
         if (skill) return skill
     }
 
     for (const detail of block.detailBlocks ?? []) {
         if (detail.kind === 'generated-image') return 'imagegen'
         if (detail.kind === 'tool-call' && detail.tool.name === 'Skill') {
-            const skill = normalizeDetectedSkillName(getInputStringAny(detail.tool.input, ['skill', 'name']))
+            const skill = getInputStringAny(detail.tool.input, ['skill', 'name'])?.trim() ?? null
             if (skill) return skill
         }
         if (detail.kind === 'agent-text' || detail.kind === 'agent-reasoning') {
-            const skill = detectSkillNameFromText(detail.text)
+            const skill = detectExplicitSkillName(detail.text)
             if (skill) return skill
         }
     }
@@ -183,6 +180,17 @@ export function formatToolGroupCompactTitle(
 
     const singleTool = !block.forceGenericCompactTitle && block.tools.length === 1 ? block.tools[0] : null
     if (singleTool) {
+        if (isTerminalExecutionTool(singleTool.tool.name)) {
+            const terminalIntent = getTerminalCommandIntent(singleTool.tool.input)
+            const terminalLabel = terminalIntent?.kind === 'read-request' && terminalIntent.targets.length > 1
+                ? t('toolGroup.compact.row.readBatch')
+                : terminalIntent
+                    ? getTerminalCommandIntentLabel(singleTool.tool.input, terminalIntent, t)
+                    : getTerminalCommandSummary(singleTool.tool.input)
+            if (terminalLabel) return `${terminalLabel} ${renderedDuration}`.trim()
+            return `${t('terminal.execution.title')} ${renderedDuration}`.trim()
+        }
+
         const status = active ? 'processing' : 'processed'
         const kind = getToolGroupActionKind(singleTool)
         if (kind === 'mutation') {
@@ -217,7 +225,7 @@ function CompactDetailBlock(props: { block: Exclude<NonNullable<ToolGroupBlock['
 
     if (block.kind === 'agent-text') {
         return (
-            <div className="min-w-0 whitespace-pre-wrap text-base leading-7 text-[var(--app-fg)]">
+            <div className="min-w-0 pl-[15px] whitespace-pre-wrap text-[13px] leading-5 text-[var(--app-fg)]">
                 {block.text}
             </div>
         )
@@ -225,20 +233,24 @@ function CompactDetailBlock(props: { block: Exclude<NonNullable<ToolGroupBlock['
 
     if (block.kind === 'agent-reasoning') {
         return (
-            <div className="min-w-0 whitespace-pre-wrap text-base leading-7 text-[var(--app-hint)]">
+            <div className="min-w-0 pl-[15px] whitespace-pre-wrap text-[13px] leading-5 text-[var(--app-hint)]">
                 {block.text}
             </div>
         )
     }
 
     if (block.kind === 'cli-output') {
-        return <CliOutputBlock text={block.text} />
+        return (
+            <div className="pl-[15px]">
+                <CliOutputBlock text={block.text} />
+            </div>
+        )
     }
 
     if (block.kind === 'agent-event') {
         const presentation = getEventPresentation(block.event)
         return (
-            <div className="text-sm text-[var(--app-hint)]">
+            <div className="pl-[15px] text-sm text-[var(--app-hint)]">
                 {presentation.text}
             </div>
         )
@@ -263,17 +275,19 @@ function CompactDetailItem(props: {
     const block = props.block
 
     if (block.kind === 'tool-call') {
+        const isTerminalExecution = isTerminalExecutionTool(block.tool.name)
+        const displayedToolState = isTerminalExecution ? getTerminalExecutionToolState(block) : block.tool.state
+
         return (
             <button
                 type="button"
-                className="flex min-w-0 items-center gap-2 rounded-md px-0 py-0.5 text-left transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                className="-ml-[7px] flex min-h-8 min-w-0 items-center gap-2 rounded-md px-0 py-1 text-left transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                 onClick={() => props.onSelectTool(block.id)}
             >
-                <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center', toolStatusColorClass(block.tool.state))}>
-                    <ToolStatusIcon state={block.tool.state} />
+                <span className={cn('flex h-3.5 w-3.5 shrink-0 items-center justify-center', toolStatusColorClass(displayedToolState))}>
+                    <ToolStatusIcon state={displayedToolState} />
                 </span>
                 <CompactRowLabel block={block} metadata={props.metadata} />
-                <RowStatusBadge block={block} />
             </button>
         )
     }
@@ -291,13 +305,16 @@ function SummaryBadge(props: { className: string; text: string }) {
 
 function RowStatusBadge(props: { block: ToolCallBlock }) {
     const { t } = useTranslation()
-    if (props.block.tool.state === 'error') {
+    const state = isTerminalExecutionTool(props.block.tool.name)
+        ? getTerminalExecutionToolState(props.block)
+        : props.block.tool.state
+    if (state === 'error') {
         return <SummaryBadge className="bg-red-500/10 text-red-600" text={t('toolGroup.rowStatus.error')} />
     }
-    if (props.block.tool.state === 'running') {
+    if (state === 'running') {
         return <SummaryBadge className="bg-sky-500/10 text-sky-600" text={t('toolGroup.rowStatus.running')} />
     }
-    if (props.block.tool.state === 'pending') {
+    if (state === 'pending') {
         return <SummaryBadge className="bg-amber-500/10 text-amber-700" text={t('toolGroup.rowStatus.pending')} />
     }
     return null
@@ -340,25 +357,49 @@ function CompactRowLabel(props: { block: ToolCallBlock; metadata: SessionMetadat
         metadata: props.metadata
     }, t), [props.block, props.metadata, t])
     const kind = getToolGroupActionKind(props.block)
-    const label = kind === 'command'
-        ? t('toolGroup.compact.row.command')
-        : kind === 'search'
-            ? t('toolGroup.compact.row.search')
-            : kind === 'read'
-                ? t('toolGroup.compact.row.read')
-                : kind === 'mutation'
-                    ? t('toolGroup.compact.row.mutation')
-                    : kind === 'web'
-                        ? t('toolGroup.compact.row.web')
-                        : presentation.title
-    const detail = presentation.subtitle ?? (kind === 'other' ? null : presentation.title)
+    const terminalIntent = isTerminalExecutionTool(props.block.tool.name)
+        ? getTerminalCommandIntent(props.block.tool.input)
+        : null
+    const terminalCommandSummary = isTerminalExecutionTool(props.block.tool.name)
+        ? getTerminalCommandSummary(props.block.tool.input)
+        : null
+    const isBatchRead = terminalIntent?.kind === 'read-request' && terminalIntent.targets.length > 1
+    const isUnknownTerminal = isTerminalExecutionTool(props.block.tool.name)
+        && terminalIntent === null
+        && terminalCommandSummary === null
+    const label = isUnknownTerminal
+        ? t('terminal.execution.title')
+        : isBatchRead
+        ? t('toolGroup.compact.row.readBatch')
+        : terminalIntent
+            ? getTerminalCommandIntentLabel(props.block.tool.input, terminalIntent, t)
+            : terminalCommandSummary
+                ? terminalCommandSummary
+                : kind === 'command'
+                    ? t('toolGroup.compact.row.command')
+                    : kind === 'search'
+                        ? t('toolGroup.compact.row.search')
+                        : kind === 'read'
+                            ? t('toolGroup.compact.row.read')
+                            : kind === 'mutation'
+                                ? t('toolGroup.compact.row.mutation')
+                                : kind === 'web'
+                                    ? t('toolGroup.compact.row.web')
+                                    : presentation.title
+    const detail = isUnknownTerminal
+        ? null
+        : terminalIntent || terminalCommandSummary
+        ? terminalIntent?.kind === 'read-request' && !isBatchRead
+            ? presentation.subtitle
+            : null
+        : presentation.subtitle ?? (kind === 'other' ? null : presentation.title)
 
     return (
         <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap text-base leading-6">
+            <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap text-[13px] leading-5">
                 <span className="shrink-0 font-medium text-[var(--app-hint)]">{label}</span>
                 {detail ? (
-                    <span className="min-w-0 flex-1 truncate font-mono text-[0.9em] text-[var(--app-tool-card-subtitle)]">
+                    <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-[var(--app-tool-card-subtitle)]">
                         {detail}
                     </span>
                 ) : null}
@@ -589,13 +630,13 @@ export function ToolGroupCard(props: {
 
     if (compactMode) {
         return (
-            <div className={cn('overflow-hidden bg-transparent', useExternalCompactHeader ? 'py-0' : 'py-2')}>
+            <div className={cn('overflow-hidden bg-transparent', useExternalCompactHeader ? 'py-0' : 'py-1')}>
                 {!useExternalCompactHeader ? (
                     <button
                         type="button"
                         onClick={toggleOpen}
                         className={cn(
-                            'flex w-full items-center gap-1.5 text-left text-base font-medium leading-6 text-[var(--app-hint)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                            'flex min-h-9 w-full items-center gap-1.5 rounded-md px-0.5 py-1 text-left text-[13px] font-medium leading-5 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                             suppressFocusRing && 'focus-visible:ring-0'
                         )}
                         onPointerDown={onTriggerPointerDown}
@@ -604,9 +645,9 @@ export function ToolGroupCard(props: {
                         aria-expanded={displayedOpen}
                     >
                         {props.block.showAgentIcon ? (
-                            <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-[1em] w-[1em] shrink-0 text-[var(--app-hint)]" />
+                            <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]" />
                         ) : null}
-                        <span>{compactTitle}</span>
+                        <span className="min-w-0 flex-1 truncate">{compactTitle}</span>
                         <span className="shrink-0 text-[var(--app-hint)]">
                             <DetailsIcon open={displayedOpen} />
                         </span>
@@ -614,7 +655,8 @@ export function ToolGroupCard(props: {
                 ) : null}
 
                 {displayedOpen ? (
-                    <div className={cn('flex flex-col gap-2', useExternalCompactHeader ? 'mt-1' : 'mt-3')}>
+                    <div className={cn('relative ml-[7px] flex flex-col gap-0.5', useExternalCompactHeader ? 'mt-0.5' : 'mt-1')}>
+                        <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-px bg-[var(--app-divider)]" data-tool-group-timeline />
                         {props.block.detailBlocks && props.block.detailBlocks.length > 0 ? (
                             props.block.detailBlocks.map((block, index) => (
                                 <CompactDetailItem
@@ -626,28 +668,22 @@ export function ToolGroupCard(props: {
                             ))
                         ) : (
                             props.block.tools.map((tool) => (
-                                <button
+                                <CompactDetailItem
                                     key={tool.id}
-                                    type="button"
-                                    className="flex min-w-0 items-center gap-2 rounded-md px-0 py-0.5 text-left transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                    onClick={() => setSelectedToolId(tool.id)}
-                                >
-                                    <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center', toolStatusColorClass(tool.tool.state))}>
-                                        <ToolStatusIcon state={tool.tool.state} />
-                                    </span>
-                                    <CompactRowLabel block={tool} metadata={props.metadata} />
-                                    <RowStatusBadge block={tool} />
-                                </button>
+                                    block={tool}
+                                    metadata={props.metadata}
+                                    onSelectTool={setSelectedToolId}
+                                />
                             ))
                         )}
 
                         {isHydratingHistory ? (
-                            <div className="text-xs text-[var(--app-hint)]">
+                            <div className="pl-[15px] text-xs text-[var(--app-hint)]">
                                 {t('toolGroup.loadingOlderHistory')}
                             </div>
                         ) : null}
                         {!isHydratingHistory && historyExhausted && props.block.needsOlderHistory ? (
-                            <div className="text-xs text-[var(--app-hint)]">
+                            <div className="pl-[15px] text-xs text-[var(--app-hint)]">
                                 {t('toolGroup.historyUnavailable')}
                             </div>
                         ) : null}
@@ -659,11 +695,11 @@ export function ToolGroupCard(props: {
                         setSelectedToolId(null)
                     }
                 }}>
-                    <DialogContent className="max-w-2xl" aria-describedby={undefined}>
+                    <DialogContent fullScreenOnMobile={selectedTool ? shouldUseFullScreenToolDetail(selectedTool.tool.name) : false} className="max-w-2xl" aria-describedby={undefined}>
                         {selectedTool && selectedPresentation ? (
                             <>
-                                <DialogHeader>
-                                    <DialogTitle>{selectedPresentation.title}</DialogTitle>
+                                <DialogHeader className={shouldUseFullScreenToolDetail(selectedTool.tool.name) ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
+                                    <DialogTitle>{isTerminalExecutionTool(selectedTool.tool.name) ? t('terminal.execution.title') : selectedPresentation.title}</DialogTitle>
                                 </DialogHeader>
                                 <ToolDetailDialogContent block={selectedTool} metadata={props.metadata} />
                             </>
@@ -675,7 +711,7 @@ export function ToolGroupCard(props: {
     }
 
     return (
-        <Card className="overflow-hidden rounded-[20px] bg-[var(--app-tool-group-bg)] shadow-none">
+        <Card className="overflow-hidden rounded-[16px] bg-[var(--app-tool-group-bg)] shadow-none">
             <CardHeader className={cn('space-y-0 p-3', subtitle ? 'pb-2' : null)}>
                 <button
                     type="button"
@@ -744,15 +780,18 @@ export function ToolGroupCard(props: {
                 <CardContent className="px-3 pb-3 pt-1">
                     <div className="flex flex-col gap-2">
                         {props.block.tools.map((tool) => {
+                            const displayedToolState = isTerminalExecutionTool(tool.tool.name)
+                                ? getTerminalExecutionToolState(tool)
+                                : tool.tool.state
                             return (
                                 <button
                                     key={tool.id}
                                     type="button"
-                                    className="flex items-center gap-3 rounded-[16px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                    className="flex items-center gap-3 rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                     onClick={() => setSelectedToolId(tool.id)}
                                 >
-                                    <span className={cn('shrink-0', toolStatusColorClass(tool.tool.state))}>
-                                        <ToolStatusIcon state={tool.tool.state} />
+                                    <span className={cn('shrink-0', toolStatusColorClass(displayedToolState))}>
+                                        <ToolStatusIcon state={displayedToolState} />
                                     </span>
                                     <RowLabel block={tool} metadata={props.metadata} />
                                     <div className="flex shrink-0 items-center gap-2">
@@ -781,10 +820,10 @@ export function ToolGroupCard(props: {
                     setSelectedToolId(null)
                 }
             }}>
-                <DialogContent className="max-w-2xl" aria-describedby={undefined}>
+                <DialogContent fullScreenOnMobile={selectedTool ? shouldUseFullScreenToolDetail(selectedTool.tool.name) : false} className="max-w-2xl" aria-describedby={undefined}>
                     {selectedTool && selectedPresentation ? (
                         <>
-                            <DialogHeader>
+                            <DialogHeader className={shouldUseFullScreenToolDetail(selectedTool.tool.name) ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
                                 <DialogTitle>{selectedPresentation.title}</DialogTitle>
                             </DialogHeader>
                             <ToolDetailDialogContent block={selectedTool} metadata={props.metadata} />

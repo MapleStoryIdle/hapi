@@ -1,9 +1,13 @@
 import type { ChatBlock, ToolCallBlock } from '@/chat/types'
 import { isSubagentToolName } from '@/chat/subagentTool'
 import { isAskUserQuestionToolName } from '@/components/ToolCard/askUserQuestion'
+import { getCodexDiffPaths, getCodexPatchChanges, isSameCodexChangedPath } from '@/components/ToolCard/codexPatch'
 import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInput'
+import { getMcpPatchTarget, getMcpReadTarget, getTerminalReadRequest } from '@/components/ToolCard/fileAccess'
 import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { getInputStringAny } from '@/lib/toolInputUtils'
+import { normalizeExplicitSkillUsage } from '@/chat/skillUsage'
+import { toQuestionAnswerBlock, type QuestionAnswerBlock } from '@/chat/questionAnswers'
 
 export type ToolGroupActionKind = 'read' | 'search' | 'command' | 'mutation' | 'web' | 'other'
 
@@ -39,7 +43,7 @@ export type ToolGroupBlock = {
     forceGenericCompactTitle?: boolean
 }
 
-export type VisibleChatBlock = ChatBlock | ToolGroupBlock
+export type VisibleChatBlock = ChatBlock | ToolGroupBlock | QuestionAnswerBlock
 
 type ToolGroupingOptions = {
     hasMoreMessages: boolean
@@ -97,17 +101,14 @@ function parsedCodexCommandKind(input: unknown): ToolGroupActionKind | null {
     const parsed = (input as { parsed_cmd?: unknown }).parsed_cmd
     if (!Array.isArray(parsed)) return null
 
-    let sawRead = false
     let sawWrite = false
     for (const item of parsed) {
         if (!item || typeof item !== 'object') continue
         const type = (item as { type?: unknown }).type
         if (type === 'write') sawWrite = true
-        if (type === 'read') sawRead = true
     }
 
     if (sawWrite) return 'mutation'
-    if (sawRead) return 'read'
     return null
 }
 
@@ -115,7 +116,7 @@ const SHELL_MUTATION_RE = /(?:^|[;&|]\s*)(?:apply_patch|rm|mv|cp|mkdir|touch|chm
 const SHELL_SEARCH_RE = /(?:^|[;&|()]\s*|["'])(?:rg|grep|git\s+grep|fd|find|ag|ack|select-string|findstr)\b/i
 const SHELL_READ_RE = /(?:^|[;&|()]\s*|["'])(?:ls|dir|cat|type|get-content|tree|get-childitem|head|tail|less|more|pwd|wc|du|stat|file|which|where|jq|sed|awk|git\s+(?:diff|status|log|show|branch|rev-parse|ls-files|blame))\b/i
 
-function getShellCommandActionKind(input: unknown): ToolGroupActionKind {
+function getShellCommandActionKind(input: unknown, allowReadClassification = true): ToolGroupActionKind {
     const parsedKind = parsedCodexCommandKind(input)
     if (parsedKind) return parsedKind
 
@@ -124,7 +125,7 @@ function getShellCommandActionKind(input: unknown): ToolGroupActionKind {
 
     if (SHELL_MUTATION_RE.test(command)) return 'mutation'
     if (SHELL_SEARCH_RE.test(command)) return 'search'
-    if (SHELL_READ_RE.test(command)) return 'read'
+    if (allowReadClassification && SHELL_READ_RE.test(command)) return 'read'
     return 'command'
 }
 
@@ -133,7 +134,8 @@ export function getToolGroupActionKind(block: ToolCallBlock): ToolGroupActionKin
 
     if (name === 'Read' || name === 'NotebookRead') return 'read'
     if (name === 'Grep' || name === 'Glob' || name === 'LS') return 'search'
-    if (name === 'Bash' || name === 'CodexBash' || name === 'shell_command') return getShellCommandActionKind(block.tool.input)
+    if (name === 'CodexBash') return getShellCommandActionKind(block.tool.input, false)
+    if (name === 'Bash' || name === 'shell_command') return getShellCommandActionKind(block.tool.input)
     if (name === 'Edit' || name === 'MultiEdit' || name === 'Write' || name === 'NotebookEdit' || name === 'CodexPatch' || name === 'CodexDiff') {
         return 'mutation'
     }
@@ -248,6 +250,11 @@ export function isEligibleForToolGrouping(block: ToolCallBlock): boolean {
     // A title is an MCP client's explicit, user-facing label for this action.
     // Keep it visible instead of collapsing it into a generic tool activity row.
     if (hasMcpInvocationTitle(block)) return false
+    if (block.tool.name === 'Read') return false
+    if (block.tool.name === 'CodexBash' && getTerminalReadRequest(block.tool.input)) return false
+    if (block.tool.name === 'CodexPatch' && getCodexPatchChanges(block.tool.input).length > 0) return false
+    if (block.tool.name === 'CodexDiff' && getCodexDiffPaths(block.tool.input).length > 0) return false
+    if (block.tool.name.startsWith('mcp__') && (getMcpReadTarget(block.tool.input) || getMcpPatchTarget(block.tool.input))) return false
     if (isSubagentToolName(block.tool.name)) return false
     if (PLAN_TOOL_NAMES.has(block.tool.name)) return false
     if (MILESTONE_TOOL_NAMES.has(block.tool.name)) return false
@@ -277,6 +284,45 @@ export function isToolGroupBlock(block: VisibleChatBlock | ChatBlock): block is 
     return block.kind === 'tool-group'
 }
 
+/**
+ * Codex emits both a fileChange (CodexPatch) and a cumulative turn/diff
+ * (CodexDiff) for the same edit.  Patch is the authoritative card because it
+ * carries the exact file-change payload.  Keep a Diff whenever it contains a
+ * file that did not arrive as a Patch, so older or partial app-server events
+ * still have a visible fallback.
+ *
+ * Historical events do not always carry a turn id.  The user-message boundary
+ * is the stable turn boundary in the rendered transcript.
+ */
+export function filterCodexDiffsCoveredByPatches(blocks: ChatBlock[]): ChatBlock[] {
+    const patchPaths: string[] = []
+
+    return blocks.filter((block) => {
+        if (block.kind === 'user-text') {
+            patchPaths.length = 0
+            return true
+        }
+        if (block.kind !== 'tool-call') return true
+        if (toQuestionAnswerBlock(block)) {
+            patchPaths.length = 0
+            return true
+        }
+
+        if (block.tool.name === 'CodexPatch') {
+            patchPaths.push(...getCodexPatchChanges(block.tool.input).map((change) => change.path))
+            return true
+        }
+        if (block.tool.name !== 'CodexDiff') return true
+
+        const diffPaths = getCodexDiffPaths(block.tool.input)
+        if (patchPaths.length === 0 || diffPaths.length === 0) return true
+
+        return !diffPaths.every((diffPath) => (
+            patchPaths.some((patchPath) => isSameCodexChangedPath(patchPath, diffPath))
+        ))
+    })
+}
+
 export function buildVisibleChatBlocks(
     blocks: ChatBlock[],
     options: ToolGroupingOptions
@@ -284,9 +330,17 @@ export function buildVisibleChatBlocks(
     const visibleBlocks: VisibleChatBlock[] = []
     const previousGroups = options.previousGroups ?? []
     const groupSingleTools = options.terminalToolDisplayMode === 'compact'
+    const displayBlocks = filterCodexDiffsCoveredByPatches(normalizeExplicitSkillUsage(blocks))
 
-    for (let index = 0; index < blocks.length; index += 1) {
-        const block = blocks[index]
+    for (let index = 0; index < displayBlocks.length; index += 1) {
+        const block = displayBlocks[index]
+        if (block.kind === 'tool-call') {
+            const questionAnswer = toQuestionAnswerBlock(block)
+            if (questionAnswer) {
+                visibleBlocks.push(questionAnswer)
+                continue
+            }
+        }
         if (block.kind !== 'tool-call' || !isEligibleForToolGrouping(block)) {
             visibleBlocks.push(block)
             continue
@@ -294,8 +348,8 @@ export function buildVisibleChatBlocks(
 
         const tools: ToolCallBlock[] = [block]
         let cursor = index + 1
-        while (cursor < blocks.length) {
-            const candidate = blocks[cursor]
+        while (cursor < displayBlocks.length) {
+            const candidate = displayBlocks[cursor]
             if (candidate.kind !== 'tool-call' || !isEligibleForToolGrouping(candidate)) {
                 break
             }
@@ -323,7 +377,8 @@ export function buildVisibleChatBlocks(
             historyState: needsOlderHistory ? 'needs-older-history' : 'complete',
             needsOlderHistory,
             summary: summarizeToolGroup(tools),
-            expansionStateKeys: [id]
+            expansionStateKeys: [id],
+            showAgentIcon: true
         })
         index = cursor - 1
     }

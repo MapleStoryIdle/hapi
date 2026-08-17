@@ -126,6 +126,19 @@ describe('extractCodexBashDisplay', () => {
             status: null
         })
     })
+
+    it('uses the command error as stderr when a separate stderr field is absent', () => {
+        expect(extractCodexBashDisplay({
+            error: 'ls: /missing: No such file or directory',
+            exit_code: 1,
+            status: 'failed'
+        })).toEqual({
+            stdout: null,
+            stderr: 'ls: /missing: No such file or directory',
+            exitCode: 1,
+            status: 'failed'
+        })
+    })
 })
 
 describe('getToolResultViewComponent registry', () => {
@@ -406,7 +419,7 @@ describe('read file result formatting', () => {
         expect(screen.getAllByText('Raw JSON').length).toBeGreaterThan(0)
     })
 
-    it('renders parsed Codex read command output as a quote', () => {
+    it('keeps parsed Codex terminal output in a terminal code block', () => {
         const { container } = renderToolResult(
             'CodexBash',
             'Exit code: 0\nWall time: 0.1s\nOutput:\nhello from file',
@@ -414,11 +427,13 @@ describe('read file result formatting', () => {
         )
         const quote = container.querySelector('[class*="border-l-"]')
 
-        expect(quote).toHaveTextContent('hello from file')
-        expect(quote?.querySelector('pre')).toBeNull()
+        expect(quote).toBeNull()
+        expect(container.querySelector('pre')).not.toBeNull()
+        expect(container).toHaveTextContent('hello from file')
+        expect(container).not.toHaveTextContent('File content')
     })
 
-    it('renders parsed Codex read command source output as a code block', () => {
+    it('does not relabel parsed Codex terminal source output as a file read', () => {
         const { container } = renderToolResult(
             'CodexBash',
             'Exit code: 0\nWall time: 0.1s\nOutput:\nconst value = 1',
@@ -427,7 +442,7 @@ describe('read file result formatting', () => {
 
         expect(container.querySelector('[class*="border-l-"]')).toBeNull()
         expect(container.querySelector('pre')).not.toBeNull()
-        expect(container).toHaveTextContent('File content')
+        expect(container).not.toHaveTextContent('File content')
         expect(container).toHaveTextContent('const value = 1')
     })
 })

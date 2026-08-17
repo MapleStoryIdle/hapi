@@ -81,6 +81,7 @@ export const toolViewRegistry: Record<string, ToolViewComponent> = {
     TodoWrite: TodoWriteView,
     update_plan: UpdatePlanView,
     CodexDiff: CodexDiffCompactView,
+    CodexPatch: CodexPatchView,
     CodexAgent: CodexAgentView,
     spawn_agent: CodexAgentView,
     send_input: CodexAgentView,

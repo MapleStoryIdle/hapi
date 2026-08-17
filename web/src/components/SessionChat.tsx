@@ -774,7 +774,6 @@ function SessionChatInner(props: SessionChatProps) {
     const hasFloatingHeaderNotice = hasCursorMigrationNotice
         || sideSessionError !== null
         || Boolean(props.session.teamState)
-        || sessionInactive
     const activeSideSessions = useMemo(() => {
         return sessionSummaries
             .filter((session) => session.active && session.metadata?.sideSession?.parentSessionId === props.session.id)
@@ -1789,16 +1788,6 @@ function SessionChatInner(props: SessionChatProps) {
                         {props.session.teamState ? (
                             <TeamPanel teamState={props.session.teamState} />
                         ) : null}
-
-                        {sessionInactive ? (
-                            <div className="px-3 pt-3">
-                                <div className="mx-auto w-full max-w-content rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
-                                    {inactiveCanResume
-                                        ? t('session.inactive.autoResume')
-                                        : t('session.inactive.cannotResume')}
-                                </div>
-                            </div>
-                        ) : null}
                     </div>
                 </div>
             ) : null}
@@ -1969,6 +1958,11 @@ function SessionChatInner(props: SessionChatProps) {
                                 }
                                 active={props.session.active}
                                 allowSendWhenInactive
+                                inactiveNotice={sessionInactive
+                                    ? inactiveCanResume
+                                        ? t('session.inactive.composerAutoResume')
+                                        : t('session.inactive.composerCannotResume')
+                                    : null}
                                 thinking={props.session.thinking}
                                 agentState={props.session.agentState}
                                 backgroundTaskCount={props.session.backgroundTaskCount}

@@ -35,6 +35,183 @@ describe('getToolPresentation — MCP invocation titles', () => {
     })
 })
 
+describe('getToolPresentation — file access semantics', () => {
+    it('shows native Read path and actual line range directly', () => {
+        const presentation = getToolPresentation({
+            toolName: 'Read',
+            input: { file_path: 'web/src/App.tsx', offset: 12, limit: 69 },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation.title).toBe('Read file')
+        expect(presentation.subtitle).toBe('web/src/App.tsx · L12–80')
+    })
+
+    it('labels only simple Codex shell reads as a request', () => {
+        const presentation = getToolPresentation({
+            toolName: 'CodexBash',
+            input: { command: "/bin/zsh -lc \"sed -n '12,80p' web/src/App.tsx\"" },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation.title).toBe('Read file')
+        expect(presentation.subtitle).toBe('web/src/App.tsx · L12–80')
+    })
+
+    it('reduces compound Codex terminal commands to their key command', () => {
+        const presentation = getToolPresentation({
+            toolName: 'CodexBash',
+            input: { command: 'cd web && cat src/App.tsx', parsed_cmd: [{ type: 'read', name: 'src/App.tsx' }] },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation.title).toBe('cat src/App.tsx')
+        expect(presentation.subtitle).toBeNull()
+    })
+
+    it('lists explicit read targets from a sequential Codex shell request', () => {
+        const presentation = getToolPresentation({
+            toolName: 'CodexBash',
+            input: {
+                command: `/bin/zsh -lc "cat /workspace/AGENT.md && printf '%s' ready && sed -n '12,80p' web/src/App.tsx"`
+            },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation.title).toBe('Read file')
+        expect(presentation.subtitle).toBe('/workspace/AGENT.md · web/src/App.tsx · L12–80')
+    })
+
+    it('names clear non-file Codex terminal work without hiding its output', () => {
+        const presentation = getToolPresentation({
+            toolName: 'CodexBash',
+            input: { command: '/bin/zsh -lc "git -C /workspace/hapi status --short"' },
+            result: { stdout: ' M web/src/App.tsx' },
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation).toMatchObject({
+            title: 'git status',
+            subtitle: null,
+            minimal: false
+        })
+    })
+
+    it('uses the actual Bun command instead of an abstract execution label', () => {
+        const presentation = getToolPresentation({
+            toolName: 'CodexBash',
+            input: { command: '/bin/zsh -lc "bun run typecheck && bun run test"' },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation).toMatchObject({
+            title: 'bun run typecheck · bun run test',
+            subtitle: null
+        })
+    })
+
+    it('uses Terminal execution when a Codex command cannot be summarized safely', () => {
+        const presentation = getToolPresentation({
+            toolName: 'CodexBash',
+            input: { command: '/bin/zsh -lc "node -e \'process.exit(0)\'"' },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation).toMatchObject({
+            title: 'Terminal execution',
+            subtitle: null
+        })
+    })
+
+    it('semanticizes only structured MCP reads and patches', () => {
+        const read = getToolPresentation({
+            toolName: 'mcp__filesystem__read_lines',
+            input: { path: 'web/src/App.tsx', startLine: 12, endLine: 80 },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+        const patch = getToolPresentation({
+            toolName: 'mcp__filesystem__apply_patch',
+            input: {
+                patch: '*** Begin Patch\n*** Update File: web/src/App.tsx\n@@\n-old\n+new\n*** End Patch'
+            },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+        const generic = getToolPresentation({
+            toolName: 'mcp__filesystem__inspect',
+            input: { title: 'Inspect file', path: 'web/src/App.tsx' },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(read).toMatchObject({ title: 'Read file', subtitle: 'web/src/App.tsx · L12–80' })
+        expect(patch).toMatchObject({ title: 'Modify file', subtitle: 'App.tsx · +1 −1' })
+        expect(generic).toMatchObject({ title: 'Inspect file', subtitle: 'MCP: Filesystem Inspect' })
+    })
+})
+
+describe('getToolPresentation — Codex patch details', () => {
+    it('summarizes actual file changes and exposes the inline patch view', () => {
+        const presentation = getToolPresentation({
+            toolName: 'CodexPatch',
+            input: {
+                changes: [{
+                    path: '/workspace/web/src/App.tsx',
+                    kind: { type: 'update', move_path: null },
+                    diff: '@@ -32,2 +32,3 @@\n old\n-old value\n+new value\n+another line\n'
+                }]
+            },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation).toMatchObject({ title: 'Modify file', subtitle: 'App.tsx · +2 −1' })
+        expect(presentation.minimal).toBe(false)
+    })
+
+    it('names native file mutations with their target path', () => {
+        const presentation = getToolPresentation({
+            toolName: 'Edit',
+            input: { file_path: 'web/src/App.tsx' },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation).toMatchObject({ title: 'Modify file', subtitle: 'web/src/App.tsx' })
+    })
+})
+
 describe('getToolPresentation — unknown tool semantic title + subtitle dedup', () => {
     it('promotes semantic title "Run shell" when toolName equals input.command (Gemini ACP case)', () => {
         const presentation = getToolPresentation({

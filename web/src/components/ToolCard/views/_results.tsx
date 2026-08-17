@@ -6,6 +6,7 @@ import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { ChecklistList, extractTodoChecklist } from '@/components/ToolCard/checklist'
 import { basename, resolveDisplayPath } from '@/utils/path'
 import { getInputStringAny } from '@/lib/toolInputUtils'
+import { getMcpReadTarget } from '@/components/ToolCard/fileAccess'
 import {
     getCodexAgentActivity,
     getCodexAgentTargets,
@@ -107,7 +108,11 @@ export function extractCodexBashDisplay(result: unknown): { stdout: string | nul
         : typeof result.output === 'string'
             ? result.output
             : null
-    const stderr = typeof result.stderr === 'string' ? result.stderr : null
+    const stderr = typeof result.stderr === 'string'
+        ? result.stderr
+        : typeof result.error === 'string'
+            ? result.error
+            : null
     const exitCode = typeof result.exit_code === 'number'
         ? result.exit_code
         : typeof result.exitCode === 'number'
@@ -367,31 +372,20 @@ function extractReadFileContent(result: unknown): { filePath: string | null; con
 function isReadFileToolCall(toolName: string, input: unknown): boolean {
     if (toolName === 'Read' || toolName === 'NotebookRead') return true
 
-    const normalizedName = toolName.toLowerCase()
-    if (normalizedName.includes('read_file') || normalizedName.includes('readfile')) return true
-
-    if (!isObject(input)) return false
-    if (Array.isArray(input.parsed_cmd)) {
-        return input.parsed_cmd.some((cmd) => isObject(cmd) && cmd.type === 'read')
+    if (toolName.startsWith('mcp__')) {
+        return getMcpReadTarget(input) !== null
     }
 
+    const normalizedName = toolName.toLowerCase()
+    if (normalizedName.includes('read_file') || normalizedName.includes('readfile')) return true
     return false
 }
 
 function extractReadPathFromInput(input: unknown): string | null {
     if (!isObject(input)) return null
 
-    const directPath = getInputStringAny(input, ['file_path', 'path', 'name'])
+    const directPath = getInputStringAny(input, ['file_path', 'path', 'filePath', 'file', 'notebook_path', 'name'])
     if (directPath) return directPath
-
-    if (Array.isArray(input.parsed_cmd)) {
-        for (const cmd of input.parsed_cmd) {
-            if (!isObject(cmd) || cmd.type !== 'read') continue
-            const parsedPath = getInputStringAny(cmd, ['name', 'path', 'file_path'])
-            if (parsedPath) return parsedPath
-        }
-    }
-
     return null
 }
 

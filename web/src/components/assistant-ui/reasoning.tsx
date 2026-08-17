@@ -50,7 +50,7 @@ export const Reasoning: FC = () => {
                 components={defaultComponents}
                 componentsByLanguage={MARKDOWN_COMPONENTS_BY_LANGUAGE}
                 urlTransform={denyOnlyTransform}
-                className={cn(MARKDOWN_CLASSNAME, 'aui-reasoning-content text-[13.5px] text-[var(--app-hint)]')}
+                className={cn(MARKDOWN_CLASSNAME, 'aui-reasoning-content text-[13px] leading-5 text-[var(--app-hint)]')}
             />
         </UriConfirmProvider>
     )
@@ -71,12 +71,12 @@ export const ReasoningGroup: FC<PropsWithChildren> = ({ children }) => {
     }, [isStreaming])
 
     return (
-        <div className="aui-reasoning-group my-3 overflow-hidden rounded-2xl bg-[var(--app-reasoning-bg)]">
+        <div className="aui-reasoning-group my-2 overflow-hidden border-l border-[var(--app-divider)] pl-3">
             <button
                 type="button"
                 onClick={() => setIsOpen(!isOpen)}
                 className={cn(
-                    'flex w-full items-center gap-1.5 px-3.5 py-2.5 text-left text-xs font-medium',
+                    'flex min-h-9 w-full items-center gap-2 py-1 text-left text-[13px] font-medium leading-5',
                     'text-[var(--app-hint)] hover:text-[var(--app-fg)]',
                     'transition-colors cursor-pointer select-none'
                 )}
@@ -96,7 +96,7 @@ export const ReasoningGroup: FC<PropsWithChildren> = ({ children }) => {
                     isOpen ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'
                 )}
             >
-                <div className="border-t border-[var(--app-divider)] px-3.5 py-3">
+                <div className="mt-0.5 border-t border-[var(--app-divider)] py-2 pr-1">
                     {children}
                 </div>
             </div>

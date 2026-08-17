@@ -26,7 +26,7 @@ describe('SyntaxHighlighter plaintext rendering', () => {
         )
 
         // Plain text blocks use the shared code/text surface but skip line numbers.
-        expect(view.container.querySelector('.aui-md-plaintext-block')).toHaveClass('overflow-hidden', 'rounded-[18px]')
+        expect(view.container.querySelector('.aui-md-plaintext-block')).toHaveClass('overflow-hidden', 'rounded-[16px]')
         expect(view.container.querySelector('.aui-md-plaintext-block > div')).toHaveClass('overflow-x-auto')
         expect(view.container.querySelector('pre')).toHaveClass('whitespace-pre')
         expect(view.container.querySelector('.aui-md-codeblock')).toBeNull()
@@ -44,7 +44,7 @@ describe('SyntaxHighlighter plaintext rendering', () => {
         )
 
         // Highlighted blocks keep line numbers but share the same radius and text scale.
-        expect(view.container.querySelector('.aui-md-codeblock')).toHaveClass('rounded-b-[18px]', 'overflow-x-auto')
-        expect(view.container.querySelector('.aui-md-codeblock > div')).toHaveClass('text-[0.93rem]', 'leading-6')
+        expect(view.container.querySelector('.aui-md-codeblock')).toHaveClass('rounded-b-[16px]', 'overflow-x-auto')
+        expect(view.container.querySelector('.aui-md-codeblock > div')).toHaveClass('text-[0.875rem]', 'leading-6')
     })
 })

@@ -6,6 +6,9 @@ import type { ChecklistItem } from '@/components/ToolCard/checklist'
 import { extractTodoChecklist, extractUpdatePlanChecklist } from '@/components/ToolCard/checklist'
 import { basename, resolveDisplayPath } from '@/utils/path'
 import { getInputStringAny, truncate } from '@/lib/toolInputUtils'
+import { getCodexPatchChanges, getCodexPatchTotals } from '@/components/ToolCard/codexPatch'
+import { formatFileReadTarget, getMcpPatchTarget, getMcpReadTarget, getNativeReadTarget, type FilePatchTarget, type FileReadTarget } from '@/components/ToolCard/fileAccess'
+import { getTerminalCommandIntent, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
 import {
     getCodexAgentActivity,
     getCodexAgentPrompt,
@@ -57,6 +60,33 @@ function formatMCPTitle(toolName: string): string {
 function getMcpInvocationTitle(input: unknown): string | null {
     const title = getInputStringAny(input, ['title'])?.trim()
     return title || null
+}
+
+function formatPatchTarget(target: FilePatchTarget, metadata: SessionMetadataSummary | null): string {
+    const display = resolveDisplayPath(target.path, metadata)
+    const name = basename(display)
+    const fileSummary = target.fileCount > 1 ? `${name} (+${target.fileCount - 1})` : name
+    if (target.additions === 0 && target.deletions === 0) return fileSummary
+    return `${fileSummary} · +${target.additions} −${target.deletions}`
+}
+
+function formatReadTargets(targets: FileReadTarget[], metadata: SessionMetadataSummary | null): string {
+    const visible = targets.slice(0, 2).map((target) => (
+        formatFileReadTarget(target, resolveDisplayPath(target.path, metadata))
+    ))
+    const remaining = targets.length - visible.length
+    return remaining > 0 ? `${visible.join(' · ')} · +${remaining}` : visible.join(' · ')
+}
+
+function isCodexTerminalMinimal(result: unknown): boolean {
+    const record = isObject(result) ? result : null
+    const stdout = record && typeof record.stdout === 'string' ? record.stdout.trim() : ''
+    const stderr = record && typeof record.stderr === 'string' ? record.stderr.trim() : ''
+    return stdout.length === 0 && stderr.length === 0
+}
+
+function getNativeMutationPath(input: unknown): string | null {
+    return getInputStringAny(input, ['file_path', 'path', 'file', 'filePath', 'notebook_path'])?.trim() || null
 }
 
 type ToolOpts = {
@@ -147,24 +177,8 @@ export const knownTools: Record<string, {
         minimal: true
     },
     CodexBash: {
-        icon: (opts) => {
-            if (isObject(opts.input) && Array.isArray(opts.input.parsed_cmd) && opts.input.parsed_cmd.length > 0) {
-                const first = opts.input.parsed_cmd[0]
-                const type = isObject(first) ? first.type : null
-                if (type === 'read') return <EyeIcon className={DEFAULT_ICON_CLASS} />
-                if (type === 'write') return <FileDiffIcon className={DEFAULT_ICON_CLASS} />
-            }
-            return <TerminalIcon className={DEFAULT_ICON_CLASS} />
-        },
-        title: (opts) => {
-            if (isObject(opts.input) && Array.isArray(opts.input.parsed_cmd) && opts.input.parsed_cmd.length === 1) {
-                const parsed = opts.input.parsed_cmd[0]
-                if (isObject(parsed) && parsed.type === 'read' && typeof parsed.name === 'string') {
-                    return resolveDisplayPath(parsed.name, opts.metadata)
-                }
-            }
-            return opts.description ?? 'Terminal'
-        },
+        icon: () => <TerminalIcon className={DEFAULT_ICON_CLASS} />,
+        title: (opts) => opts.description ?? 'Terminal',
         subtitle: (opts) => {
             const command = getInputStringAny(opts.input, ['command', 'cmd'])
             if (command) return command
@@ -403,17 +417,18 @@ export const knownTools: Record<string, {
         icon: () => <FileDiffIcon className={DEFAULT_ICON_CLASS} />,
         title: () => 'Apply changes',
         subtitle: (opts) => {
-            if (isObject(opts.input) && isObject(opts.input.changes)) {
-                const files = Object.keys(opts.input.changes)
-                if (files.length === 0) return null
-                const first = files[0]
-                const display = resolveDisplayPath(first, opts.metadata)
-                const name = basename(display)
-                return files.length > 1 ? `${name} (+${files.length - 1})` : name
-            }
-            return null
+            const changes = getCodexPatchChanges(opts.input)
+            const first = changes[0]
+            if (!first) return null
+
+            const display = resolveDisplayPath(first.path, opts.metadata)
+            const name = basename(display)
+            const fileSummary = changes.length > 1 ? `${name} (+${changes.length - 1})` : name
+            const totals = getCodexPatchTotals(changes)
+            if (totals.additions === 0 && totals.deletions === 0) return fileSummary
+            return `${fileSummary} · +${totals.additions} −${totals.deletions}`
         },
-        minimal: true
+        minimal: (opts) => getCodexPatchChanges(opts.input).length === 0
     },
     CodexDiff: {
         icon: () => <FileDiffIcon className={DEFAULT_ICON_CLASS} />,
@@ -544,7 +559,105 @@ export function getToolPresentation(
     opts: Omit<ToolOpts, 'metadata'> & { metadata: SessionMetadataSummary | null },
     t?: Translator
 ): ToolPresentation {
+    if (opts.toolName === 'Read') {
+        const target = getNativeReadTarget(opts.input)
+        if (target) {
+            return {
+                icon: <EyeIcon className={DEFAULT_ICON_CLASS} />,
+                title: t ? t('tool.semanticTitle.readFile') : 'Read file',
+                subtitle: formatFileReadTarget(target, resolveDisplayPath(target.path, opts.metadata)),
+                minimal: true
+            }
+        }
+    }
+
+    if (opts.toolName === 'CodexBash') {
+        const intent = getTerminalCommandIntent(opts.input)
+        const commandSummary = getTerminalCommandSummary(opts.input)
+        if (intent) {
+            return {
+                icon: intent.kind === 'read-request'
+                    ? <EyeIcon className={DEFAULT_ICON_CLASS} />
+                    : intent.kind === 'search-files'
+                        ? <SearchIcon className={DEFAULT_ICON_CLASS} />
+                        : <TerminalIcon className={DEFAULT_ICON_CLASS} />,
+                title: getTerminalCommandIntentLabel(opts.input, intent, t),
+                subtitle: intent.kind === 'read-request'
+                    ? formatReadTargets(intent.targets, opts.metadata)
+                    : null,
+                minimal: isCodexTerminalMinimal(opts.result)
+            }
+        }
+
+        if (commandSummary) {
+            return {
+                icon: <TerminalIcon className={DEFAULT_ICON_CLASS} />,
+                title: commandSummary,
+                subtitle: null,
+                minimal: isCodexTerminalMinimal(opts.result)
+            }
+        }
+
+        return {
+            icon: <TerminalIcon className={DEFAULT_ICON_CLASS} />,
+            title: t ? t('terminal.execution.title') : 'Terminal execution',
+            subtitle: null,
+            minimal: isCodexTerminalMinimal(opts.result)
+        }
+    }
+
+    if (opts.toolName === 'Edit' || opts.toolName === 'MultiEdit' || opts.toolName === 'Write' || opts.toolName === 'NotebookEdit') {
+        const path = getNativeMutationPath(opts.input)
+        if (path) {
+            return {
+                icon: <FileDiffIcon className={DEFAULT_ICON_CLASS} />,
+                title: t ? t('tool.semanticTitle.modifyFile') : 'Modify file',
+                subtitle: resolveDisplayPath(path, opts.metadata),
+                minimal: true
+            }
+        }
+    }
+
+    if (opts.toolName === 'CodexPatch') {
+        const changes = getCodexPatchChanges(opts.input)
+        const first = changes[0]
+        if (first) {
+            const display = resolveDisplayPath(first.path, opts.metadata)
+            const name = basename(display)
+            const fileSummary = changes.length > 1 ? `${name} (+${changes.length - 1})` : name
+            const totals = getCodexPatchTotals(changes)
+            return {
+                icon: <FileDiffIcon className={DEFAULT_ICON_CLASS} />,
+                title: t ? t('tool.semanticTitle.modifyFile') : 'Modify file',
+                subtitle: totals.additions === 0 && totals.deletions === 0
+                    ? fileSummary
+                    : `${fileSummary} · +${totals.additions} −${totals.deletions}`,
+                minimal: false
+            }
+        }
+    }
+
     if (opts.toolName.startsWith('mcp__')) {
+        const readTarget = getMcpReadTarget(opts.input)
+        if (readTarget) {
+            return {
+                icon: <EyeIcon className={DEFAULT_ICON_CLASS} />,
+                title: t ? t('tool.semanticTitle.readFile') : 'Read file',
+                subtitle: formatFileReadTarget(readTarget, resolveDisplayPath(readTarget.path, opts.metadata)),
+                minimal: true
+            }
+        }
+
+        const patchTarget = getMcpPatchTarget(opts.input)
+        if (patchTarget) {
+            return {
+                icon: <FileDiffIcon className={DEFAULT_ICON_CLASS} />,
+                title: t ? t('tool.semanticTitle.modifyFile') : 'Modify file',
+                subtitle: formatPatchTarget(patchTarget, opts.metadata),
+                minimal: true
+            }
+        }
+
         const mcpTitle = formatMCPTitle(opts.toolName)
         const invocationTitle = getMcpInvocationTitle(opts.input)
         return {

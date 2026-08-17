@@ -3,10 +3,12 @@ import {
     type BlockWithThreadMessageId,
     aggregateResponseGroups,
     assignThreadMessageIds,
-    assignThreadMessageIdsWithStableWrappers
+    assignThreadMessageIdsWithStableWrappers,
+    toThreadMessageLike
 } from './assistant-runtime'
 import type { AgentEventBlock, AgentTextBlock, CliOutputBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
+import type { QuestionAnswerBlock } from '@/chat/questionAnswers'
 
 // Minimal builders for VisibleChatBlock fixtures. Tests focus on metadata
 // aggregation behavior across response groups; non-metadata fields default to
@@ -76,6 +78,18 @@ function cliOutput(id: string, source: CliOutputBlock['source'], overrides: Part
     }
 }
 
+function questionAnswer(id: string, overrides: Partial<QuestionAnswerBlock> = {}): QuestionAnswerBlock {
+    return {
+        kind: 'question-answer',
+        id,
+        createdAt: 0,
+        answer: {
+            items: [{ question: 'Choose a direction', answers: ['Keep it compact'] }]
+        },
+        ...overrides
+    }
+}
+
 function toolGroup(id: string, tools: ToolCallBlock[], overrides: Partial<ToolGroupBlock> = {}): ToolGroupBlock {
     return {
         kind: 'tool-group',
@@ -128,6 +142,43 @@ describe('assignThreadMessageIds', () => {
         expect(second[0]).toBe(first[0])
         expect(second[0].threadMessageId).toBe('agent-text:a')
         expect(second[1].threadMessageId).toBe('user-text:u')
+    })
+})
+
+describe('answered question messages', () => {
+    it('maps selected answers to a user-role message', () => {
+        const answer = questionAnswer('qa-1', { createdAt: 1_600 })
+        const message = toThreadMessageLike(answer, 'question-answer:qa-1')
+
+        expect(message).toMatchObject({
+            role: 'user',
+            id: 'question-answer:qa-1',
+            content: [{ type: 'text', text: 'Choose a direction\n• Keep it compact' }],
+            metadata: {
+                custom: {
+                    kind: 'user',
+                    questionAnswer: answer.answer
+                }
+            }
+        })
+    })
+
+    it('uses an answered question as a response-group boundary', () => {
+        const blocks: VisibleChatBlock[] = [
+            agentText('a1', {
+                localId: 'L1',
+                model: 'claude-sonnet-4-6',
+                usage: { input_tokens: 1, output_tokens: 2 }
+            }),
+            questionAnswer('qa-1'),
+            agentText('a2', {
+                localId: 'L2',
+                model: 'claude-sonnet-4-6',
+                usage: { input_tokens: 3, output_tokens: 4 }
+            })
+        ]
+
+        expect(aggregateResponseGroups(blocks)).toEqual(new Map())
     })
 })
 

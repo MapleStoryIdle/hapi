@@ -56,6 +56,7 @@ export type ToolUse = {
     name: string
     input: unknown
     description: string | null
+    startedAt?: number
     uuid: string
     parentUUID: string | null
 }
@@ -65,6 +66,8 @@ export type ToolResult = {
     tool_use_id: string
     content: unknown
     is_error: boolean
+    completedAt?: number
+    durationMs?: number
     uuid: string
     parentUUID: string | null
     permissions?: ToolResultPermission
@@ -168,6 +171,7 @@ export type ChatToolCall = {
     createdAt: number
     startedAt: number | null
     completedAt: number | null
+    durationMs?: number
     description: string | null
     result?: unknown
     permission?: ToolPermission

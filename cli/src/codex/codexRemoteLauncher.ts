@@ -86,6 +86,7 @@ type CodexTaskStatusEvent = {
 type ChildAgentRuntime = {
     reasoningProcessor: ReasoningProcessor;
     diffProcessor: DiffProcessor;
+    toolStartedAtByCallId: Map<string, number>;
     activeToolsByCallId: Map<string, {
         name: string;
         label: string;
@@ -147,6 +148,33 @@ type GoalForwardSignature = {
     tokenBudget: number | null;
     tokenBucket: number | null;
 };
+
+type CompletedToolTiming = {
+    completedAt: number;
+    durationMs?: number;
+};
+
+function beginToolTiming(toolStartedAtByCallId: Map<string, number>, callId: string): number {
+    const existingStartedAt = toolStartedAtByCallId.get(callId);
+    if (existingStartedAt !== undefined) {
+        return existingStartedAt;
+    }
+
+    const startedAt = Date.now();
+    toolStartedAtByCallId.set(callId, startedAt);
+    return startedAt;
+}
+
+function completeToolTiming(toolStartedAtByCallId: Map<string, number>, callId: string): CompletedToolTiming {
+    const completedAt = Date.now();
+    const startedAt = toolStartedAtByCallId.get(callId);
+    toolStartedAtByCallId.delete(callId);
+
+    return {
+        completedAt,
+        ...(startedAt === undefined ? {} : { durationMs: Math.max(0, completedAt - startedAt) })
+    };
+}
 
 function goalNumber(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -642,8 +670,17 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         };
 
         const getPatchFiles = (changes: unknown): string[] => {
+            if (Array.isArray(changes)) {
+                return changes.flatMap((change) => {
+                    const record = asRecord(change);
+                    const path = asString(record?.path ?? record?.file ?? record?.filePath ?? record?.file_path);
+                    return path ? [path] : [];
+                });
+            }
             const record = asRecord(changes);
             if (!record) return [];
+            const directPath = asString(record.path ?? record.file ?? record.filePath ?? record.file_path);
+            if (directPath) return [directPath];
             return Object.keys(record).filter((file) => file.length > 0);
         };
 
@@ -740,6 +777,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             session.sendAgentMessage(message);
         });
         const mcpTitleByCallId = new Map<string, string>();
+        const toolStartedAtByCallId = new Map<string, number>();
         const agentCardByAgentId = new Map<string, string>();
         const agentSummaryByCardId = new Map<string, string>();
         const agentSummaryByAgentId = new Map<string, string>();
@@ -1378,6 +1416,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 diffProcessor: new DiffProcessor((message) => {
                     emitAgentRunTraceMessage(agentId, message);
                 }),
+                toolStartedAtByCallId: new Map(),
                 activeToolsByCallId: new Map(),
                 pendingTitleByCallId: new Map(),
                 reasoningPreview: '',
@@ -1792,6 +1831,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'exec_command_begin' || msgType === 'exec_approval_request') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
+                    const startedAt = beginToolTiming(runtime.toolStartedAtByCallId, callId);
                     const inputs: Record<string, unknown> = { ...msg };
                     delete inputs.type;
                     delete inputs.call_id;
@@ -1801,6 +1841,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         name: 'CodexBash',
                         callId,
                         input: inputs,
+                        startedAt,
                         id: randomUUID()
                     });
                     const command = normalizeCommand(inputs.command) ?? 'command';
@@ -1824,6 +1865,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'exec_command_end') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
+                    const timing = completeToolTiming(runtime.toolStartedAtByCallId, callId);
                     const activeTool = runtime.activeToolsByCallId.get(callId);
                     runtime.activeToolsByCallId.delete(callId);
                     const output: Record<string, unknown> = { ...msg };
@@ -1837,6 +1879,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         callId,
                         output,
                         is_error: Boolean(output.error),
+                        ...timing,
                         id: randomUUID()
                     });
                     const label = activeTool?.label ?? normalizeCommand(output.command) ?? 'command';
@@ -1851,7 +1894,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'patch_apply_begin') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
-                    const changes = asRecord(msg.changes) ?? {};
+                    const startedAt = beginToolTiming(runtime.toolStartedAtByCallId, callId);
+                    const changes = msg.changes ?? {};
                     const files = getPatchFiles(changes);
                     const fileSummary = summarizeFiles(files);
                     emitAgentRunTraceMessage(agentId, {
@@ -1862,6 +1906,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                             auto_approved: msg.auto_approved ?? msg.autoApproved,
                             changes
                         },
+                        startedAt,
                         id: randomUUID()
                     });
                     runtime.activeToolsByCallId.set(callId, {
@@ -1877,6 +1922,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'patch_apply_end') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
+                    const timing = completeToolTiming(runtime.toolStartedAtByCallId, callId);
                     const activeTool = runtime.activeToolsByCallId.get(callId);
                     runtime.activeToolsByCallId.delete(callId);
                     const stdout = asString(msg.stdout);
@@ -1887,6 +1933,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         callId,
                         output: { stdout, stderr, success },
                         is_error: !success,
+                        ...timing,
                         id: randomUUID()
                     });
                     updateActivity(
@@ -1904,6 +1951,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     invocation.tool ?? invocation.tool_name ?? msg.tool
                 );
                 if (callId && name) {
+                    const startedAt = beginToolTiming(runtime.toolStartedAtByCallId, callId);
                     const input = invocation.arguments ?? invocation.input ?? msg.arguments ?? msg.input ?? {};
                     const inputRecord = asRecord(input);
                     const requestedTitle = inputRecord ? asString(inputRecord.title) : null;
@@ -1915,6 +1963,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         name,
                         callId,
                         input,
+                        startedAt,
                         id: randomUUID()
                     });
                     const label = displayMcpToolName(name);
@@ -1931,6 +1980,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'mcp_tool_call_end') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
+                    const timing = completeToolTiming(runtime.toolStartedAtByCallId, callId);
                     const activeTool = runtime.activeToolsByCallId.get(callId);
                     runtime.activeToolsByCallId.delete(callId);
                     const rawResult = msg.result;
@@ -1950,6 +2000,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         callId,
                         output,
                         is_error: isError,
+                        ...timing,
                         id: randomUUID()
                     });
                     const title = runtime.pendingTitleByCallId.get(callId);
@@ -1992,12 +2043,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         });
                         return;
                     }
+                    const startedAt = beginToolTiming(runtime.toolStartedAtByCallId, callId);
                     const activity = formatActivity('Running tool', name);
                     emitAgentRunTraceMessage(agentId, {
                         type: 'tool-call',
                         name,
                         callId,
                         input: msg.input ?? {},
+                        startedAt,
                         id: randomUUID()
                     });
                     runtime.activeToolsByCallId.set(callId, {
@@ -2013,6 +2066,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'codex_tool_call_end') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
+                    const timing = completeToolTiming(runtime.toolStartedAtByCallId, callId);
                     const activeTool = runtime.activeToolsByCallId.get(callId);
                     runtime.activeToolsByCallId.delete(callId);
                     const isError = Boolean(msg.is_error ?? msg.isError);
@@ -2021,6 +2075,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         callId,
                         output: msg.output,
                         is_error: isError,
+                        ...timing,
                         id: randomUUID()
                     });
                     updateActivity(
@@ -2042,6 +2097,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 runtime.terminal = true;
                 runtime.reasoningProcessor.reset();
                 runtime.diffProcessor.reset();
+                runtime.toolStartedAtByCallId.clear();
                 runtime.activeToolsByCallId.clear();
                 runtime.pendingTitleByCallId.clear();
                 runtime.reasoningPreview = '';
@@ -2497,6 +2553,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 diffProcessor.reset();
                 appServerEventConverter.reset();
                 mcpTitleByCallId.clear();
+                toolStartedAtByCallId.clear();
                 pendingAgentToolInputByCallId.clear();
                 childAgentActivityInCurrentTurn = false;
                 wakeLoop();
@@ -2592,6 +2649,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'exec_command_begin' || msgType === 'exec_approval_request') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
+                    const startedAt = beginToolTiming(toolStartedAtByCallId, callId);
                     const inputs: Record<string, unknown> = { ...msg };
                     delete inputs.type;
                     delete inputs.call_id;
@@ -2602,6 +2660,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         name: 'CodexBash',
                         callId: callId,
                         input: inputs,
+                        startedAt,
                         id: randomUUID()
                     });
                 }
@@ -2609,6 +2668,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'exec_command_end') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
+                    const timing = completeToolTiming(toolStartedAtByCallId, callId);
                     const output: Record<string, unknown> = { ...msg };
                     delete output.type;
                     delete output.call_id;
@@ -2620,6 +2680,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         type: 'tool-call-result',
                         callId: callId,
                         output,
+                        ...timing,
                         id: randomUUID()
                     });
                 }
@@ -2666,7 +2727,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'patch_apply_begin') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
-                    const changes = asRecord(msg.changes) ?? {};
+                    const startedAt = beginToolTiming(toolStartedAtByCallId, callId);
+                    const changes = msg.changes ?? {};
                     const changeCount = Object.keys(changes).length;
                     const filesMsg = changeCount === 1 ? '1 file' : `${changeCount} files`;
                     messageBuffer.addMessage(`Modifying ${filesMsg}...`, 'tool');
@@ -2679,6 +2741,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                             auto_approved: msg.auto_approved ?? msg.autoApproved,
                             changes
                         },
+                        startedAt,
                         id: randomUUID()
                     });
                 }
@@ -2686,6 +2749,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'patch_apply_end') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
+                    const timing = completeToolTiming(toolStartedAtByCallId, callId);
                     const stdout = asString(msg.stdout);
                     const stderr = asString(msg.stderr);
                     const success = Boolean(msg.success);
@@ -2706,6 +2770,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                             stderr,
                             success
                         },
+                        ...timing,
                         id: randomUUID()
                     });
                 }
@@ -2718,6 +2783,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     invocation.tool ?? invocation.tool_name ?? msg.tool
                 );
                 if (callId && name) {
+                    const startedAt = beginToolTiming(toolStartedAtByCallId, callId);
                     const input = invocation.arguments ?? invocation.input ?? msg.arguments ?? msg.input ?? {};
                     const inputRecord = asRecord(input);
                     const requestedTitle = inputRecord ? asString(inputRecord.title) : null;
@@ -2729,6 +2795,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         name,
                         callId,
                         input,
+                        startedAt,
                         id: randomUUID()
                     });
                 }
@@ -2749,6 +2816,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 }
 
                 if (callId) {
+                    const timing = completeToolTiming(toolStartedAtByCallId, callId);
                     const title = mcpTitleByCallId.get(callId);
                     mcpTitleByCallId.delete(callId);
                     if (!isError && title) {
@@ -2760,6 +2828,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         callId,
                         output,
                         is_error: isError,
+                        ...timing,
                         id: randomUUID()
                     });
                 }
@@ -2800,11 +2869,13 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         }
                         return;
                     }
+                    const startedAt = beginToolTiming(toolStartedAtByCallId, callId);
                     session.sendAgentMessage({
                         type: 'tool-call',
                         name,
                         callId,
                         input: msg.input ?? {},
+                        startedAt,
                         id: randomUUID()
                     });
                 }
@@ -2817,11 +2888,13 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         handleAgentToolEnd(callId, name, msg.output, Boolean(msg.is_error ?? msg.isError));
                         return;
                     }
+                    const timing = completeToolTiming(toolStartedAtByCallId, callId);
                     session.sendAgentMessage({
                         type: 'tool-call-result',
                         callId,
                         output: msg.output,
                         is_error: Boolean(msg.is_error ?? msg.isError),
+                        ...timing,
                         id: randomUUID()
                     });
                 }
@@ -3824,6 +3897,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     diffProcessor.reset();
                     appServerEventConverter.reset();
                     mcpTitleByCallId.clear();
+                    toolStartedAtByCallId.clear();
                     pendingAgentToolInputByCallId.clear();
                     pendingAgentTracesByAgentId.clear();
                     cancelAllPendingThrottledAgentRunUpdates();

@@ -3,7 +3,12 @@ import { isToolGroupBlock, summarizeToolGroup, type ToolGroupBlock, type Visible
 
 function isAssistantVisibleBlock(block: VisibleChatBlock): boolean {
     if (block.kind === 'user-text') return false
+    if (block.kind === 'question-answer') return false
     if (block.kind === 'agent-event') return false
+    // Generated images are completed assistant output, not process detail.
+    // Keep them (and preceding milestone cards such as Skill) out of a
+    // collapsible result-details group.
+    if (block.kind === 'generated-image') return false
     if (block.kind === 'cli-output' && block.source === 'user') return false
     return true
 }
@@ -22,6 +27,8 @@ function flattenSourceBlock(
     tools: ToolCallBlock[],
     detailBlocks: ChatBlock[]
 ): void {
+    if (block.kind === 'question-answer') return
+
     if (isToolGroupBlock(block)) {
         tools.push(...block.tools)
         if (block.detailBlocks && block.detailBlocks.length > 0) {
@@ -93,6 +100,14 @@ function transformAssistantGroup(group: VisibleChatBlock[]): VisibleChatBlock[] 
     const tools: ToolCallBlock[] = []
     const detailBlocks: ChatBlock[] = []
     const detailSourceBlocks = group.slice(0, -1)
+    if (
+        detailSourceBlocks.length === 1
+        && detailSourceBlocks[0]?.kind === 'tool-call'
+        && detailSourceBlocks[0].tool.name === 'Skill'
+    ) {
+        return group
+    }
+
     for (const block of detailSourceBlocks) {
         flattenSourceBlock(block, tools, detailBlocks)
     }
@@ -114,7 +129,9 @@ export function groupAssistantResultDetails(
     const transformed: VisibleChatBlock[] = []
     let group: VisibleChatBlock[] = []
     let groupStartIndex = -1
-    const latestUserIndex = blocks.findLastIndex((block) => block.kind === 'user-text')
+    const latestUserIndex = blocks.findLastIndex((block) => (
+        block.kind === 'user-text' || block.kind === 'question-answer'
+    ))
     if (options.runActive && latestUserIndex === -1) {
         return blocks
     }

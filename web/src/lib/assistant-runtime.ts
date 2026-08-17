@@ -11,6 +11,7 @@ import type { ChatBlock, CliOutputBlock, CodexReview, UsageData } from '@/chat/t
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
 import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, RemoteServerSnapshot, Session } from '@/types/api'
+import { formatQuestionAnswerText, type QuestionAnswerPresentation } from '@/chat/questionAnswers'
 
 /**
  * Aggregated metadata for a multi-turn response group, surfaced on the
@@ -40,6 +41,7 @@ export type HappyChatMessageMetadata = {
     usage?: UsageData
     model?: string | null
     review?: CodexReview
+    questionAnswer?: QuestionAnswerPresentation
     /**
      * Distinct turn count when this block carries an aggregated response
      * group footer. Single-turn blocks omit this field so the existing
@@ -87,6 +89,7 @@ type VisibleChatBlockRole = 'user' | 'assistant' | 'system'
  */
 function visibleBlockRole(block: VisibleChatBlock): VisibleChatBlockRole {
     if (block.kind === 'user-text') return 'user'
+    if (block.kind === 'question-answer') return 'user'
     if (block.kind === 'agent-event') return 'system'
     if (block.kind === 'cli-output') return block.source === 'user' ? 'user' : 'assistant'
     return 'assistant'
@@ -333,7 +336,7 @@ export function assignThreadMessageIds(
     return assignThreadMessageIdsWithStableWrappers(blocks, new WeakMap())
 }
 
-function toThreadMessageLike(block: VisibleChatBlock, threadMessageId: string): ThreadMessageLike {
+export function toThreadMessageLike(block: VisibleChatBlock, threadMessageId: string): ThreadMessageLike {
     if (block.kind === 'user-text') {
         return {
             role: 'user',
@@ -349,6 +352,22 @@ function toThreadMessageLike(block: VisibleChatBlock, threadMessageId: string): 
                     attachments: block.attachments,
                     remoteServer: getRemoteServerFromMeta(block.meta),
                     invokedAt: block.invokedAt
+                } satisfies HappyChatMessageMetadata
+            }
+        }
+    }
+
+    if (block.kind === 'question-answer') {
+        return {
+            role: 'user',
+            id: threadMessageId,
+            createdAt: new Date(block.createdAt),
+            content: [{ type: 'text', text: formatQuestionAnswerText(block.answer) }],
+            metadata: {
+                custom: {
+                    kind: 'user',
+                    invokedAt: block.invokedAt,
+                    questionAnswer: block.answer
                 } satisfies HappyChatMessageMetadata
             }
         }

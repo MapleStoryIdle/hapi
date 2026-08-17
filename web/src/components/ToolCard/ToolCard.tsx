@@ -23,12 +23,18 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { TraceSection } from '@/components/ToolCard/trace'
 import { isSubagentToolName } from '@/chat/subagentTool'
+import { formatTerminalExecutionDuration, getTerminalExecutionToolState, isTerminalExecutionTool, TerminalExecutionDetail } from '@/components/ToolCard/terminalExecution'
+import { getTerminalReadRequest } from '@/components/ToolCard/fileAccess'
 
 const ELAPSED_INTERVAL_MS = 1000
 const TERMINAL_RELATED_TOOL_NAMES = new Set(['Bash', 'CodexBash', 'shell_command', 'run_shell_command'])
 
 export function shouldUseCompactTerminalToolCard(toolName: string, terminalToolDisplayMode: TerminalToolDisplayMode): boolean {
     return TERMINAL_RELATED_TOOL_NAMES.has(toolName) && terminalToolDisplayMode === 'compact'
+}
+
+export function shouldUseFullScreenToolDetail(toolName: string): boolean {
+    return isTerminalExecutionTool(toolName) || toolName === 'CodexPatch'
 }
 
 export function shouldShowInlineToolCardBody(
@@ -61,6 +67,69 @@ function ElapsedView(props: { from: number; active: boolean }) {
     return (
         <span className="font-mono text-xs text-[var(--app-hint)]">
             {elapsed.toFixed(1)}s
+        </span>
+    )
+}
+
+function isActivityToolCard(block: ToolCallBlock): boolean {
+    return block.tool.name.startsWith('mcp__')
+        || block.tool.name === 'Skill'
+        || block.tool.name === 'CodexBash' && getTerminalReadRequest(block.tool.input) !== null
+}
+
+function getActivityToolStatusLabel(
+    state: ToolCallBlock['tool']['state'],
+    t: (key: string, params?: Record<string, string | number>) => string
+): string {
+    if (state === 'pending') return t('terminal.execution.pending')
+    if (state === 'running') return t('terminal.execution.running')
+    if (state === 'error') return t('terminal.execution.failed')
+    return t('terminal.execution.completed')
+}
+
+function getActivityToolDurationMs(block: ToolCallBlock, now: number): number {
+    const startedAt = block.tool.startedAt ?? block.tool.createdAt
+    const active = block.tool.state === 'pending' || block.tool.state === 'running'
+    const recordedDurationMs = typeof block.tool.durationMs === 'number' && Number.isFinite(block.tool.durationMs)
+        ? Math.max(0, block.tool.durationMs)
+        : typeof block.durationMs === 'number' && Number.isFinite(block.durationMs)
+            ? Math.max(0, block.durationMs)
+            : null
+    if (!active && recordedDurationMs !== null) {
+        return recordedDurationMs
+    }
+    const completedAt = active
+        ? now
+        : block.tool.completedAt ?? startedAt
+    return Math.max(0, completedAt - startedAt)
+}
+
+function ActivityToolTiming(props: { block: ToolCallBlock }) {
+    const { t } = useTranslation()
+    const active = props.block.tool.state === 'pending' || props.block.tool.state === 'running'
+    const startedAt = props.block.tool.startedAt ?? props.block.tool.createdAt
+    const [now, setNow] = useState(() => Date.now())
+
+    useEffect(() => {
+        if (!active) return
+        setNow(Date.now())
+        const id = setInterval(() => setNow(Date.now()), ELAPSED_INTERVAL_MS)
+        return () => clearInterval(id)
+    }, [active, startedAt])
+
+    const duration = formatTerminalExecutionDuration(getActivityToolDurationMs(props.block, now)) ?? '0.0s'
+    const state = props.block.tool.state
+    const stateColor = toolStatusColorClass(state)
+
+    return (
+        <span
+            aria-label={`${getActivityToolStatusLabel(state, t)} ${duration}`}
+            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-mono text-[11px]"
+            data-activity-tool-timing
+            role="status"
+        >
+            <span className="text-[var(--app-hint)]">{duration}</span>
+            <span aria-hidden="true" className={stateColor}><ToolStatusIcon state={state} /></span>
         </span>
     )
 }
@@ -213,6 +282,9 @@ export function ToolDetailDialogContent(props: {
 }) {
     const { t } = useTranslation()
     const toolName = props.block.tool.name
+    if (isTerminalExecutionTool(toolName)) {
+        return <TerminalExecutionDetail block={props.block} />
+    }
     const FullToolView = getToolFullViewComponent(toolName)
     const ResultToolView = getToolResultViewComponent(toolName)
     const permission = props.block.tool.permission
@@ -224,7 +296,10 @@ export function ToolDetailDialogContent(props: {
         && Object.keys(permission.answers).length > 0
 
     return (
-        <div className="mt-3 flex max-h-[75vh] flex-col gap-4 overflow-auto">
+        <div className={cn(
+            'mt-3 flex max-h-[75vh] flex-col gap-4 overflow-auto',
+            toolName === 'CodexPatch' ? 'max-sm:mt-0 max-sm:max-h-none max-sm:flex-1 max-sm:px-5 max-sm:pb-5' : null
+        )}>
             <div>
                 <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">
                     {isQuestionToolWithAnswers ? t('tool.questionsAnswers') : t('tool.input')}
@@ -272,6 +347,9 @@ function ToolCardInner(props: ToolCardProps) {
     const taskSummary = renderTaskSummary(props.block, props.metadata, t)
     const runningFrom = props.block.tool.startedAt ?? props.block.tool.createdAt
     const isCodexAgentCard = toolName === 'CodexAgent'
+    const isActivityTool = isActivityToolCard(props.block)
+    const isTerminalExecution = isTerminalExecutionTool(toolName)
+    const useFullScreenToolDetail = shouldUseFullScreenToolDetail(toolName)
     const useCompactTerminalCard = shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode)
     const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal, props.terminalToolDisplayMode)
     const CompactToolView = showInline ? getToolViewComponent(toolName) : null
@@ -285,7 +363,8 @@ function ToolCardInner(props: ToolCardProps) {
         || ((permission.status === 'denied' || permission.status === 'canceled') && Boolean(permission.reason))
     ))
     const hasBody = showInline || taskSummary !== null || showsPermissionFooter
-    const stateColor = toolStatusColorClass(props.block.tool.state)
+    const displayedToolState = isTerminalExecution ? getTerminalExecutionToolState(props.block) : props.block.tool.state
+    const stateColor = toolStatusColorClass(displayedToolState)
     const { suppressFocusRing, onTriggerPointerDown, onTriggerKeyDown, onTriggerBlur } = usePointerFocusRing()
     const openDetails = () => setDetailsOpen(true)
     const openDetailsFromInlinePreview = (event: MouseEvent<HTMLElement>) => {
@@ -329,10 +408,16 @@ function ToolCardInner(props: ToolCardProps) {
                 'flex shrink-0 items-center gap-2 self-center text-[var(--app-hint)]',
                 subtitle ? '-translate-y-0.5' : null
             )}>
-                <ElapsedView from={runningFrom} active={props.block.tool.state === 'running'} />
-                <span className={stateColor}>
-                    <ToolStatusIcon state={props.block.tool.state} />
-                </span>
+                {isActivityTool ? (
+                    <ActivityToolTiming block={props.block} />
+                ) : (
+                    <>
+                        <ElapsedView from={runningFrom} active={props.block.tool.state === 'running'} />
+                        <span className={stateColor}>
+                            <ToolStatusIcon state={displayedToolState} />
+                        </span>
+                    </>
+                )}
                 <span className="text-[var(--app-hint)]">
                     <DetailsIcon />
                 </span>
@@ -341,7 +426,7 @@ function ToolCardInner(props: ToolCardProps) {
     )
 
     return (
-        <Card className="overflow-hidden rounded-[20px] bg-[var(--app-tool-card-bg)] shadow-none">
+        <Card className="overflow-hidden rounded-[16px] bg-[var(--app-tool-card-bg)] shadow-none">
             <CardHeader className={cn('space-y-0 p-3', subtitle ? 'pb-2' : null)}>
                 <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
                     <DialogTrigger asChild>
@@ -358,9 +443,9 @@ function ToolCardInner(props: ToolCardProps) {
                             {header}
                         </button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl" aria-describedby={undefined}>
-                        <DialogHeader>
-                            <DialogTitle>{toolTitle}</DialogTitle>
+                    <DialogContent fullScreenOnMobile={useFullScreenToolDetail} className="max-w-2xl" aria-describedby={undefined}>
+                        <DialogHeader className={useFullScreenToolDetail ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
+                            <DialogTitle>{isTerminalExecution ? t('terminal.execution.title') : toolTitle}</DialogTitle>
                         </DialogHeader>
                         <ToolDetailDialogContent block={props.block} metadata={props.metadata} />
                     </DialogContent>

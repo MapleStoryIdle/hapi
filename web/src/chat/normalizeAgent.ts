@@ -2,6 +2,11 @@ import type { AgentEvent, CodexReview, CodexReviewFinding, NormalizedAgentConten
 import { AGENT_MESSAGE_PAYLOAD_TYPE, asNumber, asString, isObject } from '@hapi/protocol'
 import { isClaudeChatVisibleMessage } from '@hapi/protocol/messages'
 
+function asNonNegativeNumber(value: unknown): number | undefined {
+    const number = asNumber(value)
+    return number !== null && number >= 0 ? number : undefined
+}
+
 function normalizeToolResultPermissions(value: unknown): ToolResultPermission | undefined {
     if (!isObject(value)) return undefined
     const date = asNumber(value.date)
@@ -719,6 +724,7 @@ export function normalizeAgentRecord(
                     name: asString(data.name) ?? 'unknown',
                     input: data.input,
                     description: null,
+                    startedAt: asNonNegativeNumber(data.startedAt ?? data.started_at),
                     uuid,
                     parentUUID: null
                 }],
@@ -739,6 +745,8 @@ export function normalizeAgentRecord(
                     tool_use_id: data.callId,
                     content: data.output,
                     is_error: Boolean(data.is_error),
+                    completedAt: asNonNegativeNumber(data.completedAt ?? data.completed_at),
+                    durationMs: asNonNegativeNumber(data.durationMs ?? data.duration_ms),
                     uuid,
                     parentUUID: null
                 }],

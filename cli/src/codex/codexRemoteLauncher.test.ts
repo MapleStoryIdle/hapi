@@ -1711,9 +1711,37 @@ describe('codexRemoteLauncher', () => {
 
         await codexRemoteLauncher(session as never);
 
+        const commandStart = codexMessages.find((message): message is Record<string, unknown> => {
+            if (typeof message !== 'object' || message === null) return false;
+            const record = message as Record<string, unknown>;
+            return record.type === 'tool-call' && record.callId === 'cmd-1';
+        });
+        const commandResult = codexMessages.find((message): message is Record<string, unknown> => {
+            if (typeof message !== 'object' || message === null) return false;
+            const record = message as Record<string, unknown>;
+            return record.type === 'tool-call-result' && record.callId === 'cmd-1';
+        });
+        if (
+            !commandStart
+            || !commandResult
+            || typeof commandStart.startedAt !== 'number'
+            || typeof commandResult.completedAt !== 'number'
+            || typeof commandResult.durationMs !== 'number'
+        ) {
+            throw new Error('Expected Codex command timing fields');
+        }
+
+        expect(commandResult.durationMs).toBe(Math.max(0, commandResult.completedAt - commandStart.startedAt));
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'tool-call',
+            callId: 'cmd-1',
+            startedAt: expect.any(Number)
+        }));
         expect(codexMessages).toContainEqual(expect.objectContaining({
             type: 'tool-call-result',
             callId: 'cmd-1',
+            completedAt: expect.any(Number),
+            durationMs: expect.any(Number),
             output: expect.objectContaining({
                 command: 'echo ok',
                 cwd: '/tmp/hapi-update',
@@ -2284,7 +2312,28 @@ describe('codexRemoteLauncher', () => {
 
         await codexRemoteLauncher(session as never);
 
+        const mcpStart = codexMessages.find((message): message is Record<string, unknown> => {
+            if (typeof message !== 'object' || message === null) return false;
+            const record = message as Record<string, unknown>;
+            return record.type === 'tool-call' && record.callId === 'title-parent';
+        });
+        const mcpResult = codexMessages.find((message): message is Record<string, unknown> => {
+            if (typeof message !== 'object' || message === null) return false;
+            const record = message as Record<string, unknown>;
+            return record.type === 'tool-call-result' && record.callId === 'title-parent';
+        });
+        if (
+            !mcpStart
+            || !mcpResult
+            || typeof mcpStart.startedAt !== 'number'
+            || typeof mcpResult.completedAt !== 'number'
+            || typeof mcpResult.durationMs !== 'number'
+        ) {
+            throw new Error('Expected MCP tool timing fields');
+        }
+
         expect(harness.bridgeOptions).toEqual([{ emitTitleSummary: false }]);
+        expect(mcpResult.durationMs).toBe(Math.max(0, mcpResult.completedAt - mcpStart.startedAt));
         expect(summaryMessages).toContainEqual(expect.objectContaining({
             type: 'summary',
             summary: 'Parent Title'
@@ -2293,12 +2342,15 @@ describe('codexRemoteLauncher', () => {
             type: 'tool-call',
             name: 'mcp__hapi__change_title',
             callId: 'title-parent',
-            input: { title: 'Parent Title' }
+            input: { title: 'Parent Title' },
+            startedAt: expect.any(Number)
         }));
         expect(codexMessages).toContainEqual(expect.objectContaining({
             type: 'tool-call-result',
             callId: 'title-parent',
-            is_error: false
+            is_error: false,
+            completedAt: expect.any(Number),
+            durationMs: expect.any(Number)
         }));
     });
 

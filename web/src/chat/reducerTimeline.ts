@@ -885,8 +885,9 @@ export function reduceTimeline(
                         permission
                     })
 
+                    setEarliestStartedAt(block, c.startedAt ?? msg.createdAt)
                     if (block.tool.state === 'pending') {
-                        block.tool = { ...block.tool, state: 'running', startedAt: msg.createdAt }
+                        block.tool = { ...block.tool, state: 'running', startedAt: c.startedAt ?? msg.createdAt }
                     }
 
                     if (isSubagentToolName(c.name) && !context.consumedGroupIds.has(msg.id)) {
@@ -944,6 +945,7 @@ export function reduceTimeline(
                     const block = ensureToolBlock(blocks, toolBlocksById, c.tool_use_id, {
                         createdAt: msg.createdAt,
                         invokedAt: msg.invokedAt,
+                        durationMs: c.durationMs,
                         usage: msg.usage,
                         model: msg.model,
                         localId: msg.localId,
@@ -954,10 +956,16 @@ export function reduceTimeline(
                         permission
                     })
 
+                    const completedAt = c.completedAt ?? msg.createdAt
+                    if (c.durationMs !== undefined) {
+                        setEarliestStartedAt(block, Math.max(0, completedAt - c.durationMs))
+                    }
+
                     block.tool = {
                         ...block.tool,
                         result: c.content,
-                        completedAt: msg.createdAt,
+                        completedAt,
+                        durationMs: c.durationMs ?? block.tool.durationMs,
                         state: c.is_error ? 'error' : 'completed'
                     }
                     continue

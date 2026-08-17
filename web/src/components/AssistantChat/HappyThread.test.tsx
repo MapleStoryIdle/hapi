@@ -377,6 +377,17 @@ describe('return-to-user-message helpers', () => {
         cleanup()
     })
 
+    it('treats a selected question answer as a user message', () => {
+        const { viewport, addMessage, cleanup } = createUserMessageViewport()
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ top: 100, bottom: 500 }))
+        const visible = addMessage('hapi-message-question-answer:choice-1', { top: 160, bottom: 220 })
+
+        expect(findVisibleUserMessageAnchor(viewport)).toBe(visible)
+        expect(hasUserMessageAnchor(viewport)).toBe(true)
+
+        cleanup()
+    })
+
     it('chooses the nearest user message above the current viewport', () => {
         const { viewport, addMessage, cleanup } = createUserMessageViewport()
         vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ top: 100, bottom: 500 }))
@@ -475,7 +486,7 @@ describe('scroll anchor helpers', () => {
         viewport.remove()
     })
 
-    it('treats upward motion near the bottom as manual scroll intent', () => {
+    it('keeps automatic following paused after upward motion near the bottom', () => {
         expect(getScrollIntent({
             scrollTop: 690,
             previousScrollTop: 702,
@@ -483,7 +494,7 @@ describe('scroll anchor helpers', () => {
             clientHeight: 530
         })).toMatchObject({
             distanceFromBottom: 12,
-            isNearBottom: true,
+            isAtBottom: false,
             isScrollingUp: true
         })
     })
@@ -496,7 +507,7 @@ describe('scroll anchor helpers', () => {
             clientHeight: 530
         })).toMatchObject({
             distanceFromBottom: 0,
-            isNearBottom: true,
+            isAtBottom: true,
             isScrollingUp: false
         })
     })

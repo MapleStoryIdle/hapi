@@ -232,7 +232,7 @@ export function QueuedMessagesBar({
     return (
         <Dialog.Root open={open} onOpenChange={setOpen}>
             <div
-                className="pointer-events-none mx-auto flex w-full max-w-content justify-center px-3"
+                className="pointer-events-none mx-auto w-full max-w-content px-3"
                 data-testid="queued-messages-accessory"
             >
                 <Dialog.Trigger asChild>
@@ -241,21 +241,20 @@ export function QueuedMessagesBar({
                         data-testid="queued-messages-trigger"
                         aria-label={t('queuedMessages.open', { count: queuedMessages.length })}
                         aria-expanded={open}
-                        className="pointer-events-auto touch-manipulation group inline-flex h-10 max-w-full items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--app-link)_20%,var(--app-border))] bg-[var(--app-bg)] px-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition-[transform,border-color,box-shadow] duration-150 hover:-translate-y-0.5 hover:border-[color-mix(in_srgb,var(--app-link)_36%,var(--app-border))] hover:shadow-[0_12px_28px_rgba(15,23,42,0.16)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] motion-reduce:transition-none"
+                        className="pointer-events-auto touch-manipulation group flex min-h-16 w-full items-center gap-3 rounded-[28px] border border-[var(--app-border)] bg-[var(--app-bg)] px-4 py-3 text-left shadow-[0_10px_28px_rgba(15,23,42,0.08)] transition-[border-color,box-shadow,background-color] duration-150 hover:border-[color-mix(in_srgb,var(--app-link)_28%,var(--app-border))] hover:shadow-[0_14px_32px_rgba(15,23,42,0.12)] active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] motion-reduce:transition-none"
                     >
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--app-link)_12%,transparent)] text-[var(--app-link)]">
-                            <QueueIcon className="h-3.5 w-3.5" />
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center text-[var(--app-hint)]">
+                            <QueueIcon className="h-5 w-5" />
                         </span>
-                        <span className="shrink-0 text-[11px] font-bold tracking-[0.08em] text-[var(--app-hint)]">
-                            {t('queuedMessages.label')}
-                        </span>
-                        <span className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-button)] px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-[var(--app-button-text)]">
-                            {queuedMessages.length}
-                        </span>
-                        <span className="min-w-0 max-w-[min(42vw,16rem)] truncate text-xs font-medium text-[var(--app-fg)]">
+                        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-5 text-[var(--app-fg)]">
                             {firstPreviewLabel}
                         </span>
-                        <ChevronUpIcon className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)] transition-transform duration-150 group-data-[state=open]:rotate-180" />
+                        {queuedMessages.length > 1 ? (
+                            <span className="shrink-0 font-mono text-xs font-medium tabular-nums text-[var(--app-hint)]" aria-hidden="true">
+                                +{queuedMessages.length - 1}
+                            </span>
+                        ) : null}
+                        <ChevronUpIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform duration-150 group-data-[state=open]:rotate-180" />
                     </button>
                 </Dialog.Trigger>
             </div>

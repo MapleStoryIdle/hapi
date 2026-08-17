@@ -179,7 +179,7 @@ describe('ToolGroupCard', () => {
         expect(screen.getByText('Tool 1')).toBeInTheDocument()
     })
 
-    it('renders completed compact groups collapsed with processed duration', () => {
+    it('renders completed compact groups with their aggregate duration', () => {
         const tools = [
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
                 createdAt: 0,
@@ -217,14 +217,170 @@ describe('ToolGroupCard', () => {
 
         const toggle = within(view.container).getByRole('button', { name: /processed 3m 25s/i })
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(toggle).toHaveClass('min-h-9', 'text-[13px]')
         expect(screen.queryByText('Ran')).not.toBeInTheDocument()
 
         fireEvent.click(toggle)
 
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.getAllByText('Ran')).toHaveLength(2)
         expect(screen.getByText('bun test')).toBeInTheDocument()
         expect(screen.getByText('bun run build')).toBeInTheDocument()
+    })
+
+    it('shows a failed terminal status inline without a result or duration', () => {
+        const terminal = makeToolBlock('bash-1', 'CodexBash', {
+            command: '/bin/zsh -lc "ls /definitely-not-exists"',
+            cwd: '/workspace/hapi'
+        }, {
+            startedAt: 0,
+            completedAt: 1_250,
+            result: {
+                exit_code: 1,
+                status: 'failed'
+            }
+        })
+        const view = renderCard(makeGroup({
+            tools: [terminal],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['/bin/zsh -lc "ls /definitely-not-exists"'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 1,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        fireEvent.click(within(view.container).getByRole('button'))
+
+        expect(within(view.container).queryByText('Failed')).not.toBeInTheDocument()
+        expect(within(view.container).getByRole('button', { name: /ls \/definitely-not-exists 1s/i })).toHaveAttribute('aria-expanded', 'true')
+        expect(within(view.container).queryByText('1.3s')).not.toBeInTheDocument()
+        expect(within(view.container).queryByText('exit 1')).not.toBeInTheDocument()
+        expect(within(view.container).queryByText('The agent did not return terminal output for this command.')).not.toBeInTheDocument()
+        const terminalRow = within(view.container)
+            .getAllByRole('button', { name: /^ls \/definitely-not-exists$/i })
+            .find((button) => !button.hasAttribute('aria-expanded'))
+        expect(terminalRow).toHaveClass('flex', 'items-center')
+        expect(terminalRow?.firstElementChild).toHaveClass('text-red-600')
+    })
+
+    it('uses Terminal execution when a compact terminal row has no recognized action', () => {
+        const terminal = makeToolBlock('bash-unknown', 'CodexBash', {
+            command: '/bin/zsh -lc "node -e \'process.exit(0)\'"'
+        })
+        const view = renderCard(makeGroup({
+            tools: [terminal],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: [],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        const toggle = within(view.container).getByRole('button', { name: /terminal execution 0s/i })
+        fireEvent.click(toggle)
+
+        expect(within(view.container).getByText('Terminal execution')).toBeInTheDocument()
+        expect(within(view.container).queryByText(/node -e/i)).not.toBeInTheDocument()
+    })
+
+    it('shows one requested file directly and collapses batch read targets', () => {
+        const singleRead = makeToolBlock('single-read', 'CodexBash', {
+            command: "/bin/zsh -lc \"sed -n '12,80p' web/src/App.tsx\""
+        })
+        const singleView = renderCard(makeGroup({
+            tools: [singleRead],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 1,
+                    search: 0,
+                    command: 0,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: ['web/src/App.tsx'],
+                commandTargets: [],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        const singleToggle = within(singleView.container).getByRole('button', { name: /read file 0s/i })
+        fireEvent.click(singleToggle)
+
+        expect(within(singleView.container).getByText('Read file')).toBeInTheDocument()
+        expect(within(singleView.container).getByText('web/src/App.tsx · L12–80')).toBeInTheDocument()
+        expect(singleView.container.querySelector('[data-tool-group-timeline]')).toHaveClass('left-0')
+        const singleRow = within(singleView.container)
+            .getAllByRole('button', { name: /read file web\/src\/App\.tsx/i })
+            .find((button) => !button.hasAttribute('aria-expanded'))
+        expect(singleRow).toHaveClass('-ml-[7px]', 'px-0')
+
+        const batchRead = makeToolBlock('batch-read', 'CodexBash', {
+            command: "/bin/zsh -lc \"cat web/src/a.ts; sed -n '1,20p' web/src/b.ts\""
+        })
+        const batchView = renderCard(makeGroup({
+            id: 'tool-group:batch-read',
+            tools: [batchRead],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 1,
+                    search: 0,
+                    command: 0,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: ['web/src/a.ts', 'web/src/b.ts'],
+                commandTargets: [],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        const batchToggle = within(batchView.container).getByRole('button', { name: /read a batch of files 0s/i })
+        fireEvent.click(batchToggle)
+
+        expect(within(batchView.container).getByText('Read a batch of files')).toBeInTheDocument()
+        expect(within(batchView.container).queryByText('web/src/a.ts')).not.toBeInTheDocument()
+        expect(within(batchView.container).queryByText('web/src/b.ts · L1–20')).not.toBeInTheDocument()
     })
 
     it('uses action-specific compact titles for single tool groups', () => {
@@ -258,11 +414,11 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /ran 2s/i })).toHaveAttribute('aria-expanded', 'false')
+        expect(within(view.container).getByRole('button', { name: /bun test 2s/i })).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByText('Processed 2s')).not.toBeInTheDocument()
     })
 
-    it('keeps long completed compact durations', () => {
+    it('shows duration only in the compact group header', () => {
         const tools = [
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
                 createdAt: 0,
@@ -293,7 +449,47 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /ran 6s/i })).toHaveAttribute('aria-expanded', 'false')
+        const toggle = within(view.container).getByRole('button', { name: /bun test 6s/i })
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+        fireEvent.click(toggle)
+
+        const terminalRow = within(view.container)
+            .getAllByRole('button', { name: /^bun test$/i })
+            .find((button) => !button.hasAttribute('aria-expanded'))
+        expect(terminalRow).not.toHaveTextContent('6s')
+    })
+
+    it('prefers persisted CLI duration for a completed compact tool group', () => {
+        const tool = makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+            startedAt: 1,
+            completedAt: 2,
+        })
+        tool.tool.durationMs = 9_000
+        const view = renderCard(makeGroup({
+            tools: [tool],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        expect(within(view.container).getByRole('button', { name: /bun test 9s/i })).toHaveAttribute('aria-expanded', 'false')
     })
 
     it('uses action-specific processing titles for active single tool groups', () => {
@@ -329,7 +525,10 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /running \d+s/i })).toHaveAttribute('aria-expanded', 'true')
+        const toggle = within(view.container)
+            .getAllByRole('button', { name: /bun test \d+s/i })
+            .find((button) => button.hasAttribute('aria-expanded'))
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
         expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
     })
 
@@ -366,9 +565,11 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const toggle = within(view.container).getByRole('button', { name: /running \d+s/i })
+        const toggle = within(view.container)
+            .getAllByRole('button', { name: /bun test \d+s/i })
+            .find((button) => button.hasAttribute('aria-expanded'))
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.queryByText(/Ran \d+s/i)).not.toBeInTheDocument()
+        expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
     })
 
     it('uses the raw command when a mutation has no parsed file target', () => {
@@ -395,7 +596,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /ran apply_patch <<patch.*0s/i })).toBeInTheDocument()
+        expect(within(view.container).getByRole('button', { name: /apply_patch 0s/i })).toBeInTheDocument()
     })
 
     it('uses the parsed file target for a mutation when available', () => {
@@ -569,8 +770,8 @@ describe('ToolGroupCard', () => {
 
         const text = view.container.textContent ?? ''
         expect(text.indexOf('First process note')).toBeGreaterThanOrEqual(0)
-        expect(text.indexOf('Ran')).toBeGreaterThan(text.indexOf('First process note'))
-        expect(text.indexOf('Second process note')).toBeGreaterThan(text.indexOf('Ran'))
+        expect(text.indexOf('bun test')).toBeGreaterThan(text.indexOf('First process note'))
+        expect(text.indexOf('Second process note')).toBeGreaterThan(text.indexOf('bun test'))
     })
 
     it('lets users collapse compact groups while tools are still active', () => {
@@ -609,12 +810,12 @@ describe('ToolGroupCard', () => {
 
         const toggle = within(view.container).getByRole('button', { name: /processing/i })
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.getByText('Ran')).toBeInTheDocument()
+        expect(screen.getByText('bun test')).toBeInTheDocument()
 
         fireEvent.click(toggle)
 
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
-        expect(screen.queryByText('Ran')).not.toBeInTheDocument()
+        expect(screen.queryByText('bun test')).not.toBeInTheDocument()
     })
 
     it('keeps an auto-open compact group open until an explicit turn completion', async () => {
@@ -683,7 +884,7 @@ describe('ToolGroupCard', () => {
         const view = render(<Harness />)
         let toggle = within(view.container).getByRole('button', { name: /processing/i })
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.getByText('Ran')).toBeInTheDocument()
+        expect(screen.getByText('bun test')).toBeInTheDocument()
 
         fireEvent.click(screen.getByRole('button', { name: 'finish' }))
 
@@ -691,7 +892,7 @@ describe('ToolGroupCard', () => {
             toggle = within(view.container).getByRole('button', { name: /processed/i })
             expect(toggle).toHaveAttribute('aria-expanded', 'true')
         })
-        expect(screen.getByText('Ran')).toBeInTheDocument()
+        expect(screen.getByText('bun test')).toBeInTheDocument()
     })
 
     it('auto-loads older history after expand when the group is incomplete', async () => {

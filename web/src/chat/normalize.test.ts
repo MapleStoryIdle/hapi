@@ -503,6 +503,55 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('preserves CLI tool timing fields for Terminal and MCP cards', () => {
+        const toolCall = normalizeDecryptedMessage(makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call',
+                    callId: 'mcp-call-1',
+                    name: 'mcp__node_repl__js',
+                    input: { code: 'browser.status()' },
+                    startedAt: 1_742_372_800_100,
+                    id: 'call-1'
+                }
+            }
+        }))
+        const toolResult = normalizeDecryptedMessage(makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call-result',
+                    callId: 'mcp-call-1',
+                    output: { ok: true },
+                    completedAt: 1_742_372_803_600,
+                    durationMs: 3_500,
+                    id: 'result-1'
+                }
+            }
+        }))
+
+        expect(toolCall).toMatchObject({
+            role: 'agent',
+            content: [{
+                type: 'tool-call',
+                id: 'mcp-call-1',
+                startedAt: 1_742_372_800_100
+            }]
+        })
+        expect(toolResult).toMatchObject({
+            role: 'agent',
+            content: [{
+                type: 'tool-result',
+                tool_use_id: 'mcp-call-1',
+                completedAt: 1_742_372_803_600,
+                durationMs: 3_500
+            }]
+        })
+    })
+
     it('normalizes Codex review JSON messages as structured review content', () => {
         const message = makeMessage({
             role: 'agent',

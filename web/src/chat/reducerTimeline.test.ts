@@ -408,6 +408,52 @@ describe('reduceTimeline', () => {
         expect(toolBlock.invokedAt).toBe(1_700_000_000_500)
     })
 
+    it('uses CLI-provided tool timing instead of hub message arrival timestamps', () => {
+        const toolUseMsg: TracedMessage = {
+            id: 'msg-call-timing',
+            localId: null,
+            createdAt: 1_700_000_100_000,
+            role: 'agent',
+            content: [{
+                type: 'tool-call',
+                id: 'mcp-timing',
+                name: 'mcp__node_repl__js',
+                input: { code: 'browser.status()' },
+                description: null,
+                startedAt: 1_700_000_000_000,
+                uuid: 'u-timing-call',
+                parentUUID: null
+            }],
+            isSidechain: false
+        } as TracedMessage
+        const toolResultMsg: TracedMessage = {
+            id: 'msg-result-timing',
+            localId: null,
+            createdAt: 1_700_000_100_001,
+            role: 'agent',
+            content: [{
+                type: 'tool-result',
+                tool_use_id: 'mcp-timing',
+                content: { ok: true },
+                is_error: false,
+                completedAt: 1_700_000_003_500,
+                durationMs: 3_500,
+                uuid: 'u-timing-result',
+                parentUUID: null
+            }],
+            isSidechain: false
+        } as TracedMessage
+
+        const { blocks } = reduceTimeline([toolUseMsg, toolResultMsg], makeContext())
+        const toolBlock = blocks.find((block) => block.kind === 'tool-call')
+        if (!toolBlock || toolBlock.kind !== 'tool-call') throw new Error('Expected tool call block')
+
+        expect(toolBlock.tool.startedAt).toBe(1_700_000_000_000)
+        expect(toolBlock.tool.completedAt).toBe(1_700_000_003_500)
+        expect(toolBlock.tool.durationMs).toBe(3_500)
+        expect(toolBlock.durationMs).toBe(3_500)
+    })
+
     it('populates block.children for Agent tool (same as Task)', () => {
         // Agent tool_use message with a sidechain group
         const agentToolMsg: TracedMessage = {

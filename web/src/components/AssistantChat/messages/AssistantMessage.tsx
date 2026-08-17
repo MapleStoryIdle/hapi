@@ -75,18 +75,18 @@ function AssistantToolGroupMetaBar(props: {
             type="button"
             onClick={props.onToggle}
             aria-expanded={props.expanded}
-            className="mb-1 flex w-full items-center gap-1.5 text-left text-base font-medium leading-6 text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+            className="mb-0.5 flex min-h-9 w-full items-center gap-1.5 rounded-md px-0.5 py-1 text-left text-[13px] font-medium leading-5 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
         >
             {props.block.showAgentIcon ? (
-                <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-[1em] w-[1em] shrink-0 text-[var(--app-hint)]" />
+                <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]" />
             ) : null}
-            <span>{label}</span>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
             <span
                 aria-hidden="true"
-                className="flex h-4 w-4 shrink-0 items-center justify-center text-[var(--app-hint)]"
+                className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[var(--app-hint)]"
             >
                 <svg
-                    className={cn('h-3.5 w-3.5 transition-transform', props.expanded ? 'rotate-90' : null)}
+                    className={cn('h-3 w-3 transition-transform', props.expanded ? 'rotate-90' : null)}
                     viewBox="0 0 16 16"
                     fill="none"
                 >
