@@ -95,13 +95,30 @@ function hasHandler(groups: Array<Record<string, unknown>>, kind: HookKind): boo
     })
 }
 
+function removeUnsupportedAsyncFlags(groups: Array<Record<string, unknown>>, kind: HookKind): boolean {
+    let changed = false
+    for (const group of groups) {
+        const handlers = group.hooks
+        if (!Array.isArray(handlers)) continue
+
+        for (const handler of handlers) {
+            if (!isOurHandler(handler, kind)) continue
+            const hook = asRecord(handler)
+            if (hook?.async === true) {
+                delete hook.async
+                changed = true
+            }
+        }
+    }
+    return changed
+}
+
 function buildHookGroup(kind: HookKind, command: string): Record<string, unknown> {
     return {
         matcher: kind === 'permission' ? '*' : '^request_user_input$',
         hooks: [{
             type: 'command',
             command,
-            async: true,
             timeout: 10
         }]
     }
@@ -135,7 +152,7 @@ async function writeJsonAtomically(path: string, value: Record<string, unknown>)
 }
 
 /**
- * Adds two additive, asynchronous user-level Codex hooks:
+ * Adds two additive user-level Codex hooks:
  * - PermissionRequest catches native approval prompts.
  * - PreToolUse catches the explicit request_user_input primitive.
  *
@@ -162,18 +179,20 @@ export async function installExternalCodexNotificationHooks(
 
     const addedKinds: HookKind[] = []
     const permissionGroups = ensureEventHooks(hooks, 'PermissionRequest')
+    const migratedPermissionHook = removeUnsupportedAsyncFlags(permissionGroups, 'permission')
     if (!hasHandler(permissionGroups, 'permission')) {
         permissionGroups.push(buildHookGroup('permission', commandForKind('permission', runnerStatePath)))
         addedKinds.push('permission')
     }
 
     const userInputGroups = ensureEventHooks(hooks, 'PreToolUse')
+    const migratedUserInputHook = removeUnsupportedAsyncFlags(userInputGroups, 'user-input')
     if (!hasHandler(userInputGroups, 'user-input')) {
         userInputGroups.push(buildHookGroup('user-input', commandForKind('user-input', runnerStatePath)))
         addedKinds.push('user-input')
     }
 
-    if (addedKinds.length > 0) {
+    if (addedKinds.length > 0 || migratedPermissionHook || migratedUserInputHook) {
         await writeJsonAtomically(hooksPath, root)
     }
 

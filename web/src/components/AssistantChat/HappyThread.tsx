@@ -110,30 +110,23 @@ export function shouldEnableTopSentinelAutoLoad(matchMedia: ((query: string) => 
 }
 
 /**
- * The transparent header must not turn into a message overlay. Move
- * the scroll viewport itself below the safe area + measured header shell so
- * no message can enter that zone at any scroll position.
+ * Keep the initial messages below the transparent title controls, while
+ * leaving the viewport edge-to-edge. Once the user scrolls, messages may pass
+ * under the transparent shell exactly as the visual design intends.
+ *
+ * The bottom remains measured from the independent composer overlay. That
+ * padding is the single endpoint reservation which keeps the newest message
+ * and in-progress agent block above the input capsule.
  */
-export function getThreadViewportPadding(props: {
+export function getThreadContentPadding(props: {
     topInset?: number
-}): Pick<CSSProperties, 'paddingTop'> {
+    bottomInset?: number
+    bottomSafeAreaInset?: boolean
+}): Pick<CSSProperties, 'paddingTop' | 'paddingBottom'> {
     return {
         paddingTop: props.topInset !== undefined
             ? `calc(var(${MOBILE_LAYOUT_CONTRACT.thread.topSafeAreaVariable}) + ${props.topInset}px)`
-            : undefined
-    }
-}
-
-/**
- * The content keeps only its natural endpoint spacing. Top clearance belongs
- * to the non-scrolling thread root; the bottom keeps reserving the measured
- * composer overlay so the latest message remains visible.
- */
-export function getThreadContentPadding(props: {
-    bottomInset?: number
-    bottomSafeAreaInset?: boolean
-}): Pick<CSSProperties, 'paddingBottom'> {
-    return {
+            : undefined,
         paddingBottom: props.bottomInset
             ? props.bottomSafeAreaInset
                 ? `calc(${props.bottomInset + 12}px + var(--app-safe-area-bottom))`
@@ -983,6 +976,21 @@ export function HappyThread(props: {
         scrollToBottomInstant()
     }, [props.bottomInset, props.bottomSafeAreaInset, scrollToBottomInstant])
 
+    // A run can introduce its first "working" block before a persisted
+    // message version changes. If the operator just sent a message and is
+    // still following the end of the thread, pin that transient block above
+    // the composer as well. Manual scroll-away remains respected.
+    useLayoutEffect(() => {
+        if (!shouldFollowBottomInsetChange({
+            autoScrollEnabled: autoScrollEnabledRef.current,
+            atBottom: atBottomRef.current,
+            restoringScroll: pendingScrollRef.current !== null
+        })) {
+            return
+        }
+        scrollToBottomInstant()
+    }, [props.toolGroupRunActive, scrollToBottomInstant])
+
     const loadOlderPreservingScroll = useCallback((): Promise<boolean> => {
         if (pendingLoadPromiseRef.current) {
             return pendingLoadPromiseRef.current
@@ -1371,7 +1379,6 @@ export function HappyThread(props: {
         }}>
             <ThreadPrimitive.Root
                 className="relative flex min-h-0 flex-1 flex-col"
-                style={getThreadViewportPadding(props)}
                 data-testid={MOBILE_LAYOUT_CONTRACT.thread.testId}
                 data-mobile-layout-contract={MOBILE_LAYOUT_CONTRACT.thread.state}
             >

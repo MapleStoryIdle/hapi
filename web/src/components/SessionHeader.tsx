@@ -491,11 +491,15 @@ export function SessionHeader(props: {
     // standalone WebKit viewport reports a zero inset. On notched devices the
     // browser-provided inset remains the source of truth.
     const headerTopInsetClass = 'pt-[max(var(--app-safe-area-top),0.75rem)]'
+    // The message viewport intentionally scrolls under this transparent
+    // shell. Keep the shell and every control in one isolated, explicit hit
+    // testing layer: inherited pointer-events:none is unreliable for nested
+    // controls in iOS standalone WebKit.
     const headerShellClass = props.floating
-        ? `pointer-events-none absolute inset-x-0 top-0 z-20 ${headerTopInsetClass}`
+        ? `pointer-events-auto absolute inset-x-0 top-0 z-20 isolate touch-manipulation ${headerTopInsetClass}`
         : headerTopInsetClass
-    // Keep controls readable as an independent solid pill, but leave the
-    // surrounding top strip transparent. No backdrop filter is applied.
+    // The full-width title-bar shell is transparent. Its compact controls
+    // deliberately keep their own solid surface for legibility.
     const headerSurfaceClass = 'border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)]'
     const menuButtonSurfaceClass = headerSurfaceClass
 
@@ -508,7 +512,10 @@ export function SessionHeader(props: {
                 data-mobile-layout-contract={MOBILE_LAYOUT_CONTRACT.header.state}
             >
                 <div className={`mx-auto flex w-full max-w-content items-center gap-2 px-3 pb-3 ${props.floating ? 'pt-0' : 'pt-3'}`}>
-                    <div className={`${props.floating ? 'pointer-events-auto' : ''} flex min-w-0 items-center gap-0.5 rounded-[20px] border px-1.5 py-1.5 ${headerSurfaceClass}`}>
+                    <div
+                        data-testid="session-header-controls"
+                        className={`pointer-events-auto flex min-w-0 items-center gap-0.5 rounded-[20px] border px-1.5 py-1.5 ${headerSurfaceClass}`}
+                    >
                         {/* Back button */}
                         <button
                             type="button"
@@ -537,7 +544,7 @@ export function SessionHeader(props: {
                             <button
                                 type="button"
                                 onClick={() => setDetailsOpen((open) => !open)}
-                                className="block max-w-full truncate rounded-full px-0.5 pr-1 text-left font-semibold transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                className="pointer-events-auto touch-manipulation block max-w-full truncate rounded-full px-0.5 pr-1 text-left font-semibold transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                 aria-haspopup="dialog"
                                 aria-expanded={detailsOpen}
                                 aria-controls={detailsOpen ? detailsId : undefined}
@@ -570,7 +577,7 @@ export function SessionHeader(props: {
                         </div>
                     </div>
 
-                    <div className={`${props.floating ? 'pointer-events-none' : ''} ml-auto flex shrink-0 items-center gap-1.5`}>
+                    <div className="ml-auto flex shrink-0 items-center gap-1.5">
                         {session.metadata?.flavor === 'codex' ? (
                             <CodexSubscriptionLimitsBadge
                                 limits={codexLimitsState.limits}
@@ -587,7 +594,7 @@ export function SessionHeader(props: {
                             aria-haspopup="menu"
                             aria-expanded={menuOpen}
                             aria-controls={menuOpen ? menuId : undefined}
-                            className={`pointer-events-auto flex h-12 w-12 items-center justify-center rounded-[18px] border text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] ${menuButtonSurfaceClass}`}
+                            className={`pointer-events-auto touch-manipulation flex h-12 w-12 items-center justify-center rounded-[18px] border text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] ${menuButtonSurfaceClass}`}
                             title={t('session.more')}
                         >
                             <AgentFlavorStatusIcon

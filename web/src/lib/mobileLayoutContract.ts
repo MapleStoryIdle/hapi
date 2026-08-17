@@ -19,7 +19,7 @@ export const MOBILE_LAYOUT_CONTRACT = {
     },
     thread: {
         testId: 'mobile-layout-thread-root',
-        state: 'below-transparent-header',
+        state: 'scrolls-under-transparent-header',
         topSafeAreaVariable: '--app-safe-area-top'
     },
     bottomAccessory: {

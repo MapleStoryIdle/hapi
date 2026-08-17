@@ -10,7 +10,6 @@ import {
     findNearestUserMessageAnchorAbove,
     findVisibleUserMessageAnchor,
     getThreadContentPadding,
-    getThreadViewportPadding,
     getPullToLoadOlderIndicator,
     getScrollIntent,
     hasUserMessageAnchor,
@@ -224,14 +223,13 @@ describe('ScrollToBottomButton', () => {
 })
 
 describe('thread endpoint insets', () => {
-    it('keeps all iPhone PWA messages below the notch and transparent floating title bar', () => {
-        const viewportPadding = getThreadViewportPadding({ topInset: 62 })
-        const contentPadding = getThreadContentPadding({})
+    it('keeps the initial messages below the notch and title controls while allowing scroll-under', () => {
+        const contentPadding = getThreadContentPadding({ topInset: 62 })
 
-        // The scroll viewport begins after the installed-PWA safe area and
-        // measured title shell. `p-3` on the content retains the normal 12px
-        // message breathing room without allowing later messages underneath.
-        expect(viewportPadding.paddingTop).toBe('calc(var(--app-safe-area-top) + 62px)')
+        // The viewport remains edge-to-edge. The content's initial spacer
+        // clears the installed-PWA safe area and title controls, then scrolls
+        // naturally under the transparent header.
+        expect(contentPadding.paddingTop).toBe('calc(var(--app-safe-area-top) + 62px)')
         expect(contentPadding.paddingBottom).toBeUndefined()
     })
 

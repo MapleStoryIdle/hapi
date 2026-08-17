@@ -31,7 +31,7 @@ const viewportHeight = source('web/src/hooks/useViewportHeight.ts')
 // together so the approval is explicit in the diff.
 requireMatch(contract, /background:\s*'transparent'/, 'header shell must stay transparent')
 requireMatch(contract, /backdropFilter:\s*'none'/, 'header shell must not use a backdrop filter')
-requireMatch(contract, /state:\s*'below-transparent-header'/, 'thread must remain below the transparent header')
+requireMatch(contract, /state:\s*'scrolls-under-transparent-header'/, 'thread must scroll under the transparent header')
 requireMatch(contract, /state:\s*'floating-above-composer'/, 'bottom status must float above the composer')
 requireMatch(contract, /keyboardOpenExpandedOffset:\s*'4px'/, 'expanded composer keyboard offset must stay 4px')
 
@@ -53,9 +53,15 @@ requireMatch(
 requireMatch(header, /style=\{mobileLayoutHeaderShellStyle\}/, 'session header must use the canonical shell style')
 requireMatch(header, /data-testid=\{MOBILE_LAYOUT_CONTRACT\.header\.testId\}/, 'session header must expose its contract target')
 requireMatch(header, /data-mobile-layout-contract=\{MOBILE_LAYOUT_CONTRACT\.header\.state\}/, 'session header must expose its contract state')
+requireMatch(header, /const headerSurfaceClass = 'border-\[color-mix\(in_srgb,var\(--app-fg\)_14%,var\(--app-bg\)\)\] bg-\[var\(--app-bg\)\]'/, 'header controls must stay independently solid')
+requireMatch(header, /const headerShellClass = props\.floating\s*\? `pointer-events-auto absolute inset-x-0 top-0 z-20 isolate touch-manipulation/, 'floating header must remain an explicit iOS hit-test layer')
 requireMatch(composer, /var\(--app-composer-expanded-bottom-gap\)\+var\(--app-composer-safe-area-bottom\)\+var\(--app-composer-expanded-keyboard-offset\)/, 'expanded composer must consume the canonical keyboard gap tokens')
 requireMatch(composer, /const requiresExpandedComposer = hasText\s*\|\|/, 'a non-empty draft must keep the composer expanded')
 requireMatch(composer, /const composerCompact = !composerExpanded && !requiresExpandedComposer/, 'the visual compact state must honor the non-empty draft invariant')
+requireMatch(composer, /grid-rows-\[0fr_auto_1fr\]/, 'expanded composer text row must grow with multi-line input')
+if (/grid-rows-\[0fr_62px_1fr\]|grid-rows-\[auto_62px_1fr\]/.test(composer)) {
+    throw new Error('Mobile layout contract violation: a fixed expanded text row can cover composer buttons')
+}
 requireMatch(composer, /<ComposerPrimitive\.Root[\s\S]*?onMouseDownCapture=\{preserveComposerFocusForAction\}/, 'every composer action must preserve focus at mousedown')
 requireMatch(composer, /<ToolbarMenu[\s\S]*?anchorRef=\{settingsButtonRef\}/, 'settings menu must use the visual-viewport toolbar menu')
 requireMatch(composerButtons, /export function computeToolbarMenuPlacement/, 'composer menus must calculate visual-viewport placement')
@@ -82,7 +88,10 @@ requireMatch(
     'queued-message entry must live in the measured floating accessory layer'
 )
 requireMatch(sessionChat, /topInset=\{FLOATING_SESSION_HEADER_HEIGHT_PX\}/, 'message thread must always receive the measured header height')
-requireMatch(happyThread, /getThreadViewportPadding\(props\)/, 'thread root must reserve the transparent header outside the scroll viewport')
+requireMatch(happyThread, /getThreadContentPadding\(props\)/, 'thread content must reserve the initial header clearance')
+if (/style=\{getThreadViewportPadding\(props\)\}/.test(happyThread)) {
+    throw new Error('Mobile layout contract violation: thread viewport must remain edge-to-edge below the transparent header')
+}
 requireMatch(happyThread, /data-testid=\{MOBILE_LAYOUT_CONTRACT\.thread\.testId\}/, 'thread root must expose its contract target')
 requireMatch(happyThread, /data-mobile-layout-contract=\{MOBILE_LAYOUT_CONTRACT\.thread\.state\}/, 'thread root must expose its contract state')
 requireMatch(viewportHeight, /getIosStandaloneSystemTopChromeState/, 'viewport hook must detect unreachable iOS top chrome')

@@ -1193,8 +1193,8 @@ export function HappyComposer(props: {
     const composerGridRowsClass = composerCompact
         ? 'grid-rows-[0fr_48px_0fr]'
         : hasAttachments
-            ? 'grid-rows-[auto_62px_1fr]'
-            : 'grid-rows-[0fr_62px_1fr]'
+            ? 'grid-rows-[auto_auto_1fr]'
+            : 'grid-rows-[0fr_auto_1fr]'
 
     const currentModelLabel = useMemo(() => {
         if (selectedModelBase !== undefined) {

@@ -17,7 +17,7 @@ describe('installExternalCodexNotificationHooks', () => {
         await rm(directory, { recursive: true, force: true })
     })
 
-    it('adds asynchronous permission and structured-input hooks without replacing existing hooks', async () => {
+    it('adds permission and structured-input hooks without replacing existing hooks', async () => {
         await writeFile(hooksPath, JSON.stringify({
             description: 'Existing hooks',
             hooks: {
@@ -49,7 +49,6 @@ describe('installExternalCodexNotificationHooks', () => {
                 hooks: [{
                     type: 'command',
                     command: 'hapi hook-forwarder --external-codex-request --kind permission',
-                    async: true,
                     timeout: 10
                 }]
             }
@@ -61,11 +60,55 @@ describe('installExternalCodexNotificationHooks', () => {
                 hooks: [{
                     type: 'command',
                     command: 'hapi hook-forwarder --external-codex-request --kind user-input',
-                    async: true,
                     timeout: 10
                 }]
             }
         ])
+    })
+
+    it('migrates existing HAPI hooks that use unsupported async execution', async () => {
+        await writeFile(hooksPath, JSON.stringify({
+            hooks: {
+                PermissionRequest: [{
+                    matcher: '*',
+                    hooks: [{
+                        type: 'command',
+                        command: 'hapi hook-forwarder --external-codex-request --kind permission',
+                        async: true,
+                        timeout: 10
+                    }]
+                }],
+                PreToolUse: [{
+                    matcher: '^request_user_input$',
+                    hooks: [{
+                        type: 'command',
+                        command: 'hapi hook-forwarder --external-codex-request --kind user-input',
+                        async: true,
+                        timeout: 10
+                    }]
+                }]
+            }
+        }, null, 2))
+
+        const result = await installExternalCodexNotificationHooks({
+            hooksPath,
+            commandForKind: (kind) => `hapi hook-forwarder --external-codex-request --kind ${kind}`
+        })
+
+        expect(result.addedKinds).toEqual([])
+        const written = JSON.parse(await readFile(hooksPath, 'utf-8')) as {
+            hooks: Record<string, Array<{ hooks: Array<Record<string, unknown>> }>>
+        }
+        expect(written.hooks.PermissionRequest[0].hooks[0]).toEqual({
+            type: 'command',
+            command: 'hapi hook-forwarder --external-codex-request --kind permission',
+            timeout: 10
+        })
+        expect(written.hooks.PreToolUse[0].hooks[0]).toEqual({
+            type: 'command',
+            command: 'hapi hook-forwarder --external-codex-request --kind user-input',
+            timeout: 10
+        })
     })
 
     it('is idempotent when HAPI hooks already exist', async () => {

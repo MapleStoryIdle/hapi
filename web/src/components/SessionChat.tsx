@@ -1836,9 +1836,9 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineOpen={outlineOpen}
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
-                        // The transparent title shell is not a message overlay:
-                        // the scroll viewport itself begins below the notch +
-                        // title bar, so scrolling content never enters it.
+                        // Keep the first message clear of the title controls,
+                        // but let later scrolling content pass under the fully
+                        // transparent title shell.
                         topInset={FLOATING_SESSION_HEADER_HEIGHT_PX}
                         // The measured bottom overlay includes the composer
                         // and its iOS home-indicator padding. Reserving that

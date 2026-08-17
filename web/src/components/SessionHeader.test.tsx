@@ -51,7 +51,7 @@ describe('getSessionCurrentBranch', () => {
 })
 
 describe('mobile layout contract', () => {
-    it('keeps the full-width floating header transparent and without blur', () => {
+    it('keeps the full title-bar shell transparent without changing the control surface', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -78,6 +78,10 @@ describe('mobile layout contract', () => {
         expect(shell).toHaveAttribute('data-mobile-layout-contract', MOBILE_LAYOUT_CONTRACT.header.state)
         expect(shell.style.backgroundColor).toBe(`var(${MOBILE_LAYOUT_CONTRACT.header.backgroundVariable})`)
         expect(shell.style.backdropFilter).toBe(`var(${MOBILE_LAYOUT_CONTRACT.header.backdropFilterVariable})`)
+        expect(shell).toHaveClass('pointer-events-auto', 'isolate', 'touch-manipulation')
+
+        const controls = screen.getByTestId('session-header-controls')
+        expect(controls).toHaveClass('pointer-events-auto', 'bg-[var(--app-bg)]')
     })
 })
 
@@ -108,8 +112,39 @@ describe('SessionHeader back action', () => {
 
         const backButton = screen.getByTestId('session-header-back')
         expect(backButton).toHaveClass('pointer-events-auto', 'touch-manipulation')
+        expect(screen.getByTestId(MOBILE_LAYOUT_CONTRACT.header.testId)).not.toHaveClass('pointer-events-none')
         fireEvent.click(backButton)
 
         expect(onBack).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps the title details control in the explicit touch hit-test layer', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={createSession()}
+                            api={null}
+                            onBack={() => {}}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const titleButton = screen.getByRole('button', { name: 'hapi' })
+        expect(titleButton).toHaveClass('pointer-events-auto', 'touch-manipulation')
+        fireEvent.click(titleButton)
+
+        expect(screen.getByRole('dialog', { name: '会话详情' })).toBeInTheDocument()
     })
 })
