@@ -5,7 +5,6 @@ import type { SessionMetadataSummary } from '@/types/api'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { ToolDetailDialogContent, ToolStatusIcon, toolStatusColorClass } from '@/components/ToolCard/ToolCard'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
-import { extractTextFromResult } from '@/components/ToolCard/views/_results'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -265,11 +264,17 @@ function CompactDetailItem(props: {
 
     if (block.kind === 'tool-call') {
         return (
-            <CompactToolActionRow
-                block={block}
-                metadata={props.metadata}
-                onSelectTool={props.onSelectTool}
-            />
+            <button
+                type="button"
+                className="flex min-w-0 items-center gap-2 rounded-md px-0 py-0.5 text-left transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                onClick={() => props.onSelectTool(block.id)}
+            >
+                <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center', toolStatusColorClass(block.tool.state))}>
+                    <ToolStatusIcon state={block.tool.state} />
+                </span>
+                <CompactRowLabel block={block} metadata={props.metadata} />
+                <RowStatusBadge block={block} />
+            </button>
         )
     }
 
@@ -335,101 +340,31 @@ function CompactRowLabel(props: { block: ToolCallBlock; metadata: SessionMetadat
         metadata: props.metadata
     }, t), [props.block, props.metadata, t])
     const kind = getToolGroupActionKind(props.block)
-    const usesActionLabel = props.block.tool.state !== 'error'
-    const label = usesActionLabel
-        ? kind === 'command'
-            ? t('toolGroup.compact.row.command')
-            : kind === 'search'
-                ? t('toolGroup.compact.row.search')
-                : kind === 'read'
-                    ? t('toolGroup.compact.row.read')
-                    : kind === 'mutation'
-                        ? t('toolGroup.compact.row.mutation')
-                        : kind === 'web'
-                            ? t('toolGroup.compact.row.web')
-                            : presentation.title
-        : presentation.title
-    const rawError = props.block.tool.state === 'error'
-        ? extractTextFromResult(props.block.tool.result)
-        : null
-    const errorSummary = rawError
-        ? rawError.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null
-        : null
-    const detail = errorSummary ?? presentation.subtitle ?? (kind === 'other' ? null : presentation.title)
+    const label = kind === 'command'
+        ? t('toolGroup.compact.row.command')
+        : kind === 'search'
+            ? t('toolGroup.compact.row.search')
+            : kind === 'read'
+                ? t('toolGroup.compact.row.read')
+                : kind === 'mutation'
+                    ? t('toolGroup.compact.row.mutation')
+                    : kind === 'web'
+                        ? t('toolGroup.compact.row.web')
+                        : presentation.title
+    const detail = presentation.subtitle ?? (kind === 'other' ? null : presentation.title)
 
     return (
         <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-baseline gap-1.5 whitespace-nowrap text-sm leading-6">
+            <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap text-base leading-6">
                 <span className="shrink-0 font-medium text-[var(--app-hint)]">{label}</span>
                 {detail ? (
-                    <>
-                        <span aria-hidden="true" className="shrink-0 text-[var(--app-tool-card-subtitle)]">•</span>
-                        <span
-                            data-tool-action-summary
-                            className={cn(
-                                'min-w-0 flex-1 truncate font-mono text-[0.9em]',
-                                errorSummary ? 'text-red-600' : 'text-[var(--app-tool-card-subtitle)]'
-                            )}
-                        >
-                            {formatCompactRawText(detail)}
-                        </span>
-                    </>
+                    <span className="min-w-0 flex-1 truncate font-mono text-[0.9em] text-[var(--app-tool-card-subtitle)]">
+                        {detail}
+                    </span>
                 ) : null}
             </div>
         </div>
     )
-}
-
-function CompactToolActionIcon(props: { block: ToolCallBlock; metadata: SessionMetadataSummary | null }) {
-    const { t } = useTranslation()
-    const presentation = useMemo(() => getToolPresentation({
-        toolName: props.block.tool.name,
-        input: props.block.tool.input,
-        result: props.block.tool.result,
-        childrenCount: props.block.children.length,
-        description: props.block.tool.description,
-        metadata: props.metadata
-    }, t), [props.block, props.metadata, t])
-    const useStateIcon = props.block.tool.state === 'error' || props.block.tool.state === 'pending'
-
-    return (
-        <span
-            aria-hidden="true"
-            className={cn(
-                'flex h-4 w-4 shrink-0 items-center justify-center',
-                useStateIcon ? toolStatusColorClass(props.block.tool.state) : 'text-[var(--app-tool-card-accent)]'
-            )}
-        >
-            {useStateIcon ? <ToolStatusIcon state={props.block.tool.state} /> : presentation.icon}
-        </span>
-    )
-}
-
-function CompactToolActionRow(props: {
-    block: ToolCallBlock
-    metadata: SessionMetadataSummary | null
-    onSelectTool: (toolId: string) => void
-}) {
-    return (
-        <button
-            type="button"
-            data-tool-action-row
-            data-state={props.block.tool.state}
-            className="hapi-tool-action-row group relative flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg px-1.5 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-            onClick={() => props.onSelectTool(props.block.id)}
-        >
-            <CompactToolActionIcon block={props.block} metadata={props.metadata} />
-            <CompactRowLabel block={props.block} metadata={props.metadata} />
-            <RowStatusBadge block={props.block} />
-        </button>
-    )
-}
-
-function getCompactGroupState(block: ToolGroupBlock): ToolCallBlock['tool']['state'] {
-    if (block.tools.some((tool) => tool.tool.state === 'running')) return 'running'
-    if (block.tools.some((tool) => tool.tool.state === 'pending')) return 'pending'
-    if (block.tools.some((tool) => tool.tool.state === 'error')) return 'error'
-    return 'completed'
 }
 
 function RowLabel(props: { block: ToolCallBlock; metadata: SessionMetadataSummary | null }) {
@@ -648,7 +583,6 @@ export function ToolGroupCard(props: {
     const subtitle = formatGroupedHeaderSubtitle(props.block, t) ?? formatActionSummary(props.block, t)
     const fileCount = props.block.summary.fileTargets.length
     const compactTitle = formatToolGroupCompactTitle(props.block, now, t)
-    const compactGroupState = getCompactGroupState(props.block)
     const toggleOpen = () => {
         setDisplayedOpen((value) => !value)
     }
@@ -660,10 +594,8 @@ export function ToolGroupCard(props: {
                     <button
                         type="button"
                         onClick={toggleOpen}
-                        data-tool-action-row
-                        data-state={compactGroupState}
                         className={cn(
-                            'hapi-tool-action-row group relative flex min-h-10 w-full items-center gap-2 rounded-lg px-1.5 py-2 text-left text-sm font-medium leading-6 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                            'flex w-full items-center gap-1.5 text-left text-base font-medium leading-6 text-[var(--app-hint)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                             suppressFocusRing && 'focus-visible:ring-0'
                         )}
                         onPointerDown={onTriggerPointerDown}
@@ -672,14 +604,10 @@ export function ToolGroupCard(props: {
                         aria-expanded={displayedOpen}
                     >
                         {props.block.showAgentIcon ? (
-                            <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-4 w-4 shrink-0 text-[var(--app-hint)]" />
-                        ) : (
-                            <span aria-hidden="true" className={cn('flex h-4 w-4 shrink-0 items-center justify-center', toolStatusColorClass(compactGroupState))}>
-                                <ToolStatusIcon state={compactGroupState} />
-                            </span>
-                        )}
-                        <span className="min-w-0 flex-1 truncate">{compactTitle}</span>
-                        <span className="shrink-0 text-[var(--app-hint)] opacity-55 transition-opacity group-hover:opacity-100">
+                            <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-[1em] w-[1em] shrink-0 text-[var(--app-hint)]" />
+                        ) : null}
+                        <span>{compactTitle}</span>
+                        <span className="shrink-0 text-[var(--app-hint)]">
                             <DetailsIcon open={displayedOpen} />
                         </span>
                     </button>
@@ -698,12 +626,18 @@ export function ToolGroupCard(props: {
                             ))
                         ) : (
                             props.block.tools.map((tool) => (
-                                <CompactToolActionRow
+                                <button
                                     key={tool.id}
-                                    block={tool}
-                                    metadata={props.metadata}
-                                    onSelectTool={setSelectedToolId}
-                                />
+                                    type="button"
+                                    className="flex min-w-0 items-center gap-2 rounded-md px-0 py-0.5 text-left transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                    onClick={() => setSelectedToolId(tool.id)}
+                                >
+                                    <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center', toolStatusColorClass(tool.tool.state))}>
+                                        <ToolStatusIcon state={tool.tool.state} />
+                                    </span>
+                                    <CompactRowLabel block={tool} metadata={props.metadata} />
+                                    <RowStatusBadge block={tool} />
+                                </button>
                             ))
                         )}
 

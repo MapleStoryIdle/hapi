@@ -776,6 +776,7 @@ html[data-theme="oled"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-typ
 
 .aui-md-codeblock pre.shiki {
     margin: 0;
+    padding: 0;
     background-color: transparent !important;
     font-size: inherit;
     line-height: inherit;
@@ -880,42 +881,8 @@ html[data-theme="oled"] .shiki span {
   animation: menu-pop 0.44s cubic-bezier(0.18, 1.08, 0.22, 1);
 }
 
-/* Compact agent actions use a quiet Harness-style activity sweep. */
-.hapi-tool-action-row {
-  isolation: isolate;
-  overflow: hidden;
-}
-
-.hapi-tool-action-row[data-state="running"]::after {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -18rem;
-  width: 18rem;
-  content: '';
-  pointer-events: none;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in srgb, var(--app-fg) 7%, transparent) 56%,
-    transparent 100%
-  );
-  animation: hapi-tool-row-sweep 2.6s ease-out infinite;
-}
-
-@keyframes hapi-tool-row-sweep {
-  0% {
-    left: -18rem;
-  }
-  90%,
-  100% {
-    left: 100%;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .animate-menu-pop,
-  .hapi-tool-action-row[data-state="running"]::after {
+  .animate-menu-pop {
     animation: none;
   }
 }

@@ -262,85 +262,6 @@ describe('ToolGroupCard', () => {
         expect(screen.queryByText('Processed 2s')).not.toBeInTheDocument()
     })
 
-    it('renders compact tool details as semantic action rows with mobile-safe hit targets', () => {
-        const tools = [makeToolBlock('bash-1', 'Bash', { command: 'bun test' })]
-        const view = renderCard(makeGroup({
-            tools,
-            summary: {
-                totalTools: 1,
-                countsByKind: {
-                    read: 0,
-                    search: 0,
-                    command: 1,
-                    mutation: 0,
-                    web: 0,
-                    other: 0,
-                },
-                fileTargets: [],
-                commandTargets: ['bun test'],
-                searchTargets: [],
-                urlTargets: [],
-                otherTargets: [],
-                errorCount: 0,
-                runningCount: 0,
-                pendingCount: 0,
-            },
-        }), { terminalToolDisplayMode: 'compact' })
-
-        const toggle = within(view.container).getByRole('button', { name: /ran 0s/i })
-        expect(toggle).toHaveAttribute('data-tool-action-row')
-        expect(toggle).toHaveAttribute('data-state', 'completed')
-        expect(toggle).toHaveClass('min-h-10')
-
-        fireEvent.click(toggle)
-
-        const rows = Array.from(view.container.querySelectorAll<HTMLButtonElement>('[data-tool-action-row]'))
-        const toolRow = rows.find((row) => row !== toggle)
-        expect(toolRow).toBeDefined()
-        expect(toolRow).toHaveAttribute('data-state', 'completed')
-        expect(toolRow).toHaveClass('min-h-10')
-        expect(within(toolRow!).getByText('Ran')).toBeInTheDocument()
-        expect(toolRow!.querySelector('[data-tool-action-summary]')).toHaveTextContent('bun test')
-    })
-
-    it('uses the first error line as the compact action summary', () => {
-        const tools = [makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
-            state: 'error',
-            result: { error: 'Permission denied while reading .env\nCheck the file permissions and retry.' },
-        })]
-        const view = renderCard(makeGroup({
-            tools,
-            summary: {
-                totalTools: 1,
-                countsByKind: {
-                    read: 0,
-                    search: 0,
-                    command: 1,
-                    mutation: 0,
-                    web: 0,
-                    other: 0,
-                },
-                fileTargets: [],
-                commandTargets: ['bun test'],
-                searchTargets: [],
-                urlTargets: [],
-                otherTargets: [],
-                errorCount: 1,
-                runningCount: 0,
-                pendingCount: 0,
-            },
-        }), { terminalToolDisplayMode: 'compact' })
-
-        fireEvent.click(within(view.container).getByRole('button', { name: /ran 0s/i }))
-
-        const rows = Array.from(view.container.querySelectorAll<HTMLButtonElement>('[data-tool-action-row]'))
-        const toolRow = rows.find((row) => row.querySelector('[data-tool-action-summary]') !== null)
-        expect(toolRow).toBeDefined()
-        expect(toolRow).toHaveAttribute('data-state', 'error')
-        expect(within(toolRow!).getByText('Error')).toBeInTheDocument()
-        expect(toolRow!.querySelector('[data-tool-action-summary]')).toHaveTextContent('Permission denied while reading .env')
-    })
-
     it('keeps long completed compact durations', () => {
         const tools = [
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
@@ -408,10 +329,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const toggle = within(view.container).getByRole('button', { name: /running \d+s/i })
-        expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(toggle).toHaveAttribute('data-state', 'running')
-        expect(toggle).toHaveClass('hapi-tool-action-row')
+        expect(within(view.container).getByRole('button', { name: /running \d+s/i })).toHaveAttribute('aria-expanded', 'true')
         expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
     })
 
