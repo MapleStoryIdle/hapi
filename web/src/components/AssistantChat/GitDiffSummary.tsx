@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GitFileStatus, GitStatusFiles } from '@/types/api'
+import { getDetachedBranchLabel } from '@/lib/files-i18n'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -132,23 +133,30 @@ export function GitDiffSummary(props: {
     const visibleRows = summary.rows.slice(0, VISIBLE_DIFF_ROW_LIMIT)
     const hiddenCount = Math.max(0, summary.rows.length - visibleRows.length)
     const showViewAll = hiddenCount > 0
+    const branchLabel = getDetachedBranchLabel(props.status?.branch, t)
 
     return (
-        <div ref={rootRef} className="pointer-events-none relative mx-auto flex w-full max-w-content justify-center px-3">
+        <div ref={rootRef} className="pointer-events-none relative mx-auto flex w-full max-w-content justify-center px-3 [font-family:var(--app-chat-font-family)]">
             {expanded ? (
                 <div
                     className="pointer-events-auto absolute bottom-14 left-6 right-6 z-20 max-h-64 origin-bottom overflow-hidden rounded-[22px] border border-[var(--app-border)] bg-[var(--app-code-bg)] shadow-[0_18px_45px_rgba(15,23,42,0.16)] animate-diff-pop"
                     role="dialog"
                     aria-label={t('gitDiff.summary.title')}
                 >
-                    <div className="flex items-center justify-between gap-3 px-6 pb-3 pt-5">
-                        <button
-                            type="button"
-                            className="min-w-0 text-left text-[0.95rem] font-semibold text-[var(--app-fg)]"
-                            onClick={() => setExpanded(false)}
-                        >
-                            {t('gitDiff.summary.changedFiles', { count: summary.fileCount })}
-                        </button>
+                    <div className="flex items-start justify-between gap-3 px-6 pb-3 pt-5">
+                        <div className="min-w-0">
+                            <button
+                                type="button"
+                                className="block min-w-0 text-left text-[0.95rem] font-semibold text-[var(--app-fg)]"
+                                onClick={() => setExpanded(false)}
+                            >
+                                {t('gitDiff.summary.changedFiles', { count: summary.fileCount })}
+                            </button>
+                            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs leading-4 text-[var(--app-hint)]">
+                                <span className="shrink-0">{t('gitDiff.summary.branch')}</span>
+                                <span className="min-w-0 truncate font-semibold text-[var(--app-fg)]">{branchLabel}</span>
+                            </div>
+                        </div>
                         <div className="flex shrink-0 items-center gap-3 text-[0.95rem] font-semibold">
                             <span className="text-[var(--app-git-staged-color)]">+{summary.added}</span>
                             <span className="text-[var(--app-git-deleted-color)]">-{summary.removed}</span>

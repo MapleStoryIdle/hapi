@@ -1,9 +1,6 @@
 import type { ChatBlock, ToolCallBlock } from '@/chat/types'
-import { isSubagentToolName } from '@/chat/subagentTool'
-import { isAskUserQuestionToolName } from '@/components/ToolCard/askUserQuestion'
 import { getCodexDiffPaths, getCodexPatchChanges, isSameCodexChangedPath } from '@/components/ToolCard/codexPatch'
-import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInput'
-import { getMcpPatchTarget, getMcpReadTarget, getTerminalReadRequest } from '@/components/ToolCard/fileAccess'
+import { getMcpReadTarget } from '@/components/ToolCard/fileAccess'
 import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { getInputStringAny } from '@/lib/toolInputUtils'
 import { normalizeExplicitSkillUsage } from '@/chat/skillUsage'
@@ -41,6 +38,8 @@ export type ToolGroupBlock = {
     detailBlocks?: ChatBlock[]
     showAgentIcon?: boolean
     forceGenericCompactTitle?: boolean
+    /** Render the tool activity as a collapsed, transparent activity row. */
+    forceCompact?: boolean
 }
 
 export type VisibleChatBlock = ChatBlock | ToolGroupBlock | QuestionAnswerBlock
@@ -50,33 +49,6 @@ type ToolGroupingOptions = {
     previousGroups?: ToolGroupBlock[]
     terminalToolDisplayMode?: TerminalToolDisplayMode
 }
-
-const PLAN_TOOL_NAMES = new Set([
-    'TodoWrite',
-    'update_plan',
-    'ExitPlanMode',
-    'exit_plan_mode',
-    'CodexReasoning'
-])
-
-const MILESTONE_TOOL_NAMES = new Set([
-    'Task',
-    'Agent',
-    'CodexAgent',
-    'TeamCreate',
-    'TeamDelete',
-    'SendMessage',
-    'Skill',
-    'spawn_agent',
-    'send_input',
-    'resume_agent',
-    'wait_agent',
-    'close_agent'
-])
-
-const INTERACTIVE_TOOL_NAMES = new Set([
-    'CodexPermission'
-])
 
 function pushUnique(target: string[], value: string | null): void {
     if (!value) return
@@ -129,10 +101,17 @@ function getShellCommandActionKind(input: unknown, allowReadClassification = tru
     return 'command'
 }
 
+function isReadLikeToolName(name: string): boolean {
+    if (name === 'Read' || name === 'NotebookRead') return true
+
+    const normalizedName = name.toLowerCase()
+    return normalizedName === 'readfile' || normalizedName === 'read_file'
+}
+
 export function getToolGroupActionKind(block: ToolCallBlock): ToolGroupActionKind {
     const name = block.tool.name
 
-    if (name === 'Read' || name === 'NotebookRead') return 'read'
+    if (isReadLikeToolName(name) || (name.startsWith('mcp__') && getMcpReadTarget(block.tool.input))) return 'read'
     if (name === 'Grep' || name === 'Glob' || name === 'LS') return 'search'
     if (name === 'CodexBash') return getShellCommandActionKind(block.tool.input, false)
     if (name === 'Bash' || name === 'shell_command') return getShellCommandActionKind(block.tool.input)
@@ -235,29 +214,12 @@ export function summarizeToolGroup(tools: ToolCallBlock[]): ToolGroupSummary {
 }
 
 function isInteractiveToolBlock(block: ToolCallBlock): boolean {
-    return INTERACTIVE_TOOL_NAMES.has(block.tool.name)
-        || block.tool.permission?.status === 'pending'
-        || isAskUserQuestionToolName(block.tool.name)
-        || isRequestUserInputToolName(block.tool.name)
-}
-
-function hasMcpInvocationTitle(block: ToolCallBlock): boolean {
-    return block.tool.name.startsWith('mcp__')
-        && Boolean(getInputStringAny(block.tool.input, ['title'])?.trim())
+    // A pending permission or question is an actionable control, not passive
+    // activity. It must remain visible for the user to answer it.
+    return block.tool.permission?.status === 'pending'
 }
 
 export function isEligibleForToolGrouping(block: ToolCallBlock): boolean {
-    // A title is an MCP client's explicit, user-facing label for this action.
-    // Keep it visible instead of collapsing it into a generic tool activity row.
-    if (hasMcpInvocationTitle(block)) return false
-    if (block.tool.name === 'Read') return false
-    if (block.tool.name === 'CodexBash' && getTerminalReadRequest(block.tool.input)) return false
-    if (block.tool.name === 'CodexPatch' && getCodexPatchChanges(block.tool.input).length > 0) return false
-    if (block.tool.name === 'CodexDiff' && getCodexDiffPaths(block.tool.input).length > 0) return false
-    if (block.tool.name.startsWith('mcp__') && (getMcpReadTarget(block.tool.input) || getMcpPatchTarget(block.tool.input))) return false
-    if (isSubagentToolName(block.tool.name)) return false
-    if (PLAN_TOOL_NAMES.has(block.tool.name)) return false
-    if (MILESTONE_TOOL_NAMES.has(block.tool.name)) return false
     if (isInteractiveToolBlock(block)) return false
     return true
 }
@@ -329,7 +291,6 @@ export function buildVisibleChatBlocks(
 ): VisibleChatBlock[] {
     const visibleBlocks: VisibleChatBlock[] = []
     const previousGroups = options.previousGroups ?? []
-    const groupSingleTools = options.terminalToolDisplayMode === 'compact'
     const displayBlocks = filterCodexDiffsCoveredByPatches(normalizeExplicitSkillUsage(blocks))
 
     for (let index = 0; index < displayBlocks.length; index += 1) {
@@ -357,11 +318,6 @@ export function buildVisibleChatBlocks(
             cursor += 1
         }
 
-        if (tools.length < 2 && !groupSingleTools) {
-            visibleBlocks.push(block)
-            continue
-        }
-
         const startsAtOldestVisibleBoundary = visibleBlocks.length === 0
         const needsOlderHistory = options.hasMoreMessages && startsAtOldestVisibleBoundary
         const id = createToolGroupId(tools, needsOlderHistory, previousGroups)
@@ -378,7 +334,8 @@ export function buildVisibleChatBlocks(
             needsOlderHistory,
             summary: summarizeToolGroup(tools),
             expansionStateKeys: [id],
-            showAgentIcon: true
+            showAgentIcon: true,
+            forceCompact: true
         })
         index = cursor - 1
     }

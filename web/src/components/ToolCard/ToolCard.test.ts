@@ -9,25 +9,21 @@ describe('ToolCard terminal display mode helpers', () => {
         expect(shouldUseCompactTerminalToolCard('Read', 'compact')).toBe(false)
     })
 
-    it('hides inline terminal previews in compact mode', () => {
-        expect(shouldShowInlineToolCardBody('CodexBash', false, 'compact')).toBe(false)
-    })
-
-    it('keeps inline terminal previews in detailed mode', () => {
-        expect(shouldShowInlineToolCardBody('CodexBash', false, 'detailed')).toBe(true)
-        expect(shouldShowInlineToolCardBody('Bash', true, 'detailed')).toBe(true)
-        expect(shouldShowInlineToolCardBody('shell_command', true, 'detailed')).toBe(true)
-        expect(shouldShowInlineToolCardBody('run_shell_command', true, 'detailed')).toBe(true)
+    it('keeps terminal execution details out of the message flow in every mode', () => {
+        expect(shouldShowInlineToolCardBody('CodexBash', false)).toBe(false)
+        expect(shouldShowInlineToolCardBody('Bash', true)).toBe(false)
+        expect(shouldShowInlineToolCardBody('shell_command', true)).toBe(false)
+        expect(shouldShowInlineToolCardBody('run_shell_command', true)).toBe(false)
     })
 
     it('still hides inline bodies for minimal and Task/Agent subagent cards', () => {
-        expect(shouldShowInlineToolCardBody('Task', false, 'detailed')).toBe(false)
-        expect(shouldShowInlineToolCardBody('Agent', false, 'detailed')).toBe(false)
-        expect(shouldShowInlineToolCardBody('Read', true, 'detailed')).toBe(false)
+        expect(shouldShowInlineToolCardBody('Task', false)).toBe(false)
+        expect(shouldShowInlineToolCardBody('Agent', false)).toBe(false)
+        expect(shouldShowInlineToolCardBody('Read', true)).toBe(false)
     })
 
-    it('uses full-screen details on mobile for terminal execution and exact Codex patches', () => {
-        expect(shouldUseFullScreenToolDetail('CodexBash')).toBe(true)
+    it('reserves the generic full-screen detail surface for exact Codex patches', () => {
+        expect(shouldUseFullScreenToolDetail('CodexBash')).toBe(false)
         expect(shouldUseFullScreenToolDetail('CodexPatch')).toBe(true)
         expect(shouldUseFullScreenToolDetail('Read')).toBe(false)
     })

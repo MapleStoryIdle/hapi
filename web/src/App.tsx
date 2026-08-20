@@ -15,7 +15,7 @@ import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
-import { clearMessageWindow, fetchLatestMessages, ingestIncomingMessages } from '@/lib/message-window-store'
+import { clearMessageWindow, enqueueIncomingMessages, fetchLatestMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
@@ -275,7 +275,7 @@ function AppInner() {
         // message into the window as a lossless fallback; merge is idempotent
         // when the session stream also delivers the same event.
         if (event.type === 'message-received' && event.sessionId === selectedSessionId) {
-            ingestIncomingMessages(event.sessionId, [event.message])
+            enqueueIncomingMessages(event.sessionId, [event.message])
         }
         handleSseEvent(event)
     }, [handleSseEvent, selectedSessionId])

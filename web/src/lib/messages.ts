@@ -44,9 +44,6 @@ function compareMessages(a: DecryptedMessage, b: DecryptedMessage): number {
 }
 
 export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedMessage[]): DecryptedMessage[] {
-    if (existing.length === 0) {
-        return [...incoming].sort(compareMessages)
-    }
     if (incoming.length === 0) {
         return [...existing].sort(compareMessages)
     }

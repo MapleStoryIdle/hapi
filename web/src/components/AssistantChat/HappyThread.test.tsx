@@ -18,6 +18,7 @@ import {
     restoreScrollAnchor,
     scrollElementToViewportTop,
     shouldCancelInitialScrollSettling,
+    shouldCancelLatestMessageFollow,
     shouldEnableTopSentinelAutoLoad,
     shouldFollowBottomInsetChange,
     shouldHideScrollToBottomButton,
@@ -261,6 +262,38 @@ describe('bottom inset follow behavior', () => {
             autoScrollEnabled: true,
             atBottom: true,
             restoringScroll: true
+        })).toBe(false)
+    })
+})
+
+describe('latest-message follow behavior', () => {
+    it('does not stop following because layout or streaming moved the viewport', () => {
+        expect(shouldCancelLatestMessageFollow({
+            followingLatest: true,
+            isAtBottom: false,
+            isScrollingUp: false,
+            userInitiated: false
+        })).toBe(false)
+    })
+
+    it('stops following only when the user scrolls away from the bottom', () => {
+        expect(shouldCancelLatestMessageFollow({
+            followingLatest: true,
+            isAtBottom: false,
+            isScrollingUp: true,
+            userInitiated: true
+        })).toBe(true)
+        expect(shouldCancelLatestMessageFollow({
+            followingLatest: true,
+            isAtBottom: true,
+            isScrollingUp: true,
+            userInitiated: true
+        })).toBe(false)
+        expect(shouldCancelLatestMessageFollow({
+            followingLatest: true,
+            isAtBottom: false,
+            isScrollingUp: false,
+            userInitiated: true
         })).toBe(false)
     })
 })

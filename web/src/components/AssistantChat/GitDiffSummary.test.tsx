@@ -108,6 +108,8 @@ describe('GitDiffSummary', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /1 file/i }))
         expect(screen.getByRole('dialog', { name: 'Git changes' })).toBeTruthy()
+        expect(screen.getByText('Branch')).toBeInTheDocument()
+        expect(screen.getByText('main')).toBeInTheDocument()
         const row = screen.getByRole('button', { name: /AssistantChat\/GitDiffSummary\.tsx/i })
         expect(row).toBeTruthy()
         expect(screen.queryByRole('button', { name: 'Copy summary' })).toBeNull()
@@ -149,5 +151,13 @@ describe('GitDiffSummary', () => {
         expect(container.querySelector('.text-\\[var\\(--app-git-deleted-color\\)\\]')?.textContent).toBe('-5')
         expect(container.querySelector('.text-\\[var\\(--app-diff-added-text\\)\\]')).toBeNull()
         expect(container.querySelector('.text-\\[var\\(--app-diff-removed-text\\)\\]')).toBeNull()
+    })
+
+    it('uses the same font family as chat messages', () => {
+        const { container } = renderSummary(makeStatus({
+            unstagedFiles: [makeGitFile(1)]
+        }))
+
+        expect(container.firstElementChild?.className).toContain('[font-family:var(--app-chat-font-family)]')
     })
 })

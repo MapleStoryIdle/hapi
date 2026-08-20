@@ -16,6 +16,7 @@ import {
     prepareSidebarSessions,
     sessionTreeNodeContainsSession,
     sessionMatchesQuery,
+    shouldCollapseMachineGroup,
     shouldShowSessionInSidebar
 } from './SessionList'
 
@@ -433,6 +434,20 @@ describe('filterActiveSessionsOnly', () => {
             makeSession({ id: 'c', active: true, metadata: { path: '/p' } })
         ]
         expect(filterActiveSessionsOnly(sessions).map(s => s.id)).toEqual(['a', 'c'])
+    })
+})
+
+describe('shouldCollapseMachineGroup', () => {
+    it('keeps a single inactive runner expanded so its project groups stay reachable', () => {
+        expect(shouldCollapseMachineGroup(1, false, false)).toBe(false)
+    })
+
+    it('keeps the inactive runner collapse behavior when multiple runners are present', () => {
+        expect(shouldCollapseMachineGroup(2, false, false)).toBe(true)
+    })
+
+    it('keeps a runner containing the selected session expanded', () => {
+        expect(shouldCollapseMachineGroup(2, false, true)).toBe(false)
     })
 })
 

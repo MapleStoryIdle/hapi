@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | 顶部外层 | 透明；`backdrop-filter: none`；不得做整条毛玻璃 | `mobileLayoutContract.ts`、`SessionHeader.tsx` |
 | 顶部操作 | 操作按钮所在的小胶囊保持实色；整条标题栏背景保持透明 | `SessionHeader.tsx` |
+| 标题栏触摸层 | 浮动标题栏固定为 `z-40`，必须高于会话大纲等线程遮罩；返回与会话详情不可被覆盖层拦截 | `SessionHeader.tsx`、`HappyThread.tsx` |
 | 聊天滚动区 | 初始消息从“顶部安全区 + 实测标题栏高度”之后开始；滚动后消息可从完全透明的标题栏下方经过 | `SessionChat.tsx`、`HappyThread.tsx` |
 | iOS 顶部安全区 | standalone 模式通常最小 50px；若运行时确认顶部是 WebKit 绘制在 DOM 外的系统区，则不得再叠加这 50px，标题从可见网页视口开始 | `useViewportHeight.ts`、`index.css` |
 | iOS 底部安全区 | standalone 模式最小 34px；普通触屏最小 12px | `index.css` |

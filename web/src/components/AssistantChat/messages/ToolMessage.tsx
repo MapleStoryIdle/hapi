@@ -15,6 +15,7 @@ import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { UserBubbleContent, getUserBubbleClassName, shouldShowMessageStatus } from '@/components/AssistantChat/messages/user-bubble'
 import { ImagePreview } from '@/components/ImagePreview'
+import { useTranslation } from '@/lib/use-translation'
 
 function isToolCallBlock(value: unknown): value is ToolCallBlock {
     if (!isObject(value)) return false
@@ -123,6 +124,28 @@ function splitTaskChildren(block: ToolCallBlock): { pending: ChatBlock[]; rest: 
     return { pending, rest }
 }
 
+function TitleChangedEvent(props: { title: string }) {
+    const { t } = useTranslation()
+    const title = props.title.trim()
+
+    return (
+        <div className="py-1" data-title-change-event>
+            <div className="mx-auto flex w-fit max-w-[92%] items-center gap-1.5 px-2 py-0.5 text-xs leading-5 text-[var(--app-hint)]">
+                <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
+                    <path d="M3 11.75V13h1.25l7.1-7.1-1.25-1.25-7.1 7.1Z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
+                    <path d="m9.45 4.55 1.25 1.25.8-.8a.88.88 0 0 0 0-1.25l-.55-.55a.88.88 0 0 0-1.25 0l-.8.8Z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
+                </svg>
+                <span className="shrink-0">{t('agentEvent.titleChanged')}</span>
+                {title ? (
+                    <span className="max-w-[15rem] truncate font-medium text-[var(--app-fg)]" title={title}>
+                        {title}
+                    </span>
+                ) : null}
+            </div>
+        </div>
+    )
+}
+
 function HappyNestedBlockList(props: {
     blocks: ChatBlock[]
 }) {
@@ -181,6 +204,10 @@ function HappyNestedBlockList(props: {
                 }
 
                 if (block.kind === 'agent-event') {
+                    if (block.event.type === 'title-changed' && typeof block.event.title === 'string') {
+                        return <TitleChangedEvent key={`event:${block.id}`} title={block.event.title} />
+                    }
+
                     const presentation = getEventPresentation(block.event)
                     return (
                         <div key={`event:${block.id}`} className="py-1">

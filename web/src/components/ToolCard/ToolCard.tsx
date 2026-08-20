@@ -24,28 +24,28 @@ import { useTranslation } from '@/lib/use-translation'
 import { TraceSection } from '@/components/ToolCard/trace'
 import { isSubagentToolName } from '@/chat/subagentTool'
 import { formatTerminalExecutionDuration, getTerminalExecutionToolState, isTerminalExecutionTool, TerminalExecutionDetail } from '@/components/ToolCard/terminalExecution'
+import { TerminalExecutionDrawer } from '@/components/ToolCard/TerminalExecutionDrawer'
 import { getTerminalReadRequest } from '@/components/ToolCard/fileAccess'
 
 const ELAPSED_INTERVAL_MS = 1000
-const TERMINAL_RELATED_TOOL_NAMES = new Set(['Bash', 'CodexBash', 'shell_command', 'run_shell_command'])
 
 export function shouldUseCompactTerminalToolCard(toolName: string, terminalToolDisplayMode: TerminalToolDisplayMode): boolean {
-    return TERMINAL_RELATED_TOOL_NAMES.has(toolName) && terminalToolDisplayMode === 'compact'
+    return isTerminalExecutionTool(toolName) && terminalToolDisplayMode === 'compact'
 }
 
 export function shouldUseFullScreenToolDetail(toolName: string): boolean {
-    return isTerminalExecutionTool(toolName) || toolName === 'CodexPatch'
+    return toolName === 'CodexPatch'
 }
 
 export function shouldShowInlineToolCardBody(
     toolName: string,
-    presentationMinimal: boolean,
-    terminalToolDisplayMode: TerminalToolDisplayMode
+    presentationMinimal: boolean
 ): boolean {
     if (isSubagentToolName(toolName)) return false
-    if (TERMINAL_RELATED_TOOL_NAMES.has(toolName)) {
-        return terminalToolDisplayMode === 'detailed'
-    }
+    // Terminal command/output is log-like content. Keep it out of the
+    // message flow for every display mode; its only full-detail surface is
+    // TerminalExecutionDrawer.
+    if (isTerminalExecutionTool(toolName)) return false
     return !presentationMinimal
 }
 
@@ -351,7 +351,7 @@ function ToolCardInner(props: ToolCardProps) {
     const isTerminalExecution = isTerminalExecutionTool(toolName)
     const useFullScreenToolDetail = shouldUseFullScreenToolDetail(toolName)
     const useCompactTerminalCard = shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode)
-    const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal, props.terminalToolDisplayMode)
+    const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal)
     const CompactToolView = showInline ? getToolViewComponent(toolName) : null
     const ResultToolView = getToolResultViewComponent(toolName)
     const permission = props.block.tool.permission
@@ -426,30 +426,48 @@ function ToolCardInner(props: ToolCardProps) {
     )
 
     return (
-        <Card className="overflow-hidden rounded-[16px] bg-[var(--app-tool-card-bg)] shadow-none">
+        <Card className="overflow-hidden rounded-[18px] border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] shadow-none">
             <CardHeader className={cn('space-y-0 p-3', subtitle ? 'pb-2' : null)}>
-                <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-                    <DialogTrigger asChild>
-                        <button
-                            type="button"
-                            className={cn(
-                                'w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                                suppressFocusRing && 'focus-visible:ring-0'
-                            )}
-                            onPointerDown={onTriggerPointerDown}
-                            onKeyDown={onTriggerKeyDown}
-                            onBlur={onTriggerBlur}
-                        >
-                            {header}
-                        </button>
-                    </DialogTrigger>
-                    <DialogContent fullScreenOnMobile={useFullScreenToolDetail} className="max-w-2xl" aria-describedby={undefined}>
-                        <DialogHeader className={useFullScreenToolDetail ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
-                            <DialogTitle>{isTerminalExecution ? t('terminal.execution.title') : toolTitle}</DialogTitle>
-                        </DialogHeader>
-                        <ToolDetailDialogContent block={props.block} metadata={props.metadata} />
-                    </DialogContent>
-                </Dialog>
+                {isTerminalExecution ? (
+                    <button
+                        type="button"
+                        className={cn(
+                            'w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                            suppressFocusRing && 'focus-visible:ring-0'
+                        )}
+                        onClick={openDetails}
+                        onPointerDown={onTriggerPointerDown}
+                        onKeyDown={onTriggerKeyDown}
+                        onBlur={onTriggerBlur}
+                        aria-expanded={detailsOpen}
+                        aria-haspopup="dialog"
+                    >
+                        {header}
+                    </button>
+                ) : (
+                    <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+                        <DialogTrigger asChild>
+                            <button
+                                type="button"
+                                className={cn(
+                                    'w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                                    suppressFocusRing && 'focus-visible:ring-0'
+                                )}
+                                onPointerDown={onTriggerPointerDown}
+                                onKeyDown={onTriggerKeyDown}
+                                onBlur={onTriggerBlur}
+                            >
+                                {header}
+                            </button>
+                        </DialogTrigger>
+                        <DialogContent fullScreenOnMobile={useFullScreenToolDetail} className="max-w-2xl" aria-describedby={undefined}>
+                            <DialogHeader className={useFullScreenToolDetail ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
+                                <DialogTitle>{toolTitle}</DialogTitle>
+                            </DialogHeader>
+                            <ToolDetailDialogContent block={props.block} metadata={props.metadata} />
+                        </DialogContent>
+                    </Dialog>
+                )}
             </CardHeader>
 
             {hasBody ? (
@@ -524,6 +542,14 @@ function ToolCardInner(props: ToolCardProps) {
                         />
                     )}
                 </CardContent>
+            ) : null}
+
+            {isTerminalExecution ? (
+                <TerminalExecutionDrawer
+                    block={props.block}
+                    open={detailsOpen}
+                    onOpenChange={setDetailsOpen}
+                />
             ) : null}
         </Card>
     )

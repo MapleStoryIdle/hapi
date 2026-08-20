@@ -5,6 +5,7 @@ import type { SessionMetadataSummary } from '@/types/api'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { shouldUseFullScreenToolDetail, ToolDetailDialogContent, ToolStatusIcon, toolStatusColorClass } from '@/components/ToolCard/ToolCard'
 import { getTerminalExecutionToolState, isTerminalExecutionTool } from '@/components/ToolCard/terminalExecution'
+import { TerminalExecutionDrawer } from '@/components/ToolCard/TerminalExecutionDrawer'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { getTerminalCommandIntent, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
@@ -180,6 +181,11 @@ export function formatToolGroupCompactTitle(
 
     const singleTool = !block.forceGenericCompactTitle && block.tools.length === 1 ? block.tools[0] : null
     if (singleTool) {
+        const invocationTitle = getInputStringAny(singleTool.tool.input, ['title'])?.trim()
+        if (invocationTitle) {
+            return `${formatCompactRawText(invocationTitle)} ${renderedDuration}`.trim()
+        }
+
         if (isTerminalExecutionTool(singleTool.tool.name)) {
             const terminalIntent = getTerminalCommandIntent(singleTool.tool.input)
             const terminalLabel = terminalIntent?.kind === 'read-request' && terminalIntent.targets.length > 1
@@ -212,6 +218,18 @@ export function formatToolGroupCompactTitle(
         }
         if (kind !== 'other') {
             return t(`toolGroup.compact.single.${status}.${kind}`, { duration: renderedDuration }).trim()
+        }
+
+        const presentation = getToolPresentation({
+            toolName: singleTool.tool.name,
+            input: singleTool.tool.input,
+            result: singleTool.tool.result,
+            childrenCount: singleTool.children.length,
+            description: singleTool.tool.description,
+            metadata: null
+        }, t)
+        if (presentation.title) {
+            return `${formatCompactRawText(presentation.title)} ${renderedDuration}`.trim()
         }
     }
 
@@ -440,13 +458,49 @@ function RowLabel(props: { block: ToolCallBlock; metadata: SessionMetadataSummar
     )
 }
 
+function ToolGroupDetailSurface(props: {
+    selectedTool: ToolCallBlock | null
+    title: string
+    metadata: SessionMetadataSummary | null
+    onClose: () => void
+}) {
+    if (!props.selectedTool) return null
+
+    if (isTerminalExecutionTool(props.selectedTool.tool.name)) {
+        return (
+            <TerminalExecutionDrawer
+                block={props.selectedTool}
+                open
+                onOpenChange={(nextOpen) => {
+                    if (!nextOpen) props.onClose()
+                }}
+            />
+        )
+    }
+
+    return (
+        <Dialog open onOpenChange={(nextOpen) => {
+            if (!nextOpen) props.onClose()
+        }}>
+            <DialogContent fullScreenOnMobile={shouldUseFullScreenToolDetail(props.selectedTool.tool.name)} className="max-w-2xl" aria-describedby={undefined}>
+                <DialogHeader className={shouldUseFullScreenToolDetail(props.selectedTool.tool.name) ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
+                    <DialogTitle>{props.title}</DialogTitle>
+                </DialogHeader>
+                <ToolDetailDialogContent block={props.selectedTool} metadata={props.metadata} />
+            </DialogContent>
+        </Dialog>
+    )
+}
+
 export function ToolGroupCard(props: {
     block: ToolGroupBlock
     metadata: SessionMetadataSummary | null
 }) {
     const { t } = useTranslation()
     const ctx = useHappyChatContext()
-    const [unmanagedOpen, setUnmanagedOpen] = useState(() => props.block.defaultOpen || isToolGroupActive(props.block))
+    const [unmanagedOpen, setUnmanagedOpen] = useState(() => (
+        props.block.defaultOpen || (!props.block.forceCompact && isToolGroupActive(props.block))
+    ))
     const [selectedToolId, setSelectedToolId] = useState<string | null>(null)
     const [isHydratingHistory, setIsHydratingHistory] = useState(false)
     const [historyExhausted, setHistoryExhausted] = useState(false)
@@ -456,14 +510,14 @@ export function ToolGroupCard(props: {
     const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const { suppressFocusRing, onTriggerPointerDown, onTriggerKeyDown, onTriggerBlur } = usePointerFocusRing()
     const compactHeaderState = useContext(ToolGroupCompactHeaderContext)
-    const compactMode = ctx.terminalToolDisplayMode === 'compact'
+    const compactMode = ctx.terminalToolDisplayMode === 'compact' || props.block.forceCompact === true
     const hasActiveTools = isToolGroupActive(props.block)
     const useExternalCompactHeader = compactMode && compactHeaderState?.groupId === props.block.id
     const expansionStateKeys = getToolGroupExpansionStateKeys(props.block)
     const primaryExpansionStateKey = getPrimaryToolGroupExpansionStateKey(props.block)
     const usesManagedExpansionState = ctx.setToolGroupExpansionState !== undefined
     const defaultExpansionState = getDefaultToolGroupExpansionState(
-        props.block.defaultOpen || ctx.toolGroupRunActive === true || hasActiveTools
+        props.block.defaultOpen || (!props.block.forceCompact && (ctx.toolGroupRunActive === true || hasActiveTools))
     )
     const expansionState = resolveToolGroupExpansionState(
         props.block,
@@ -690,28 +744,18 @@ export function ToolGroupCard(props: {
                     </div>
                 ) : null}
 
-                <Dialog open={selectedTool !== null} onOpenChange={(nextOpen) => {
-                    if (!nextOpen) {
-                        setSelectedToolId(null)
-                    }
-                }}>
-                    <DialogContent fullScreenOnMobile={selectedTool ? shouldUseFullScreenToolDetail(selectedTool.tool.name) : false} className="max-w-2xl" aria-describedby={undefined}>
-                        {selectedTool && selectedPresentation ? (
-                            <>
-                                <DialogHeader className={shouldUseFullScreenToolDetail(selectedTool.tool.name) ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
-                                    <DialogTitle>{isTerminalExecutionTool(selectedTool.tool.name) ? t('terminal.execution.title') : selectedPresentation.title}</DialogTitle>
-                                </DialogHeader>
-                                <ToolDetailDialogContent block={selectedTool} metadata={props.metadata} />
-                            </>
-                        ) : null}
-                    </DialogContent>
-                </Dialog>
+                <ToolGroupDetailSurface
+                    selectedTool={selectedTool}
+                    title={selectedPresentation?.title ?? selectedTool?.tool.name ?? ''}
+                    metadata={props.metadata}
+                    onClose={() => setSelectedToolId(null)}
+                />
             </div>
         )
     }
 
     return (
-        <Card className="overflow-hidden rounded-[16px] bg-[var(--app-tool-group-bg)] shadow-none">
+        <Card className="overflow-hidden rounded-[18px] border border-[var(--app-border)] bg-[var(--app-tool-group-bg)] shadow-none">
             <CardHeader className={cn('space-y-0 p-3', subtitle ? 'pb-2' : null)}>
                 <button
                     type="button"
@@ -815,22 +859,12 @@ export function ToolGroupCard(props: {
                 </CardContent>
             ) : null}
 
-            <Dialog open={selectedTool !== null} onOpenChange={(nextOpen) => {
-                if (!nextOpen) {
-                    setSelectedToolId(null)
-                }
-            }}>
-                <DialogContent fullScreenOnMobile={selectedTool ? shouldUseFullScreenToolDetail(selectedTool.tool.name) : false} className="max-w-2xl" aria-describedby={undefined}>
-                    {selectedTool && selectedPresentation ? (
-                        <>
-                            <DialogHeader className={shouldUseFullScreenToolDetail(selectedTool.tool.name) ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
-                                <DialogTitle>{selectedPresentation.title}</DialogTitle>
-                            </DialogHeader>
-                            <ToolDetailDialogContent block={selectedTool} metadata={props.metadata} />
-                        </>
-                    ) : null}
-                </DialogContent>
-            </Dialog>
+            <ToolGroupDetailSurface
+                selectedTool={selectedTool}
+                title={selectedPresentation?.title ?? selectedTool?.tool.name ?? ''}
+                metadata={props.metadata}
+                onClose={() => setSelectedToolId(null)}
+            />
         </Card>
     )
 }

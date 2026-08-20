@@ -15,6 +15,16 @@ function userMessage(partial: Partial<DecryptedMessage> & { id: string }): Decry
 }
 
 describe('mergeMessages', () => {
+    it('deduplicates repeated incoming rows before an initial window exists', () => {
+        const merged = mergeMessages([], [
+            userMessage({ id: 'server-1', localId: 'local-1', createdAt: 1_000 }),
+            userMessage({ id: 'server-1', localId: 'local-1', createdAt: 1_001 }),
+        ])
+
+        expect(merged).toHaveLength(1)
+        expect(merged[0]?.createdAt).toBe(1_001)
+    })
+
     it('preserves invokedAt when a stale snapshot omits the ack timestamp', () => {
         const invokedAt = 2_000
         const existing = [userMessage({ id: 'server-1', localId: 'local-1', invokedAt })]

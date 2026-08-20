@@ -14,6 +14,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { decodeBase64 } from '@/lib/utils'
 import { ImagePreview } from '@/components/ImagePreview'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { SessionDetailHeader } from '@/components/SessionDetailHeader'
 
 const MAX_COPYABLE_FILE_BYTES = 1_000_000
 const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
@@ -77,25 +78,6 @@ function triggerBlobDownload(fileName: string, blob: Blob) {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-}
-
-function BackIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <polyline points="15 18 9 12 15 6" />
-        </svg>
-    )
 }
 
 function DiffDisplay(props: { diffContent: string }) {
@@ -412,21 +394,11 @@ export default function FilePage() {
 
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3 border-b border-[var(--app-border)]">
-                    <button
-                        type="button"
-                        onClick={goBack}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                    >
-                        <BackIcon />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold">{fileName}</div>
-                        <div className="truncate text-xs text-[var(--app-hint)]">{filePath || t('file.page.unknownPath')}</div>
-                    </div>
-                </div>
-            </div>
+            <SessionDetailHeader
+                title={fileName}
+                subtitle={filePath || t('file.page.unknownPath')}
+                onBack={goBack}
+            />
 
             <div className="bg-[var(--app-bg)]">
                 <div className="mx-auto w-full max-w-content px-3 py-2 flex items-center gap-2 border-b border-[var(--app-divider)]">

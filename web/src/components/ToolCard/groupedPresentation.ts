@@ -34,7 +34,7 @@ function getIntentLabel(intent: GroupedSummaryIntent, t: Translator): string {
 export function inferGroupedSummaryIntent(tool: ToolCallBlock): GroupedSummaryIntent {
     const toolName = tool.tool.name
 
-    if (toolName === 'Read' || toolName === 'LS' || toolName === 'NotebookRead') {
+    if (getToolGroupActionKind(tool) === 'read' || toolName === 'LS') {
         return 'inspect-files'
     }
     if (toolName === 'Grep' || toolName === 'Glob') {

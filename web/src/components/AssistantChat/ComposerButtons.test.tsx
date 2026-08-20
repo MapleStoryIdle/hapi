@@ -148,6 +148,24 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
         expect(onAbort).not.toHaveBeenCalled()
     })
 
+    it('adds a breathing animation to an available abort button', () => {
+        renderInProviders(
+            <UnifiedButton
+                canSend={false}
+                voiceStatus="disconnected"
+                voiceEnabled={false}
+                controlsDisabled={false}
+                onSend={noop}
+                onVoiceToggle={noop}
+                showAbortButton
+                abortDisabled={false}
+                onAbort={noop}
+            />,
+        )
+
+        expect(getButton('Abort').querySelector('span')?.className).toContain('animate-stop-button-breathe')
+    })
+
     it('preserves the iOS click sequence while retaining composer focus for Send', () => {
         const onParentPointerDown = vi.fn()
         const onParentMouseDown = vi.fn()

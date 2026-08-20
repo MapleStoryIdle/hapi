@@ -73,10 +73,27 @@ function renderWithProviders() {
     )
 }
 
+describe('TerminalPage title bar', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        onExitHandler = null
+        localStorage.removeItem('hapi-lang')
+    })
+
+    it('uses the shared height and localized session title bar', () => {
+        renderWithProviders()
+
+        expect(screen.getByTestId('session-detail-header-row')).toHaveClass('h-14')
+        expect(screen.getByText('Terminal')).toBeInTheDocument()
+        expect(screen.getByRole('status', { name: 'Connected' })).toBeInTheDocument()
+    })
+})
+
 describe('TerminalPage paste behavior', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         onExitHandler = null
+        localStorage.removeItem('hapi-lang')
     })
 
     it('does not open manual paste dialog when clipboard text is empty', async () => {

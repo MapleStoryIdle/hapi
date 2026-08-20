@@ -2,24 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useAppContext } from '@/lib/app-context'
 import { useTranslation } from '@/lib/use-translation'
-import { Button } from '@/components/ui/button'
-
-function BackIcon() {
-    return (
-        <svg
-            className="h-5 w-5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-        >
-            <path d="M15 18l-6-6 6-6" />
-        </svg>
-    )
-}
+import { SessionDetailHeader } from '@/components/SessionDetailHeader'
 
 function RefreshIcon() {
     return (
@@ -75,33 +58,23 @@ export default function SessionPreviewPage() {
 
     return (
         <div className="flex h-full min-h-0 flex-col bg-[var(--app-bg)] text-[var(--app-fg)]">
-            <div className="flex shrink-0 items-center gap-2 border-b border-[var(--app-border)] px-3 py-2">
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-9 gap-1.5 rounded-full"
-                    onClick={() => navigate({ to: '/sessions/$sessionId', params: { sessionId } })}
-                >
-                    <BackIcon />
-                    <span>{t('localPreview.back')}</span>
-                </Button>
-                <div className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {port ? `${protocol}://127.0.0.1:${port}${path}` : t('localPreview.empty')}
-                </div>
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-9 w-9 rounded-full p-0"
-                    aria-label={t('localPreview.refresh')}
-                    title={t('localPreview.refresh')}
-                    disabled={!src}
-                    onClick={() => setReloadKey((value) => value + 1)}
-                >
-                    <RefreshIcon />
-                </Button>
-            </div>
+            <SessionDetailHeader
+                title={t('localPreview.title')}
+                subtitle={port ? `${protocol}://127.0.0.1:${port}${path}` : t('localPreview.empty')}
+                onBack={() => navigate({ to: '/sessions/$sessionId', params: { sessionId } })}
+                actions={(
+                    <button
+                        type="button"
+                        className="flex h-11 w-11 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label={t('localPreview.refresh')}
+                        title={t('localPreview.refresh')}
+                        disabled={!src}
+                        onClick={() => setReloadKey((value) => value + 1)}
+                    >
+                        <RefreshIcon />
+                    </button>
+                )}
+            />
             {src ? (
                 <iframe
                     key={`${src}:${reloadKey}`}

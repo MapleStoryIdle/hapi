@@ -102,9 +102,15 @@
     --app-secondary-bg: var(--tg-theme-secondary-bg-color, #f3f4f6);
 
     --app-dialog-bg: #ffffff;
+    /* Conversation is deliberately a little quieter than the surrounding app
+     * chrome. The slight warmth makes the edge-to-edge thread feel like one
+     * continuous reading surface without introducing a card behind every
+     * message. */
+    --app-chat-canvas: color-mix(in srgb, var(--app-bg) 97%, #e8e1d8);
     --app-chat-user-bg: #f1f1f1;
     --app-chat-user-surface-bg: var(--app-chat-user-bg);
     --app-chat-user-fg: #202020;
+    --app-chat-user-border: rgba(15, 23, 42, 0.07);
     --app-chat-user-chip-bg: #e3e3e3;
     --app-chat-user-chip-fg: #202020;
     --app-tool-card-bg: #f2f4f6;
@@ -124,9 +130,11 @@
     --app-md-table-bg: #f5f6f7;
     --app-md-table-head-bg: #e3e7eb;
     --app-reasoning-bg: #f2f4f6;
-    --app-composer-expanded-border: #BBD7FF;
+    --app-composer-compact-border: rgba(15, 23, 42, 0.12);
+    --app-composer-compact-shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
+    --app-composer-expanded-border: rgba(15, 23, 42, 0.14);
     --app-composer-expanded-bg: var(--app-bg);
-    --app-composer-expanded-shadow: 0 14px 36px rgba(37, 99, 235, 0.12);
+    --app-composer-expanded-shadow: 0 14px 36px rgba(15, 23, 42, 0.12);
     --app-mermaid-node-fill: #f8fbff;
     --app-mermaid-node-border: #b8cdfd;
     --app-mermaid-cluster-fill: #eef4ff;
@@ -232,9 +240,11 @@ html[data-app-keyboard-open="true"] {
     --app-secondary-bg: var(--tg-theme-secondary-bg-color, #2C2C2E);
 
     --app-dialog-bg: #202226;
+    --app-chat-canvas: color-mix(in srgb, var(--app-bg) 94%, #05070b);
     --app-chat-user-bg: #303030;
     --app-chat-user-surface-bg: var(--app-chat-user-bg);
     --app-chat-user-fg: #f5f5f5;
+    --app-chat-user-border: rgba(255, 255, 255, 0.10);
     --app-chat-user-chip-bg: #414141;
     --app-chat-user-chip-fg: #f5f5f5;
     --app-tool-card-bg: #2b2f34;
@@ -254,9 +264,11 @@ html[data-app-keyboard-open="true"] {
     --app-md-table-bg: #2a2f35;
     --app-md-table-head-bg: #3d4550;
     --app-reasoning-bg: #2b3036;
-    --app-composer-expanded-border: rgba(96, 165, 250, 0.28);
+    --app-composer-compact-border: rgba(255, 255, 255, 0.14);
+    --app-composer-compact-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+    --app-composer-expanded-border: rgba(255, 255, 255, 0.16);
     --app-composer-expanded-bg: var(--app-bg);
-    --app-composer-expanded-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+    --app-composer-expanded-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
     --app-mermaid-node-fill: #323843;
     --app-mermaid-node-border: #7aa2ff;
     --app-mermaid-cluster-fill: #2d3440;
@@ -313,9 +325,11 @@ html[data-app-keyboard-open="true"] {
     --app-secondary-bg: #0a0a0b;
 
     --app-dialog-bg: #0c0c0e;
+    --app-chat-canvas: #000000;
     --app-chat-user-bg: #242424;
     --app-chat-user-surface-bg: var(--app-chat-user-bg);
     --app-chat-user-fg: #f5f5f5;
+    --app-chat-user-border: rgba(255, 255, 255, 0.12);
     --app-chat-user-chip-bg: #363636;
     --app-chat-user-chip-fg: #f5f5f5;
     --app-tool-card-bg: #0e0e10;
@@ -335,9 +349,11 @@ html[data-app-keyboard-open="true"] {
     --app-md-table-bg: #0e0e10;
     --app-md-table-head-bg: #1f2024;
     --app-reasoning-bg: #0e0e10;
-    --app-composer-expanded-border: rgba(78, 161, 255, 0.32);
+    --app-composer-compact-border: rgba(255, 255, 255, 0.16);
+    --app-composer-compact-shadow: 0 10px 30px rgba(0, 0, 0, 0.58);
+    --app-composer-expanded-border: rgba(255, 255, 255, 0.18);
     --app-composer-expanded-bg: var(--app-bg);
-    --app-composer-expanded-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+    --app-composer-expanded-shadow: 0 14px 36px rgba(0, 0, 0, 0.60);
     --app-mermaid-node-fill: #16181d;
     --app-mermaid-node-border: #4ea1ff;
     --app-mermaid-cluster-fill: #101216;
@@ -939,6 +955,28 @@ html[data-theme="oled"] .shiki span {
 
 .animate-spin-slow {
   animation: spin 2s linear infinite;
+}
+
+/* Active run abort affordance: small visual pulse without shifting layout. */
+@keyframes stop-button-breathe {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12), 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.18), 0 0 18px rgba(239, 68, 68, 0.38);
+  }
+}
+
+.animate-stop-button-breathe {
+  animation: stop-button-breathe 1.7s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-stop-button-breathe {
+    animation: none;
+  }
 }
 
 /* New messages indicator bounce animation */

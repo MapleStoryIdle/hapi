@@ -161,7 +161,8 @@ export function HappyAssistantMessage() {
     const firstToolGroupActive = firstToolGroup ? isToolGroupActive(firstToolGroup) : false
     const firstToolGroupManaged = ctx.setToolGroupExpansionState !== undefined
     const firstToolGroupDefaultExpansionState = getDefaultToolGroupExpansionState(
-        firstToolGroupActive || ctx.toolGroupRunActive === true
+        Boolean(firstToolGroup?.defaultOpen)
+            || (firstToolGroup?.forceCompact !== true && (firstToolGroupActive || ctx.toolGroupRunActive === true))
     )
     const firstToolGroupExpansionState = firstToolGroup
         ? resolveToolGroupExpansionState(

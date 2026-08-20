@@ -4,6 +4,7 @@ import type { DecryptedMessage, MessageStatus } from '@/types/api'
 import {
     appendOptimisticMessage,
     clearMessageWindow,
+    enqueueIncomingMessages,
     fetchLatestMessages,
     fetchOlderMessages,
     getMessageWindowState,
@@ -12,6 +13,7 @@ import {
     reconcileQueuedAgainstLatest,
     removeOptimisticMessage,
     setAtBottom,
+    subscribeMessageWindow,
     VISIBLE_WINDOW_SIZE,
     updateMessageStatus,
 } from '@/lib/message-window-store'
@@ -124,6 +126,75 @@ function makeAgentMessagePage(props: {
         createdAt: props.startCreatedAt + index,
     }))
 }
+
+describe('message-window-store frame-batched ingestion', () => {
+    const SESSION_ID = 'session-message-window-frame-batch-test'
+
+    afterEach(() => {
+        clearMessageWindow(SESSION_ID)
+        vi.unstubAllGlobals()
+        vi.restoreAllMocks()
+    })
+
+    function stubAnimationFrame(): FrameRequestCallback[] {
+        const callbacks: FrameRequestCallback[] = []
+        vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+            callbacks.push(callback)
+            return callbacks.length
+        }))
+        return callbacks
+    }
+
+    it('merges a same-frame SSE burst once and notifies subscribers once', () => {
+        const callbacks = stubAnimationFrame()
+        const listener = vi.fn()
+        const unsubscribe = subscribeMessageWindow(SESSION_ID, listener)
+
+        enqueueIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'frame-1', seq: 1 })])
+        enqueueIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'frame-2', seq: 2 })])
+        // The global and selected-session streams can deliver the same row
+        // before the first window state exists. A frame batch must remain
+        // idempotent in that initial state too.
+        enqueueIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'frame-2', seq: 2 })])
+
+        expect(getMessageWindowState(SESSION_ID).messages).toHaveLength(0)
+        expect(callbacks).toHaveLength(1)
+
+        callbacks[0](0)
+
+        expect(getMessageWindowState(SESSION_ID).messages.map((message) => message.id)).toEqual(['frame-1', 'frame-2'])
+        expect(listener).toHaveBeenCalledTimes(1)
+        unsubscribe()
+    })
+
+    it('drops a queued SSE batch when its session window is cleared', () => {
+        const callbacks = stubAnimationFrame()
+
+        enqueueIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'discarded', seq: 1 })])
+        clearMessageWindow(SESSION_ID)
+        callbacks[0](0)
+
+        expect(getMessageWindowState(SESSION_ID).messages).toHaveLength(0)
+    })
+
+    it('flushes queued server messages before processing a consume acknowledgement', () => {
+        stubAnimationFrame()
+        enqueueIncomingMessages(SESSION_ID, [{
+            ...makeUserMessage({
+                id: 'server-queued',
+                localId: 'queued-before-frame',
+                status: 'queued',
+            }),
+            invokedAt: null,
+        }])
+
+        markMessagesConsumed(SESSION_ID, ['queued-before-frame'], 1_700_000_000_000)
+
+        const message = getMessageWindowState(SESSION_ID).messages.find((entry) => entry.id === 'server-queued')
+        expect(message?.status).toBe('sent')
+        expect(message?.invokedAt).toBe(1_700_000_000_000)
+    })
+})
 
 describe('removeOptimisticMessage', () => {
     const SESSION = 'test-session-remove'

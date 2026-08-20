@@ -1812,9 +1812,9 @@ export function HappyComposer(props: {
                     ) : null}
 
                     <div
-                        className={`relative grid overflow-hidden border shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition-[grid-template-rows,border-radius,border-color,box-shadow,background-color] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${composerGridRowsClass} ${
+                        className={`relative grid overflow-hidden border transition-[grid-template-rows,border-radius,border-color,box-shadow,background-color] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${composerGridRowsClass} ${
                             composerCompact
-                                ? 'rounded-full border-[var(--app-border)] bg-[var(--app-bg)]'
+                                ? 'rounded-full border-[var(--app-composer-compact-border)] bg-[var(--app-bg)] shadow-[var(--app-composer-compact-shadow)]'
                                 : 'rounded-[22px] border-[var(--app-composer-expanded-border)] [background:var(--app-composer-expanded-bg)] [box-shadow:var(--app-composer-expanded-shadow)]'
                         } ${
                             sendError ? 'ring-1 ring-red-500' : ''

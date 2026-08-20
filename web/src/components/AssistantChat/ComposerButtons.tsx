@@ -941,7 +941,7 @@ export function UnifiedButton(props: {
 
     if (showAbort) {
         icon = <AbortIcon spinning={props.isAborting ?? false} />
-        className = 'bg-red-600 text-white shadow-[0_0_0_3px_rgba(239,68,68,0.12)] hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-400'
+        className = `bg-red-600 text-white shadow-[0_0_0_3px_rgba(239,68,68,0.12)] hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-400${props.isAborting ? '' : ' animate-stop-button-breathe'}`
         ariaLabel = t('composer.abort')
     } else if (isConnecting) {
         icon = <LoadingIcon />

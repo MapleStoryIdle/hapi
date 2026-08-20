@@ -7,6 +7,18 @@ import { isRequestUserInputToolName, parseRequestUserInputInput, type RequestUse
 export type QuestionAnswerItem = {
     question: string | null
     answers: string[]
+    /**
+     * Original choices are retained for the compact chat summary's detail
+     * sheet. Older stored messages may not have this field, so rendering must
+     * gracefully fall back to the selected answers alone.
+     */
+    options?: QuestionAnswerOption[]
+}
+
+export type QuestionAnswerOption = {
+    label: string
+    description: string | null
+    selected: boolean
 }
 
 export type QuestionAnswerPresentation = {
@@ -116,12 +128,22 @@ export function getQuestionAnswerPresentation(block: ToolCallBlock): QuestionAns
     const answers = normalizeAnswers(block.tool.permission?.answers ?? parseResultAnswers(block.tool.result))
     if (!answers) return null
 
-    const items = questions.map((question, index) => ({
-        question: question.question,
-        answers: unique(getAnswerValues(answers, question, index)
+    const items = questions.map((question, index) => {
+        const selectedAnswers = unique(getAnswerValues(answers, question, index)
             .map((answer) => resolveAnswerLabel(answer, question.options))
             .filter((answer) => answer.length > 0))
-    })).filter((item) => item.answers.length > 0)
+        const selectedLabels = new Set(selectedAnswers)
+
+        return {
+            question: question.question,
+            answers: selectedAnswers,
+            options: question.options.map((option) => ({
+                label: option.label,
+                description: option.description,
+                selected: selectedLabels.has(option.label)
+            }))
+        }
+    }).filter((item) => item.answers.length > 0)
 
     if (items.length > 0) return { items }
 

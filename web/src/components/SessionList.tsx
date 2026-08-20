@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -95,6 +95,14 @@ type MachineGroup = {
     totalSessions: number
     hasActiveSession: boolean
     latestUpdatedAt: number
+}
+
+export function shouldCollapseMachineGroup(
+    machineGroupCount: number,
+    hasActiveSession: boolean,
+    hasSelectedSession: boolean
+): boolean {
+    return machineGroupCount > 1 && !hasActiveSession && !hasSelectedSession
 }
 
 export function getGroupDisplayName(directory: string): string {
@@ -618,7 +626,7 @@ export function getVisibleSessionPreview(
     return visible
 }
 
-function SessionItem(props: {
+const SessionItem = memo(function SessionItem(props: {
     session: SessionSummary
     onSelect: (sessionId: string) => void
     showPath?: boolean
@@ -628,7 +636,7 @@ function SessionItem(props: {
     nested?: boolean
     sideSessionCount?: number
     sideSessionsCollapsed?: boolean
-    onToggleSideSessions?: () => void
+    onToggleSideSessions?: (sessionId: string, collapsed: boolean) => void
 }) {
     const { t } = useTranslation()
     const {
@@ -709,7 +717,7 @@ function SessionItem(props: {
     const toggleSideSessions = (event: React.MouseEvent | React.KeyboardEvent | React.TouchEvent) => {
         event.preventDefault()
         event.stopPropagation()
-        onToggleSideSessions?.()
+        onToggleSideSessions?.(s.id, sideSessionsCollapsed)
     }
     return (
         <>
@@ -859,9 +867,9 @@ function SessionItem(props: {
             />
         </>
     )
-}
+})
 
-export function SessionList(props: {
+export const SessionList = memo(function SessionList(props: {
     sessions: SessionSummary[]
     onSelect: (sessionId: string) => void
     onNewSession: () => void
@@ -965,13 +973,13 @@ export function SessionList(props: {
         return collapseOverrides.get(`side::${node.session.id}`) ?? false
     }
 
-    const toggleSideSessions = (sessionId: string, collapsed: boolean) => {
+    const toggleSideSessions = useCallback((sessionId: string, collapsed: boolean) => {
         setCollapseOverrides(prev => {
             const next = new Map(prev)
             next.set(`side::${sessionId}`, !collapsed)
             return next
         })
-    }
+    }, [])
 
     const renderSessionNode = (node: SessionTreeNode, depth = 0): React.ReactNode => {
         const sideCollapsed = isSideSessionsCollapsed(node)
@@ -988,9 +996,9 @@ export function SessionList(props: {
                     nested={depth > 0}
                     sideSessionCount={node.sideSessions.length}
                     sideSessionsCollapsed={sideCollapsed}
-                    onToggleSideSessions={hasSideSessions ? () => toggleSideSessions(node.session.id, sideCollapsed) : undefined}
+                    onToggleSideSessions={hasSideSessions ? toggleSideSessions : undefined}
                 />
-                {hasSideSessions ? (
+                {hasSideSessions && !sideCollapsed ? (
                     <div className="collapsible-panel" data-open={!sideCollapsed || undefined}>
                         <div className="collapsible-inner">
                             <div className={cn(
@@ -1002,6 +1010,42 @@ export function SessionList(props: {
                         </div>
                     </div>
                 ) : null}
+            </div>
+        )
+    }
+
+    const renderGroupSessions = (group: SessionGroup, isCollapsed: boolean): React.ReactNode => {
+        // Collapsed groups previously kept preview rows, nested menus, and dialog
+        // trees mounted behind a zero-height CSS panel. Avoid that hidden work so
+        // returning to the mobile list only mounts rows the user can see.
+        if (isCollapsed) return null
+
+        const sessionNodes = buildSessionTree(group.sessions)
+        const visibleGroupNodes = getVisibleGroupNodes(sessionNodes, group)
+        const hiddenSessionCount = sessionNodes.length - visibleGroupNodes.length
+        const canCollapseSessions = getGroupVisibleCount(group) > sessionPreviewLimit
+        const showMoreCount = Math.min(sessionPreviewLimit, hiddenSessionCount)
+
+        return (
+            <div className="collapsible-inner">
+                <div className="flex flex-col py-2 pl-4">
+                    {visibleGroupNodes.map(node => renderSessionNode(node))}
+                    {sessionNodes.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canCollapseSessions) ? (
+                        <button
+                            type="button"
+                            onClick={() => hiddenSessionCount > 0
+                                ? showMoreSessions(group)
+                                : collapseSessionGroup(group)}
+                            className={cn(
+                                'my-1 rounded-xl px-0 py-2 text-left text-base text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]'
+                            )}
+                        >
+                            {hiddenSessionCount > 0
+                                ? t('sessions.group.showMore', { n: showMoreCount })
+                                : t('sessions.group.showLess')}
+                        </button>
+                    ) : null}
+                </div>
             </div>
         )
     }
@@ -1018,7 +1062,7 @@ export function SessionList(props: {
         const hasSelected = selectedSessionId
             ? mg.projectGroups.some(pg => pg.sessions.some(s => s.id === selectedSessionId))
             : false
-        return !mg.hasActiveSession && !hasSelected
+        return shouldCollapseMachineGroup(machineGroups.length, mg.hasActiveSession, hasSelected)
     }
 
     const toggleMachine = (mg: MachineGroup) => {
@@ -1149,11 +1193,6 @@ export function SessionList(props: {
                                 <div className="flex flex-col gap-1.5">
                                     {mg.projectGroups.map((group) => {
                                         const isCollapsed = isGroupCollapsed(group)
-                                        const sessionNodes = buildSessionTree(group.sessions)
-                                        const visibleGroupNodes = getVisibleGroupNodes(sessionNodes, group)
-                                        const hiddenSessionCount = sessionNodes.length - visibleGroupNodes.length
-                                        const canCollapseSessions = getGroupVisibleCount(group) > sessionPreviewLimit
-                                        const showMoreCount = Math.min(sessionPreviewLimit, hiddenSessionCount)
                                         const canStartInGroupDirectory = group.directory !== 'Other'
                                         return (
                                             <section key={group.key} className="min-w-0">
@@ -1190,26 +1229,7 @@ export function SessionList(props: {
 
                                                 {/* Level 3: Sessions */}
                                                 <div className="collapsible-panel" data-open={!isCollapsed || undefined}>
-                                                    <div className="collapsible-inner">
-                                                    <div className="flex flex-col py-2 pl-4">
-                                                        {visibleGroupNodes.map(node => renderSessionNode(node))}
-                                                        {sessionNodes.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canCollapseSessions) ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => hiddenSessionCount > 0
-                                                                    ? showMoreSessions(group)
-                                                                    : collapseSessionGroup(group)}
-                                                                className={cn(
-                                                                    'my-1 rounded-xl px-0 py-2 text-left text-base text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]'
-                                                                )}
-                                                            >
-                                                                {hiddenSessionCount > 0
-                                                                    ? t('sessions.group.showMore', { n: showMoreCount })
-                                                                    : t('sessions.group.showLess')}
-                                                            </button>
-                                                        ) : null}
-                                                    </div>
-                                                    </div>
+                                                    {renderGroupSessions(group, isCollapsed)}
                                                 </div>
                                             </section>
                                         )
@@ -1223,4 +1243,4 @@ export function SessionList(props: {
             </div>
         </div>
     )
-}
+})

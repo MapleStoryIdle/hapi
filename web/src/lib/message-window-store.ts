@@ -88,9 +88,15 @@ const PERSIST_THROTTLE_MS = 200
 const STORAGE_KEY_PREFIX = 'hapi:message-window:v1:'
 const pendingNotifySessionIds = new Set<string>()
 const pendingPersistSessionIds = new Set<string>()
+// SSE can deliver a burst of token/tool events in the same visual frame. Keep
+// those payloads out of React's synchronous update path, then merge them once
+// just before the browser paints. User-initiated mutations still use the
+// synchronous ingestion path below.
+const pendingIncomingMessagesBySession = new Map<string, DecryptedMessage[]>()
 let notifyRafId: ReturnType<typeof requestAnimationFrame> | null = null
 let persistTimerId: ReturnType<typeof setTimeout> | null = null
 let lastNotifyAt = 0
+let incomingMessageFlushScheduled = false
 
 function resolveForcedLatestRefresh(refresh: { resolvers: Array<() => void> }): void {
     for (const resolve of refresh.resolvers) {
@@ -155,6 +161,49 @@ function flushNotifications(): void {
         for (const listener of subs) {
             listener()
         }
+    }
+}
+
+function flushQueuedIncomingMessagesForSession(sessionId: string): void {
+    const incoming = pendingIncomingMessagesBySession.get(sessionId)
+    if (!incoming || incoming.length === 0) {
+        return
+    }
+    pendingIncomingMessagesBySession.delete(sessionId)
+    ingestIncomingMessagesNow(sessionId, incoming, true)
+}
+
+function flushQueuedIncomingMessages(): void {
+    incomingMessageFlushScheduled = false
+    const batches = Array.from(pendingIncomingMessagesBySession.entries())
+    pendingIncomingMessagesBySession.clear()
+    for (const [sessionId, incoming] of batches) {
+        ingestIncomingMessagesNow(sessionId, incoming, true)
+    }
+}
+
+function scheduleIncomingMessageFlush(): void {
+    if (incomingMessageFlushScheduled) {
+        return
+    }
+    incomingMessageFlushScheduled = true
+    const flush = () => {
+        flushQueuedIncomingMessages()
+    }
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(flush)
+        return
+    }
+    setTimeout(flush, 16)
+}
+
+function discardQueuedIncomingMessages(sessionId: string): void {
+    pendingIncomingMessagesBySession.delete(sessionId)
+    // A previously scheduled frame is harmless if it later fires with no
+    // batches. Resetting this guard lets a just-cleared session receive a new
+    // message without waiting for that stale frame first.
+    if (pendingIncomingMessagesBySession.size === 0) {
+        incomingMessageFlushScheduled = false
     }
 }
 
@@ -364,6 +413,7 @@ function notify(sessionId: string): void {
 
 function notifyImmediate(sessionId: string): void {
     // Bypass throttle for user-initiated actions (flush, clear, etc.)
+    pendingNotifySessionIds.delete(sessionId)
     const subs = listeners.get(sessionId)
     if (!subs) return
     for (const listener of subs) {
@@ -827,6 +877,7 @@ export function subscribeMessageWindow(sessionId: string, listener: () => void):
 }
 
 export function clearMessageWindow(sessionId: string): void {
+    discardQueuedIncomingMessages(sessionId)
     clearPendingForcedLatestRefresh(sessionId)
     clearPendingVisibilityCache(sessionId)
     clearPersistedState(sessionId)
@@ -872,6 +923,7 @@ export async function fetchLatestMessages(
     sessionId: string,
     options: FetchLatestMessagesOptions = {}
 ): Promise<void> {
+    flushQueuedIncomingMessagesForSession(sessionId)
     const initial = getState(sessionId)
     if (initial.isLoading) {
         if (options.force) {
@@ -956,6 +1008,7 @@ export async function fetchLatestMessages(
 }
 
 export async function fetchOlderMessages(api: ApiClient, sessionId: string): Promise<void> {
+    flushQueuedIncomingMessagesForSession(sessionId)
     const initial = getState(sessionId)
     if (initial.isLoadingMore || !initial.hasMore) {
         return
@@ -995,7 +1048,11 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
     }
 }
 
-export function ingestIncomingMessages(sessionId: string, incoming: DecryptedMessage[]): void {
+function ingestIncomingMessagesNow(
+    sessionId: string,
+    incoming: DecryptedMessage[],
+    immediate = false
+): void {
     if (incoming.length === 0) {
         return
     }
@@ -1037,10 +1094,42 @@ export function ingestIncomingMessages(sessionId: string, incoming: DecryptedMes
             })
         }
         return state
-    })
+    }, immediate)
+}
+
+/**
+ * Queue server-sent messages until the next animation frame. This is the
+ * streaming entry point: a burst of Codex updates becomes one merge and one
+ * React notification per frame, while preserving arrival order per session.
+ */
+export function enqueueIncomingMessages(sessionId: string, incoming: DecryptedMessage[]): void {
+    if (incoming.length === 0) {
+        return
+    }
+    const pending = pendingIncomingMessagesBySession.get(sessionId)
+    if (pending) {
+        pending.push(...incoming)
+    } else {
+        pendingIncomingMessagesBySession.set(sessionId, [...incoming])
+    }
+    scheduleIncomingMessageFlush()
+}
+
+/**
+ * Synchronously merge messages for direct callers and tests. SSE handlers
+ * should use enqueueIncomingMessages instead so streaming does not repeatedly
+ * rebuild the full visible message window in a single frame.
+ */
+export function ingestIncomingMessages(sessionId: string, incoming: DecryptedMessage[]): void {
+    if (incoming.length === 0) {
+        return
+    }
+    flushQueuedIncomingMessagesForSession(sessionId)
+    ingestIncomingMessagesNow(sessionId, incoming)
 }
 
 export function flushPendingMessages(sessionId: string): boolean {
+    flushQueuedIncomingMessagesForSession(sessionId)
     const current = getState(sessionId)
     if (current.pending.length === 0 && current.pendingOverflowVisibleCount === 0) {
         return false
@@ -1063,6 +1152,7 @@ export function flushPendingMessages(sessionId: string): boolean {
 }
 
 export function setAtBottom(sessionId: string, atBottom: boolean): void {
+    flushQueuedIncomingMessagesForSession(sessionId)
     updateState(sessionId, (prev) => {
         if (prev.atBottom === atBottom) {
             return prev
@@ -1072,6 +1162,7 @@ export function setAtBottom(sessionId: string, atBottom: boolean): void {
 }
 
 export function appendOptimisticMessage(sessionId: string, message: DecryptedMessage): void {
+    flushQueuedIncomingMessagesForSession(sessionId)
     updateState(sessionId, (prev) => {
         const merged = mergeMessages(prev.messages, [message])
         const { kept, dropped } = trimVisibleWithDropped(merged, 'append')
@@ -1089,6 +1180,7 @@ export function updateMessageStatus(sessionId: string, localId: string, status: 
     if (!localId) {
         return
     }
+    flushQueuedIncomingMessagesForSession(sessionId)
     updateState(sessionId, (prev) => {
         let changed = false
         const updateList = (list: DecryptedMessage[]) => {
@@ -1122,6 +1214,7 @@ export function updateMessageStatus(sessionId: string, localId: string, status: 
  */
 export function removeOptimisticMessage(sessionId: string, localId: string): void {
     if (!localId) return
+    flushQueuedIncomingMessagesForSession(sessionId)
     updateState(sessionId, (prev) => {
         let changed = false
         const filterList = (list: DecryptedMessage[]) => {
@@ -1150,6 +1243,7 @@ export function removeOptimisticMessage(sessionId: string, localId: string): voi
  *  timestamp for composite cursor pagination. */
 export function markMessagesConsumed(sessionId: string, localIds: string[], invokedAt: number): void {
     if (localIds.length === 0) return
+    flushQueuedIncomingMessagesForSession(sessionId)
     const idSet = new Set(localIds)
     updateState(sessionId, (prev) => {
         let changed = false

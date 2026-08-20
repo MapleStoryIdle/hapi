@@ -83,7 +83,8 @@ function createResultDetailsGroup(
         expansionStateKeys: collectExpansionStateKeys(sourceBlocks),
         detailBlocks,
         showAgentIcon: true,
-        forceGenericCompactTitle: true
+        forceGenericCompactTitle: true,
+        forceCompact: true
     }
 }
 

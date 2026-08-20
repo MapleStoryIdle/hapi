@@ -13,7 +13,13 @@ vi.mock('@/components/LazyRainbowText', () => ({
     )
 }))
 
-import { UserBubbleContent, extractLeadingDirectives, formatDirectiveLabel, getUserBubbleClassName } from '@/components/AssistantChat/messages/user-bubble'
+import {
+    UserBubbleContent,
+    extractLeadingDirectives,
+    formatDirectiveLabel,
+    getQuestionAnswerMessageClassName,
+    getUserBubbleClassName
+} from '@/components/AssistantChat/messages/user-bubble'
 
 describe('extractLeadingDirectives', () => {
     it('extracts leading skill and command directives', () => {
@@ -63,5 +69,13 @@ describe('UserBubbleContent', () => {
         const className = getUserBubbleClassName('queued')
         expect(className).toContain('shadow-none')
         expect(className).toContain('opacity-60')
+    })
+
+    it('gives completed selections their own card container instead of a user bubble', () => {
+        const className = getQuestionAnswerMessageClassName()
+
+        expect(className).toContain('happy-question-answer-message')
+        expect(className).toContain('max-w-[min(30rem,92%)]')
+        expect(className).not.toContain('happy-user-bubble')
     })
 })

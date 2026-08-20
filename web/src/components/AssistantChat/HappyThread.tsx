@@ -46,6 +46,7 @@ const TOP_LOAD_WHEEL_DELTA_EPSILON_PX = 0.5
 const PULL_TO_LOAD_OLDER_THRESHOLD_PX = 72
 const PULL_TO_LOAD_OLDER_MAX_OFFSET_PX = 48
 const PULL_TO_LOAD_OLDER_LOADING_OFFSET_PX = 34
+const MANUAL_SCROLL_INTENT_WINDOW_MS = 250
 
 export type PullToLoadOlderPhase = 'idle' | 'pulling' | 'ready' | 'loading'
 
@@ -100,6 +101,18 @@ export function getScrollIntent(params: {
 
 export function shouldCancelInitialScrollSettling(intent: ScrollIntent): boolean {
     return intent.isScrollingUp && intent.distanceFromBottom > MANUAL_SCROLL_EPSILON_PX
+}
+
+export function shouldCancelLatestMessageFollow(params: {
+    followingLatest: boolean
+    isAtBottom: boolean
+    isScrollingUp: boolean
+    userInitiated: boolean
+}): boolean {
+    return params.followingLatest
+        && params.userInitiated
+        && params.isScrollingUp
+        && !params.isAtBottom
 }
 
 export function shouldEnableTopSentinelAutoLoad(matchMedia: ((query: string) => MediaQueryList) | undefined): boolean {
@@ -636,6 +649,7 @@ export function HappyThread(props: {
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const lastScrollTopRef = useRef(0)
+    const manualScrollIntentExpiresAtRef = useRef(0)
     const sessionIdRef = useRef(props.sessionId)
     const initialScrollSessionRef = useRef<string | null>(null)
     const initialScrollDeadlineRef = useRef(0)
@@ -674,7 +688,8 @@ export function HappyThread(props: {
         setToolGroupExpansionStates(closeAutoExpandedToolGroups)
     }, [props.toolGroupCompletionKey])
 
-    // Smart scroll state: enabled only while the user is intentionally at the bottom.
+    // Follow state is enabled by a send and stays enabled until the user
+    // intentionally scrolls away from the latest message.
     const autoScrollEnabledRef = useRef(true)
     const setPullToLoadDistance = useCallback((distance: number) => {
         const nextDistance = Math.max(0, distance)
@@ -772,7 +787,19 @@ export function HappyThread(props: {
         )
     }, [])
 
-    // Track scroll position to toggle autoScroll (stable listener using refs)
+    const markManualScrollIntent = useCallback(() => {
+        manualScrollIntentExpiresAtRef.current = Date.now() + MANUAL_SCROLL_INTENT_WINDOW_MS
+    }, [])
+
+    const consumeManualScrollIntent = useCallback((): boolean => {
+        const userInitiated = Date.now() <= manualScrollIntentExpiresAtRef.current
+        manualScrollIntentExpiresAtRef.current = 0
+        return userInitiated
+    }, [])
+
+    // Keep following after an accepted send. Only an actual wheel/touch scroll
+    // away from the end may turn that mode off; browser layout and streaming
+    // content also emit scroll events and must not cancel it.
     useEffect(() => {
         const viewport = viewportRef.current
         if (!viewport) return
@@ -800,6 +827,7 @@ export function HappyThread(props: {
 
         const handleScroll = () => {
             requestReturnToUserMessageVisibilityUpdate()
+            const userInitiated = consumeManualScrollIntent()
             const intent = getScrollIntent({
                 scrollTop: viewport.scrollTop,
                 scrollHeight: viewport.scrollHeight,
@@ -809,7 +837,7 @@ export function HappyThread(props: {
             lastScrollTopRef.current = viewport.scrollTop
 
             if (isInitialScrollSettling()) {
-                if (shouldCancelInitialScrollSettling(intent)) {
+                if (userInitiated && shouldCancelInitialScrollSettling(intent)) {
                     initialScrollDeadlineRef.current = 0
                     clearInitialScrollTimers()
                     setAutoScrollMode(false)
@@ -818,12 +846,26 @@ export function HappyThread(props: {
                 return
             }
 
-            // A manual move must keep tracking paused even when it ends only
-            // a few pixels above the end. Sending or reaching the exact end
-            // explicitly resumes following.
             if (intent.isAtBottom) {
                 setAutoScrollMode(true)
                 setAtBottomMode(true)
+                return
+            }
+
+            if (shouldCancelLatestMessageFollow({
+                followingLatest: autoScrollEnabledRef.current,
+                isAtBottom: intent.isAtBottom,
+                isScrollingUp: intent.isScrollingUp,
+                userInitiated
+            })) {
+                setAutoScrollMode(false)
+                setAtBottomMode(false)
+                return
+            }
+
+            // The user previously left the end, so maintain the normal
+            // unread indicator state. Otherwise preserve send-follow mode.
+            if (autoScrollEnabledRef.current) {
                 return
             }
 
@@ -833,7 +875,7 @@ export function HappyThread(props: {
 
         viewport.addEventListener('scroll', handleScroll, { passive: true })
         return () => viewport.removeEventListener('scroll', handleScroll)
-    }, []) // Stable: no dependencies, reads from refs
+    }, [clearInitialScrollTimers, consumeManualScrollIntent, isInitialScrollSettling, requestReturnToUserMessageVisibilityUpdate])
 
     const scrollToBottomInstant = useCallback(() => {
         const viewport = viewportRef.current
@@ -893,6 +935,7 @@ export function HappyThread(props: {
         setPullToLoadLoading(false)
         pullToLoadLoadingRef.current = false
         resetPullGesture()
+        manualScrollIntentExpiresAtRef.current = 0
         onAtBottomChangeRef.current(true)
         forceScrollTokenRef.current = props.forceScrollToken
         pendingScrollRef.current = null
@@ -1093,6 +1136,8 @@ export function HappyThread(props: {
                 return
             }
 
+            markManualScrollIntent()
+
             if (!gesture.active) {
                 if (viewport.scrollTop > 0 || !canStartPullToLoadOlder()) {
                     gesture.startY = touch.clientY
@@ -1149,20 +1194,30 @@ export function HappyThread(props: {
             finishPull(false)
         }
 
+        const handlePointerMove = (event: PointerEvent) => {
+            // Wheel covers trackpads; this covers a desktop scrollbar drag.
+            if (event.pointerType !== 'touch' && event.buttons !== 0) {
+                markManualScrollIntent()
+            }
+        }
+
         viewport.addEventListener('touchstart', handleTouchStart, { passive: true })
         viewport.addEventListener('touchmove', handleTouchMove, { passive: false })
         viewport.addEventListener('touchend', handleTouchEnd)
         viewport.addEventListener('touchcancel', handleTouchCancel)
+        viewport.addEventListener('pointermove', handlePointerMove, { passive: true })
 
         return () => {
             viewport.removeEventListener('touchstart', handleTouchStart)
             viewport.removeEventListener('touchmove', handleTouchMove)
             viewport.removeEventListener('touchend', handleTouchEnd)
             viewport.removeEventListener('touchcancel', handleTouchCancel)
+            viewport.removeEventListener('pointermove', handlePointerMove)
         }
     }, [
         canStartPullToLoadOlder,
         loadOlderPreservingScroll,
+        markManualScrollIntent,
         resetPullGesture,
         setPullToLoadDistance
     ])
@@ -1224,6 +1279,12 @@ export function HappyThread(props: {
         }
 
         const handleWheel = (event: WheelEvent) => {
+            if (
+                Math.abs(event.deltaY) > TOP_LOAD_WHEEL_DELTA_EPSILON_PX
+                && Math.abs(event.deltaY) >= Math.abs(event.deltaX)
+            ) {
+                markManualScrollIntent()
+            }
             if (!shouldLoadOlderFromTopWheel({
                 scrollTop: viewport.scrollTop,
                 deltaY: event.deltaY,
@@ -1240,7 +1301,7 @@ export function HappyThread(props: {
 
         viewport.addEventListener('wheel', handleWheel, { passive: true })
         return () => viewport.removeEventListener('wheel', handleWheel)
-    }, [clearInitialScrollTimers, loadOlderPreservingScroll])
+    }, [clearInitialScrollTimers, loadOlderPreservingScroll, markManualScrollIntent])
 
     useEffect(() => {
         const sentinel = topSentinelRef.current
@@ -1393,7 +1454,7 @@ export function HappyThread(props: {
                     >
                         <div
                             ref={contentRef}
-                            className="session-thread-content mx-auto min-h-full w-full max-w-content min-w-0 bg-[var(--app-bg)] p-3"
+                            className="session-thread-content mx-auto min-h-full w-full max-w-content min-w-0 bg-[var(--app-chat-canvas)] p-3"
                             style={getThreadContentPadding(props)}
                             data-testid="happy-thread-content"
                         >

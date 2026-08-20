@@ -45,7 +45,12 @@ describe('question answer presentation', () => {
         expect(getQuestionAnswerPresentation(block)).toEqual({
             items: [{
                 question: 'Which direction?',
-                answers: ['Keep it compact', 'Match the mobile layout']
+                answers: ['Keep it compact', 'Match the mobile layout'],
+                options: [{
+                    label: 'Keep it compact',
+                    description: 'Short rows',
+                    selected: true
+                }]
             }]
         })
         expect(toQuestionAnswerBlock(block)).toMatchObject({
@@ -73,7 +78,15 @@ describe('question answer presentation', () => {
         })
 
         expect(getQuestionAnswerPresentation(block)).toEqual({
-            items: [{ question: 'Choose a theme', answers: ['Dark theme'] }]
+            items: [{
+                question: 'Choose a theme',
+                answers: ['Dark theme'],
+                options: [{
+                    label: 'Dark theme',
+                    description: null,
+                    selected: true
+                }]
+            }]
         })
     })
 
@@ -94,8 +107,44 @@ describe('question answer presentation', () => {
         })
 
         expect(getQuestionAnswerPresentation(block)).toEqual({
-            items: [{ question: 'Ship this change?', answers: ['Ship it'] }]
+            items: [{
+                question: 'Ship this change?',
+                answers: ['Ship it'],
+                options: [{
+                    label: 'Ship it',
+                    description: 'Deploy now',
+                    selected: true
+                }]
+            }]
         })
+    })
+
+    it('keeps unselected choices for the detail view while copy text remains selected-only', () => {
+        const block = makeToolBlock({
+            input: {
+                questions: [{
+                    id: 'direction',
+                    question: 'Which direction?',
+                    options: [
+                        { label: 'Keep it compact', description: 'Short rows' },
+                        { label: 'Show all details', description: 'Everything visible' }
+                    ]
+                }]
+            },
+            permission: {
+                id: 'question-1',
+                status: 'approved',
+                answers: { direction: { answers: ['Keep it compact'] } }
+            }
+        })
+
+        const presentation = getQuestionAnswerPresentation(block)
+
+        expect(presentation?.items[0]?.options).toEqual([
+            { label: 'Keep it compact', description: 'Short rows', selected: true },
+            { label: 'Show all details', description: 'Everything visible', selected: false }
+        ])
+        expect(formatQuestionAnswerText(presentation!)).toBe('Which direction?\n• Keep it compact')
     })
 
     it('does not convert a pending question without a user answer', () => {

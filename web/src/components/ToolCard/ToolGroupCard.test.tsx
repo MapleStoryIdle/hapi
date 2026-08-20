@@ -114,6 +114,85 @@ describe('ToolGroupCard', () => {
         expect(view.container.innerHTML).toContain('bg-[var(--app-tool-group-bg)]')
     })
 
+    it('uses a transparent compact row for every forced tool group and retains an MCP title', () => {
+        const mcp = makeToolBlock('mcp-1', 'mcp__node_repl__js', {
+            title: '查看本地会话',
+            code: 'nodeRepl.write("ok")'
+        })
+        const view = renderCard(makeGroup({
+            tools: [mcp],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 0,
+                    mutation: 0,
+                    web: 0,
+                    other: 1,
+                },
+                fileTargets: [],
+                commandTargets: [],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: ['mcp__node_repl__js'],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+            forceCompact: true
+        }))
+
+        const toggle = within(view.container).getByRole('button', { name: /查看本地会话 0s/i })
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(view.container.innerHTML).not.toContain('bg-[var(--app-tool-group-bg)]')
+
+        fireEvent.click(toggle)
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByText('查看本地会话')).toBeInTheDocument()
+    })
+
+    it('keeps forced compact activity collapsed while a tool is running', () => {
+        const startedAt = Date.now() - 3_000
+        const running = makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+            state: 'running',
+            createdAt: startedAt,
+            startedAt,
+            completedAt: null,
+        })
+        const view = renderCard(makeGroup({
+            tools: [running],
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 1,
+                pendingCount: 0,
+            },
+            forceCompact: true
+        }))
+
+        const toggle = within(view.container).getByRole('button')
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByText('bun test')).not.toBeInTheDocument()
+
+        fireEvent.click(toggle)
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByText('bun test')).toBeInTheDocument()
+    })
+
     it('expands to show compact rows and opens a detail dialog per row', async () => {
         const view = renderCard(makeGroup())
         const groupToggle = within(view.container).getByRole('button', { name: /inspect project files/i })
@@ -141,6 +220,26 @@ describe('ToolGroupCard', () => {
         expect(screen.getAllByText('src/a.ts')[0]).toBeInTheDocument()
         expect(within(dialog).getAllByText('Input').length).toBeGreaterThan(0)
         expect(within(dialog).getAllByText('Result').length).toBeGreaterThan(0)
+    })
+
+    it('opens terminal command rows in the command drawer', async () => {
+        const view = renderCard(makeGroup())
+        const groupToggle = within(view.container).getByRole('button', { name: /inspect project files/i })
+
+        fireEvent.click(groupToggle)
+
+        const commandRow = Array.from(view.container.querySelectorAll<HTMLButtonElement>('button'))
+            .find((button) => button.textContent?.includes('Terminal') && button.textContent.includes('bun test'))
+        expect(commandRow).toBeDefined()
+
+        fireEvent.click(commandRow!)
+
+        await waitFor(() => {
+            expect(screen.getByTestId('terminal-execution-drawer')).toBeInTheDocument()
+        })
+        const drawer = screen.getByRole('dialog')
+        expect(drawer).toHaveAttribute('data-testid', 'terminal-execution-drawer')
+        expect(within(drawer).getAllByText('bun test').length).toBeGreaterThan(0)
     })
 
     it('uses a neutral header for all-generic tool groups without duplicate counters', () => {

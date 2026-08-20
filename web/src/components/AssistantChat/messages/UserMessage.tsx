@@ -4,7 +4,7 @@ import { useHappyChatContext } from '@/components/AssistantChat/context'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { MessageStatusIndicator } from '@/components/AssistantChat/messages/MessageStatusIndicator'
 import { MessageAttachments } from '@/components/AssistantChat/messages/MessageAttachments'
-import { UserBubbleContent, getUserBubbleClassName, shouldShowMessageStatus } from '@/components/AssistantChat/messages/user-bubble'
+import { UserBubbleContent, getQuestionAnswerMessageClassName, getUserBubbleClassName, shouldShowMessageStatus } from '@/components/AssistantChat/messages/user-bubble'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
@@ -95,6 +95,26 @@ export function HappyUserMessage() {
         )
     }
 
+    if (questionAnswer) {
+        return (
+            <MessagePrimitive.Root
+                id={getConversationMessageAnchorId(messageId)}
+                className={getQuestionAnswerMessageClassName()}
+                onClick={toggleDetailsVisible}
+            >
+                <QuestionAnswerBubble answer={questionAnswer} />
+                <MessageDetailsFooter
+                    visible={detailsVisible}
+                    align="right"
+                    hasMetadata={hasMetadata}
+                    metadataOpen={showMetadata}
+                    onMetadataToggle={() => setShowMetadata((open) => !open)}
+                    invokedAt={invokedAt}
+                />
+            </MessagePrimitive.Root>
+        )
+    }
+
     const hasText = text.length > 0
     const hasAttachments = attachments && attachments.length > 0
 
@@ -107,7 +127,7 @@ export function HappyUserMessage() {
             <div className="flex flex-col gap-1">
                 <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
-                        {questionAnswer ? <QuestionAnswerBubble answer={questionAnswer} /> : hasText ? <UserBubbleContent text={text} /> : null}
+                        {hasText ? <UserBubbleContent text={text} /> : null}
                         {hasAttachments ? <MessageAttachments attachments={attachments} /> : null}
                         {remoteServer ? (
                             <div className="mt-1 flex justify-end">

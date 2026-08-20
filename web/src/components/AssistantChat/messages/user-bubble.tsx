@@ -7,9 +7,13 @@ const LEADING_DIRECTIVE_REGEX = /^([$\/][a-z0-9][\w-]*)(?=\s|$)/i
 
 export function getUserBubbleClassName(status?: MessageStatus) {
     return cn(
-        'happy-user-bubble happy-chat-text mr-1 ml-auto w-fit min-w-0 max-w-[88%] rounded-[1.35rem] bg-[var(--app-chat-user-surface-bg)] px-4 py-2.5 text-[var(--app-chat-user-fg)] shadow-none',
+        'happy-user-bubble happy-chat-text mr-1 ml-auto w-fit min-w-0 max-w-[88%] rounded-[1.35rem] rounded-br-[0.5rem] border border-[var(--app-chat-user-border)] bg-[var(--app-chat-user-surface-bg)] px-4 py-2.5 text-[var(--app-chat-user-fg)] shadow-none',
         status === 'queued' && 'opacity-60'
     )
+}
+
+export function getQuestionAnswerMessageClassName() {
+    return 'happy-question-answer-message ml-auto w-full min-w-0 max-w-[min(30rem,92%)] scroll-mt-4'
 }
 
 export function shouldShowMessageStatus(status?: MessageStatus): boolean {
@@ -47,7 +51,7 @@ export function DirectiveChip(props: { value: string }) {
     return (
         <span
             className={cn(
-                'inline-flex items-center justify-center gap-[0.2rem] whitespace-nowrap rounded-full border-0 bg-[var(--app-chat-user-chip-bg)] px-2 py-px align-middle text-[length:var(--app-chat-font-size)] font-normal leading-[1.4] text-[var(--app-chat-user-chip-fg)] shadow-none'
+                'inline-flex items-center justify-center gap-[0.2rem] whitespace-nowrap rounded-full border border-[var(--app-chat-user-border)] bg-[var(--app-chat-user-chip-bg)] px-2 py-px align-middle text-[length:var(--app-chat-font-size)] font-normal leading-[1.4] text-[var(--app-chat-user-chip-fg)] shadow-none'
             )}
             title={props.value}
             aria-label={props.value}

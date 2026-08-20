@@ -54,7 +54,7 @@ requireMatch(header, /style=\{mobileLayoutHeaderShellStyle\}/, 'session header m
 requireMatch(header, /data-testid=\{MOBILE_LAYOUT_CONTRACT\.header\.testId\}/, 'session header must expose its contract target')
 requireMatch(header, /data-mobile-layout-contract=\{MOBILE_LAYOUT_CONTRACT\.header\.state\}/, 'session header must expose its contract state')
 requireMatch(header, /const headerSurfaceClass = 'border-\[color-mix\(in_srgb,var\(--app-fg\)_14%,var\(--app-bg\)\)\] bg-\[var\(--app-bg\)\]'/, 'header controls must stay independently solid')
-requireMatch(header, /const headerShellClass = props\.floating\s*\? `pointer-events-auto absolute inset-x-0 top-0 z-20 isolate touch-manipulation/, 'floating header must remain an explicit iOS hit-test layer')
+requireMatch(header, /const headerShellClass = props\.floating[\s\S]*?\? `pointer-events-auto absolute inset-x-0 top-0 z-40 isolate touch-manipulation/, 'floating header must remain above conversation overlays in the explicit iOS hit-test layer')
 requireMatch(composer, /var\(--app-composer-expanded-bottom-gap\)\+var\(--app-composer-safe-area-bottom\)\+var\(--app-composer-expanded-keyboard-offset\)/, 'expanded composer must consume the canonical keyboard gap tokens')
 requireMatch(composer, /const requiresExpandedComposer = hasText\s*\|\|/, 'a non-empty draft must keep the composer expanded')
 requireMatch(composer, /const composerCompact = !composerExpanded && !requiresExpandedComposer/, 'the visual compact state must honor the non-empty draft invariant')

@@ -50,6 +50,7 @@ function makeTextBlock(id: string, text = 'note'): ChatBlock {
 describe('getToolGroupActionKind', () => {
     it('classifies common execution tools', () => {
         expect(getToolGroupActionKind(makeToolBlock('read-1', 'Read'))).toBe('read')
+        expect(getToolGroupActionKind(makeToolBlock('read-file-1', 'read_file'))).toBe('read')
         expect(getToolGroupActionKind(makeToolBlock('grep-1', 'Grep'))).toBe('search')
         expect(getToolGroupActionKind(makeToolBlock('bash-1', 'Bash'))).toBe('command')
         expect(getToolGroupActionKind(makeToolBlock('edit-1', 'Edit'))).toBe('mutation')
@@ -72,29 +73,29 @@ describe('getToolGroupActionKind', () => {
 })
 
 describe('isEligibleForToolGrouping', () => {
-    it('excludes interactive, subagent, and plan cards', () => {
-        expect(isEligibleForToolGrouping(makeToolBlock('read-1', 'Read'))).toBe(false)
+    it('groups every noninteractive tool card', () => {
+        expect(isEligibleForToolGrouping(makeToolBlock('read-1', 'Read'))).toBe(true)
         expect(isEligibleForToolGrouping(makeToolBlock('codex-read-1', 'CodexBash', {
             command: "sed -n '12,80p' src/App.tsx"
-        }))).toBe(false)
+        }))).toBe(true)
         expect(isEligibleForToolGrouping(makeToolBlock('codex-sequential-read-1', 'CodexBash', {
             command: "cat AGENT.md && sed -n '12,80p' src/App.tsx"
-        }))).toBe(false)
+        }))).toBe(true)
         expect(isEligibleForToolGrouping(makeToolBlock('codex-sequential-read-with-pipeline-1', 'CodexBash', {
             command: "cat AGENT.md; find src -type f | sort; sed -n '12,80p' src/App.tsx"
-        }))).toBe(false)
+        }))).toBe(true)
         expect(isEligibleForToolGrouping(makeToolBlock('mcp-read-1', 'mcp__files__read', {
             path: 'src/App.tsx', startLine: 12, endLine: 80
-        }))).toBe(false)
+        }))).toBe(true)
         expect(isEligibleForToolGrouping(makeToolBlock('patch-1', 'CodexPatch', {
             changes: [{ path: 'src/App.tsx', diff: '@@ -1 +1 @@\n-old\n+new' }]
-        }))).toBe(false)
+        }))).toBe(true)
         expect(isEligibleForToolGrouping(makeToolBlock('diff-1', 'CodexDiff', {
             unified_diff: '--- a/src/App.tsx\n+++ b/src/App.tsx\n@@ -1 +1 @@\n-old\n+new'
-        }))).toBe(false)
-        expect(isEligibleForToolGrouping(makeToolBlock('task-1', 'Task'))).toBe(false)
-        expect(isEligibleForToolGrouping(makeToolBlock('plan-1', 'update_plan'))).toBe(false)
-        expect(isEligibleForToolGrouping(makeToolBlock('ask-1', 'AskUserQuestion'))).toBe(false)
+        }))).toBe(true)
+        expect(isEligibleForToolGrouping(makeToolBlock('task-1', 'Task'))).toBe(true)
+        expect(isEligibleForToolGrouping(makeToolBlock('plan-1', 'update_plan'))).toBe(true)
+        expect(isEligibleForToolGrouping(makeToolBlock('ask-1', 'AskUserQuestion'))).toBe(true)
         expect(isEligibleForToolGrouping(makeToolBlock('perm-1', 'Bash', {}, {
             tool: {
                 id: 'perm-1',
@@ -150,7 +151,7 @@ describe('isEligibleForToolGrouping', () => {
         }))).toBe(true)
     })
 
-    it('keeps Codex permission milestones standalone after completion', () => {
+    it('folds completed Codex permission milestones', () => {
         expect(isEligibleForToolGrouping(makeToolBlock('codex-perm-1', 'CodexPermission', {}, {
             tool: {
                 id: 'codex-perm-1',
@@ -166,15 +167,15 @@ describe('isEligibleForToolGrouping', () => {
                     status: 'approved'
                 }
             }
-        }))).toBe(false)
+        }))).toBe(true)
     })
 
-    it('keeps titled MCP calls standalone so their operator title stays visible', () => {
+    it('folds titled MCP calls while retaining their title in the compact row', () => {
         expect(isEligibleForToolGrouping(makeToolBlock(
             'mcp-titled-1',
             'mcp__node_repl__js',
             { title: '查看本地会话', code: 'nodeRepl.write("ok")' }
-        ))).toBe(false)
+        ))).toBe(true)
 
         expect(isEligibleForToolGrouping(makeToolBlock(
             'mcp-untitled-1',
@@ -210,12 +211,16 @@ describe('buildVisibleChatBlocks', () => {
             id: 'question-1',
             createdAt: 5,
             answer: {
-                items: [{ question: 'Which direction?', answers: ['Keep it compact'] }]
+                items: [{
+                    question: 'Which direction?',
+                    answers: ['Keep it compact'],
+                    options: [{ label: 'Keep it compact', description: null, selected: true }]
+                }]
             }
         })])
     })
 
-    it('renders an explicit skill load as a standalone Skill card before compact tool grouping', () => {
+    it('folds an explicit skill load into a compact activity row', () => {
         const visible = buildVisibleChatBlocks([
             makeTextBlock('intro', '使用 `imagegen`：生成预览图。'),
             makeToolBlock('read-skill', 'CodexBash', {
@@ -227,10 +232,14 @@ describe('buildVisibleChatBlocks', () => {
         })
 
         expect(visible).toHaveLength(1)
-        expect(visible[0]).toMatchObject({
-            kind: 'tool-call',
+        expect(isToolGroupBlock(visible[0])).toBe(true)
+        if (!isToolGroupBlock(visible[0])) {
+            throw new Error('expected compact tool group')
+        }
+        expect(visible[0].tools[0]).toMatchObject({
             tool: { name: 'Skill', input: { skill: 'imagegen' } }
         })
+        expect(visible[0].forceCompact).toBe(true)
     })
 
     it('uses CodexPatch as the authoritative view for a matching diff in the same user turn', () => {
@@ -348,6 +357,7 @@ describe('buildVisibleChatBlocks', () => {
         expect(visible[0].tools.map((tool) => tool.id)).toEqual(['grep-1', 'bash-1', 'edit-1'])
         expect(visible[0].defaultOpen).toBe(false)
         expect(visible[0].showAgentIcon).toBe(true)
+        expect(visible[0].forceCompact).toBe(true)
         expect(visible[0].summary.fileTargets).toEqual(['src/a.ts'])
         expect(visible[0].summary.commandTargets).toEqual(['bun test'])
     })
@@ -367,7 +377,7 @@ describe('buildVisibleChatBlocks', () => {
         expect(isToolGroupBlock(visible[2])).toBe(true)
     })
 
-    it('keeps single eligible tool cards standalone', () => {
+    it('folds every single noninteractive tool in detailed display mode', () => {
         const visible = buildVisibleChatBlocks([
             makeToolBlock('read-1', 'Read', { file_path: 'src/a.ts' }),
             makeTextBlock('text-1'),
@@ -375,10 +385,17 @@ describe('buildVisibleChatBlocks', () => {
         ], { hasMoreMessages: false })
 
         expect(visible).toHaveLength(3)
-        expect(visible.every((block) => !isToolGroupBlock(block))).toBe(true)
+        expect(isToolGroupBlock(visible[0])).toBe(true)
+        expect(visible[1].kind).toBe('agent-text')
+        expect(isToolGroupBlock(visible[2])).toBe(true)
+        if (!isToolGroupBlock(visible[0]) || !isToolGroupBlock(visible[2])) {
+            throw new Error('expected compact single tool groups')
+        }
+        expect(visible[0].forceCompact).toBe(true)
+        expect(visible[2].forceCompact).toBe(true)
     })
 
-    it('groups single eligible tool cards in compact display mode', () => {
+    it('keeps single tool activity compact in compact display mode', () => {
         const runningTool = makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
             tool: {
                 id: 'bash-1',
@@ -413,11 +430,13 @@ describe('buildVisibleChatBlocks', () => {
         }
         expect(visible[0].tools).toEqual([runningTool])
         expect(visible[0].summary.runningCount).toBe(1)
+        expect(visible[0].forceCompact).toBe(true)
         expect(visible[2].tools).toEqual([completedTool])
         expect(visible[2].summary.totalTools).toBe(1)
+        expect(visible[2].forceCompact).toBe(true)
     })
 
-    it('does not group titled MCP calls in compact display mode', () => {
+    it('folds titled MCP calls in compact display mode', () => {
         const titledMcp = makeToolBlock(
             'mcp-titled-1',
             'mcp__node_repl__js',
@@ -428,11 +447,33 @@ describe('buildVisibleChatBlocks', () => {
             terminalToolDisplayMode: 'compact'
         })
 
-        expect(visible).toEqual([titledMcp])
+        expect(visible).toHaveLength(1)
+        expect(isToolGroupBlock(visible[0])).toBe(true)
+        if (!isToolGroupBlock(visible[0])) {
+            throw new Error('expected compact MCP tool group')
+        }
+        expect(visible[0].tools).toEqual([titledMcp])
+        expect(visible[0].forceCompact).toBe(true)
     })
 
     it('keeps interactive cards standalone and uses them as hard boundaries', () => {
-        const interactive = makeToolBlock('ask-1', 'request_user_input')
+        const interactive = makeToolBlock('ask-1', 'request_user_input', {}, {
+            tool: {
+                id: 'ask-1',
+                name: 'request_user_input',
+                state: 'pending',
+                input: {},
+                createdAt: 1,
+                startedAt: null,
+                completedAt: null,
+                description: null,
+                result: null,
+                permission: {
+                    id: 'ask-1',
+                    status: 'pending'
+                }
+            }
+        })
         const visible = buildVisibleChatBlocks([
             makeToolBlock('grep-1', 'Grep', { pattern: 'TODO' }),
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }),
@@ -447,7 +488,7 @@ describe('buildVisibleChatBlocks', () => {
         expect(isToolGroupBlock(visible[2])).toBe(true)
     })
 
-    it('keeps completed Codex permission cards as standalone grouping boundaries', () => {
+    it('folds completed Codex permission cards with the surrounding activity', () => {
         const permission = makeToolBlock('perm-1', 'CodexPermission', { tool: 'shell_command' }, {
             tool: {
                 id: 'perm-1',
@@ -474,10 +515,15 @@ describe('buildVisibleChatBlocks', () => {
             makeToolBlock('write-1', 'Write', { file_path: 'src/b.ts' }),
         ], { hasMoreMessages: false })
 
-        expect(visible).toHaveLength(3)
+        expect(visible).toHaveLength(1)
         expect(isToolGroupBlock(visible[0])).toBe(true)
-        expect(visible[1]).toBe(permission)
-        expect(isToolGroupBlock(visible[2])).toBe(true)
+        if (!isToolGroupBlock(visible[0])) {
+            throw new Error('expected compact tool group')
+        }
+        expect(visible[0].tools.map((tool) => tool.id)).toEqual([
+            'grep-1', 'bash-1', 'perm-1', 'edit-1', 'write-1'
+        ])
+        expect(visible[0].forceCompact).toBe(true)
     })
 
     it('marks only the oldest visible grouped run as needing older history', () => {
@@ -508,7 +554,7 @@ describe('buildVisibleChatBlocks', () => {
         expect(isToolGroupBlock(visible[3]) && visible[3].needsOlderHistory).toBe(false)
     })
 
-    it('does not mark groups after a leading standalone tool as needing older history', () => {
+    it('does not mark groups after a leading compact tool as needing older history', () => {
         const visible = buildVisibleChatBlocks([
             makeToolBlock('single-1', 'Read', { file_path: 'src/solo.ts' }),
             makeTextBlock('text-1', 'boundary'),
@@ -516,26 +562,26 @@ describe('buildVisibleChatBlocks', () => {
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }),
         ], { hasMoreMessages: true })
 
-        expect(visible[0].kind).toBe('tool-call')
+        expect(isToolGroupBlock(visible[0]) && visible[0].forceCompact).toBe(true)
         expect(visible[1].kind).toBe('agent-text')
         expect(isToolGroupBlock(visible[2]) && visible[2].needsOlderHistory).toBe(false)
     })
 
-    it('does not mark groups after a standalone permission boundary as needing older history', () => {
+    it('does not mark groups after a pending permission boundary as needing older history', () => {
         const permission = makeToolBlock('perm-1', 'CodexPermission', { tool: 'shell_command' }, {
             tool: {
                 id: 'perm-1',
                 name: 'CodexPermission',
-                state: 'completed',
+                state: 'pending',
                 input: { tool: 'shell_command' },
                 createdAt: 1,
-                startedAt: 1,
-                completedAt: 2,
+                startedAt: null,
+                completedAt: null,
                 description: null,
-                result: 'Approved',
+                result: null,
                 permission: {
                     id: 'perm-1',
-                    status: 'approved'
+                    status: 'pending'
                 }
             }
         })

@@ -11,6 +11,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { randomId } from '@/lib/randomId'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 import { LoadingState } from '@/components/LoadingState'
+import { SessionDetailHeader } from '@/components/SessionDetailHeader'
 import { Button } from '@/components/ui/button'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 import {
@@ -20,28 +21,16 @@ import {
     DialogHeader,
     DialogTitle
 } from '@/components/ui/dialog'
-function BackIcon() {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-        >
-            <polyline points="15 18 9 12 15 6" />
-        </svg>
-    )
-}
 
 function ConnectionIndicator(props: { status: 'idle' | 'connecting' | 'connected' | 'error' }) {
+    const { t } = useTranslation()
     const isConnected = props.status === 'connected'
     const isConnecting = props.status === 'connecting'
-    const label = isConnected ? 'Connected' : isConnecting ? 'Connecting' : 'Offline'
+    const label = isConnected
+        ? t('terminal.connection.connected')
+        : isConnecting
+            ? t('terminal.connection.connecting')
+            : t('terminal.connection.offline')
     const colorClass = isConnected
         ? 'bg-emerald-500'
         : isConnecting
@@ -429,22 +418,12 @@ export default function TerminalPage() {
 
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3 border-b border-[var(--app-border)]">
-                    <button
-                        type="button"
-                        onClick={goBack}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                    >
-                        <BackIcon />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold">Terminal</div>
-                        <div className="truncate text-xs text-[var(--app-hint)]">{subtitle}</div>
-                    </div>
-                    <ConnectionIndicator status={status} />
-                </div>
-            </div>
+            <SessionDetailHeader
+                title={t('terminal.page.title')}
+                subtitle={subtitle}
+                onBack={goBack}
+                actions={<ConnectionIndicator status={status} />}
+            />
 
             {session.active ? null : (
                 <div className="px-3 pt-3">

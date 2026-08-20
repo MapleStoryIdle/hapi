@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { AssistantRuntimeProvider, useAssistantApi, useAssistantState } from '@assistant-ui/react'
@@ -51,6 +51,7 @@ import { deleteShareTransfer, getShareTransfer } from '@/lib/shareTransfer'
 import { getDraft } from '@/lib/composer-drafts'
 import { useTranslation } from '@/lib/use-translation'
 import { SessionHeader } from '@/components/SessionHeader'
+import { SESSION_DETAIL_HEADER_HEIGHT_PX } from '@/components/SessionDetailHeader'
 import {
     CursorMigrationBanner,
     isCursorMigrationAmbiguous,
@@ -100,10 +101,45 @@ const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSessio
 const RUN_SETTLE_DELAY_MS = 1500
 const RUN_ACTIVITY_KEY_LOOKBACK = 12
 const CODEX_QUICK_REPLY_CONTINUE_TEXT = '继续'
+const THREAD_WORK_BUDGET_MS = 12
+const threadWorkLastWarningAt = new Map<'normalize' | 'reduce', number>()
 export const BOTTOM_FLOATING_CONTROL_GAP_PX = 8
 export const BOTTOM_OVERLAY_INSET_PX = 0
-// 50px control surface (including border) + 12px bottom breathing room.
-export const FLOATING_SESSION_HEADER_HEIGHT_PX = 62
+// Keep the chat's scroll reservation aligned with every session title bar.
+// The device safe area is added independently by HappyThread.
+export const FLOATING_SESSION_HEADER_HEIGHT_PX = SESSION_DETAIL_HEADER_HEIGHT_PX
+
+function measureThreadWork<T>(
+    sessionId: string,
+    stage: 'normalize' | 'reduce',
+    messagesVersion: number,
+    work: () => T
+): T {
+    if (!import.meta.env.DEV || typeof performance === 'undefined') {
+        return work()
+    }
+
+    const startedAt = performance.now()
+    const result = work()
+    const elapsedMs = performance.now() - startedAt
+    if (elapsedMs < THREAD_WORK_BUDGET_MS) {
+        return result
+    }
+
+    // A continuous stream can run this path every frame. Keep development
+    // diagnostics actionable without flooding the console.
+    const now = Date.now()
+    const lastWarningAt = threadWorkLastWarningAt.get(stage) ?? 0
+    if (now - lastWarningAt >= 1_000) {
+        threadWorkLastWarningAt.set(stage, now)
+        console.warn(`[SessionChat] ${stage} exceeded ${THREAD_WORK_BUDGET_MS}ms`, {
+            elapsedMs: Number(elapsedMs.toFixed(1)),
+            messagesVersion,
+            sessionId,
+        })
+    }
+    return result
+}
 
 /**
  * The plan/git pill floats above the stable bottom overlay. When it is visible,
@@ -622,6 +658,77 @@ type SessionChatProps = {
     onInitialOutlineConsumed?: () => void
 }
 
+type NormalizedMessageCache = Map<string, {
+    source: DecryptedMessage
+    normalized: NormalizedMessage | null
+}>
+
+function normalizeMessagesWithCache(
+    messages: readonly DecryptedMessage[],
+    cache: NormalizedMessageCache
+): NormalizedMessage[] {
+    const normalized: NormalizedMessage[] = []
+    const seen = new Set<string>()
+    for (const message of messages) {
+        if (seen.has(message.id)) {
+            continue
+        }
+        seen.add(message.id)
+        const cached = cache.get(message.id)
+        if (cached && cached.source === message) {
+            if (cached.normalized) {
+                normalized.push(cached.normalized)
+            }
+            continue
+        }
+        const next = normalizeDecryptedMessage(message)
+        cache.set(message.id, { source: message, normalized: next })
+        if (next) {
+            normalized.push(next)
+        }
+    }
+    for (const id of cache.keys()) {
+        if (!seen.has(id)) {
+            cache.delete(id)
+        }
+    }
+    return normalized
+}
+
+type ThreadRenderSnapshot = {
+    messages: DecryptedMessage[]
+    pendingMessages: DecryptedMessage[]
+    messagesVersion: number
+}
+
+/**
+ * Keep an accepted local send visible while its first deferred render catches
+ * up. Without the small hand-off guard, a mutation that flips `isSending`
+ * false before the background render commits can briefly make the just-sent
+ * row disappear. Server streaming itself remains deferred.
+ */
+function useDeferredThreadSnapshot(
+    snapshot: ThreadRenderSnapshot,
+    forceCurrent: boolean
+): ThreadRenderSnapshot {
+    const deferredSnapshot = useDeferredValue(snapshot)
+    const [urgentVersion, setUrgentVersion] = useState<number | null>(null)
+
+    useEffect(() => {
+        if (forceCurrent) {
+            setUrgentVersion(snapshot.messagesVersion)
+        }
+    }, [forceCurrent, snapshot.messagesVersion])
+
+    useEffect(() => {
+        if (urgentVersion !== null && deferredSnapshot.messagesVersion >= urgentVersion) {
+            setUrgentVersion(null)
+        }
+    }, [deferredSnapshot.messagesVersion, urgentVersion])
+
+    return forceCurrent || urgentVersion !== null ? snapshot : deferredSnapshot
+}
+
 /**
  * Public entry point. Thin wrapper around `SessionChatInner` keyed by
  * the session id so that ALL inner state - including the scratchlist
@@ -664,7 +771,8 @@ function SessionChatInner(props: SessionChatProps) {
         () => summarizeGitStatusFiles(gitDiffDisplayStatus) !== null,
         [gitDiffDisplayStatus]
     )
-    const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
+    const normalizedCacheRef = useRef<NormalizedMessageCache>(new Map())
+    const normalizedGoalStateCacheRef = useRef<NormalizedMessageCache>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
     const [forceScrollToken, setForceScrollToken] = useState(0)
@@ -734,6 +842,23 @@ function SessionChatInner(props: SessionChatProps) {
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
     }, [])
+    const followLatestMessage = useCallback(() => {
+        setForceScrollToken((token) => token + 1)
+    }, [])
+    const sendChatMessageAndFollow = useCallback(
+        async (
+            text: string,
+            attachments?: AttachmentMetadata[],
+            scheduledAt?: number | null,
+        ): Promise<boolean> => {
+            const accepted = await props.onSend(text, attachments, scheduledAt)
+            if (accepted) {
+                followLatestMessage()
+            }
+            return accepted
+        },
+        [followLatestMessage, props.onSend],
+    )
     /**
      * onSend wrapper: when scratchlist mode is on AND the submission is
      * pure text (no attachments, no scheduledAt), the operator's submit
@@ -761,9 +886,9 @@ function SessionChatInner(props: SessionChatProps) {
             if (shouldRouteToScratchlist(scratchlistMode, attachments, scheduledAt)) {
                 return scratchlist.add(text)
             }
-            return props.onSend(text, attachments, scheduledAt)
+            return sendChatMessageAndFollow(text, attachments, scheduledAt)
         },
-        [props.onSend, scratchlist, scratchlistMode],
+        [scratchlist, scratchlistMode, sendChatMessageAndFollow],
     )
     const agentFlavor = props.session.metadata?.flavor ?? null
     const controlledByUser = props.session.agentState?.controlledByUser === true
@@ -1033,7 +1158,9 @@ function SessionChatInner(props: SessionChatProps) {
     useEffect(() => {
         registerSessionStore({
             getSession: () => props.session as { agentState?: { requests?: Record<string, unknown> } } | null,
-            sendMessage: (_sessionId: string, message: string) => props.onSend(message),
+            sendMessage: (_sessionId: string, message: string) => {
+                void sendChatMessageAndFollow(message)
+            },
             approvePermission: async (_sessionId: string, requestId: string) => {
                 await props.api.approvePermission(props.session.id, requestId)
                 props.onRefresh()
@@ -1043,7 +1170,7 @@ function SessionChatInner(props: SessionChatProps) {
                 props.onRefresh()
             }
         })
-    }, [props.session, props.api, props.onSend, props.onRefresh])
+    }, [props.session, props.api, props.onRefresh, sendChatMessageAndFollow])
 
     useEffect(() => {
         registerVoiceHooksStore(
@@ -1139,6 +1266,7 @@ function SessionChatInner(props: SessionChatProps) {
 
     useEffect(() => {
         normalizedCacheRef.current.clear()
+        normalizedGoalStateCacheRef.current.clear()
         blocksByIdRef.current.clear()
         visibleGroupsRef.current = []
         setOutlineOpen(false)
@@ -1146,47 +1274,47 @@ function SessionChatInner(props: SessionChatProps) {
 
     const queuedMessages = useQueuedMessages(props.session.id)
 
+    // Message SSE updates are intentionally allowed to settle behind urgent
+    // controls. The composer, permission actions, stop button, and session
+    // state still receive current props; only the expensive thread reduction
+    // (normalization → blocks → assistant-ui runtime) uses this snapshot.
+    // Keep a version in the same object so HappyThread never scrolls for a
+    // message revision that has not reached its DOM yet.
+    const currentThreadSnapshot = useMemo(() => ({
+        messages: props.messages,
+        pendingMessages: props.pendingMessages ?? [],
+        messagesVersion: props.messagesVersion,
+    }), [props.messages, props.pendingMessages, props.messagesVersion])
+    const threadSnapshot = useDeferredThreadSnapshot(
+        currentThreadSnapshot,
+        props.isSending || codexQuickReplySending
+    )
+
     // Exclude user messages that haven't been invoked yet — those appear in the
     // queue drawer, not in the thread timeline. The shared predicate keeps the
     // thread, message window, and floating queue entry point in agreement.
     const visibleMessages = useMemo(
-        () => props.messages.filter((m) => !isQueuedForInvocation(m)),
-        [props.messages]
+        () => threadSnapshot.messages.filter((m) => !isQueuedForInvocation(m)),
+        [threadSnapshot.messages]
     )
 
     const normalizedMessages: NormalizedMessage[] = useMemo(() => {
         // Clear caches immediately when session changes (before useEffect runs)
         if (prevSessionIdRef.current !== null && prevSessionIdRef.current !== props.session.id) {
             normalizedCacheRef.current.clear()
+            normalizedGoalStateCacheRef.current.clear()
             blocksByIdRef.current.clear()
             visibleGroupsRef.current = []
         }
         prevSessionIdRef.current = props.session.id
 
-        const cache = normalizedCacheRef.current
-        const normalized: NormalizedMessage[] = []
-        const seen = new Set<string>()
-        for (const message of visibleMessages) {
-            if (seen.has(message.id)) {
-                continue
-            }
-            seen.add(message.id)
-            const cached = cache.get(message.id)
-            if (cached && cached.source === message) {
-                if (cached.normalized) normalized.push(cached.normalized)
-                continue
-            }
-            const next = normalizeDecryptedMessage(message)
-            cache.set(message.id, { source: message, normalized: next })
-            if (next) normalized.push(next)
-        }
-        for (const id of cache.keys()) {
-            if (!seen.has(id)) {
-                cache.delete(id)
-            }
-        }
-        return normalized
-    }, [visibleMessages])
+        return measureThreadWork(
+            props.session.id,
+            'normalize',
+            threadSnapshot.messagesVersion,
+            () => normalizeMessagesWithCache(visibleMessages, normalizedCacheRef.current)
+        )
+    }, [props.session.id, threadSnapshot.messagesVersion, visibleMessages])
     const detectedLocalPreviews = useMemo(
         () => extractLocalPreviews(normalizedMessages),
         [normalizedMessages]
@@ -1246,18 +1374,19 @@ function SessionChatInner(props: SessionChatProps) {
     ])
 
     const goalStateSourceMessages = useMemo(
-        () => buildGoalStateMessages(props.messages, props.pendingMessages ?? []),
-        [props.messages, props.pendingMessages]
+        () => buildGoalStateMessages(threadSnapshot.messages, threadSnapshot.pendingMessages),
+        [threadSnapshot.messages, threadSnapshot.pendingMessages]
     )
 
-    const normalizedGoalStateMessages: NormalizedMessage[] = useMemo(() => {
-        const normalized: NormalizedMessage[] = []
-        for (const message of goalStateSourceMessages) {
-            const next = normalizeDecryptedMessage(message)
-            if (next) normalized.push(next)
-        }
-        return normalized
-    }, [goalStateSourceMessages])
+    const normalizedGoalStateMessages = useMemo(
+        () => measureThreadWork(
+            props.session.id,
+            'normalize',
+            threadSnapshot.messagesVersion,
+            () => normalizeMessagesWithCache(goalStateSourceMessages, normalizedGoalStateCacheRef.current)
+        ),
+        [goalStateSourceMessages, props.session.id, threadSnapshot.messagesVersion]
+    )
 
     const codexQuickReplyPrompt = useMemo(() => {
         if (agentFlavor !== 'codex') {
@@ -1268,12 +1397,20 @@ function SessionChatInner(props: SessionChatProps) {
     const showCodexQuickReply = codexQuickReplyPrompt !== null
         && codexQuickReplyPrompt.messageId !== dismissedCodexQuickReplyPromptId
 
-    const reduced = useMemo(
+    const reduced = useMemo(() => measureThreadWork(
+        props.session.id,
+        'reduce',
+        threadSnapshot.messagesVersion,
         () => reduceChatBlocks(normalizedMessages, props.session.agentState, {
             goalStateMessages: normalizedGoalStateMessages
-        }),
-        [normalizedMessages, normalizedGoalStateMessages, props.session.agentState]
-    )
+        })
+    ), [
+        normalizedMessages,
+        normalizedGoalStateMessages,
+        props.session.agentState,
+        props.session.id,
+        threadSnapshot.messagesVersion
+    ])
     const reconciled = useMemo(
         () => reconcileChatBlocks(reduced.blocks, blocksByIdRef.current),
         [reduced.blocks]
@@ -1639,7 +1776,7 @@ function SessionChatInner(props: SessionChatProps) {
     const handleSend = useCallback(async (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => {
         // Route through the scratchlist-aware wrapper. When scratchlistMode
         // is on AND the payload is pure text, this turns into
-        // addScratchlistEntry; otherwise it goes to props.onSend (the chat
+        // addScratchlistEntry; otherwise it goes to the chat-send wrapper
         // send path). The wrapper resolves true on success either way so
         // the composer-clear is shared, but the schedule-clear / scroll
         // dance below must gate on the actual route taken (not just
@@ -1656,11 +1793,10 @@ function SessionChatInner(props: SessionChatProps) {
             // accepted - covers both pre-mutation guards AND async
             // inactive-session resume failure. SessionChat is the single
             // owner of schedule clear (HappyComposer no longer clears on
-            // its own send path). Schedule clear / forced scroll only
-            // matter for chat sends; scratchlist adds don't have a
-            // schedule and shouldn't move the chat viewport.
+            // its own send path). Chat sends already enable latest-message
+            // follow through sendChatMessageAndFollow; scratchlist adds do
+            // not touch the conversation viewport.
             setPendingSchedule(null)
-            setForceScrollToken((token) => token + 1)
         }
     }, [onSendForComposer, scratchlistMode])
 
@@ -1674,16 +1810,15 @@ function SessionChatInner(props: SessionChatProps) {
         try {
             // This deliberately bypasses scratchlist mode: a response to a
             // Codex confirmation question must go back to the Codex chat.
-            const accepted = await props.onSend(CODEX_QUICK_REPLY_CONTINUE_TEXT)
+            const accepted = await sendChatMessageAndFollow(CODEX_QUICK_REPLY_CONTINUE_TEXT)
             if (!accepted) {
                 return
             }
             setDismissedCodexQuickReplyPromptId(prompt.messageId)
-            setForceScrollToken((token) => token + 1)
         } finally {
             setCodexQuickReplySending(false)
         }
-    }, [codexQuickReplyPrompt, codexQuickReplySending, dismissedCodexQuickReplyPromptId, props.onSend])
+    }, [codexQuickReplyPrompt, codexQuickReplySending, dismissedCodexQuickReplyPromptId, sendChatMessageAndFollow])
 
     const attachmentAdapter = useMemo(() => {
         if (!props.session.active) {
@@ -1818,7 +1953,7 @@ function SessionChatInner(props: SessionChatProps) {
                         pendingCount={props.pendingCount}
                         rawMessagesCount={visibleMessages.length}
                         normalizedMessagesCount={normalizedMessages.length}
-                        messagesVersion={props.messagesVersion}
+                        messagesVersion={threadSnapshot.messagesVersion}
                         toolGroupRunActive={runActive}
                         toolGroupCompletionKey={turnCompletionKey}
                         forceScrollToken={forceScrollToken}
@@ -1893,7 +2028,7 @@ function SessionChatInner(props: SessionChatProps) {
                                     entries={scratchlist.entries}
                                     onMove={scratchlist.move}
                                     onDelete={scratchlist.remove}
-                                    onSend={props.onSend}
+                                    onSend={sendChatMessageAndFollow}
                                     onExitScratchlistMode={() => setScratchlistMode(false)}
                                 />
                             ) : null}

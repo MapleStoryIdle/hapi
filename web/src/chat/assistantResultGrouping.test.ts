@@ -78,6 +78,7 @@ describe('groupAssistantResultDetails', () => {
         expect(visible[0].detailBlocks).toEqual([tool, processText])
         expect(visible[0].showAgentIcon).toBe(true)
         expect(visible[0].forceGenericCompactTitle).toBe(true)
+        expect(visible[0].forceCompact).toBe(true)
     })
 
     it('does not group process blocks while the current run is active', () => {

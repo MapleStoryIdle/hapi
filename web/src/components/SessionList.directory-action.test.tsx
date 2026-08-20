@@ -102,7 +102,7 @@ describe('SessionList directory action', () => {
 })
 
 describe('SessionList collapse behavior', () => {
-    function renderSessionList(sessions: SessionSummary[], selectedSessionId = 'session-running') {
+    function renderSessionList(sessions: SessionSummary[], selectedSessionId: string | null = 'session-running') {
         return (
             <QueryClientProvider client={new QueryClient({
                 defaultOptions: {
@@ -197,5 +197,29 @@ describe('SessionList collapse behavior', () => {
         await waitFor(() => {
             expect(getProjectPanel().getAttribute('data-open')).toBe('true')
         })
+    })
+
+    it('does not mount rows for a collapsed project until the project is opened', () => {
+        const sessions = [
+            makeSession({
+                id: 'running-session',
+                active: true,
+                updatedAt: 200,
+                metadata: { path: '/work/current', name: 'Running task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'archived-session',
+                updatedAt: 100,
+                metadata: { path: '/work/archive', name: 'Archived task', flavor: 'codex' },
+            })
+        ]
+
+        render(renderSessionList(sessions, null))
+
+        expect(screen.queryByText('Archived task')).toBeNull()
+
+        fireEvent.click(screen.getByTitle('/work/archive'))
+
+        expect(screen.getByText('Archived task')).toBeInTheDocument()
     })
 })

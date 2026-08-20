@@ -608,6 +608,17 @@ function SessionsPage() {
         })
     }, [navigate])
 
+    const handleSelectSession = useCallback((sessionId: string) => {
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+        })
+    }, [navigate])
+
+    const handleBrowse = useCallback(() => {
+        navigate({ to: '/browse' })
+    }, [navigate])
+
     const isCodexScriptTimeout = useCallback((message: string | null | undefined): boolean => {
         const raw = (message ?? '').trim()
         return /执行超时|timed\s*out|timeout/i.test(raw)
@@ -1052,13 +1063,10 @@ function SessionsPage() {
                     <SessionList
                         sessions={sessionsForSelectedRunner}
                         selectedSessionId={selectedSessionId}
-                        onSelect={(sessionId) => navigate({
-                            to: '/sessions/$sessionId',
-                            params: { sessionId },
-                        })}
+                        onSelect={handleSelectSession}
                         onNewSession={goNewSession}
                         onNewSessionInDirectory={handleNewSessionInDirectory}
-                        onBrowse={() => navigate({ to: '/browse' })}
+                        onBrowse={handleBrowse}
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
                         renderHeader={false}

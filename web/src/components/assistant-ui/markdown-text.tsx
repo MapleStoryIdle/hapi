@@ -17,6 +17,7 @@ import remarkRepairTables from '@/lib/remark-repair-tables'
 import { useNavigate } from '@tanstack/react-router'
 import remarkStripCjkAutolink from '@/lib/remark-strip-cjk-autolink'
 import remarkNonHttpsAutolink from '@/lib/remark-non-https-autolink'
+import remarkRepairAdjacentStrong from '@/lib/remark-repair-adjacent-strong'
 import { cn, encodeBase64 } from '@/lib/utils'
 import { SyntaxHighlighter, isPlainTextCodeLanguage } from '@/components/assistant-ui/shiki-highlighter'
 import { MermaidDiagram } from '@/components/assistant-ui/mermaid-diagram'
@@ -30,7 +31,7 @@ import { UriConfirmDialog } from '@/components/UriConfirmDialog'
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
 
 // ── Plugin array ────────────────────────────────────────────────────────────
-// Order: remarkGfm → remarkRepairTables → remarkNonHttpsAutolink → remarkStripCjkAutolink → remarkMath → remarkDisableIndentedCode → remarkFilePathLinks
+// Order: remarkGfm → remarkRepairTables → remarkNonHttpsAutolink → remarkStripCjkAutolink → remarkMath → remarkDisableIndentedCode → remarkRepairAdjacentStrong → remarkFilePathLinks
 // remarkRepairTables must run immediately after remarkGfm — it reads file.value
 // (raw source) to pad short separator rows before remark-gfm parses the table.
 // remarkNonHttpsAutolink must run BEFORE remarkStripCjkAutolink so that the
@@ -50,6 +51,7 @@ const MARKDOWN_PLUGIN_TAIL = [
     remarkStripCjkAutolink,
     [remarkMath, { singleDollarTextMath: false }],
     remarkDisableIndentedCode,
+    remarkRepairAdjacentStrong,
     remarkFilePathLinks,        // upstream — file path → link conversion, runs last
 ] satisfies NonNullable<MarkdownTextPrimitiveProps['remarkPlugins']>
 
