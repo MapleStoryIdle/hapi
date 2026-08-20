@@ -27,6 +27,7 @@ export type {
     LocalPreviewCheckRequest,
     LocalPreviewCheckResponse,
     LocalPreviewProtocol,
+    OpenVikingStatusResponse,
     MachineDirectoryEntry,
     MachineListDirectoryResponse,
     MachinePathsExistsResponse,

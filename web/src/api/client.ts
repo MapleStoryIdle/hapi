@@ -13,6 +13,7 @@ import type {
     FileSearchResponse,
     MachinesResponse,
     MessagesResponse,
+    OpenVikingStatusResponse,
     PermissionMode,
     PushSubscriptionPayload,
     PushUnsubscribePayload,
@@ -729,6 +730,12 @@ export class ApiClient {
 
     async getMachines(): Promise<MachinesResponse> {
         return await this.request<MachinesResponse>('/api/machines')
+    }
+
+    async getOpenVikingStatus(machineId: string): Promise<OpenVikingStatusResponse> {
+        return await this.request<OpenVikingStatusResponse>(
+            `/api/openviking/machines/${encodeURIComponent(machineId)}/status`
+        )
     }
 
     async listMachineDirectory(

@@ -53,6 +53,7 @@ const FilesPage = lazy(() => import('@/routes/sessions/files'))
 const FilePage = lazy(() => import('@/routes/sessions/file'))
 const TerminalPage = lazy(() => import('@/routes/sessions/terminal'))
 const PreviewPage = lazy(() => import('@/routes/sessions/preview'))
+const OpenVikingPage = lazy(() => import('@/routes/memory'))
 const SettingsPage = lazy(() => import('@/routes/settings'))
 const SharePage = lazy(() => import('@/routes/share'))
 const RemoteServersPage = lazy(() => import('@/components/RemoteServers'))
@@ -186,6 +187,28 @@ function ServerIcon(props: { className?: string }) {
             <rect x="4" y="14" width="16" height="6" rx="2" />
             <path d="M8 7h.01" />
             <path d="M8 17h.01" />
+        </svg>
+    )
+}
+
+function MemoryIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <ellipse cx="12" cy="5" rx="7" ry="3" />
+            <path d="M5 5v7c0 1.66 3.13 3 7 3s7-1.34 7-3V5" />
+            <path d="M5 12v7c0 1.66 3.13 3 7 3s7-1.34 7-3v-7" />
         </svg>
     )
 }
@@ -1019,6 +1042,20 @@ function SessionsPage() {
                                             <FolderOpenIcon className="h-4 w-4" />
                                         </span>
                                         <span>{t('browse.nav')}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="menuitem"
+                                        onClick={() => {
+                                            setIsSessionsMenuOpen(false)
+                                            navigate({ to: '/memory' })
+                                        }}
+                                        className={sessionsMenuItemClass}
+                                    >
+                                        <span className={sessionsMenuIconClass}>
+                                            <MemoryIcon className="h-4 w-4" />
+                                        </span>
+                                        <span>{t('openViking.nav')}</span>
                                     </button>
                                     <button
                                         type="button"
@@ -1894,6 +1931,18 @@ const browseRoute = createRoute({
     component: BrowsePage,
 })
 
+const memoryRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/memory',
+    validateSearch: (search: Record<string, unknown>): { machineId?: string } => {
+        const machineId = typeof search.machineId === 'string' && search.machineId.trim().length > 0
+            ? search.machineId
+            : undefined
+        return machineId ? { machineId } : {}
+    },
+    component: OpenVikingPage,
+})
+
 const settingsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/settings',
@@ -1939,6 +1988,7 @@ export const routeTree = rootRoute.addChildren([
         ]),
     ]),
     browseRoute,
+    memoryRoute,
     remoteServersRoute,
     settingsRoute,
     shareRoute,

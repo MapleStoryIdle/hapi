@@ -314,6 +314,15 @@ export default {
   'localPreview.back': 'Back to session',
   'localPreview.refresh': 'Refresh preview',
   'localPreview.empty': 'No local service is available to preview.',
+  'openViking.nav': 'OpenViking',
+  'openViking.title': 'OpenViking',
+  'openViking.machine': 'Machine',
+  'openViking.loading': 'Finding an available runner…',
+  'openViking.connecting': 'Connecting to OpenViking…',
+  'openViking.unavailable': 'OpenViking is unavailable',
+  'openViking.noMachines': 'No runner is online. Connect the machine that runs OpenViking first.',
+  'openViking.retry': 'Retry',
+  'openViking.refresh': 'Refresh OpenViking',
 
   // Machine
   'machine.unknown': 'Unknown platform',

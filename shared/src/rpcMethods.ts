@@ -36,7 +36,9 @@ export const RPC_METHODS = {
     ListOpencodeModelsForCwd: 'listOpencodeModelsForCwd',
     ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions',
     LocalPreviewCheck: 'localPreview.check',
-    LocalPreviewHttpRequest: 'localPreview.httpRequest'
+    LocalPreviewHttpRequest: 'localPreview.httpRequest',
+    OpenVikingStatus: 'openViking.status',
+    OpenVikingHttpRequest: 'openViking.httpRequest'
 } as const
 
 export type RpcMethod = typeof RPC_METHODS[keyof typeof RPC_METHODS]

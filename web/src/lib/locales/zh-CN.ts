@@ -318,6 +318,15 @@ export default {
   'localPreview.back': '返回会话',
   'localPreview.refresh': '刷新预览',
   'localPreview.empty': '没有可预览的本地服务。',
+  'openViking.nav': 'OpenViking',
+  'openViking.title': 'OpenViking',
+  'openViking.machine': '本机',
+  'openViking.loading': '正在查找可用的 runner…',
+  'openViking.connecting': '正在连接 OpenViking…',
+  'openViking.unavailable': 'OpenViking 暂不可用',
+  'openViking.noMachines': '没有在线 runner。请先连接运行 OpenViking 的本机。',
+  'openViking.retry': '重试',
+  'openViking.refresh': '刷新 OpenViking',
 
   // Machine
   'machine.unknown': '未知平台',

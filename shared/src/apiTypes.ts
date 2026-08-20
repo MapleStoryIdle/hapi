@@ -418,6 +418,40 @@ export type LocalPreviewCheckResponse = {
     candidate: LocalPreviewCandidate
 }
 
+export const OpenVikingPathSchema = z.string()
+    .trim()
+    .min(1)
+    .max(4096)
+    .refine((value) => value.startsWith('/') && !value.startsWith('//'), {
+        message: 'path must be an absolute local path'
+    })
+
+export const OpenVikingHttpRequestSchema = z.object({
+    path: OpenVikingPathSchema,
+    method: LocalPreviewHttpMethodSchema.default('GET'),
+    headers: z.record(z.string(), z.string()).optional(),
+    bodyBase64: z.string().optional()
+})
+
+export type OpenVikingHttpRequest = z.infer<typeof OpenVikingHttpRequestSchema>
+
+export type OpenVikingHttpResponse = {
+    ok: boolean
+    status: number
+    statusText?: string
+    headers: Record<string, string>
+    bodyBase64: string
+    error?: string
+}
+
+export type OpenVikingStatusResponse = {
+    ok: boolean
+    status?: number
+    version?: string
+    authMode?: string
+    error?: string
+}
+
 export const AuthRequestSchema = z.union([
     z.object({ initData: z.string() }),
     z.object({ accessToken: z.string() })

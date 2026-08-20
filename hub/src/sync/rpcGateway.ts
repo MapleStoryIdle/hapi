@@ -21,6 +21,9 @@ import type {
     LocalPreviewHttpResponse,
     LocalPreviewProbeRequest,
     LocalPreviewProbeResponse,
+    OpenVikingHttpRequest,
+    OpenVikingHttpResponse,
+    OpenVikingStatusResponse,
     ListDirectoryResponse,
     OpencodeModelsResponse,
     OpencodeModelSummary,
@@ -75,6 +78,8 @@ export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
 export type RpcLocalPreviewProbeResponse = LocalPreviewProbeResponse
 export type RpcLocalPreviewHttpResponse = LocalPreviewHttpResponse
+export type RpcOpenVikingStatusResponse = OpenVikingStatusResponse
+export type RpcOpenVikingHttpResponse = OpenVikingHttpResponse
 export type RpcCodexLocalSessionsResponse = CodexLocalSessionsRpcResponse
 export type RpcCodexLocalSessionDataResponse = CodexLocalSessionDataRpcResponse
 export type RpcForkCodexSideSessionResponse =
@@ -444,6 +449,14 @@ export class RpcGateway {
 
     async proxyLocalPreviewRequest(machineId: string, request: LocalPreviewHttpRequest): Promise<RpcLocalPreviewHttpResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.LocalPreviewHttpRequest, request) as RpcLocalPreviewHttpResponse
+    }
+
+    async getOpenVikingStatus(machineId: string): Promise<RpcOpenVikingStatusResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.OpenVikingStatus, {}) as RpcOpenVikingStatusResponse
+    }
+
+    async proxyOpenVikingRequest(machineId: string, request: OpenVikingHttpRequest): Promise<RpcOpenVikingHttpResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.OpenVikingHttpRequest, request) as RpcOpenVikingHttpResponse
     }
 
     /** Generic Pi RPC call — routes all Pi-specific session RPCs through

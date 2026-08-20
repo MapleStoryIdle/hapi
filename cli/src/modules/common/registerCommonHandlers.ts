@@ -12,6 +12,7 @@ import { registerSlashCommandHandlers } from './handlers/slashCommands'
 import { registerSkillsHandlers } from './handlers/skills'
 import { registerUploadHandlers } from './handlers/uploads'
 import { registerLocalPreviewHandlers } from './handlers/localPreview'
+import { registerOpenVikingHandlers } from './handlers/openViking'
 
 export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
     registerBashHandlers(rpcHandlerManager, workingDirectory)
@@ -27,4 +28,5 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
     registerGitHandlers(rpcHandlerManager, workingDirectory)
     registerUploadHandlers(rpcHandlerManager)
     registerLocalPreviewHandlers(rpcHandlerManager)
+    registerOpenVikingHandlers(rpcHandlerManager)
 }
