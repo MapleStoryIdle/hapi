@@ -12,7 +12,7 @@ export function ToastContainer() {
 
     return (
         <div
-            className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+1rem)] z-50 flex flex-col items-center gap-2 px-3"
+            className="pointer-events-none fixed inset-x-0 top-[calc(var(--app-safe-area-top)+1rem)] z-50 flex flex-col items-center gap-2 px-3"
             aria-live="polite"
         >
             {toasts.map((toast) => (

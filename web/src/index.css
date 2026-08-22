@@ -68,9 +68,9 @@
 
 :root {
     /*
-     * Keep the browser-provided inset in one token. Individual surfaces may
-     * add a visual minimum, but must still derive from this raw value so the
-     * layout tracks iOS standalone/PWA safe-area changes.
+     * Keep browser-provided insets in one token per edge. Individual surfaces
+     * may add a visual minimum, but must consume these tokens so the layout
+     * tracks iOS standalone/PWA safe-area changes consistently.
      */
     /*
      * Mobile layout contract. These values are product-approved invariants;
@@ -85,7 +85,9 @@
     --app-mobile-composer-touch-safe-area-min: 12px;
 
     --app-safe-area-top: env(safe-area-inset-top, 0px);
+    --app-safe-area-right: env(safe-area-inset-right, 0px);
     --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --app-safe-area-left: env(safe-area-inset-left, 0px);
     --app-composer-safe-area-bottom: var(--app-safe-area-bottom);
     --app-composer-expanded-bottom-gap: 0.75rem;
     --app-composer-expanded-keyboard-offset: 0px;

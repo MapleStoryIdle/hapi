@@ -39,7 +39,7 @@ export function LocalPreviewLauncher(props: {
 
     return (
         <div
-            className="fixed top-[calc(env(safe-area-inset-top)+4.75rem)] z-30"
+            className="fixed top-[calc(var(--app-safe-area-top)+4.75rem)] z-30"
             style={{ right: edgeOffset }}
         >
             <button

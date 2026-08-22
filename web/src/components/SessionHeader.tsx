@@ -603,7 +603,7 @@ export function SessionHeader(props: {
                                     id={detailsId}
                                     role="dialog"
                                     aria-label={t('session.header.details.title')}
-                                    className="fixed left-3 top-[calc(env(safe-area-inset-top)+4.25rem)] z-50 w-[min(calc(100vw-1.5rem),22rem)] rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+                                    className="fixed left-3 top-[calc(var(--app-safe-area-top)+4.25rem)] z-50 w-[min(calc(100vw-1.5rem),22rem)] rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
                                 >
                                     <div className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">{t('session.header.details.title')}</div>
                                     <div className="flex flex-col gap-2">

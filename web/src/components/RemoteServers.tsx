@@ -758,7 +758,7 @@ export default function RemoteServersPage() {
 
     return (
         <div className="flex h-full min-h-0 flex-col bg-[var(--app-bg)]">
-            <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-bg)] px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
+            <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-bg)] px-3 pb-3 pt-[calc(0.75rem+var(--app-safe-area-top))]">
                 <button
                     type="button"
                     onClick={goBack}

@@ -142,8 +142,8 @@ export function ImagePreview(props: {
                         filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45))'
                     },
                     toolbar: {
-                        paddingTop: 'calc(env(safe-area-inset-top) + 8px)',
-                        paddingRight: 'calc(env(safe-area-inset-right) + 8px)'
+                        paddingTop: 'calc(var(--app-safe-area-top) + 8px)',
+                        paddingRight: 'calc(var(--app-safe-area-right) + 8px)'
                     }
                 }}
             />

@@ -4,8 +4,8 @@ import { usePwaUpdateContext } from '@/lib/pwa-update-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useVoiceOptional } from '@/lib/voice-context'
 
-const TITLE_BAR_ANCHORED_TOP_CLASS = 'top-[calc(env(safe-area-inset-top)+4.75rem)]'
-const TITLE_BAR_ANCHORED_STATUS_TOP_CLASS = 'top-[calc(env(safe-area-inset-top)+7.25rem)]'
+const TITLE_BAR_ANCHORED_TOP_CLASS = 'top-[calc(var(--app-safe-area-top)+4.75rem)]'
+const TITLE_BAR_ANCHORED_STATUS_TOP_CLASS = 'top-[calc(var(--app-safe-area-top)+7.25rem)]'
 
 function getDefaultTopClass(isOnline: boolean, offsetFromTitleBar: boolean): string {
     if (offsetFromTitleBar) {

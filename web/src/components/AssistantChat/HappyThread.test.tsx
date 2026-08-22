@@ -155,7 +155,7 @@ describe('ReturnToUserMessageButton', () => {
         )
 
         expect(container.querySelector('button')?.style.bottom).toBe(
-            'calc(120px + env(safe-area-inset-bottom))'
+            'calc(120px + var(--app-safe-area-bottom))'
         )
     })
 })
@@ -198,7 +198,7 @@ describe('ScrollToBottomButton', () => {
         )
 
         expect(container.querySelector('button')?.style.bottom).toBe(
-            'calc(120px + env(safe-area-inset-bottom))'
+            'calc(120px + var(--app-safe-area-bottom))'
         )
     })
 

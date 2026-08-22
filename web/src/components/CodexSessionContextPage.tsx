@@ -203,7 +203,7 @@ export function CodexSessionContextPage(props: {
 
     return (
         <div className="relative flex h-full min-h-0 flex-col bg-[var(--app-bg)]" data-testid="codex-session-context-page">
-            <header className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
+            <header className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">
                 <div className="mx-auto flex w-full max-w-content items-center gap-2 p-3">
                     <div className="pointer-events-auto flex min-w-0 items-center gap-0.5 rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] px-1.5 py-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.08)]">
                         <button
@@ -276,7 +276,7 @@ export function CodexSessionContextPage(props: {
                 ) : null}
             </main>
             {forkError ? (
-                <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)+4.5rem)] z-30 px-3">
+                <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
                     <div className="pointer-events-auto mx-auto w-full max-w-content rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-600" role="status">
                         {t('recentCodex.fork.failed')}: {forkError}
                     </div>

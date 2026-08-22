@@ -175,7 +175,7 @@ export function TerminalExecutionDetail(props: { block: ToolCallBlock; surface?:
             className={cn(
                 isDrawer
                     ? 'relative isolate flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-5 pb-[max(var(--app-safe-area-bottom),1.25rem)] pt-4 sm:px-6 sm:pb-6'
-                    : 'mt-3 flex min-h-0 max-h-[calc(75vh-4rem)] flex-col gap-4 overflow-y-auto pb-1 max-sm:mt-0 max-sm:max-h-none max-sm:flex-1 max-sm:px-5 max-sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))] max-sm:pt-4'
+                    : 'mt-3 flex min-h-0 max-h-[calc(75vh-4rem)] flex-col gap-4 overflow-y-auto pb-1 max-sm:mt-0 max-sm:max-h-none max-sm:flex-1 max-sm:px-5 max-sm:pb-[calc(1.25rem+var(--app-safe-area-bottom))] max-sm:pt-4'
             )}
             data-terminal-execution-detail
         >

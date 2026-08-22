@@ -462,7 +462,7 @@ export default function TerminalPage() {
                 </div>
             </div>
 
-            <div className="bg-[var(--app-bg)] border-t border-[var(--app-border)] pb-[env(safe-area-inset-bottom)]">
+            <div className="bg-[var(--app-bg)] border-t border-[var(--app-border)] pb-[var(--app-safe-area-bottom)]">
                 <div className="mx-auto w-full max-w-content px-3">
                     <div className="flex flex-col gap-2 py-2">
                         <button

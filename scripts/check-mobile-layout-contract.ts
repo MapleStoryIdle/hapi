@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url))
 
@@ -13,6 +13,37 @@ function source(relativePath: string): string {
 function requireMatch(content: string, pattern: RegExp, rule: string): void {
     if (!pattern.test(content)) {
         throw new Error(`Mobile layout contract violation: ${rule}`)
+    }
+}
+
+function collectSourceFiles(directory: string): string[] {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+        const filePath = join(directory, entry.name)
+        if (entry.isDirectory()) {
+            return collectSourceFiles(filePath)
+        }
+        return /\.(?:css|ts|tsx)$/.test(entry.name) ? [filePath] : []
+    })
+}
+
+function requireCanonicalSafeAreaConsumers(): void {
+    const rawSafeAreaPattern = /env\(safe-area-inset-(?:top|right|bottom|left)\b/
+    const cssPath = resolve(repositoryRoot, 'web/src/index.css')
+    const viewportHeightPath = resolve(repositoryRoot, 'web/src/hooks/useViewportHeight.ts')
+
+    for (const filePath of collectSourceFiles(resolve(repositoryRoot, 'web/src'))) {
+        const absolutePath = resolve(filePath)
+        const content = readFileSync(filePath, 'utf8')
+        if (absolutePath === cssPath) continue
+
+        // This single probe must read the browser value to detect WebKit's
+        // system-owned top strip; all rendered components consume CSS tokens.
+        const contentWithoutProbe = absolutePath === viewportHeightPath
+            ? content.replace("'padding-top:env(safe-area-inset-top, 0px)'", '')
+            : content
+        if (rawSafeAreaPattern.test(contentWithoutProbe)) {
+            throw new Error(`Mobile layout contract violation: ${filePath} must consume canonical --app-safe-area-* variables`)
+        }
     }
 }
 
@@ -38,6 +69,10 @@ requireMatch(contract, /keyboardOpenExpandedOffset:\s*'4px'/, 'expanded composer
 requireMatch(css, /--app-mobile-header-shell-background:\s*transparent\s*;/, 'CSS header background token must stay transparent')
 requireMatch(css, /--app-mobile-header-shell-backdrop-filter:\s*none\s*;/, 'CSS header backdrop token must stay none')
 requireMatch(css, /--app-mobile-composer-expanded-keyboard-offset:\s*4px\s*;/, 'CSS keyboard offset token must stay 4px')
+requireMatch(css, /--app-safe-area-top:\s*env\(safe-area-inset-top,\s*0px\)\s*;/, 'top safe-area token must own the browser inset')
+requireMatch(css, /--app-safe-area-right:\s*env\(safe-area-inset-right,\s*0px\)\s*;/, 'right safe-area token must own the browser inset')
+requireMatch(css, /--app-safe-area-bottom:\s*env\(safe-area-inset-bottom,\s*0px\)\s*;/, 'bottom safe-area token must own the browser inset')
+requireMatch(css, /--app-safe-area-left:\s*env\(safe-area-inset-left,\s*0px\)\s*;/, 'left safe-area token must own the browser inset')
 requireMatch(css, /--app-composer-expanded-bottom-gap:\s*0\.75rem\s*;/, 'expanded composer base gap must stay 12px outside keyboard state')
 requireMatch(
     css,
@@ -49,6 +84,7 @@ requireMatch(
     /html\[data-ios-standalone="true"\]\[data-ios-system-top-chrome="unreachable"\]\s*\{[\s\S]*?--app-safe-area-top:\s*env\(safe-area-inset-top,\s*0px\)\s*;/,
     'unreachable iOS system top chrome must not receive the 50px web fallback'
 )
+requireCanonicalSafeAreaConsumers()
 
 requireMatch(header, /style=\{mobileLayoutHeaderShellStyle\}/, 'session header must use the canonical shell style')
 requireMatch(header, /data-testid=\{MOBILE_LAYOUT_CONTRACT\.header\.testId\}/, 'session header must expose its contract target')

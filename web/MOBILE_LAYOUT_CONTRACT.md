@@ -22,6 +22,7 @@
 ## 唯一入口
 
 - CSS 数值只能通过 `web/src/index.css` 中的 **Mobile layout contract** 变量维护。
+- 所有渲染组件必须使用 canonical `--app-safe-area-top/right/bottom/left`（输入框可使用由其派生的 composer token）；`env(safe-area-inset-*)` 只允许出现在 `index.css` 的变量定义和 `useViewportHeight.ts` 的浏览器探针中。这样 standalone 的 50px/34px 兜底不会被二级页面或浮层绕过。
 - 顶部外层样式只能通过 `web/src/lib/mobileLayoutContract.ts` 的 `mobileLayoutHeaderShellStyle` 进入 `SessionHeader`。
 - 消息线程必须保持 edge-to-edge；初始顶部留白只能由 `HappyThread.tsx` 的 `getThreadContentPadding` 维护。不得再给非滚动 root 加顶部 padding，否则消息无法从透明标题栏下方滚过。
 - 组件不得为了“临时修一个问题”另加平行的底部 `padding`、`margin`、`bottom` 或 `backdrop-filter` 覆盖这些规则。
@@ -55,6 +56,7 @@
 - 键盘态展开输入框底部总间隔仍是 4px；
 - 键盘态操作菜单仍由 `VisualViewport` 约束，所有菜单项可滚动触达；
 - 顶部组件仍使用唯一入口；
+- 页面、浮层和横向工具栏均未绕过 canonical safe-area 变量；
 - 初始消息仍避开标题操作区，滚动消息仍可从透明顶部标题区下方经过；
 - 消息线程仍预留测得的底部输入区高度。
 - 底部排队、计划或 Git 入口显示/隐藏不会改变输入框底部锚点，且消息线程仍会预留入口高度；排队抽屉本身不会参与该高度计算。

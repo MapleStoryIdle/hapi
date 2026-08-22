@@ -113,7 +113,7 @@ describe('PwaUpdateBanner', () => {
             </I18nProvider>,
         )
 
-        expect(screen.getByTestId('pwa-update-banner')).toHaveClass('top-[calc(env(safe-area-inset-top)+4.75rem)]')
+        expect(screen.getByTestId('pwa-update-banner')).toHaveClass('top-[calc(var(--app-safe-area-top)+4.75rem)]')
     })
 
     it('offsets below voice error banners when shown inside the voice provider', () => {
@@ -147,7 +147,7 @@ describe('PwaUpdateBanner', () => {
             </I18nProvider>,
         )
 
-        expect(screen.getByTestId('pwa-update-banner')).toHaveClass('top-[calc(env(safe-area-inset-top)+7.25rem)]')
+        expect(screen.getByTestId('pwa-update-banner')).toHaveClass('top-[calc(var(--app-safe-area-top)+7.25rem)]')
     })
 
     it('expands the rationale section when the disclosure is opened', () => {

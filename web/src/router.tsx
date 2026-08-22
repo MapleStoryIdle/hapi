@@ -920,7 +920,7 @@ function SessionsPage() {
                 className={`session-list-screen ${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
-                <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
+                <div className="bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">
                     <div className="mx-auto grid w-full max-w-[620px] grid-cols-[52px_1fr_52px] items-center px-6 pb-3 pt-5">
                         <button
                             type="button"
@@ -1635,7 +1635,7 @@ function NewSessionPage() {
 
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
+            <div className="bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">
                 <div className="mx-auto flex w-full max-w-2xl items-center gap-2 px-3 py-3">
                     {!isTelegramApp() && (
                         <button
@@ -1652,7 +1652,7 @@ function NewSessionPage() {
 
             <div
                 className="app-scroll-y flex-1 min-h-0"
-                style={{ paddingBottom: 'calc(var(--app-floating-bottom-offset, 0px) + env(safe-area-inset-bottom))' }}
+                style={{ paddingBottom: 'calc(var(--app-floating-bottom-offset, 0px) + var(--app-safe-area-bottom))' }}
             >
                 {machinesError ? (
                     <div className="p-3 text-sm text-red-600">
@@ -1694,7 +1694,7 @@ function BrowsePage() {
 
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-bg)] p-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
+            <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-bg)] p-3 pt-[calc(0.75rem+var(--app-safe-area-top))]">
                 {!isTelegramApp() && (
                     <button
                         type="button"

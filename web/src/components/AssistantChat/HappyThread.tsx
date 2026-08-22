@@ -348,7 +348,7 @@ export function ScrollToBottomButton(props: {
     const label = hasNewMessages ? newMessageLabel : t('misc.backToBottom')
     const bottomOffsetPx = (props.bottomInset ?? 0) + (props.bottomAccessoryVisible ? 8 : 0)
     const bottomOffset = props.bottomSafeAreaInset
-        ? `calc(${bottomOffsetPx}px + env(safe-area-inset-bottom))`
+        ? `calc(${bottomOffsetPx}px + var(--app-safe-area-bottom))`
         : `${bottomOffsetPx}px`
     const rightOffset = 'max(1rem, calc((100% - var(--content-max-w, 960px)) / 2 + 0.75rem))'
     const contentClass = hasNewMessages
@@ -395,7 +395,7 @@ export function ReturnToUserMessageButton(props: {
     const label = t('misc.returnToUserMessage')
     const bottomOffsetPx = (props.bottomInset ?? 0) + (props.bottomAccessoryVisible ? 8 : 0)
     const bottomOffset = props.bottomSafeAreaInset
-        ? `calc(${bottomOffsetPx}px + env(safe-area-inset-bottom))`
+        ? `calc(${bottomOffsetPx}px + var(--app-safe-area-bottom))`
         : `${bottomOffsetPx}px`
     const leftOffset = 'max(1rem, calc((100% - var(--content-max-w, 960px)) / 2 + 0.75rem))'
 
@@ -468,7 +468,7 @@ function PullToLoadOlderIndicator(props: PullToLoadOlderIndicatorState) {
 
     return (
         <div
-            className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)+4.25rem)] z-10 flex justify-center transition-[opacity,transform] duration-150 ease-out"
+            className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.25rem)] z-10 flex justify-center transition-[opacity,transform] duration-150 ease-out"
             style={{
                 opacity: isLoading ? 1 : Math.max(0.35, props.progress),
                 transform: `translateY(${props.offset}px)`
