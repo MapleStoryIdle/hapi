@@ -278,13 +278,12 @@ export class ApiMachineClient {
             }
         })
 
-        // OpenCode model discovery spawns an `opencode acp` subprocess scoped to the
-        // requested cwd, so it must obey the same workspace-root containment as
-        // `list-directory` and `spawn-happy-session`. Re-register the handler that
-        // `registerCommonHandlers` installed unguarded with a guarded version that
-        // resolves symlinks and rejects paths outside the configured root before
-        // delegating to the lower-level probe. This intentionally overwrites the
-        // earlier registration on the same scoped method name.
+        // OpenCode model discovery spawns an `opencode acp` subprocess scoped to
+        // the requested cwd. Session creation is intentionally allowed to target
+        // any directory the runner can access, so resolve the path for a stable
+        // subprocess cwd but do not apply the optional browser-root restriction.
+        // Re-register the handler that `registerCommonHandlers` installed so the
+        // model probe follows the same unrestricted session-creation policy.
         this.rpcHandlerManager.registerHandler<ListOpencodeModelsForCwdRequest, ListOpencodeModelsForCwdResponse>(
             RPC_METHODS.ListOpencodeModelsForCwd,
             async (params) => {
@@ -294,10 +293,6 @@ export class ApiMachineClient {
                 }
 
                 const resolvedCwd = await this.resolveForWorkspaceCheck(rawCwd)
-                if (!this.isWithinWorkspaceRoots(resolvedCwd)) {
-                    return { success: false, error: 'Path is outside workspace roots' }
-                }
-
                 return await listOpencodeModelsForCwd(resolvedCwd)
             }
         )
@@ -350,11 +345,9 @@ export class ApiMachineClient {
                 throw new Error('Directory is required')
             }
 
-            const resolvedDirectory = await this.resolveForWorkspaceCheck(directory)
-            if (!this.isWithinWorkspaceRoots(resolvedDirectory)) {
-                return { type: 'error', errorMessage: 'Directory is outside this machine\'s workspace roots' }
-            }
-
+            // `workspaceRoots` controls the optional file browser. It must not
+            // block an explicitly requested session directory; users may run a
+            // session in any path available to this runner.
             const result = await spawnSession({
                 directory,
                 sessionId,

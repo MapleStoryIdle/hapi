@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import type { CodexSubscriptionLimits, CodexSubscriptionLimitWindow, Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -357,7 +357,7 @@ function CodexSubscriptionLimitsBadge(props: {
     )
 }
 
-export function SessionHeader(props: {
+export const SessionHeader = memo(function SessionHeader(props: {
     session: Session
     onBack: () => void
     onToggleFiles?: () => void
@@ -441,13 +441,10 @@ export function SessionHeader(props: {
 
     // iOS standalone WebKit occasionally drops the compatibility `click`
     // generated after a touch on a top-edge control. Trigger the explicit
-    // navigation from pointer-up as well, then ignore its follow-up click.
-    // Keyboard activation still uses the regular click path.
+    // action from pointer-up for touch/pen only, then consume one follow-up
+    // click. Mouse and keyboard activations stay on the normal click path.
     const handleBackPointerUp = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-        // Touch and pen pointer events do not consistently expose a primary
-        // mouse-button value in standalone WebKit. Restrict only actual
-        // secondary mouse-button activations.
-        if (event.pointerType === 'mouse' && event.button !== 0) return
+        if (event.pointerType === 'mouse') return
 
         backPointerUpAtRef.current = Date.now()
         event.preventDefault()
@@ -455,9 +452,11 @@ export function SessionHeader(props: {
     }, [props.onBack])
 
     const handleBackClick = useCallback(() => {
-        // A pointer-up activation has already navigated. Browsers that still
-        // emit the synthetic click must not create a second history action.
-        if (Date.now() - backPointerUpAtRef.current < 1_000) return
+        // A touch/pen pointer-up activation has already navigated. Browsers
+        // that still emit the synthetic click must not create a second action.
+        const pointerUpAt = backPointerUpAtRef.current
+        backPointerUpAtRef.current = 0
+        if (pointerUpAt > 0 && Date.now() - pointerUpAt < 500) return
 
         props.onBack()
     }, [props.onBack])
@@ -470,7 +469,7 @@ export function SessionHeader(props: {
     // path as Back. Standalone iOS WebKit can delay or omit the compatibility
     // click after a touch in this area; keyboard activation still uses click.
     const handleDetailsPointerUp = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-        if (event.pointerType === 'mouse' && event.button !== 0) return
+        if (event.pointerType === 'mouse') return
 
         detailsPointerUpAtRef.current = Date.now()
         event.preventDefault()
@@ -480,7 +479,9 @@ export function SessionHeader(props: {
     const handleDetailsClick = useCallback(() => {
         // Do not immediately toggle the dialog a second time when the browser
         // emits the synthetic click after the pointer-up fallback.
-        if (Date.now() - detailsPointerUpAtRef.current < 1_000) return
+        const pointerUpAt = detailsPointerUpAtRef.current
+        detailsPointerUpAtRef.current = 0
+        if (pointerUpAt > 0 && Date.now() - pointerUpAt < 500) return
 
         toggleDetails()
     }, [toggleDetails])
@@ -563,6 +564,7 @@ export function SessionHeader(props: {
                         <button
                             type="button"
                             onPointerUp={handleBackPointerUp}
+                            onPointerCancel={() => { backPointerUpAtRef.current = 0 }}
                             onClick={handleBackClick}
                             data-testid="session-header-back"
                             aria-label={t('session.back')}
@@ -588,6 +590,7 @@ export function SessionHeader(props: {
                             <button
                                 type="button"
                                 onPointerUp={handleDetailsPointerUp}
+                                onPointerCancel={() => { detailsPointerUpAtRef.current = 0 }}
                                 onClick={handleDetailsClick}
                                 className="pointer-events-auto touch-manipulation block max-w-full truncate rounded-full px-1.5 pr-2 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                 aria-haspopup="dialog"
@@ -726,4 +729,4 @@ export function SessionHeader(props: {
             />
         </>
     )
-}
+})

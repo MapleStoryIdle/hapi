@@ -28,6 +28,10 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const before = parsed.data.beforeAt !== undefined && parsed.data.beforeSeq !== undefined
             ? { at: parsed.data.beforeAt, seq: parsed.data.beforeSeq }
             : null
+        // The web client uses this endpoint to repair SSE gaps. Prevent an
+        // intermediary or service worker from returning an older snapshot.
+        c.header('Cache-Control', 'no-store, no-cache, must-revalidate')
+        c.header('Pragma', 'no-cache')
         return c.json(engine.getMessagesPage(sessionId, { limit, before }))
     })
 

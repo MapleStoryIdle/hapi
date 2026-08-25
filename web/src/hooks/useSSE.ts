@@ -90,7 +90,8 @@ function buildEventsUrl(
     baseUrl: string,
     token: string,
     subscription: SSESubscription,
-    visibility: VisibilityState
+    visibility: VisibilityState,
+    lastEventId: number | null
 ): string {
     const params = new URLSearchParams()
     params.set('token', token)
@@ -103,6 +104,9 @@ function buildEventsUrl(
     }
     if (subscription.machineId) {
         params.set('machineId', subscription.machineId)
+    }
+    if (lastEventId !== null) {
+        params.set('lastEventId', `${lastEventId}`)
     }
 
     const path = `/api/events?${params.toString()}`
@@ -141,6 +145,8 @@ export function useSSE(options: {
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const reconnectAttemptRef = useRef(0)
     const lastActivityAtRef = useRef(0)
+    const lastEventIdRef = useRef<number | null>(null)
+    const streamIdentityRef = useRef<string | null>(null)
     const [reconnectNonce, setReconnectNonce] = useState(0)
     const [subscriptionId, setSubscriptionId] = useState<string | null>(null)
 
@@ -192,10 +198,15 @@ export function useSSE(options: {
         }
 
         setSubscriptionId(null)
+        const streamIdentity = JSON.stringify([options.baseUrl, options.token, subscriptionKey])
+        if (streamIdentityRef.current !== streamIdentity) {
+            streamIdentityRef.current = streamIdentity
+            lastEventIdRef.current = null
+        }
         const url = buildEventsUrl(options.baseUrl, options.token, {
             ...subscription,
             sessionId: subscription.sessionId ?? undefined
-        }, getVisibilityState())
+        }, getVisibilityState(), lastEventIdRef.current)
         const eventSource = new EventSource(url)
         let disconnectNotified = false
         let reconnectRequested = false
@@ -552,6 +563,15 @@ export function useSSE(options: {
         }
 
         const handleMessage = (message: MessageEvent<string>) => {
+            if (eventSourceRef.current !== eventSource) {
+                return
+            }
+            if (typeof message.lastEventId === 'string' && message.lastEventId.trim() !== '') {
+                const eventId = Number(message.lastEventId)
+                if (Number.isSafeInteger(eventId) && eventId >= 0) {
+                    lastEventIdRef.current = eventId
+                }
+            }
             if (typeof message.data !== 'string') {
                 return
             }
@@ -575,6 +595,9 @@ export function useSSE(options: {
 
         eventSource.onmessage = handleMessage
         eventSource.onopen = () => {
+            if (eventSourceRef.current !== eventSource) {
+                return
+            }
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current)
                 reconnectTimerRef.current = null

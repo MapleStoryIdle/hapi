@@ -199,9 +199,9 @@ ${chalk.bold('Usage:')}
   hapi runner list               List active sessions
 
 ${chalk.bold('Options:')}
-  --workspace-root <path>        Restrict the runner to this directory.
-                                 Repeat to allow multiple directories/drives.
-                                 Browse & spawn reject paths outside them.
+  --workspace-root <path>        Expose this directory for file browsing.
+                                 Repeat to expose multiple directories/drives.
+                                 Session creation is not restricted by these roots.
                                  Supports \`~\` / \`~/foo\` expansion.
                                  Omit to leave browsing off (legacy mode).
 

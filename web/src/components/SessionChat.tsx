@@ -1661,6 +1661,14 @@ function SessionChatInner(props: SessionChatProps) {
         setOutlineOpen((open) => !open)
     }, [])
 
+    const handleSessionReopened = useCallback((newSessionId: string) => {
+        void navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId: newSessionId },
+            replace: true
+        })
+    }, [navigate])
+
     const handleBottomAccessoryExpandedChange = useCallback((expanded: boolean) => {
         setStatusAccessoryExpanded(expanded)
     }, [])
@@ -1839,6 +1847,41 @@ function SessionChatInner(props: SessionChatProps) {
         pendingScheduleRef
     })
 
+    const sessionHeaderStatus = useMemo(() => ({
+        active: props.session.active,
+        thinking: props.session.thinking,
+        agentState: props.session.agentState,
+        backgroundTaskCount: props.session.backgroundTaskCount,
+        contextSize: reduced.latestUsage?.contextSize,
+        contextCacheRead: reduced.latestUsage?.cacheRead,
+        contextWindow: reduced.latestUsage?.contextWindow,
+        model: props.session.model,
+        modelReasoningEffort: agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined,
+        serviceTier: props.session.serviceTier,
+        permissionMode: props.session.permissionMode,
+        collaborationMode: codexCollaborationModeSupported ? props.session.collaborationMode : undefined,
+        threadGoal: reduced.latestGoal,
+        agentFlavor,
+        voiceStatus: voice?.status
+    }), [
+        agentFlavor,
+        codexCollaborationModeSupported,
+        props.session.active,
+        props.session.agentState,
+        props.session.backgroundTaskCount,
+        props.session.collaborationMode,
+        props.session.model,
+        props.session.modelReasoningEffort,
+        props.session.permissionMode,
+        props.session.serviceTier,
+        props.session.thinking,
+        reduced.latestGoal,
+        reduced.latestUsage?.cacheRead,
+        reduced.latestUsage?.contextSize,
+        reduced.latestUsage?.contextWindow,
+        voice?.status
+    ])
+
     return (
         <div
             className="relative flex h-full min-h-0 flex-col overflow-hidden"
@@ -1853,13 +1896,7 @@ function SessionChatInner(props: SessionChatProps) {
                 outlineActive={outlineOpen}
                 api={props.api}
                 onSessionDeleted={props.onBack}
-                onSessionReopened={(newSessionId) => {
-                    navigate({
-                        to: '/sessions/$sessionId',
-                        params: { sessionId: newSessionId },
-                        replace: true
-                    })
-                }}
+                onSessionReopened={handleSessionReopened}
                 onCreateSideSession={
                     canCreateSideSessionFromSession({
                         agentFlavor,
@@ -1871,23 +1908,7 @@ function SessionChatInner(props: SessionChatProps) {
                         : undefined
                 }
                 sideSessionPending={sideSessionPending}
-                status={{
-                    active: props.session.active,
-                    thinking: props.session.thinking,
-                    agentState: props.session.agentState,
-                    backgroundTaskCount: props.session.backgroundTaskCount,
-                    contextSize: reduced.latestUsage?.contextSize,
-                    contextCacheRead: reduced.latestUsage?.cacheRead,
-                    contextWindow: reduced.latestUsage?.contextWindow,
-                    model: props.session.model,
-                    modelReasoningEffort: agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined,
-                    serviceTier: props.session.serviceTier,
-                    permissionMode: props.session.permissionMode,
-                    collaborationMode: codexCollaborationModeSupported ? props.session.collaborationMode : undefined,
-                    threadGoal: reduced.latestGoal,
-                    agentFlavor,
-                    voiceStatus: voice?.status
-                }}
+                status={sessionHeaderStatus}
                 floating
             />
             <LocalPreviewLauncher

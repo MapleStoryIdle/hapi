@@ -14,16 +14,12 @@ const jwtPayloadSchema = z.object({
     ns: z.string()
 })
 
-function getEmbeddedTokenFromReferer(
-    referer: string | undefined,
-    routePrefix: string,
-    tokenParam: string
-): string | undefined {
+function getPreviewTokenFromReferer(referer: string | undefined): string | undefined {
     if (!referer) return undefined
     try {
         const url = new URL(referer)
-        return url.pathname.startsWith(routePrefix)
-            ? url.searchParams.get(tokenParam) ?? undefined
+        return url.pathname.startsWith('/api/preview/')
+            ? url.searchParams.get('hapiPreviewToken') ?? undefined
             : undefined
     } catch {
         return undefined
@@ -44,14 +40,10 @@ export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<W
             ? c.req.query().token
             : path.startsWith('/api/preview/')
                 ? c.req.query().hapiPreviewToken
-                : path.startsWith('/api/openviking/')
-                    ? c.req.query().hapiOpenVikingToken
                 : undefined
         const tokenFromReferer = path.startsWith('/api/preview/')
-            ? getEmbeddedTokenFromReferer(c.req.header('referer'), '/api/preview/', 'hapiPreviewToken')
-            : path.startsWith('/api/openviking/')
-                ? getEmbeddedTokenFromReferer(c.req.header('referer'), '/api/openviking/', 'hapiOpenVikingToken')
-                : undefined
+            ? getPreviewTokenFromReferer(c.req.header('referer'))
+            : undefined
         const token = tokenFromHeader ?? tokenFromQuery ?? tokenFromReferer
 
         if (!token) {

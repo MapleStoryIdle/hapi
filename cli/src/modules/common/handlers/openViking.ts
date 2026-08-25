@@ -1,7 +1,14 @@
+import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import {
-    OpenVikingHttpRequestSchema,
-    type OpenVikingHttpRequest,
-    type OpenVikingHttpResponse,
+    OpenVikingContextListRequestSchema,
+    OpenVikingContextReadRequestSchema,
+    type OpenVikingContextEntry,
+    type OpenVikingContextListRequest,
+    type OpenVikingContextListResponse,
+    type OpenVikingContextReadRequest,
+    type OpenVikingContextReadResponse,
     type OpenVikingStatusResponse
 } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
@@ -9,63 +16,68 @@ import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 
 const OPEN_VIKING_ORIGIN = 'http://127.0.0.1:1933'
 const OPEN_VIKING_TIMEOUT_MS = 12_000
-const OPEN_VIKING_MAX_BYTES = 25 * 1024 * 1024
 
-const FORWARDED_REQUEST_HEADERS = new Set([
-    'accept',
-    'accept-language',
-    'content-type',
-    'range',
-    'user-agent'
-])
+type OpenVikingCredentials = {
+    apiKey?: string
+    bearerToken?: string
+    account?: string
+    user?: string
+}
 
-const BLOCKED_RESPONSE_HEADERS = new Set([
-    'connection',
-    'content-encoding',
-    'content-length',
-    'content-security-policy',
-    'keep-alive',
-    'proxy-authenticate',
-    'proxy-authorization',
-    'referrer-policy',
-    'set-cookie',
-    'te',
-    'trailer',
-    'transfer-encoding',
-    'upgrade',
-    'x-frame-options'
-])
+function getStringValue(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
 
-function resolveOpenVikingUrl(path: string): URL | null {
+function getRecord(value: unknown): Record<string, unknown> | null {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : null
+}
+
+function firstEnvironmentValue(names: string[]): string | undefined {
+    for (const name of names) {
+        const value = getStringValue(process.env[name])
+        if (value) return value
+    }
+    return undefined
+}
+
+async function readOpenVikingClientConfig(): Promise<Record<string, unknown>> {
+    const path = getStringValue(process.env.OPENVIKING_CLI_CONFIG_FILE)
+        ?? join(homedir(), '.openviking', 'ovcli.conf')
     try {
-        const url = new URL(path, OPEN_VIKING_ORIGIN)
-        return url.origin === OPEN_VIKING_ORIGIN ? url : null
+        const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
+        return getRecord(parsed) ?? {}
     } catch {
-        return null
+        return {}
     }
 }
 
-function isOpenVikingPath(path: string): boolean {
-    const url = resolveOpenVikingUrl(path)
-    if (!url) return false
-
-    const pathname = url.pathname
-    return pathname === '/health'
-        || pathname === '/ready'
-        || pathname === '/studio'
-        || pathname.startsWith('/studio/')
-        || pathname.startsWith('/api/')
-        || pathname.startsWith('/bot/')
-        || pathname.startsWith('/oauth/')
-        || pathname.startsWith('/.well-known/')
+async function resolveOpenVikingCredentials(): Promise<OpenVikingCredentials> {
+    const config = await readOpenVikingClientConfig()
+    return {
+        apiKey: firstEnvironmentValue(['HAPI_OPENVIKING_API_KEY', 'OPENVIKING_API_KEY'])
+            ?? getStringValue(config.api_key),
+        bearerToken: firstEnvironmentValue(['HAPI_OPENVIKING_BEARER_TOKEN', 'OPENVIKING_BEARER_TOKEN']),
+        account: firstEnvironmentValue(['HAPI_OPENVIKING_ACCOUNT', 'OPENVIKING_ACCOUNT'])
+            ?? getStringValue(config.account),
+        user: firstEnvironmentValue(['HAPI_OPENVIKING_USER', 'OPENVIKING_USER'])
+            ?? getStringValue(config.user)
+    }
 }
 
-function openVikingUrl(path: string): string {
-    const url = resolveOpenVikingUrl(path)
-    if (!url) {
-        throw new Error('Invalid OpenViking URL')
+function openVikingHeaders(credentials: OpenVikingCredentials, includeIdentity: boolean): Headers {
+    const headers = new Headers({ accept: 'application/json' })
+    if (credentials.bearerToken) {
+        headers.set('authorization', `Bearer ${credentials.bearerToken}`)
+    } else if (credentials.apiKey) {
+        headers.set('x-api-key', credentials.apiKey)
     }
-    return url.toString()
+    if (includeIdentity) {
+        if (credentials.account) headers.set('x-openviking-account', credentials.account)
+        if (credentials.user) headers.set('x-openviking-user', credentials.user)
+    }
+    return headers
 }
 
 function withTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
@@ -84,45 +96,62 @@ function normalizeError(error: unknown): string {
     return String(error)
 }
 
-function filterRequestHeaders(headers: Record<string, string> | undefined): Headers {
-    const filtered = new Headers()
-    if (!headers) return filtered
-
-    for (const [name, value] of Object.entries(headers)) {
-        const normalizedName = name.toLowerCase()
-        if (FORWARDED_REQUEST_HEADERS.has(normalizedName)) {
-            filtered.set(normalizedName, value)
-        }
-    }
-
-    return filtered
+function openVikingUrl(path: string, uri?: string): string {
+    const url = new URL(path, OPEN_VIKING_ORIGIN)
+    if (uri) url.searchParams.set('uri', uri)
+    return url.toString()
 }
 
-function filterResponseHeaders(headers: Headers): Record<string, string> {
-    const filtered: Record<string, string> = {}
-    headers.forEach((value, name) => {
-        if (!BLOCKED_RESPONSE_HEADERS.has(name.toLowerCase())) {
-            filtered[name] = value
-        }
+async function fetchOpenViking(url: string, credentials: OpenVikingCredentials, signal: AbortSignal): Promise<Response> {
+    const includeIdentity = Boolean(credentials.account || credentials.user)
+    const request = (withIdentity: boolean) => fetch(url, {
+        method: 'GET',
+        headers: openVikingHeaders(credentials, withIdentity),
+        signal
     })
-    return filtered
+
+    const initial = await request(includeIdentity)
+    // OpenViking API-key mode rejects trusted identity headers. A retry without
+    // them keeps the runner compatible with both documented auth modes.
+    if (initial.status === 400 && includeIdentity && (credentials.apiKey || credentials.bearerToken)) {
+        return await request(false)
+    }
+    return initial
 }
 
-async function readResponseBody(response: Response): Promise<Uint8Array> {
-    const declaredSize = Number(response.headers.get('content-length') ?? '0')
-    if (Number.isFinite(declaredSize) && declaredSize > OPEN_VIKING_MAX_BYTES) {
-        throw new Error('OpenViking response is too large')
-    }
-
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    if (bytes.byteLength > OPEN_VIKING_MAX_BYTES) {
-        throw new Error('OpenViking response is too large')
-    }
-    return bytes
+function responseError(response: Response, body: unknown): string {
+    const record = getRecord(body)
+    const error = record?.error
+    if (typeof error === 'string' && error.trim()) return error
+    const nested = getRecord(error)
+    const nestedMessage = getStringValue(nested?.message)
+    if (nestedMessage) return nestedMessage
+    const message = getStringValue(record?.message)
+    return message ?? `OpenViking returned HTTP ${response.status}`
 }
 
-function getStringValue(value: unknown): string | undefined {
-    return typeof value === 'string' && value.trim() ? value : undefined
+function nameFromContextUri(uri: string): string {
+    const path = uri.slice('viking://'.length).replace(/\/+$/, '')
+    return path.split('/').filter(Boolean).at(-1) ?? uri
+}
+
+function parseContextEntry(value: unknown): OpenVikingContextEntry | null {
+    const entry = getRecord(value)
+    const uri = getStringValue(entry?.uri)
+    const name = getStringValue(entry?.name) ?? (uri ? nameFromContextUri(uri) : undefined)
+    if (!name || !uri || typeof entry?.isDir !== 'boolean') return null
+
+    const size = typeof entry.size === 'number' && Number.isFinite(entry.size)
+        ? entry.size
+        : undefined
+    const modTime = getStringValue(entry.modTime)
+    return {
+        name,
+        uri,
+        isDir: entry.isDir,
+        ...(size === undefined ? {} : { size }),
+        ...(modTime ? { modTime } : {})
+    }
 }
 
 async function getOpenVikingStatus(): Promise<OpenVikingStatusResponse> {
@@ -141,12 +170,12 @@ async function getOpenVikingStatus(): Promise<OpenVikingStatusResponse> {
         }
 
         const data: unknown = await response.json().catch(() => null)
-        const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+        const record = getRecord(data)
         return {
             ok: true,
             status: response.status,
-            version: getStringValue(record.version),
-            authMode: getStringValue(record.auth_mode)
+            version: getStringValue(record?.version),
+            authMode: getStringValue(record?.auth_mode)
         }
     } catch (error) {
         return { ok: false, error: normalizeError(error) }
@@ -155,45 +184,61 @@ async function getOpenVikingStatus(): Promise<OpenVikingStatusResponse> {
     }
 }
 
-async function proxyOpenVikingRequest(rawRequest: unknown): Promise<OpenVikingHttpResponse> {
-    const parsed = OpenVikingHttpRequestSchema.safeParse(rawRequest)
-    if (!parsed.success) {
-        return { ok: false, status: 400, headers: {}, bodyBase64: '', error: 'Invalid OpenViking request' }
-    }
-
-    const request = parsed.data as OpenVikingHttpRequest
-    if (!isOpenVikingPath(request.path)) {
-        return { ok: false, status: 403, headers: {}, bodyBase64: '', error: 'OpenViking path is not allowed' }
-    }
+async function listOpenVikingContext(rawRequest: unknown): Promise<OpenVikingContextListResponse> {
+    const parsed = OpenVikingContextListRequestSchema.safeParse(rawRequest)
+    if (!parsed.success) return { ok: false, error: 'Invalid OpenViking context URI' }
 
     const { signal, cleanup } = withTimeoutSignal(OPEN_VIKING_TIMEOUT_MS)
     try {
-        const method = request.method.toUpperCase()
-        const bodyBase64 = !['GET', 'HEAD'].includes(method) ? request.bodyBase64 : undefined
-        const response = await fetch(openVikingUrl(request.path), {
-            method,
-            headers: filterRequestHeaders(request.headers),
-            body: bodyBase64 ? Buffer.from(bodyBase64, 'base64') : undefined,
-            redirect: 'manual',
+        const response = await fetchOpenViking(
+            openVikingUrl('/api/v1/fs/ls', parsed.data.uri),
+            await resolveOpenVikingCredentials(),
             signal
-        })
-        const bytes = await readResponseBody(response)
+        )
+        const body: unknown = await response.json().catch(() => null)
+        if (!response.ok) return { ok: false, error: responseError(response, body) }
 
-        return {
-            ok: true,
-            status: response.status,
-            statusText: response.statusText,
-            headers: filterResponseHeaders(response.headers),
-            bodyBase64: Buffer.from(bytes).toString('base64')
+        const record = getRecord(body)
+        if (record?.status !== 'ok' || !Array.isArray(record.result)) {
+            return { ok: false, error: 'OpenViking returned an invalid context directory response' }
         }
+
+        const entries = record.result
+            .map(parseContextEntry)
+            .filter((entry): entry is OpenVikingContextEntry => entry !== null)
+            .sort((a, b) => {
+                if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+                return a.name.localeCompare(b.name)
+            })
+        return { ok: true, entries }
     } catch (error) {
-        return {
-            ok: false,
-            status: 502,
-            headers: {},
-            bodyBase64: '',
-            error: normalizeError(error)
+        return { ok: false, error: normalizeError(error) }
+    } finally {
+        cleanup()
+    }
+}
+
+async function readOpenVikingContext(rawRequest: unknown): Promise<OpenVikingContextReadResponse> {
+    const parsed = OpenVikingContextReadRequestSchema.safeParse(rawRequest)
+    if (!parsed.success) return { ok: false, error: 'Invalid OpenViking context URI' }
+
+    const { signal, cleanup } = withTimeoutSignal(OPEN_VIKING_TIMEOUT_MS)
+    try {
+        const response = await fetchOpenViking(
+            openVikingUrl('/api/v1/content/read', parsed.data.uri),
+            await resolveOpenVikingCredentials(),
+            signal
+        )
+        const body: unknown = await response.json().catch(() => null)
+        if (!response.ok) return { ok: false, error: responseError(response, body) }
+
+        const record = getRecord(body)
+        if (record?.status !== 'ok' || typeof record.result !== 'string') {
+            return { ok: false, error: 'OpenViking returned an invalid context content response' }
         }
+        return { ok: true, content: record.result }
+    } catch (error) {
+        return { ok: false, error: normalizeError(error) }
     } finally {
         cleanup()
     }
@@ -204,8 +249,12 @@ export function registerOpenVikingHandlers(rpcHandlerManager: RpcHandlerManager)
         RPC_METHODS.OpenVikingStatus,
         getOpenVikingStatus
     )
-    rpcHandlerManager.registerHandler<OpenVikingHttpRequest, OpenVikingHttpResponse>(
-        RPC_METHODS.OpenVikingHttpRequest,
-        proxyOpenVikingRequest
+    rpcHandlerManager.registerHandler<OpenVikingContextListRequest, OpenVikingContextListResponse>(
+        RPC_METHODS.OpenVikingListContext,
+        listOpenVikingContext
+    )
+    rpcHandlerManager.registerHandler<OpenVikingContextReadRequest, OpenVikingContextReadResponse>(
+        RPC_METHODS.OpenVikingReadContext,
+        readOpenVikingContext
     )
 }

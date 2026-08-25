@@ -71,7 +71,7 @@ See `src/commands/auth.ts`.
 Both `start` and `start-sync` accept repeatable `--workspace-root <path>` (or `--workspace-root=<path>`). When set:
 
 - The web `/browse` page surfaces scoped file trees rooted at those paths.
-- The runner refuses `list-directory` and `spawn-session` requests for paths outside the configured roots.
+- The runner applies the roots only to `list-directory` browsing; explicitly requested sessions may use any directory the runner can access.
 - `~` and `~/foo` are expanded.
 
 Omitting the flag keeps the legacy behavior: no scoping, no `/browse` feature.
@@ -109,6 +109,7 @@ See `src/configuration.ts` for all options.
 - `HAPI_HTTP_MCP_URL` - Default MCP target for `hapi mcp`.
 - `HAPI_SESSION_ID` - Current HAPI session ID exported into wrapped Agent processes.
 - `HAPI_WAIT_ACTIVE_SECS` - Timeout for `hapi ping-peer` to wait after resuming a session (default: 60).
+- `HAPI_OPENVIKING_API_KEY` (or `HAPI_OPENVIKING_BEARER_TOKEN`), `HAPI_OPENVIKING_ACCOUNT`, `HAPI_OPENVIKING_USER` - Optional OpenViking credentials for the read-only Context page. When omitted, the runner uses matching values from `~/.openviking/ovcli.conf`.
 
 The recent Codex transcript API is runner-scoped: the selected runner reads its own `CODEX_HOME` through Hub RPC, so a remote Hub never needs access to your local transcript files.
 

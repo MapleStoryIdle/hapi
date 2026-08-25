@@ -35,7 +35,7 @@ function createApp(engine: Partial<SyncEngine>) {
     return app
 }
 
-describe('OpenViking routes', () => {
+describe('OpenViking context routes', () => {
     it('returns a machine-scoped status result', async () => {
         const machine = createMachine()
         const calls: string[] = []
@@ -43,7 +43,7 @@ describe('OpenViking routes', () => {
             getMachine: () => machine,
             getOpenVikingStatus: async (machineId: string) => {
                 calls.push(machineId)
-                return { ok: true, version: '0.4.14', authMode: 'dev' }
+                return { ok: true, version: '0.4.14', authMode: 'trusted' }
             }
         })
 
@@ -51,68 +51,83 @@ describe('OpenViking routes', () => {
 
         expect(response.status).toBe(200)
         expect(calls).toEqual(['machine-1'])
-        expect(await response.json()).toEqual({ ok: true, version: '0.4.14', authMode: 'dev' })
+        expect(await response.json()).toEqual({ ok: true, version: '0.4.14', authMode: 'trusted' })
     })
 
-    it('keeps the Studio under the authenticated proxy prefix', async () => {
-        const machine = createMachine()
-        const requests: Array<{ machineId: string; path: string }> = []
+    it('lists the full OpenViking root when no URI is given', async () => {
+        const requests: Array<{ machineId: string; uri: string }> = []
         const app = createApp({
-            getMachine: () => machine,
-            proxyOpenVikingRequest: async (machineId: string, request: { path: string }) => {
-                requests.push({ machineId, path: request.path })
+            getMachine: () => createMachine(),
+            listOpenVikingContext: async (machineId: string, request: { uri: string }) => {
+                requests.push({ machineId, uri: request.uri })
                 return {
                     ok: true,
-                    status: 200,
-                    headers: { 'content-type': 'text/html' },
-                    bodyBase64: Buffer.from('<html><head><script src="/studio/assets/app.js"></script></head></html>').toString('base64')
+                    entries: [{ name: 'user', uri: 'viking://user/', isDir: true }]
                 }
             }
         })
 
-        const response = await app.request('/api/openviking/machines/machine-1/studio/?hapiOpenVikingToken=jwt-token')
-        const body = await response.text()
+        const response = await app.request('/api/openviking/machines/machine-1/context')
 
         expect(response.status).toBe(200)
-        expect(requests).toEqual([{ machineId: 'machine-1', path: '/studio/' }])
-        expect(body).toContain('/api/openviking/machines/machine-1/studio/assets/app.js?hapiOpenVikingToken=jwt-token')
-        expect(body).toContain('OpenViking service worker is disabled inside HAPI')
+        expect(requests).toEqual([{ machineId: 'machine-1', uri: 'viking://' }])
+        expect(await response.json()).toEqual({
+            ok: true,
+            entries: [{ name: 'user', uri: 'viking://user/', isDir: true }]
+        })
     })
 
-    it('rewrites Studio JavaScript paths and module chunks through the authenticated proxy', async () => {
-        const machine = createMachine()
+    it('reads arbitrary Viking URIs without narrowing them to a memory prefix', async () => {
+        const requests: Array<{ machineId: string; uri: string }> = []
         const app = createApp({
-            getMachine: () => machine,
-            proxyOpenVikingRequest: async () => ({
-                ok: true,
-                status: 200,
-                headers: { 'content-type': 'application/javascript' },
-                bodyBase64: Buffer.from([
-                    'const studioBase = "/studio/"',
-                    'const page = () => import("./page.js")',
-                    'import { helper } from "./helper.js"'
-                ].join('\n')).toString('base64')
-            })
+            getMachine: () => createMachine(),
+            readOpenVikingContext: async (machineId: string, request: { uri: string }) => {
+                requests.push({ machineId, uri: request.uri })
+                return { ok: true, content: '# shared skill' }
+            }
         })
 
-        const response = await app.request('/api/openviking/machines/machine-1/studio/assets/app.js?hapiOpenVikingToken=jwt-token')
+        const uri = 'viking://agent/skills/search-web/SKILL.md'
+        const response = await app.request(
+            `/api/openviking/machines/machine-1/context/read?uri=${encodeURIComponent(uri)}`
+        )
 
-        expect(await response.text()).toBe([
-            'const studioBase = "/api/openviking/machines/machine-1/studio/"',
-            'const page = () => import("/api/openviking/machines/machine-1/studio/assets/page.js?hapiOpenVikingToken=jwt-token")',
-            'import { helper } from "/api/openviking/machines/machine-1/studio/assets/helper.js?hapiOpenVikingToken=jwt-token"'
-        ].join('\n'))
+        expect(response.status).toBe(200)
+        expect(requests).toEqual([{ machineId: 'machine-1', uri }])
+        expect(await response.json()).toEqual({ ok: true, content: '# shared skill' })
     })
 
-    it('does not proxy a machine from another namespace', async () => {
+    it('rejects non-Viking context URIs before RPC', async () => {
         const app = createApp({
-            getMachine: () => createMachine({ namespace: 'other' }),
-            proxyOpenVikingRequest: async () => {
+            getMachine: () => createMachine(),
+            listOpenVikingContext: async () => {
                 throw new Error('should not run')
             }
         })
 
+        const response = await app.request('/api/openviking/machines/machine-1/context?uri=https%3A%2F%2Fexample.com')
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({ error: 'Invalid OpenViking context URI' })
+    })
+
+    it('does not expose the OpenViking Studio proxy', async () => {
+        const app = createApp({ getMachine: () => createMachine() })
+
         const response = await app.request('/api/openviking/machines/machine-1/studio/')
+
+        expect(response.status).toBe(404)
+    })
+
+    it('does not expose a machine from another namespace', async () => {
+        const app = createApp({
+            getMachine: () => createMachine({ namespace: 'other' }),
+            listOpenVikingContext: async () => {
+                throw new Error('should not run')
+            }
+        })
+
+        const response = await app.request('/api/openviking/machines/machine-1/context')
 
         expect(response.status).toBe(403)
         expect(await response.json()).toEqual({ error: 'Machine access denied' })

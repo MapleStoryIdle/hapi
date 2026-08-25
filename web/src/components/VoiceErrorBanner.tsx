@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useVoiceOptional } from '@/lib/voice-context'
 
-export function VoiceErrorBanner() {
+export function VoiceErrorBanner({ offsetFromTitleBar = false }: { offsetFromTitleBar?: boolean }) {
     const voice = useVoiceOptional()
 
     const shouldShow = voice && voice.status === 'error' && voice.errorMessage
@@ -21,7 +21,11 @@ export function VoiceErrorBanner() {
     }
 
     return (
-        <div className="fixed top-0 left-0 right-0 bg-red-500 text-white text-center py-2 text-sm font-medium z-50 flex items-center justify-center border-b border-red-600">
+        <div
+            className={`pointer-events-none fixed left-0 right-0 z-30 flex items-center justify-center border-b border-red-600 bg-red-500 py-2 text-center text-sm font-medium text-white ${offsetFromTitleBar ? 'top-[calc(var(--app-safe-area-top)+4.75rem)]' : 'top-0'}`}
+            role="status"
+            aria-live="polite"
+        >
             {voice.errorMessage}
         </div>
     )

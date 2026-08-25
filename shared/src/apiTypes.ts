@@ -418,29 +418,43 @@ export type LocalPreviewCheckResponse = {
     candidate: LocalPreviewCandidate
 }
 
-export const OpenVikingPathSchema = z.string()
+export const OpenVikingContextUriSchema = z.string()
     .trim()
-    .min(1)
+    .min(9)
     .max(4096)
-    .refine((value) => value.startsWith('/') && !value.startsWith('//'), {
-        message: 'path must be an absolute local path'
+    .refine((value) => value === 'viking://' || value.startsWith('viking://'), {
+        message: 'uri must use the viking:// scheme'
     })
 
-export const OpenVikingHttpRequestSchema = z.object({
-    path: OpenVikingPathSchema,
-    method: LocalPreviewHttpMethodSchema.default('GET'),
-    headers: z.record(z.string(), z.string()).optional(),
-    bodyBase64: z.string().optional()
+export const OpenVikingContextListRequestSchema = z.object({
+    uri: OpenVikingContextUriSchema.default('viking://')
 })
 
-export type OpenVikingHttpRequest = z.infer<typeof OpenVikingHttpRequestSchema>
+export type OpenVikingContextListRequest = z.infer<typeof OpenVikingContextListRequestSchema>
 
-export type OpenVikingHttpResponse = {
+export const OpenVikingContextReadRequestSchema = z.object({
+    uri: OpenVikingContextUriSchema
+})
+
+export type OpenVikingContextReadRequest = z.infer<typeof OpenVikingContextReadRequestSchema>
+
+export type OpenVikingContextEntry = {
+    name: string
+    uri: string
+    isDir: boolean
+    size?: number
+    modTime?: string
+}
+
+export type OpenVikingContextListResponse = {
     ok: boolean
-    status: number
-    statusText?: string
-    headers: Record<string, string>
-    bodyBase64: string
+    entries?: OpenVikingContextEntry[]
+    error?: string
+}
+
+export type OpenVikingContextReadResponse = {
+    ok: boolean
+    content?: string
     error?: string
 }
 

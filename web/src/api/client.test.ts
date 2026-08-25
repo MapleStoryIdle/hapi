@@ -13,6 +13,7 @@ describe('ApiClient error mapping', () => {
 
     afterEach(() => {
         globalThis.fetch = originalFetch
+        vi.useRealTimers()
     })
 
     it('prefers the stable `code` field over the human-readable `error` message in ApiError.code', async () => {
@@ -78,5 +79,27 @@ describe('ApiClient error mapping', () => {
             expect(apiError.status).toBe(422)
             expect(apiError.body).toContain('cursorSessionId')
         }
+    })
+
+    it('aborts a stalled request and exposes a stable timeout error', async () => {
+        vi.useFakeTimers()
+        fetchMock.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => (
+            new Promise<Response>((_resolve, reject) => {
+                init?.signal?.addEventListener('abort', () => {
+                    reject(new DOMException('The operation was aborted.', 'AbortError'))
+                }, { once: true })
+            })
+        ))
+
+        const api = new ApiClient('test-token', { requestTimeoutMs: 100 })
+        const request = api.reopenSession('session-timeout')
+        const timeoutExpectation = expect(request).rejects.toMatchObject({
+            status: 408,
+            code: 'request_timeout'
+        })
+        await vi.advanceTimersByTimeAsync(100)
+
+        await timeoutExpectation
+        vi.useRealTimers()
     })
 })

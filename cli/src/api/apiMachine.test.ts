@@ -70,15 +70,24 @@ describe('ApiMachineClient listOpencodeModelsForCwd handler', () => {
         rmSync(workspaceRoot, { recursive: true, force: true })
     })
 
-    it('rejects cwd outside the workspace root with the standard error shape', async () => {
+    it('allows model discovery in a cwd outside the optional browser roots', async () => {
         const machine = makeMachine('machine-1')
         const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
 
         const outsideCwd = mkdtempSync(join(tmpdir(), 'hapi-outside-'))
+        listOpencodeModelsForCwdMock.mockResolvedValueOnce({
+            success: true,
+            availableModels: [],
+            currentModelId: null
+        })
         try {
             const result = await callListOpencodeModels(client, machine.id, outsideCwd)
-            expect(result).toEqual({ success: false, error: 'Path is outside workspace roots' })
-            expect(listOpencodeModelsForCwdMock).not.toHaveBeenCalled()
+            expect(result).toEqual({
+                success: true,
+                availableModels: [],
+                currentModelId: null
+            })
+            expect(listOpencodeModelsForCwdMock).toHaveBeenCalledWith(realpathSync(outsideCwd))
         } finally {
             rmSync(outsideCwd, { recursive: true, force: true })
             client.shutdown()
@@ -149,6 +158,43 @@ describe('ApiMachineClient listOpencodeModelsForCwd handler', () => {
             expect(listOpencodeModelsForCwdMock).toHaveBeenCalledWith(realpathSync(secondWorkspaceRoot))
         } finally {
             rmSync(secondWorkspaceRoot, { recursive: true, force: true })
+            client.shutdown()
+        }
+    })
+})
+
+describe('ApiMachineClient session spawning', () => {
+    let workspaceRoot: string
+
+    beforeEach(() => {
+        ioMock.mockReset()
+        workspaceRoot = mkdtempSync(join(tmpdir(), 'hapi-machine-spawn-root-'))
+    })
+
+    afterEach(() => {
+        rmSync(workspaceRoot, { recursive: true, force: true })
+    })
+
+    it('allows an explicitly requested directory outside the browser roots', async () => {
+        const machine = makeMachine('machine-spawn')
+        const outsideDirectory = mkdtempSync(join(tmpdir(), 'hapi-machine-spawn-outside-'))
+        const spawnSession = vi.fn(async () => ({ type: 'success' as const, sessionId: 'spawned-session' }))
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+        client.setRPCHandlers({
+            spawnSession,
+            stopSession: () => true,
+            requestShutdown: () => {}
+        })
+
+        try {
+            const result = await callMachineRpc(client, machine.id, 'spawn-happy-session', {
+                directory: outsideDirectory,
+                agent: 'claude'
+            })
+            expect(result).toEqual({ type: 'success', sessionId: 'spawned-session' })
+            expect(spawnSession).toHaveBeenCalledWith(expect.objectContaining({ directory: outsideDirectory }))
+        } finally {
+            rmSync(outsideDirectory, { recursive: true, force: true })
             client.shutdown()
         }
     })

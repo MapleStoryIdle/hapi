@@ -165,4 +165,37 @@ describe('useSSE reconnect handling', () => {
 
         expect(MockEventSource.instances).toHaveLength(2)
     })
+
+    it('carries the last SSE event id into a manually rebuilt stream', () => {
+        vi.useFakeTimers()
+        vi.spyOn(Math, 'random').mockReturnValue(0)
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+
+        renderHook(() => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            subscription: { all: true },
+            scope: 'global',
+            onEvent: vi.fn()
+        }), { wrapper: createWrapper() })
+
+        const source = MockEventSource.instances[0]
+        expect(source).toBeDefined()
+
+        act(() => {
+            source?.onmessage?.({
+                data: JSON.stringify({ type: 'heartbeat', data: { timestamp: Date.now() } }),
+                lastEventId: '7'
+            } as MessageEvent<string>)
+            source?.onerror?.(new Event('error'))
+            vi.advanceTimersByTime(1_000)
+        })
+
+        expect(MockEventSource.instances[1]?.url).toContain('lastEventId=7')
+    })
 })

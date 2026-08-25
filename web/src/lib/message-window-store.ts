@@ -53,9 +53,10 @@ export type FetchLatestMessagesOptions = {
     /**
      * Request one more latest-page read after an in-flight read completes.
      *
-     * A newly opened SSE stream has no replay cursor, so its connection can
-     * race the initial HTTP load. Queuing instead of cancelling the active
-     * load preserves the first snapshot if the follow-up request fails.
+     * SSE replays a short cursor window, but the stream can still race the
+     * authoritative HTTP snapshot (or miss an event beyond that window).
+     * Queuing instead of cancelling the active load preserves the first
+     * snapshot if the follow-up request fails.
      */
     force?: boolean
 }
@@ -178,7 +179,10 @@ function flushQueuedIncomingMessages(): void {
     const batches = Array.from(pendingIncomingMessagesBySession.entries())
     pendingIncomingMessagesBySession.clear()
     for (const [sessionId, incoming] of batches) {
-        ingestIncomingMessagesNow(sessionId, incoming, true)
+        // Keep the merge frame-batched, but let the normal notification throttle
+        // coalesce several frames into one React update. The previous immediate
+        // notification path rebuilt the entire SessionChat tree on every frame.
+        ingestIncomingMessagesNow(sessionId, incoming)
     }
 }
 
@@ -1099,8 +1103,8 @@ function ingestIncomingMessagesNow(
 
 /**
  * Queue server-sent messages until the next animation frame. This is the
- * streaming entry point: a burst of Codex updates becomes one merge and one
- * React notification per frame, while preserving arrival order per session.
+ * streaming entry point: a burst of Codex updates becomes one merge per frame,
+ * while the store notification throttle coalesces React updates across frames.
  */
 export function enqueueIncomingMessages(sessionId: string, incoming: DecryptedMessage[]): void {
     if (incoming.length === 0) {

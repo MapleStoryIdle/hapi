@@ -15,7 +15,7 @@ import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
-import { clearMessageWindow, enqueueIncomingMessages, fetchLatestMessages } from '@/lib/message-window-store'
+import { clearMessageWindow, enqueueIncomingMessages, fetchLatestMessages, getMessageWindowState } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
@@ -37,6 +37,7 @@ import type { SyncEvent } from '@/types/api'
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
 
 const REQUIRE_SERVER_URL = requireHubUrlForLogin()
+const MESSAGE_RECONCILE_INTERVAL_MS = 8_000
 
 function withPwaBanner(content: ReactNode) {
     return (
@@ -140,8 +141,12 @@ function AppInner() {
     const { isSyncing, startSync, endSync } = useSyncingState()
     const [sseDisconnected, setSseDisconnected] = useState(false)
     const [sseDisconnectReason, setSseDisconnectReason] = useState<string | null>(null)
+    const [sessionSseDisconnected, setSessionSseDisconnected] = useState(false)
+    const [sessionSseDisconnectReason, setSessionSseDisconnectReason] = useState<string | null>(null)
     const syncTokenRef = useRef(0)
     const isFirstConnectRef = useRef(true)
+    const sessionSseConnectedRef = useRef(false)
+    const sessionReconcileInFlightRef = useRef<Set<string>>(new Set())
     const baseUrlRef = useRef(baseUrl)
     const pushPromptedRef = useRef(false)
     const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
@@ -153,8 +158,23 @@ function AppInner() {
         baseUrlRef.current = baseUrl
         isFirstConnectRef.current = true
         syncTokenRef.current = 0
+        sessionSseConnectedRef.current = false
+        sessionReconcileInFlightRef.current.clear()
+        setSseDisconnected(false)
+        setSseDisconnectReason(null)
+        setSessionSseDisconnected(false)
+        setSessionSseDisconnectReason(null)
         queryClient.clear()
     }, [baseUrl, queryClient])
+
+    useEffect(() => {
+        sessionSseConnectedRef.current = false
+        if (selectedSessionId) {
+            sessionReconcileInFlightRef.current.delete(selectedSessionId)
+        }
+        setSessionSseDisconnected(false)
+        setSessionSseDisconnectReason(null)
+    }, [selectedSessionId])
 
     // Clean up URL params after successful auth (for direct access links)
     useEffect(() => {
@@ -205,11 +225,34 @@ function AppInner() {
         if (!api || !selectedSessionId) {
             return Promise.resolve()
         }
-        // SSE has no replay cursor. A connection or foreground transition can
-        // therefore have a gap even when EventSource reports itself as open.
+        if (sessionReconcileInFlightRef.current.has(selectedSessionId)) {
+            return Promise.resolve()
+        }
+        sessionReconcileInFlightRef.current.add(selectedSessionId)
+        // SSE replays a short cursor window, while this HTTP read repairs gaps
+        // outside that window and validates the authoritative message snapshot.
         // `force` queues one follow-up read behind an in-flight initial load.
-        return fetchLatestMessages(api, selectedSessionId, { force: true })
+        return fetchLatestMessages(api, selectedSessionId, { force: true }).finally(() => {
+            sessionReconcileInFlightRef.current.delete(selectedSessionId)
+        })
     }, [api, selectedSessionId])
+
+    const reconcileOnMessageGap = useCallback((event: SyncEvent): void => {
+        if (event.type !== 'message-received' || !api || event.sessionId !== selectedSessionId) {
+            return
+        }
+        const incomingSeq = event.message.seq
+        if (typeof incomingSeq !== 'number') {
+            return
+        }
+        const current = getMessageWindowState(event.sessionId)
+        if (current.isLoading || current.newestSeq === null) {
+            return
+        }
+        if (incomingSeq > current.newestSeq + 1) {
+            void reconcileSelectedSessionMessages()
+        }
+    }, [api, reconcileSelectedSessionMessages, selectedSessionId])
 
     const handleSseConnect = useCallback(() => {
         // Clear disconnected state on successful connection
@@ -259,6 +302,10 @@ function AppInner() {
     }, [])
 
     const handleSseEvent = useCallback((event: SyncEvent) => {
+        reconcileOnMessageGap(event)
+        if (event.type === 'message-received') {
+            return
+        }
         if (event.type !== 'messages-invalidated') {
             return
         }
@@ -267,7 +314,7 @@ function AppInner() {
         }
         clearMessageWindow(event.sessionId)
         void reconcileSelectedSessionMessages()
-    }, [api, reconcileSelectedSessionMessages, selectedSessionId])
+    }, [api, reconcileOnMessageGap, reconcileSelectedSessionMessages, selectedSessionId])
 
     const handleGlobalSseEvent = useCallback((event: SyncEvent) => {
         // The all-session stream stays connected while the selected-session
@@ -281,8 +328,70 @@ function AppInner() {
     }, [handleSseEvent, selectedSessionId])
 
     const handleSessionSseConnect = useCallback(() => {
+        sessionSseConnectedRef.current = true
+        setSessionSseDisconnected(false)
+        setSessionSseDisconnectReason(null)
         void reconcileSelectedSessionMessages()
     }, [reconcileSelectedSessionMessages])
+
+    const handleSessionSseDisconnect = useCallback((reason: string) => {
+        if (!sessionSseConnectedRef.current) {
+            return
+        }
+        setSessionSseDisconnected(true)
+        setSessionSseDisconnectReason(reason)
+    }, [])
+
+    useEffect(() => {
+        if (!api || !selectedSessionId) {
+            return
+        }
+
+        let cancelled = false
+        let probeInFlight = false
+        const probeLatestMessage = async () => {
+            if (cancelled || document.visibilityState !== 'visible') {
+                return
+            }
+            if (probeInFlight) {
+                return
+            }
+            const before = getMessageWindowState(selectedSessionId)
+            if (before.isLoading) {
+                return
+            }
+            probeInFlight = true
+            try {
+                const response = await api.getMessages(selectedSessionId, { limit: 1 })
+                if (cancelled) {
+                    return
+                }
+                const latestSeq = response.messages.reduce<number | null>((latest, message) => (
+                    typeof message.seq === 'number' && (latest === null || message.seq > latest)
+                        ? message.seq
+                        : latest
+                ), null)
+                const current = getMessageWindowState(selectedSessionId)
+                if (latestSeq !== null && (current.newestSeq === null || latestSeq > current.newestSeq)) {
+                    await reconcileSelectedSessionMessages()
+                }
+            } catch {
+                // The SSE reconnect path and the next probe will retry. The
+                // message window owns the visible warning for a full refresh.
+            } finally {
+                probeInFlight = false
+            }
+        }
+
+        const timer = window.setInterval(() => {
+            void probeLatestMessage()
+        }, MESSAGE_RECONCILE_INTERVAL_MS)
+
+        return () => {
+            cancelled = true
+            window.clearInterval(timer)
+        }
+    }, [api, reconcileSelectedSessionMessages, selectedSessionId])
     const translateIncomingToast = useCallback((title: string, body: string): { title: string; body: string } => {
         const normalizedTitle = title.trim()
         const normalizedBody = body.trim()
@@ -363,6 +472,7 @@ function AppInner() {
         subscription: sessionEventSubscription ?? undefined,
         scope: 'full',
         onConnect: handleSessionSseConnect,
+        onDisconnect: handleSessionSseDisconnect,
         onEvent: handleSseEvent
     })
 
@@ -470,21 +580,27 @@ function AppInner() {
         )
     }
 
+    const isAnySseDisconnected = sseDisconnected || sessionSseDisconnected
+    const activeSseDisconnectReason = sessionSseDisconnected
+        ? sessionSseDisconnectReason
+        : sseDisconnectReason
+
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
             <VoiceProvider>
                 <PwaUpdateBannerWithStatusOffset
                     isSyncing={isSyncing}
-                    isReconnecting={sseDisconnected && !isSyncing}
+                    isReconnecting={isAnySseDisconnected && !isSyncing}
                     offsetFromTitleBar={Boolean(selectedSessionId)}
                 />
-                <SyncingBanner isSyncing={isSyncing} />
+                <SyncingBanner isSyncing={isSyncing} offsetFromTitleBar={Boolean(selectedSessionId)} />
                 <ReconnectingBanner
-                    isReconnecting={sseDisconnected && !isSyncing}
-                    reason={sseDisconnectReason}
+                    isReconnecting={isAnySseDisconnected && !isSyncing}
+                    reason={activeSseDisconnectReason}
+                    offsetFromTitleBar={Boolean(selectedSessionId)}
                 />
-                <VoiceErrorBanner />
-                <OfflineBanner />
+                <VoiceErrorBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
+                <OfflineBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
                 <div className="h-full min-h-0 flex flex-col">
                     <Suspense fallback={
                         <div className="flex flex-1 items-center justify-center p-4">

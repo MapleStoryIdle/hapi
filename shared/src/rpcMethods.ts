@@ -38,7 +38,8 @@ export const RPC_METHODS = {
     LocalPreviewCheck: 'localPreview.check',
     LocalPreviewHttpRequest: 'localPreview.httpRequest',
     OpenVikingStatus: 'openViking.status',
-    OpenVikingHttpRequest: 'openViking.httpRequest'
+    OpenVikingListContext: 'openViking.listContext',
+    OpenVikingReadContext: 'openViking.readContext'
 } as const
 
 export type RpcMethod = typeof RPC_METHODS[keyof typeof RPC_METHODS]

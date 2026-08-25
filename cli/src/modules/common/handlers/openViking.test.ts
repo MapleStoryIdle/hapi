@@ -1,26 +1,58 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { registerOpenVikingHandlers } from './openViking'
 
+type FetchInput = Parameters<typeof globalThis.fetch>[0]
+type FetchInit = Parameters<typeof globalThis.fetch>[1]
+
+const OPEN_VIKING_ENV_NAMES = [
+    'HAPI_OPENVIKING_API_KEY',
+    'HAPI_OPENVIKING_BEARER_TOKEN',
+    'HAPI_OPENVIKING_ACCOUNT',
+    'HAPI_OPENVIKING_USER',
+    'OPENVIKING_API_KEY',
+    'OPENVIKING_BEARER_TOKEN',
+    'OPENVIKING_ACCOUNT',
+    'OPENVIKING_USER',
+    'OPENVIKING_CLI_CONFIG_FILE'
+] as const
+
 describe('OpenViking RPC handlers', () => {
     const originalFetch = globalThis.fetch
+    const originalEnvironment = Object.fromEntries(
+        OPEN_VIKING_ENV_NAMES.map((name) => [name, process.env[name]])
+    ) as Record<typeof OPEN_VIKING_ENV_NAMES[number], string | undefined>
+
+    beforeEach(() => {
+        process.env.HAPI_OPENVIKING_API_KEY = 'openviking-key'
+        process.env.HAPI_OPENVIKING_ACCOUNT = 'default'
+        process.env.HAPI_OPENVIKING_USER = 'default'
+        delete process.env.HAPI_OPENVIKING_BEARER_TOKEN
+        delete process.env.OPENVIKING_API_KEY
+        delete process.env.OPENVIKING_BEARER_TOKEN
+        delete process.env.OPENVIKING_ACCOUNT
+        delete process.env.OPENVIKING_USER
+        process.env.OPENVIKING_CLI_CONFIG_FILE = '/does-not-exist'
+    })
 
     afterEach(() => {
         globalThis.fetch = originalFetch
+        for (const name of OPEN_VIKING_ENV_NAMES) {
+            const value = originalEnvironment[name]
+            if (value === undefined) delete process.env[name]
+            else process.env[name] = value
+        }
     })
 
     it('reports the local OpenViking version and auth mode', async () => {
-        globalThis.fetch = (async (input) => {
-            expect(input).toBe('http://127.0.0.1:1933/health')
-            return new Response(JSON.stringify({ version: '0.4.14', auth_mode: 'dev' }), {
-                headers: { 'content-type': 'application/json' }
-            })
-        }) as typeof globalThis.fetch
+        globalThis.fetch = (async () => new Response(JSON.stringify({
+            version: '0.4.14',
+            auth_mode: 'trusted'
+        }), { status: 200 })) as unknown as typeof globalThis.fetch
 
         const rpc = new RpcHandlerManager({ scopePrefix: 'machine-test' })
         registerOpenVikingHandlers(rpc)
-
         const raw = await rpc.handleRequest({
             method: `machine-test:${RPC_METHODS.OpenVikingStatus}`,
             params: '{}'
@@ -30,75 +62,82 @@ describe('OpenViking RPC handlers', () => {
             ok: true,
             status: 200,
             version: '0.4.14',
-            authMode: 'dev'
+            authMode: 'trusted'
         })
     })
 
-    it('proxies only supported OpenViking paths and strips HAPI authorization', async () => {
-        const captured: { headers?: Headers } = {}
-        globalThis.fetch = (async (input, init) => {
-            expect(input).toBe('http://127.0.0.1:1933/studio/')
+    it('lists a context directory with runner-side credentials', async () => {
+        const captured: { url?: URL; headers?: Headers } = {}
+        globalThis.fetch = (async (input: FetchInput, init?: FetchInit) => {
+            captured.url = new URL(String(input))
             captured.headers = new Headers(init?.headers)
-            return new Response('<html>studio</html>', {
-                headers: {
-                    'content-type': 'text/html',
-                    'x-frame-options': 'DENY'
-                }
-            })
-        }) as typeof globalThis.fetch
+            return new Response(JSON.stringify({
+                status: 'ok',
+                result: [
+                    { uri: 'viking://resources/', isDir: true },
+                    { name: 'profile.md', uri: 'viking://user/default/profile.md', isDir: false, size: 42 }
+                ]
+            }), { status: 200 })
+        }) as unknown as typeof globalThis.fetch
 
         const rpc = new RpcHandlerManager({ scopePrefix: 'machine-test' })
         registerOpenVikingHandlers(rpc)
-
         const raw = await rpc.handleRequest({
-            method: `machine-test:${RPC_METHODS.OpenVikingHttpRequest}`,
-            params: JSON.stringify({
-                path: '/studio/',
-                method: 'GET',
-                headers: {
-                    authorization: 'Bearer hapi-jwt',
-                    accept: 'text/html'
-                }
-            })
+            method: `machine-test:${RPC_METHODS.OpenVikingListContext}`,
+            params: JSON.stringify({ uri: 'viking://' })
         })
-        const result = JSON.parse(raw) as {
-            ok: boolean
-            headers: Record<string, string>
-        }
 
-        expect(result.ok).toBe(true)
-        expect(captured.headers?.get('authorization')).toBeNull()
-        expect(captured.headers?.get('accept')).toBe('text/html')
-        expect(result.headers['x-frame-options']).toBeUndefined()
+        expect(JSON.parse(raw)).toEqual({
+            ok: true,
+            entries: [
+                { name: 'resources', uri: 'viking://resources/', isDir: true },
+                { name: 'profile.md', uri: 'viking://user/default/profile.md', isDir: false, size: 42 }
+            ]
+        })
+        expect(captured.url?.origin).toBe('http://127.0.0.1:1933')
+        expect(captured.url?.pathname).toBe('/api/v1/fs/ls')
+        expect(captured.url?.searchParams.get('uri')).toBe('viking://')
+        expect(captured.headers?.get('x-api-key')).toBe('openviking-key')
+        expect(captured.headers?.get('x-openviking-account')).toBe('default')
+        expect(captured.headers?.get('x-openviking-user')).toBe('default')
     })
 
-    it('rejects unsupported or traversal local paths before making a request', async () => {
-        const fetchMock = async () => new Response('unexpected')
+    it('reads any Viking URI and retries without trusted headers for API-key mode', async () => {
+        const headers: Headers[] = []
+        globalThis.fetch = (async (_input: FetchInput, init?: FetchInit) => {
+            headers.push(new Headers(init?.headers))
+            if (headers.length === 1) {
+                return new Response(JSON.stringify({ status: 'error' }), { status: 400 })
+            }
+            return new Response(JSON.stringify({ status: 'ok', result: '# context' }), { status: 200 })
+        }) as unknown as typeof globalThis.fetch
+
+        const rpc = new RpcHandlerManager({ scopePrefix: 'machine-test' })
+        registerOpenVikingHandlers(rpc)
+        const raw = await rpc.handleRequest({
+            method: `machine-test:${RPC_METHODS.OpenVikingReadContext}`,
+            params: JSON.stringify({ uri: 'viking://agent/skills/search-web/SKILL.md' })
+        })
+
+        expect(JSON.parse(raw)).toEqual({ ok: true, content: '# context' })
+        expect(headers).toHaveLength(2)
+        expect(headers[0]?.get('x-openviking-account')).toBe('default')
+        expect(headers[1]?.get('x-openviking-account')).toBeNull()
+        expect(headers[1]?.get('x-api-key')).toBe('openviking-key')
+    })
+
+    it('rejects a non-Viking URI without contacting OpenViking', async () => {
+        const fetchMock = vi.fn()
         globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch
 
         const rpc = new RpcHandlerManager({ scopePrefix: 'machine-test' })
         registerOpenVikingHandlers(rpc)
-
         const raw = await rpc.handleRequest({
-            method: `machine-test:${RPC_METHODS.OpenVikingHttpRequest}`,
-            params: JSON.stringify({ path: '/metrics' })
+            method: `machine-test:${RPC_METHODS.OpenVikingListContext}`,
+            params: JSON.stringify({ uri: 'https://example.test' })
         })
 
-        expect(JSON.parse(raw)).toMatchObject({
-            ok: false,
-            status: 403,
-            error: 'OpenViking path is not allowed'
-        })
-
-        const traversalRaw = await rpc.handleRequest({
-            method: `machine-test:${RPC_METHODS.OpenVikingHttpRequest}`,
-            params: JSON.stringify({ path: '/api/%2e%2e/metrics' })
-        })
-
-        expect(JSON.parse(traversalRaw)).toMatchObject({
-            ok: false,
-            status: 403,
-            error: 'OpenViking path is not allowed'
-        })
+        expect(JSON.parse(raw)).toEqual({ ok: false, error: 'Invalid OpenViking context URI' })
+        expect(fetchMock).not.toHaveBeenCalled()
     })
 })

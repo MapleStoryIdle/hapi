@@ -58,7 +58,7 @@ export function TerminalExecutionDrawer(props: {
         setDragOffset(0)
     }
 
-    const handleDrawerDragStart = (event: PointerEvent<HTMLDivElement>) => {
+    const handleDrawerDragStart = (event: PointerEvent<HTMLButtonElement>) => {
         if (event.pointerType === 'mouse' && event.button !== 0) return
 
         dragStateRef.current = {
@@ -70,14 +70,14 @@ export function TerminalExecutionDrawer(props: {
         setDragOffset(0)
     }
 
-    const handleDrawerDragMove = (event: PointerEvent<HTMLDivElement>) => {
+    const handleDrawerDragMove = (event: PointerEvent<HTMLButtonElement>) => {
         const dragState = dragStateRef.current
         if (!dragState || dragState.pointerId !== event.pointerId) return
 
         setDragOffset(Math.max(0, event.clientY - dragState.startY))
     }
 
-    const handleDrawerDragEnd = (event: PointerEvent<HTMLDivElement>) => {
+    const handleDrawerDragEnd = (event: PointerEvent<HTMLButtonElement>) => {
         const dragState = dragStateRef.current
         if (!dragState || dragState.pointerId !== event.pointerId) return
 
@@ -96,29 +96,33 @@ export function TerminalExecutionDrawer(props: {
                     aria-describedby={undefined}
                     data-testid="terminal-execution-drawer"
                     className={cn(
-                        'fixed inset-x-0 bottom-0 z-[61] flex h-[min(88dvh,50rem)] flex-col overflow-hidden rounded-t-[28px] border-x border-t border-[var(--app-border)] bg-[var(--app-dialog-bg)] pb-[max(var(--app-safe-area-bottom),0.75rem)] shadow-[0_-18px_48px_rgba(15,23,42,0.22)] isolate animate-slide-up outline-none motion-reduce:animate-none sm:inset-y-0 sm:left-auto sm:right-0 sm:h-auto sm:w-[min(46rem,58vw)] sm:rounded-none sm:border-y-0 sm:border-r-0 sm:border-l sm:pb-0 sm:shadow-[-18px_0_48px_rgba(15,23,42,0.18)]',
+                        'fixed inset-x-0 bottom-0 z-[61] flex h-[min(88dvh,50rem)] max-h-[calc(100dvh-var(--app-safe-area-top))] flex-col overflow-hidden rounded-t-[28px] border-x border-t border-[var(--app-border)] bg-[var(--app-dialog-bg)] pt-[var(--app-safe-area-top)] shadow-[0_-18px_48px_rgba(15,23,42,0.22)] isolate animate-slide-up outline-none motion-reduce:animate-none sm:inset-y-0 sm:left-auto sm:right-0 sm:h-auto sm:max-h-none sm:w-[min(46rem,58vw)] sm:rounded-none sm:border-y-0 sm:border-r-0 sm:border-l sm:pt-0 sm:shadow-[-18px_0_48px_rgba(15,23,42,0.18)]',
                         isDragging ? 'transition-none' : 'transition-transform duration-200 ease-out'
                     )}
                     style={dragOffset > 0 ? { transform: `translate3d(0, ${dragOffset}px, 0)` } : undefined}
                 >
-                    <div
+                    <button
+                        type="button"
                         className={cn(
-                            'flex h-8 shrink-0 touch-none select-none items-center justify-center sm:hidden',
+                            'flex h-9 w-full shrink-0 touch-none select-none items-center justify-center sm:hidden',
                             isDragging ? 'cursor-grabbing' : 'cursor-grab'
                         )}
+                        aria-label={t('terminal.execution.dragToClose')}
+                        title={t('terminal.execution.dragToClose')}
                         data-testid="terminal-execution-drawer-drag-handle"
                         onPointerCancel={resetDrawerDrag}
                         onPointerDown={handleDrawerDragStart}
                         onPointerMove={handleDrawerDragMove}
                         onPointerUp={handleDrawerDragEnd}
+                        onClick={() => props.onOpenChange(false)}
                     >
                         <div className={cn(
                             'h-1 rounded-full bg-[var(--app-border)] transition-[width] duration-150',
                             isDragging ? 'w-14' : 'w-10'
                         )} aria-hidden="true" />
-                    </div>
+                    </button>
 
-                    <header className="relative z-10 flex shrink-0 items-start gap-3 border-b border-[var(--app-border)] bg-[var(--app-dialog-bg)] px-5 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-[max(var(--app-safe-area-top),1.25rem)]">
+                    <header className="relative z-10 flex shrink-0 items-start gap-3 border-b border-[var(--app-border)] bg-[var(--app-dialog-bg)] px-5 pb-3 pt-3 sm:px-6 sm:pb-4 sm:pt-[max(var(--app-safe-area-top),1.25rem)]">
                         <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--app-link)_10%,transparent)] text-[var(--app-link)]">
                             <TerminalIcon className="h-5 w-5" />
                         </span>
@@ -145,9 +149,11 @@ export function TerminalExecutionDrawer(props: {
                         </div>
                         <Dialog.Close
                             type="button"
+                            data-testid="terminal-execution-close"
                             aria-label={t('button.close')}
-                            className="touch-manipulation -mr-2 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                            className="touch-manipulation -mr-2 -mt-1 inline-flex h-11 shrink-0 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                         >
+                            <span>{t('button.close')}</span>
                             <CloseIcon className="h-4 w-4" />
                         </Dialog.Close>
                     </header>

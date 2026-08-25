@@ -17,7 +17,8 @@ import type {
     LocalPreviewHttpResponse,
     LocalPreviewProbeRequest,
     LocalPreviewProbeResponse,
-    OpenVikingHttpRequest,
+    OpenVikingContextListRequest,
+    OpenVikingContextReadRequest,
     SlashCommandsResponse,
     UpdateRemoteServerRequest,
     VerifyRemoteServerCandidateRequest
@@ -65,7 +66,8 @@ import {
     type RpcListOpencodeReasoningEffortOptionsResponse,
     type RpcLocalPreviewHttpResponse,
     type RpcLocalPreviewProbeResponse,
-    type RpcOpenVikingHttpResponse,
+    type RpcOpenVikingContextListResponse,
+    type RpcOpenVikingContextReadResponse,
     type RpcOpenVikingStatusResponse,
     type RpcCursorModel,
     type RpcCodexLocalSessionDataResponse,
@@ -95,7 +97,8 @@ export type {
     RpcListOpencodeReasoningEffortOptionsResponse,
     RpcLocalPreviewHttpResponse,
     RpcLocalPreviewProbeResponse,
-    RpcOpenVikingHttpResponse,
+    RpcOpenVikingContextListResponse,
+    RpcOpenVikingContextReadResponse,
     RpcOpenVikingStatusResponse,
     RpcCursorModel,
     RpcCodexLocalSessionDataResponse,
@@ -2195,8 +2198,12 @@ export class SyncEngine {
         return await this.rpcGateway.getOpenVikingStatus(machineId)
     }
 
-    async proxyOpenVikingRequest(machineId: string, request: OpenVikingHttpRequest): Promise<RpcOpenVikingHttpResponse> {
-        return await this.rpcGateway.proxyOpenVikingRequest(machineId, request)
+    async listOpenVikingContext(machineId: string, request: OpenVikingContextListRequest): Promise<RpcOpenVikingContextListResponse> {
+        return await this.rpcGateway.listOpenVikingContext(machineId, request)
+    }
+
+    async readOpenVikingContext(machineId: string, request: OpenVikingContextReadRequest): Promise<RpcOpenVikingContextReadResponse> {
+        return await this.rpcGateway.readOpenVikingContext(machineId, request)
     }
 
     /** Generic Pi RPC — delegates to rpcGateway.callPiRpc. */

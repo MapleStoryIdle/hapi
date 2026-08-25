@@ -21,8 +21,10 @@ import type {
     LocalPreviewHttpResponse,
     LocalPreviewProbeRequest,
     LocalPreviewProbeResponse,
-    OpenVikingHttpRequest,
-    OpenVikingHttpResponse,
+    OpenVikingContextListRequest,
+    OpenVikingContextListResponse,
+    OpenVikingContextReadRequest,
+    OpenVikingContextReadResponse,
     OpenVikingStatusResponse,
     ListDirectoryResponse,
     OpencodeModelsResponse,
@@ -79,7 +81,8 @@ export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEff
 export type RpcLocalPreviewProbeResponse = LocalPreviewProbeResponse
 export type RpcLocalPreviewHttpResponse = LocalPreviewHttpResponse
 export type RpcOpenVikingStatusResponse = OpenVikingStatusResponse
-export type RpcOpenVikingHttpResponse = OpenVikingHttpResponse
+export type RpcOpenVikingContextListResponse = OpenVikingContextListResponse
+export type RpcOpenVikingContextReadResponse = OpenVikingContextReadResponse
 export type RpcCodexLocalSessionsResponse = CodexLocalSessionsRpcResponse
 export type RpcCodexLocalSessionDataResponse = CodexLocalSessionDataRpcResponse
 export type RpcForkCodexSideSessionResponse =
@@ -455,8 +458,12 @@ export class RpcGateway {
         return await this.machineRpc(machineId, RPC_METHODS.OpenVikingStatus, {}) as RpcOpenVikingStatusResponse
     }
 
-    async proxyOpenVikingRequest(machineId: string, request: OpenVikingHttpRequest): Promise<RpcOpenVikingHttpResponse> {
-        return await this.machineRpc(machineId, RPC_METHODS.OpenVikingHttpRequest, request) as RpcOpenVikingHttpResponse
+    async listOpenVikingContext(machineId: string, request: OpenVikingContextListRequest): Promise<RpcOpenVikingContextListResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.OpenVikingListContext, request) as RpcOpenVikingContextListResponse
+    }
+
+    async readOpenVikingContext(machineId: string, request: OpenVikingContextReadRequest): Promise<RpcOpenVikingContextReadResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.OpenVikingReadContext, request) as RpcOpenVikingContextReadResponse
     }
 
     /** Generic Pi RPC call — routes all Pi-specific session RPCs through

@@ -4,7 +4,7 @@ import type { SyncEvent } from '../sync/syncEngine'
 import { VisibilityTracker } from '../visibility/visibilityTracker'
 
 describe('SSEManager namespace filtering', () => {
-    it('routes events to matching namespace', () => {
+    it('routes events to matching namespace', async () => {
         const manager = new SSEManager(0, new VisibilityTracker())
         const receivedAlpha: SyncEvent[] = []
         const receivedBeta: SyncEvent[] = []
@@ -30,12 +30,13 @@ describe('SSEManager namespace filtering', () => {
         })
 
         manager.broadcast({ type: 'session-updated', sessionId: 's1', namespace: 'alpha' })
+        await Promise.resolve()
 
         expect(receivedAlpha).toHaveLength(1)
         expect(receivedBeta).toHaveLength(0)
     })
 
-    it('broadcasts connection-changed to all namespaces', () => {
+    it('broadcasts connection-changed to all namespaces', async () => {
         const manager = new SSEManager(0, new VisibilityTracker())
         const received: Array<{ id: string; event: SyncEvent }> = []
 
@@ -60,6 +61,7 @@ describe('SSEManager namespace filtering', () => {
         })
 
         manager.broadcast({ type: 'connection-changed', data: { status: 'connected' } })
+        await Promise.resolve()
 
         expect(received).toHaveLength(2)
         expect(received.map((entry) => entry.id).sort()).toEqual(['alpha', 'beta'])
@@ -117,5 +119,39 @@ describe('SSEManager namespace filtering', () => {
         expect(delivered).toBe(1)
         expect(received).toHaveLength(1)
         expect(received[0]?.id).toBe('visible')
+    })
+
+    it('replays events missed before a reconnect without replaying newer live events', async () => {
+        const manager = new SSEManager(0, new VisibilityTracker())
+        const first = manager.subscribe({
+            id: 'first',
+            namespace: 'alpha',
+            all: true,
+            send: () => {},
+            sendHeartbeat: () => {}
+        })
+
+        manager.broadcast({ type: 'session-updated', sessionId: 'session-1', namespace: 'alpha' })
+        manager.unsubscribe(first.id)
+
+        const replayed: Array<{ type: SyncEvent['type']; id?: number }> = []
+        const second = manager.subscribe({
+            id: 'second',
+            namespace: 'alpha',
+            all: true,
+            replay: true,
+            send: (event, id) => {
+                replayed.push({ type: event.type, id })
+            },
+            sendHeartbeat: () => {}
+        })
+
+        manager.broadcast({ type: 'session-updated', sessionId: 'session-2', namespace: 'alpha' })
+        await manager.replay(second.id, 0)
+
+        expect(replayed).toEqual([
+            { type: 'session-updated', id: 1 },
+            { type: 'session-updated', id: 2 }
+        ])
     })
 })

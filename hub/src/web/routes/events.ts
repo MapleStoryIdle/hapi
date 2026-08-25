@@ -27,6 +27,15 @@ function parseVisibility(value: string | undefined): VisibilityState {
     return value === 'visible' ? 'visible' : 'hidden'
 }
 
+function parseLastEventId(queryValue: string | undefined, headerValue: string | undefined): number | null {
+    const raw = queryValue ?? headerValue
+    if (!raw) {
+        return null
+    }
+    const parsed = Number(raw.trim())
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null
+}
+
 const visibilitySchema = z.object({
     subscriptionId: z.string().min(1),
     visibility: z.enum(['visible', 'hidden'])
@@ -51,6 +60,7 @@ export function createEventsRoutes(
         const machineId = parseOptionalId(query.machineId)
         const subscriptionId = randomUUID()
         const visibility = parseVisibility(query.visibility)
+        const lastEventId = parseLastEventId(query.lastEventId, c.req.header('Last-Event-ID'))
         const namespace = c.get('namespace')
         let resolvedSessionId = sessionId
 
@@ -77,15 +87,22 @@ export function createEventsRoutes(
             }
         }
 
+        c.header('Cache-Control', 'no-cache, no-transform')
+        c.header('X-Accel-Buffering', 'no')
+
         return streamSSE(c, async (stream) => {
-            manager.subscribe({
+            const subscription = manager.subscribe({
                 id: subscriptionId,
                 namespace,
                 all,
                 sessionId: resolvedSessionId,
                 machineId,
                 visibility,
-                send: (event) => stream.writeSSE({ data: JSON.stringify(event) }),
+                replay: true,
+                send: (event, eventId) => stream.writeSSE({
+                    data: JSON.stringify(event),
+                    id: eventId === undefined ? undefined : String(eventId)
+                }),
                 sendHeartbeat: async () => {
                     await stream.writeSSE({
                         data: JSON.stringify({
@@ -99,23 +116,27 @@ export function createEventsRoutes(
                 }
             })
 
-            await stream.writeSSE({
-                data: JSON.stringify({
-                    type: 'connection-changed',
-                    data: {
-                        status: 'connected',
-                        subscriptionId
-                    }
+            try {
+                await stream.writeSSE({
+                    data: JSON.stringify({
+                        type: 'connection-changed',
+                        data: {
+                            status: 'connected',
+                            subscriptionId
+                        }
+                    })
                 })
-            })
 
-            await new Promise<void>((resolve) => {
-                const done = () => resolve()
-                c.req.raw.signal.addEventListener('abort', done, { once: true })
-                stream.onAbort(done)
-            })
+                await manager.replay(subscription.id, lastEventId)
 
-            manager.unsubscribe(subscriptionId)
+                await new Promise<void>((resolve) => {
+                    const done = () => resolve()
+                    c.req.raw.signal.addEventListener('abort', done, { once: true })
+                    stream.onAbort(done)
+                })
+            } finally {
+                manager.unsubscribe(subscriptionId)
+            }
         })
     })
 

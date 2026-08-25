@@ -63,6 +63,8 @@ describe('TerminalExecutionDrawer', () => {
         expect(drawer).toHaveClass(
             'bottom-0',
             'h-[min(88dvh,50rem)]',
+            'max-h-[calc(100dvh-var(--app-safe-area-top))]',
+            'pt-[var(--app-safe-area-top)]',
             'rounded-t-[28px]',
             'isolate',
             'sm:right-0',
@@ -79,6 +81,7 @@ describe('TerminalExecutionDrawer', () => {
         expect(drawer.querySelector('[data-terminal-execution-detail]')).toHaveClass('relative', 'isolate', 'flex-1', 'overscroll-contain')
         expect(drawer.querySelector('[data-terminal-execution-input]')).toHaveClass('shrink-0')
         expect(drawer.querySelector('[data-terminal-execution-output]')).toHaveClass('shrink-0')
+        expect(screen.getByTestId('terminal-execution-close')).toHaveTextContent('Close')
     })
 
     it('closes through the drawer close control', async () => {
@@ -111,6 +114,20 @@ describe('TerminalExecutionDrawer', () => {
         })
 
         firePointerEvent(handle, 'pointerup', 220)
+
+        await waitFor(() => {
+            expect(screen.queryByTestId('terminal-execution-drawer')).not.toBeInTheDocument()
+        })
+    })
+
+    it('closes with a single tap on the mobile handle', async () => {
+        render(
+            <I18nProvider>
+                <DrawerHarness />
+            </I18nProvider>
+        )
+
+        fireEvent.click(screen.getByTestId('terminal-execution-drawer-drag-handle'))
 
         await waitFor(() => {
             expect(screen.queryByTestId('terminal-execution-drawer')).not.toBeInTheDocument()

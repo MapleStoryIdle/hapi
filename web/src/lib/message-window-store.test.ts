@@ -163,6 +163,10 @@ describe('message-window-store frame-batched ingestion', () => {
         callbacks[0](0)
 
         expect(getMessageWindowState(SESSION_ID).messages.map((message) => message.id)).toEqual(['frame-1', 'frame-2'])
+        // The merge is frame-batched; React notifications are throttled across
+        // frames so a long token stream does not rebuild SessionChat every frame.
+        expect(callbacks).toHaveLength(2)
+        callbacks[1]?.(0)
         expect(listener).toHaveBeenCalledTimes(1)
         unsubscribe()
     })

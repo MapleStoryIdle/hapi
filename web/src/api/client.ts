@@ -13,6 +13,8 @@ import type {
     FileSearchResponse,
     MachinesResponse,
     MessagesResponse,
+    OpenVikingContextListResponse,
+    OpenVikingContextReadResponse,
     OpenVikingStatusResponse,
     PermissionMode,
     PushSubscriptionPayload,
@@ -59,7 +61,10 @@ type ApiClientOptions = {
     baseUrl?: string
     getToken?: () => string | null
     onUnauthorized?: () => Promise<string | null>
+    requestTimeoutMs?: number
 }
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000
 
 type ErrorPayload = {
     error?: unknown
@@ -96,12 +101,14 @@ export class ApiClient {
     private readonly baseUrl: string | null
     private readonly getToken: (() => string | null) | null
     private readonly onUnauthorized: (() => Promise<string | null>) | null
+    private readonly requestTimeoutMs: number
 
     constructor(token: string, options?: ApiClientOptions) {
         this.token = token
         this.baseUrl = options?.baseUrl ?? null
         this.getToken = options?.getToken ?? null
         this.onUnauthorized = options?.onUnauthorized ?? null
+        this.requestTimeoutMs = options?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
     }
 
     private buildUrl(path: string): string {
@@ -134,34 +141,65 @@ export class ApiClient {
             headers.set('content-type', 'application/json')
         }
 
-        const res = await fetch(this.buildUrl(path), {
-            ...init,
-            headers
-        })
-
-        if (res.status === 401) {
-            if (attempt === 0 && this.onUnauthorized) {
-                const refreshed = await this.onUnauthorized()
-                if (refreshed) {
-                    this.token = refreshed
-                    return await this.request<T>(path, init, attempt + 1, refreshed)
-                }
+        const controller = new AbortController()
+        let timedOut = false
+        const timeoutId = setTimeout(() => {
+            timedOut = true
+            controller.abort()
+        }, this.requestTimeoutMs)
+        const callerSignal = init?.signal
+        const abortFromCaller = () => controller.abort()
+        if (callerSignal) {
+            if (callerSignal.aborted) {
+                controller.abort()
+            } else {
+                callerSignal.addEventListener('abort', abortFromCaller, { once: true })
             }
-            throw new Error('Session expired. Please sign in again.')
         }
 
-        if (!res.ok) {
-            const body = await res.text().catch(() => '')
-            const code = parseErrorCode(body)
-            throw new ApiError(
-                `HTTP ${res.status} ${res.statusText}: ${body}`,
-                res.status,
-                code,
-                body || undefined
-            )
-        }
+        try {
+            const res = await fetch(this.buildUrl(path), {
+                ...init,
+                headers,
+                signal: controller.signal
+            })
 
-        return await res.json() as T
+            if (res.status === 401) {
+                if (attempt === 0 && this.onUnauthorized) {
+                    const refreshed = await this.onUnauthorized()
+                    if (refreshed) {
+                        this.token = refreshed
+                        const retryResult = await this.request<T>(path, init, attempt + 1, refreshed)
+                        if (timedOut) {
+                            throw new ApiError('Request timed out. Please try again.', 408, 'request_timeout')
+                        }
+                        return retryResult
+                    }
+                }
+                throw new Error('Session expired. Please sign in again.')
+            }
+
+            if (!res.ok) {
+                const body = await res.text().catch(() => '')
+                const code = parseErrorCode(body)
+                throw new ApiError(
+                    `HTTP ${res.status} ${res.statusText}: ${body}`,
+                    res.status,
+                    code,
+                    body || undefined
+                )
+            }
+
+            return await res.json() as T
+        } catch (error) {
+            if (timedOut) {
+                throw new ApiError('Request timed out. Please try again.', 408, 'request_timeout')
+            }
+            throw error
+        } finally {
+            clearTimeout(timeoutId)
+            callerSignal?.removeEventListener('abort', abortFromCaller)
+        }
     }
 
     async authenticate(auth: { initData: string } | { accessToken: string }): Promise<AuthResponse> {
@@ -326,7 +364,9 @@ export class ApiClient {
 
         const qs = params.toString()
         const url = `/api/sessions/${encodeURIComponent(sessionId)}/messages${qs ? `?${qs}` : ''}`
-        return await this.request<MessagesResponse>(url)
+        // Message pages are the authoritative reconciliation source after an
+        // SSE gap. Never let a browser/service-worker cache satisfy this read.
+        return await this.request<MessagesResponse>(url, { cache: 'no-store' })
     }
 
     async checkLocalPreview(sessionId: string, request: LocalPreviewCheckRequest): Promise<LocalPreviewCheckResponse> {
@@ -735,6 +775,18 @@ export class ApiClient {
     async getOpenVikingStatus(machineId: string): Promise<OpenVikingStatusResponse> {
         return await this.request<OpenVikingStatusResponse>(
             `/api/openviking/machines/${encodeURIComponent(machineId)}/status`
+        )
+    }
+
+    async listOpenVikingContext(machineId: string, uri = 'viking://'): Promise<OpenVikingContextListResponse> {
+        return await this.request<OpenVikingContextListResponse>(
+            `/api/openviking/machines/${encodeURIComponent(machineId)}/context?uri=${encodeURIComponent(uri)}`
+        )
+    }
+
+    async readOpenVikingContext(machineId: string, uri: string): Promise<OpenVikingContextReadResponse> {
+        return await this.request<OpenVikingContextReadResponse>(
+            `/api/openviking/machines/${encodeURIComponent(machineId)}/context/read?uri=${encodeURIComponent(uri)}`
         )
     }
 

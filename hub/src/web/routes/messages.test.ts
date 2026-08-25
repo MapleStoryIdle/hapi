@@ -21,6 +21,7 @@ import { createMessagesRoutes } from './messages'
 function createApp(opts: {
     active?: boolean
     sendMessage?: (sessionId: string, payload: unknown) => Promise<void>
+    getMessagesPage?: () => unknown
 }) {
     const sentMessages: Array<{ sessionId: string; payload: unknown }> = []
     const sendMessage = opts.sendMessage ?? (async (sessionId: string, payload: unknown) => {
@@ -35,7 +36,7 @@ function createApp(opts: {
         }),
         sendMessage,
         cancelQueuedMessage: async () => ({ status: 'cancelled' }),
-        getMessagesPage: () => ({ messages: [], page: {} }),
+        getMessagesPage: opts.getMessagesPage ?? (() => ({ messages: [], page: {} })),
     } as unknown as SyncEngine
 
     const app = new Hono<WebAppEnv>()
@@ -47,6 +48,21 @@ function createApp(opts: {
 
     return { app, sentMessages }
 }
+
+describe('GET /api/sessions/:id/messages freshness', () => {
+    it('marks message snapshots as non-cacheable for SSE reconciliation', async () => {
+        const { app } = createApp({
+            getMessagesPage: () => ({ messages: [{ id: 'latest' }], page: {} })
+        })
+
+        const response = await app.request('/api/sessions/session-1/messages?limit=1')
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('cache-control')).toBe('no-store, no-cache, must-revalidate')
+        expect(response.headers.get('pragma')).toBe('no-cache')
+        expect(await response.json()).toEqual({ messages: [{ id: 'latest' }], page: {} })
+    })
+})
 
 // ---------------------------------------------------------------------------
 // #2 server-side scheduledAt upper bound
