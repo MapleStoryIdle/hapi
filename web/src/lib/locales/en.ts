@@ -399,7 +399,6 @@ export default {
   'terminal.execution.outputPending': 'Waiting for terminal output…',
   'terminal.execution.noOutput': 'The agent did not return terminal output for this command.',
   'terminal.execution.commandUnavailable': 'Command details are unavailable.',
-  'terminal.execution.dragToClose': 'Drag down or tap to close',
   'terminal.page.title': 'Terminal',
   'terminal.connection.connected': 'Connected',
   'terminal.connection.connecting': 'Connecting',

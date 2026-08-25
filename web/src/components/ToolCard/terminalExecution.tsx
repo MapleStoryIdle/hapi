@@ -162,24 +162,24 @@ function terminalOutputFallback(
         : t('terminal.execution.noOutput')
 }
 
-export function TerminalExecutionDetail(props: { block: ToolCallBlock; surface?: 'dialog' | 'drawer' }) {
+export function TerminalExecutionDetail(props: { block: ToolCallBlock; surface?: 'dialog' | 'drawer' | 'modal' }) {
     const { t } = useTranslation()
     const details = getTerminalExecutionDetails(props.block)
     const state = getTerminalExecutionState(props.block, details)
     const duration = formatTerminalExecutionDuration(details.durationMs)
     const hasOutput = Boolean(details.stdout || details.stderr)
-    const isDrawer = props.surface === 'drawer'
+    const isCompactSurface = props.surface === 'drawer' || props.surface === 'modal'
 
     return (
         <div
             className={cn(
-                isDrawer
+                isCompactSurface
                     ? 'relative isolate flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-5 pb-[max(var(--app-safe-area-bottom),1.25rem)] pt-4 sm:px-6 sm:pb-6'
                     : 'mt-3 flex min-h-0 max-h-[calc(75vh-4rem)] flex-col gap-4 overflow-y-auto pb-1 max-sm:mt-0 max-sm:max-h-none max-sm:flex-1 max-sm:px-5 max-sm:pb-[calc(1.25rem+var(--app-safe-area-bottom))] max-sm:pt-4'
             )}
             data-terminal-execution-detail
         >
-            {!isDrawer ? (
+            {!isCompactSurface ? (
                 <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3" data-terminal-execution-overview>
                     <div className="grid grid-cols-2 gap-2">
                         <div className="min-w-0 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2">

@@ -31,7 +31,7 @@ describe('ToolCard terminal execution detail', () => {
         cleanup()
     })
 
-    it('opens command details in the dedicated drawer instead of the generic dialog', async () => {
+    it('opens command details in the dedicated modal instead of the generic dialog', async () => {
         render(
             <I18nProvider>
                 <ToolCard

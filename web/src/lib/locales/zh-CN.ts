@@ -403,7 +403,6 @@ export default {
   'terminal.execution.outputPending': '正在等待终端输出…',
   'terminal.execution.noOutput': '代理没有返回此命令的终端输出。',
   'terminal.execution.commandUnavailable': '命令详情不可用。',
-  'terminal.execution.dragToClose': '下拉或点击关闭',
   'terminal.page.title': '终端',
   'terminal.connection.connected': '已连接',
   'terminal.connection.connecting': '连接中',

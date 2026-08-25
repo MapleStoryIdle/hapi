@@ -44,7 +44,7 @@ export function shouldShowInlineToolCardBody(
     if (isSubagentToolName(toolName)) return false
     // Terminal command/output is log-like content. Keep it out of the
     // message flow for every display mode; its only full-detail surface is
-    // TerminalExecutionDrawer.
+    // the terminal modal.
     if (isTerminalExecutionTool(toolName)) return false
     return !presentationMinimal
 }

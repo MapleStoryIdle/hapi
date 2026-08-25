@@ -1,4 +1,4 @@
-import { cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ToolCallBlock } from '@/chat/types'
@@ -37,22 +37,12 @@ function DrawerHarness() {
     return <TerminalExecutionDrawer block={makeBlock()} open={open} onOpenChange={setOpen} />
 }
 
-function firePointerEvent(target: Element, type: 'pointerdown' | 'pointermove' | 'pointerup', clientY: number) {
-    const event = createEvent(type, target, { bubbles: true, cancelable: true })
-    Object.defineProperties(event, {
-        pointerId: { value: 1 },
-        pointerType: { value: 'touch' },
-        clientY: { value: clientY },
-    })
-    fireEvent(target, event)
-}
-
 describe('TerminalExecutionDrawer', () => {
     afterEach(() => {
         cleanup()
     })
 
-    it('uses a bottom sheet on mobile and a wide side drawer on larger screens', () => {
+    it('uses a bounded modal on mobile and larger screens', () => {
         render(
             <I18nProvider>
                 <DrawerHarness />
@@ -61,15 +51,18 @@ describe('TerminalExecutionDrawer', () => {
 
         const drawer = screen.getByTestId('terminal-execution-drawer')
         expect(drawer).toHaveClass(
-            'bottom-0',
-            'h-[min(88dvh,50rem)]',
-            'max-h-[calc(100dvh-var(--app-safe-area-top))]',
+            'left-1/2',
+            'top-1/2',
+            'h-[min(75dvh,50rem)]',
+            'max-h-[calc(100dvh-var(--app-safe-area-top)-var(--app-safe-area-bottom)-2rem)]',
+            'w-[min(92vw,60rem)]',
+            'sm:w-[min(75vw,60rem)]',
+            '-translate-x-1/2',
+            '-translate-y-1/2',
             'pt-[var(--app-safe-area-top)]',
-            'rounded-t-[28px]',
+            'rounded-2xl',
             'isolate',
-            'sm:right-0',
-            'sm:h-auto',
-            'sm:w-[min(46rem,58vw)]'
+            'overflow-hidden'
         )
         expect(drawer).toHaveTextContent('Terminal execution')
         expect(drawer).toHaveTextContent('Completed')
@@ -84,7 +77,7 @@ describe('TerminalExecutionDrawer', () => {
         expect(screen.getByTestId('terminal-execution-close')).toHaveTextContent('Close')
     })
 
-    it('closes through the drawer close control', async () => {
+    it('closes through the modal close control', async () => {
         render(
             <I18nProvider>
                 <DrawerHarness />
@@ -98,36 +91,14 @@ describe('TerminalExecutionDrawer', () => {
         })
     })
 
-    it('closes when the mobile handle is dragged down far enough', async () => {
+    it('closes when the modal overlay is clicked', async () => {
         render(
             <I18nProvider>
                 <DrawerHarness />
             </I18nProvider>
         )
 
-        const handle = screen.getByTestId('terminal-execution-drawer-drag-handle')
-        firePointerEvent(handle, 'pointerdown', 100)
-        firePointerEvent(handle, 'pointermove', 220)
-
-        await waitFor(() => {
-            expect(screen.getByTestId('terminal-execution-drawer')).toHaveStyle({ transform: 'translate3d(0, 120px, 0)' })
-        })
-
-        firePointerEvent(handle, 'pointerup', 220)
-
-        await waitFor(() => {
-            expect(screen.queryByTestId('terminal-execution-drawer')).not.toBeInTheDocument()
-        })
-    })
-
-    it('closes with a single tap on the mobile handle', async () => {
-        render(
-            <I18nProvider>
-                <DrawerHarness />
-            </I18nProvider>
-        )
-
-        fireEvent.click(screen.getByTestId('terminal-execution-drawer-drag-handle'))
+        fireEvent.click(screen.getByTestId('terminal-execution-overlay'))
 
         await waitFor(() => {
             expect(screen.queryByTestId('terminal-execution-drawer')).not.toBeInTheDocument()

@@ -222,7 +222,7 @@ describe('ToolGroupCard', () => {
         expect(within(dialog).getAllByText('Result').length).toBeGreaterThan(0)
     })
 
-    it('opens terminal command rows in the command drawer', async () => {
+    it('opens terminal command rows in the command modal', async () => {
         const view = renderCard(makeGroup())
         const groupToggle = within(view.container).getByRole('button', { name: /inspect project files/i })
 
