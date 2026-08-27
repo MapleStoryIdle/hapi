@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Folder, History, LoaderCircle, RefreshCw } from 'lucide-react'
+import { Activity, Folder, History, LoaderCircle, RefreshCw } from 'lucide-react'
 import type { ApiClient } from '@/api/client'
 import type { CodexLocalSessionSummary } from '@/types/api'
 import { formatRelativeTime } from '@/lib/relativeTime'
@@ -52,13 +52,35 @@ export function RecentCodexSessions(props: {
     api: ApiClient
     machineId: string | null
     onOpen: (session: CodexLocalSessionSummary) => void
+    /** Render as a non-scrolling section inside the main HAPI session list. */
+    embedded?: boolean
+    /** Optional heading override used by source panels such as running. */
+    title?: string
+    /** Optional description override; pass null to keep the heading compact. */
+    description?: string | null
+    /** Limit the list to native turns currently reported as processing. */
+    onlyProcessing?: boolean
+    /** Number of recent transcripts to request. Defaults to the product list size. */
+    limit?: number
+    /** Optional empty-state copy for filtered views such as running. */
+    emptyMessage?: string
 }) {
     const { t } = useTranslation()
+    const embedded = props.embedded ?? false
+    const title = props.title ?? t('recentCodex.title')
+    const description = props.description === undefined ? t('recentCodex.description') : props.description
+    const onlyProcessing = props.onlyProcessing ?? false
+    const limit = props.limit ?? 5
+    const SectionIcon = onlyProcessing ? Activity : History
     const [sessions, setSessions] = useState<CodexLocalSessionSummary[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [loadError, setLoadError] = useState<string | null>(null)
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null)
-    const directoryGroups = useMemo(() => groupRecentCodexSessionsByDirectory(sessions), [sessions])
+    const visibleSessions = useMemo(
+        () => onlyProcessing ? sessions.filter((session) => session.runState === 'processing') : sessions,
+        [onlyProcessing, sessions]
+    )
+    const directoryGroups = useMemo(() => groupRecentCodexSessionsByDirectory(visibleSessions), [visibleSessions])
 
     const refresh = useCallback(async () => {
         setIsLoading(true)
@@ -72,7 +94,7 @@ export function RecentCodexSessions(props: {
         try {
             const response = await props.api.getCodexSessions({
                 machineId,
-                limit: 10,
+                limit,
                 excludeHapiInitiated: true
             })
             setSessions(response.sessions)
@@ -82,7 +104,13 @@ export function RecentCodexSessions(props: {
         } finally {
             setIsLoading(false)
         }
-    }, [props.api, props.machineId])
+    }, [limit, props.api, props.machineId])
+
+    const isDefaultNamespaceUnavailable = loadError !== null && (
+        loadError.includes('Codex transcript import is not available outside the default namespace')
+        || loadError.includes('default namespace')
+        || loadError.includes('默认命名空间')
+    )
 
     useEffect(() => {
         void refresh()
@@ -90,19 +118,21 @@ export function RecentCodexSessions(props: {
 
     return (
         <section
-            className="flex min-h-0 w-full flex-1 flex-col px-4 pb-4 pt-3"
-            aria-label={t('recentCodex.title')}
+            className={embedded
+                ? 'flex w-full shrink-0 flex-col px-0 pb-3 pt-1'
+                : 'flex min-h-0 w-full flex-1 flex-col px-4 pb-4 pt-3'}
+            aria-label={title}
             aria-busy={isLoading || undefined}
             data-testid="recent-codex-sessions"
         >
-            <div className="flex items-center justify-between gap-3 pr-10">
+            <div className={`flex items-center justify-between gap-3 ${embedded ? '' : 'pr-10'}`}>
                 <div className="flex min-w-0 items-center gap-2">
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[var(--app-subtle-bg)] text-[var(--app-hint)]">
-                        <History className="h-3.5 w-3.5" aria-hidden="true" />
+                        <SectionIcon className="h-3.5 w-3.5" aria-hidden="true" />
                     </span>
                     <div className="min-w-0">
-                        <h2 className="truncate text-sm font-semibold leading-5 text-[var(--app-fg)]">{t('recentCodex.title')}</h2>
-                        <p className="truncate text-[11px] text-[var(--app-hint)]">{t('recentCodex.description')}</p>
+                        <h2 className="truncate text-sm font-semibold leading-5 text-[var(--app-fg)]">{title}</h2>
+                        {description ? <p className="truncate text-[11px] text-[var(--app-hint)]">{description}</p> : null}
                     </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -125,28 +155,38 @@ export function RecentCodexSessions(props: {
             </div>
 
             {loadError ? (
-                <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-2 text-xs text-red-600" role="status">
-                    <span className="min-w-0 break-words">{loadError}</span>
-                    <button
-                        type="button"
-                        onClick={() => void refresh()}
-                        className="shrink-0 font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
-                    >
-                        {t('recentCodex.retry')}
-                    </button>
+                <div className={isDefaultNamespaceUnavailable
+                    ? 'mt-2 flex items-center justify-between gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-xs text-[var(--app-hint)]'
+                    : 'mt-2 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-2 text-xs text-red-600'} role="status">
+                    <span className="min-w-0 break-words">
+                        {isDefaultNamespaceUnavailable ? t('recentCodex.defaultNamespaceOnly') : loadError}
+                    </span>
+                    {isDefaultNamespaceUnavailable ? null : (
+                        <button
+                            type="button"
+                            onClick={() => void refresh()}
+                            className="shrink-0 font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
+                        >
+                            {t('recentCodex.retry')}
+                        </button>
+                    )}
                 </div>
             ) : null}
 
-            {isLoading && sessions.length === 0 ? (
+            {isLoading && visibleSessions.length === 0 ? (
                 <div className="mt-3 px-1 text-sm text-[var(--app-hint)]">{t('loading')}</div>
             ) : !props.machineId ? (
                 <div className="mt-3 rounded-lg bg-[var(--app-subtle-bg)] px-2.5 py-2 text-xs leading-5 text-[var(--app-hint)]">
                     {t('recentCodex.runnerRequired')}
                 </div>
-            ) : sessions.length === 0 ? (
-                <div className="mt-3 rounded-lg bg-[var(--app-subtle-bg)] px-2.5 py-2 text-xs leading-5 text-[var(--app-hint)]">{t('recentCodex.empty')}</div>
+            ) : loadError && visibleSessions.length === 0 ? null : visibleSessions.length === 0 ? (
+                <div className="mt-3 rounded-lg bg-[var(--app-subtle-bg)] px-2.5 py-2 text-xs leading-5 text-[var(--app-hint)]">
+                    {props.emptyMessage ?? t('recentCodex.empty')}
+                </div>
             ) : (
-                <div className="mt-4 flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
+                <div className={embedded
+                    ? 'mt-3 flex min-h-0 flex-col gap-0'
+                    : 'mt-4 flex min-h-0 flex-col gap-2 overflow-y-auto pr-1'}>
                     {directoryGroups.map((group) => {
                         const directoryLabel = group.directory
                             ? getDirectoryDisplayName(group.directory)

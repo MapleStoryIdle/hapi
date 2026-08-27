@@ -1,11 +1,12 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { SignalLow, Unplug } from 'lucide-react'
 import type { CodexSubscriptionLimits, CodexSubscriptionLimitWindow, Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexSubscriptionLimits } from '@/hooks/queries/useCodexSubscriptionLimits'
 import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
-import { useSessionConnection } from '@/lib/session-connection-context'
+import { useSessionConnection, type SessionConnectionHealth } from '@/lib/session-connection-context'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
@@ -17,7 +18,6 @@ import { MOBILE_LAYOUT_CONTRACT, mobileLayoutHeaderShellStyle } from '@/lib/mobi
 import type { StatusBarProps } from '@/components/AssistantChat/StatusBar'
 import { CheckIcon, CopyIcon } from '@/components/icons'
 import { SESSION_DETAIL_HEADER_ROW_CLASS, SESSION_DETAIL_HEADER_SAFE_AREA_CLASS } from '@/components/SessionDetailHeader'
-import { Wifi, WifiHigh, WifiLow, WifiOff } from 'lucide-react'
 
 type Translator = (key: string, params?: Record<string, string | number>) => string
 
@@ -246,7 +246,21 @@ export function SessionHeaderBackButton(props: { onBack: () => void; label?: str
     )
 }
 
-function SessionConnectionRecoveryButton() {
+function SessionConnectionIcon(props: { health: SessionConnectionHealth }) {
+    if (props.health === 'offline') {
+        return <Unplug className="h-5 w-5" strokeWidth={2.25} aria-hidden="true" />
+    }
+
+    return (
+        <SignalLow
+            className={props.health === 'recovering' ? 'h-5 w-5 animate-pulse' : 'h-5 w-5'}
+            strokeWidth={2.25}
+            aria-hidden="true"
+        />
+    )
+}
+
+export function SessionConnectionRecoveryControl() {
     const connection = useSessionConnection()
     const { t } = useTranslation()
     const recover = useCallback(() => {
@@ -257,49 +271,51 @@ function SessionConnectionRecoveryButton() {
     }, [connection])
     const recoveryActivation = useReliableTopEdgeAction(recover)
 
-    if (!connection) {
+    if (!connection || connection.health === 'connected') {
         return null
     }
 
-    const presentation = connection.health === 'connected'
+    const presentation = connection.health === 'degraded'
         ? {
-            label: t('session.connection.connected'),
-            icon: <WifiHigh className="h-6 w-6" strokeWidth={2.25} aria-hidden="true" />,
-            iconClass: 'text-emerald-500'
+            label: t('session.connection.degraded'),
+            icon: <SessionConnectionIcon health={connection.health} />,
+            iconClass: 'text-amber-500'
         }
-        : connection.health === 'degraded'
+        : connection.health === 'recovering'
             ? {
-                label: t('session.connection.degraded'),
-                icon: <WifiLow className="h-6 w-6" strokeWidth={2.25} aria-hidden="true" />,
+                label: t('session.connection.recovering'),
+                icon: <SessionConnectionIcon health={connection.health} />,
                 iconClass: 'text-amber-500'
             }
-            : connection.health === 'recovering'
-                ? {
-                    label: t('session.connection.recovering'),
-                    icon: <Wifi className="h-6 w-6 animate-pulse" strokeWidth={2.25} aria-hidden="true" />,
-                    iconClass: 'text-sky-600 dark:text-sky-400'
-                }
-                : {
-                    label: t('session.connection.offline'),
-                    icon: <WifiOff className="h-6 w-6" strokeWidth={2.25} aria-hidden="true" />,
-                    iconClass: 'text-red-500'
-                }
+            : {
+                label: t('session.connection.offline'),
+                icon: <SessionConnectionIcon health={connection.health} />,
+                iconClass: 'text-red-500'
+            }
     const actionLabel = connection.health === 'recovering'
         ? presentation.label
         : `${presentation.label} · ${t('session.connection.recover')}`
 
+    const edgeOffset = 'max(0.75rem, calc((100% - var(--content-max-w, 960px)) / 2 + 0.75rem))'
+
     return (
-        <button
-            type="button"
-            {...recoveryActivation}
-            disabled={connection.health === 'recovering'}
-            data-testid="session-connection-recovery"
-            className="pointer-events-auto touch-manipulation relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:border-[var(--app-hint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
-            aria-label={actionLabel}
-            title={actionLabel}
+        <div
+            data-testid="session-connection-recovery-float"
+            className="fixed top-[calc(var(--app-safe-area-top)+4.75rem)] z-30"
+            style={{ right: edgeOffset }}
         >
-            <span className={presentation.iconClass}>{presentation.icon}</span>
-        </button>
+            <button
+                type="button"
+                {...recoveryActivation}
+                disabled={connection.health === 'recovering'}
+                data-testid="session-connection-recovery"
+                className="pointer-events-auto touch-manipulation relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:border-[var(--app-hint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
+                aria-label={actionLabel}
+                title={actionLabel}
+            >
+                <span className={presentation.iconClass}>{presentation.icon}</span>
+            </button>
+        </div>
     )
 }
 
@@ -702,8 +718,6 @@ export const SessionHeader = memo(function SessionHeader(props: {
                 floating={props.floating}
                 actions={(
                     <>
-                        <SessionConnectionRecoveryButton />
-
                         {session.metadata?.flavor === 'codex' ? (
                             <CodexSubscriptionLimitsBadge
                                 limits={codexLimitsState.limits}

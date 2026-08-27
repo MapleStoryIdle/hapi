@@ -8,7 +8,6 @@ import type {
     AttachmentMetadata,
     CodexCollaborationMode,
     DecryptedMessage,
-    LocalPreviewCandidate,
     PermissionMode,
     Session,
     PiModelSummary,
@@ -22,7 +21,6 @@ import { getPendingCodexQuickReplyPrompt } from '@/chat/codexQuickReply'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { buildConversationOutline } from '@/chat/outline'
-import { extractLocalPreviews } from '@/lib/local-preview'
 import { buildVisibleChatBlocks, isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
 import { groupAssistantResultDetails } from '@/chat/assistantResultGrouping'
 import { isQueuedForInvocation, mergeMessages } from '@/lib/messages'
@@ -50,7 +48,7 @@ import { consumeSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer, getShareTransfer } from '@/lib/shareTransfer'
 import { getDraft } from '@/lib/composer-drafts'
 import { useTranslation } from '@/lib/use-translation'
-import { SessionHeader } from '@/components/SessionHeader'
+import { SessionConnectionRecoveryControl, SessionHeader } from '@/components/SessionHeader'
 import { SESSION_DETAIL_HEADER_HEIGHT_PX } from '@/components/SessionDetailHeader'
 import {
     CursorMigrationBanner,
@@ -58,7 +56,6 @@ import {
     isCursorMigrationInProgress
 } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
-import { LocalPreviewLauncher } from '@/components/LocalPreviewLauncher'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
@@ -558,18 +555,6 @@ export function getLatestTurnCompletionKey(messages: readonly NormalizedMessage[
 export function getLatestUserTurnCreatedAt(messages: readonly NormalizedMessage[]): number | null {
     const latestUserIndex = messages.findLastIndex((message) => message.role === 'user')
     return latestUserIndex >= 0 ? messages[latestUserIndex]!.createdAt : null
-}
-
-function getCurrentLocalPreviewIdentity(): { protocol: 'http' | 'https'; port: number } | null {
-    if (typeof window === 'undefined') return null
-    const protocol = window.location.protocol === 'https:' ? 'https' : window.location.protocol === 'http:' ? 'http' : null
-    if (!protocol) return null
-    const port = window.location.port
-        ? Number(window.location.port)
-        : protocol === 'https'
-            ? 443
-            : 80
-    return Number.isSafeInteger(port) ? { protocol, port } : null
 }
 
 function useSettledRunActive(
@@ -1315,64 +1300,6 @@ function SessionChatInner(props: SessionChatProps) {
             () => normalizeMessagesWithCache(visibleMessages, normalizedCacheRef.current)
         )
     }, [props.session.id, threadSnapshot.messagesVersion, visibleMessages])
-    const detectedLocalPreviews = useMemo(
-        () => extractLocalPreviews(normalizedMessages),
-        [normalizedMessages]
-    )
-    const detectedLocalPreviewKey = useMemo(
-        () => detectedLocalPreviews.map((candidate) => (
-            `${candidate.protocol}:${candidate.port}:${candidate.path}:${candidate.detectedAt}`
-        )).join('|'),
-        [detectedLocalPreviews]
-    )
-    const [localPreviewCandidates, setLocalPreviewCandidates] = useState<LocalPreviewCandidate[]>([])
-    const currentLocalPreviewIdentity = getCurrentLocalPreviewIdentity()
-    const visibleLocalPreviewCandidates = useMemo(
-        () => localPreviewCandidates.filter((candidate) => (
-            !currentLocalPreviewIdentity
-            || candidate.protocol !== currentLocalPreviewIdentity.protocol
-            || candidate.port !== currentLocalPreviewIdentity.port
-        )),
-        [currentLocalPreviewIdentity, localPreviewCandidates]
-    )
-
-    useEffect(() => {
-        const machineId = props.session.metadata?.machineId
-        if (!machineId || detectedLocalPreviews.length === 0) {
-            setLocalPreviewCandidates([])
-            return
-        }
-
-        let cancelled = false
-        const candidatesToCheck = detectedLocalPreviews.slice(0, 5)
-        void Promise.all(candidatesToCheck.map(async (candidate) => {
-            try {
-                return (await props.api.checkLocalPreview(props.session.id, {
-                    protocol: candidate.protocol,
-                    port: candidate.port,
-                    path: candidate.path,
-                    sourceUrl: candidate.sourceUrl
-                })).candidate
-            } catch {
-                return null
-            }
-        })).then((candidates) => {
-            if (cancelled) return
-            setLocalPreviewCandidates(candidates.filter((candidate): candidate is LocalPreviewCandidate => (
-                candidate !== null && candidate.status === 'online'
-            )))
-        })
-
-        return () => {
-            cancelled = true
-        }
-    }, [
-        detectedLocalPreviewKey,
-        props.api,
-        props.session.id,
-        props.session.metadata?.machineId
-    ])
-
     const goalStateSourceMessages = useMemo(
         () => buildGoalStateMessages(threadSnapshot.messages, threadSnapshot.pendingMessages),
         [threadSnapshot.messages, threadSnapshot.pendingMessages]
@@ -1911,10 +1838,7 @@ function SessionChatInner(props: SessionChatProps) {
                 status={sessionHeaderStatus}
                 floating
             />
-            <LocalPreviewLauncher
-                sessionId={props.session.id}
-                candidates={visibleLocalPreviewCandidates}
-            />
+            <SessionConnectionRecoveryControl />
 
             {hasFloatingHeaderNotice ? (
                 <div

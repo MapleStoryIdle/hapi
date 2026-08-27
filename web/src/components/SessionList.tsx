@@ -752,7 +752,7 @@ const SessionItem = memo(function SessionItem(props: {
                         <span
                             role="button"
                             tabIndex={0}
-                            className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                            className="flex h-11 w-11 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation"
                             title={sideSessionsCollapsed ? t('sessions.sideSessions.expand') : t('sessions.sideSessions.collapse')}
                             aria-label={sideSessionsCollapsed ? t('sessions.sideSessions.expand') : t('sessions.sideSessions.collapse')}
                             aria-expanded={!sideSessionsCollapsed}
@@ -881,6 +881,8 @@ export const SessionList = memo(function SessionList(props: {
     api: ApiClient | null
     machineLabelsById?: Record<string, string>
     selectedSessionId?: string | null
+    /** Fit the list to a parent source panel instead of owning the viewport scroll. */
+    embedded?: boolean
 }) {
     const { t } = useTranslation()
     const { renderHeader = true, api, selectedSessionId, machineLabelsById = {}, onNewSessionInDirectory } = props
@@ -1037,7 +1039,7 @@ export const SessionList = memo(function SessionList(props: {
                                 ? showMoreSessions(group)
                                 : collapseSessionGroup(group)}
                             className={cn(
-                                'my-1 rounded-xl px-0 py-2 text-left text-base text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]'
+                                'my-1 min-h-11 rounded-xl px-0 py-2 text-left text-base text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation'
                             )}
                         >
                             {hiddenSessionCount > 0
@@ -1145,8 +1147,12 @@ export const SessionList = memo(function SessionList(props: {
         })
     }, [allGroups])
 
+    const embedded = props.embedded ?? false
+
     return (
-        <div className="mx-auto flex h-full min-h-0 w-full max-w-[620px] flex-1 flex-col">
+        <div className={embedded
+            ? 'flex w-full min-w-0 flex-col'
+            : 'mx-auto flex h-full min-h-0 w-full max-w-[620px] flex-1 flex-col'}>
             {renderHeader ? (
                 <div className="flex items-center justify-between px-8 pb-2 pt-1">
                     <div className="text-sm text-[var(--app-hint)]">
@@ -1155,7 +1161,7 @@ export const SessionList = memo(function SessionList(props: {
                     <button
                         type="button"
                         onClick={props.onNewSession}
-                        className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
+                        className="session-list-new-button flex h-11 w-11 items-center justify-center rounded-full text-[var(--app-link)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                         title={t('sessions.new')}
                     >
                         <PlusIcon className="h-5 w-5" />
@@ -1170,7 +1176,9 @@ export const SessionList = memo(function SessionList(props: {
                 />
             )}
 
-            <div className="app-scroll-y desktop-scrollbar-left flex min-h-0 flex-1 flex-col px-8 pb-6 pt-2">
+            <div className={embedded
+                ? 'flex min-h-0 flex-col px-0 pb-0 pt-0'
+                : 'app-scroll-y desktop-scrollbar-left flex min-h-0 flex-1 flex-col px-8 pb-6 pt-2'}>
                 {machineGroups.map((mg) => {
                     const machineCollapsed = isMachineCollapsed(mg)
                     const showMachineHeading = machineGroups.length > 1
@@ -1180,7 +1188,7 @@ export const SessionList = memo(function SessionList(props: {
                                 <button
                                     type="button"
                                     onClick={() => toggleMachine(mg)}
-                                    className="mb-3 flex items-center gap-2 rounded-xl py-1 text-left text-sm font-medium text-[var(--app-hint)]"
+                                    className="mb-3 flex min-h-11 items-center gap-2 rounded-xl py-1 text-left text-sm font-medium text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation"
                                 >
                                     <span className="h-2 w-2 rounded-full bg-[#34C759]" aria-hidden="true" />
                                     <span>{mg.label}</span>
@@ -1218,7 +1226,7 @@ export const SessionList = memo(function SessionList(props: {
                                                                     directory: group.directory
                                                                 })
                                                             }}
-                                                            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#8e8e93] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                                            className="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8e8e93] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation"
                                                             title={t('sessions.group.new')}
                                                             aria-label={t('sessions.group.new')}
                                                         >

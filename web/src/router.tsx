@@ -14,8 +14,10 @@ import {
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import { App } from '@/App'
-import { SessionList, getSessionWorkspaceTitle } from '@/components/SessionList'
+import { SessionList } from '@/components/SessionList'
+import { SessionSourceTabs, type SessionSource } from '@/components/SessionSourceTabs'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
+import { RecentCodexSessions } from '@/components/RecentCodexSessions'
 import { RecentCodexSessionsDrawer } from '@/components/RecentCodexSessionsDrawer'
 import { CodexSessionContextPage } from '@/components/CodexSessionContextPage'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -52,7 +54,6 @@ const WorkspaceBrowser = lazy(() => import('@/components/WorkspaceBrowser').then
 const FilesPage = lazy(() => import('@/routes/sessions/files'))
 const FilePage = lazy(() => import('@/routes/sessions/file'))
 const TerminalPage = lazy(() => import('@/routes/sessions/terminal'))
-const PreviewPage = lazy(() => import('@/routes/sessions/preview'))
 const OpenVikingPage = lazy(() => import('@/routes/memory'))
 const SettingsPage = lazy(() => import('@/routes/settings'))
 const SharePage = lazy(() => import('@/routes/share'))
@@ -512,6 +513,7 @@ function SessionsPage() {
     const [isMergingDuplicateSessions, setIsMergingDuplicateSessions] = useState(false)
     const [isSessionsMenuOpen, setIsSessionsMenuOpen] = useState(false)
     const [isRecentCodexDrawerOpen, setIsRecentCodexDrawerOpen] = useState(false)
+    const [sessionSource, setSessionSource] = useState<SessionSource>('hapi')
     const [selectedRunnerMachineId, setSelectedRunnerMachineId] = useState<string | null>(loadSelectedRunnerMachineId)
     const [isRunnerDetailsOpen, setIsRunnerDetailsOpen] = useState(false)
     const [isRunnerSwitcherOpen, setIsRunnerSwitcherOpen] = useState(false)
@@ -566,11 +568,20 @@ function SessionsPage() {
         () => getSessionsForMachine(sessions, selectedRunnerMachine?.id),
         [sessions, selectedRunnerMachine?.id]
     )
-    const currentWorkspaceTitle = getSessionWorkspaceTitle(
-        selectedSessionId ? sessions : sessionsForSelectedRunner,
-        selectedSessionId,
-        t('sessions.workspaceFallback')
+    const runningHapiSessions = useMemo(
+        () => sessionsForSelectedRunner.filter((session) => session.active),
+        [sessionsForSelectedRunner]
     )
+    // Native Codex context is a separate read-only route. Keep the source tab
+    // in sync when navigation lands there, while allowing a manual tab choice
+    // on the sessions index without rewriting the URL.
+    useEffect(() => {
+        if (isRecentCodexContext) {
+            setSessionSource('codex')
+        } else if (selectedSessionId) {
+            setSessionSource('hapi')
+        }
+    }, [isRecentCodexContext, selectedSessionId])
 
     const selectRunnerMachine = useCallback((machineId: string) => {
         setSelectedRunnerMachineId(machineId)
@@ -637,6 +648,16 @@ function SessionsPage() {
             params: { sessionId },
         })
     }, [navigate])
+
+    const handleOpenCodexSession = useCallback((session: CodexLocalSessionSummary) => {
+        if (!selectedRunnerMachine) return
+        setIsRecentCodexDrawerOpen(false)
+        navigate({
+            to: '/sessions/codex/$codexSessionId',
+            params: { codexSessionId: session.id },
+            search: { machineId: selectedRunnerMachine.id }
+        })
+    }, [navigate, selectedRunnerMachine])
 
     const handleBrowse = useCallback(() => {
         navigate({ to: '/browse' })
@@ -938,16 +959,14 @@ function SessionsPage() {
                             <RecentSessionsIcon className="h-6 w-6" />
                         </button>
                         <div className="flex min-w-0 flex-col items-center justify-center px-4 text-center">
-                            <button
-                                type="button"
-                                onClick={() => navigate({ to: '/browse' })}
-                                aria-label={t('sessions.switchWorkspace')}
-                                title={t('sessions.switchWorkspace')}
-                                className="group flex min-w-0 max-w-full items-center justify-center gap-1.5 rounded-full px-2 py-0.5 text-[24px] font-semibold leading-7 text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                            >
-                                <span className="truncate">{currentWorkspaceTitle}</span>
-                                <SwitchWorkspaceIcon className="h-4 w-4 shrink-0 text-[#9ca3af] transition-colors group-hover:text-[var(--app-fg)]" />
-                            </button>
+                            <SessionSourceTabs
+                                value={sessionSource}
+                                onChange={(source) => {
+                                    setSessionSource(source)
+                                    setIsRecentCodexDrawerOpen(false)
+                                    setIsSessionsMenuOpen(false)
+                                }}
+                            />
                             <div ref={runnerControlRef} className="relative mt-0.5 flex min-w-0 items-center justify-center gap-1.5 text-[16px] font-medium leading-5 text-[#9ca3af]">
                                 <button
                                     type="button"
@@ -1097,19 +1116,87 @@ function SessionsPage() {
                             <div className="text-sm text-red-600">{error}</div>
                         </div>
                     ) : null}
-                    <SessionList
-                        sessions={sessionsForSelectedRunner}
-                        selectedSessionId={selectedSessionId}
-                        onSelect={handleSelectSession}
-                        onNewSession={goNewSession}
-                        onNewSessionInDirectory={handleNewSessionInDirectory}
-                        onBrowse={handleBrowse}
-                        onRefresh={handleRefresh}
-                        isLoading={isLoading}
-                        renderHeader={false}
-                        api={api}
-                        machineLabelsById={machineLabelsById}
-                    />
+                    {sessionSource === 'running' ? (
+                        <div
+                            id="session-source-panel-running"
+                            role="tabpanel"
+                            aria-labelledby="session-source-tab-running"
+                            className="app-scroll-y mx-auto flex min-h-0 w-full max-w-[620px] flex-1 flex-col px-8 pb-6 pt-2"
+                        >
+                            {runningHapiSessions.length > 0 ? (
+                                <section className="mb-5 min-w-0" aria-label={t('sessions.running.hapi')}>
+                                    <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--app-hint)]">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" aria-hidden="true" />
+                                        <span>{t('sessions.running.hapi')}</span>
+                                    </div>
+                                    <SessionList
+                                        sessions={runningHapiSessions}
+                                        selectedSessionId={selectedSessionId}
+                                        onSelect={handleSelectSession}
+                                        onNewSession={goNewSession}
+                                        onBrowse={handleBrowse}
+                                        onRefresh={handleRefresh}
+                                        isLoading={isLoading}
+                                        renderHeader={false}
+                                        api={api}
+                                        machineLabelsById={machineLabelsById}
+                                        embedded
+                                    />
+                                </section>
+                            ) : null}
+
+                            <div className="min-w-0">
+                                <RecentCodexSessions
+                                    api={api}
+                                    machineId={selectedRunnerMachine?.id ?? null}
+                                    onOpen={handleOpenCodexSession}
+                                    embedded
+                                    onlyProcessing
+                                    limit={100}
+                                    title={t('sessions.running.codex')}
+                                    description={t('sessions.running.codex.description')}
+                                    emptyMessage={runningHapiSessions.length > 0
+                                        ? t('sessions.running.noCodex')
+                                        : t('sessions.running.empty')}
+                                />
+                            </div>
+                        </div>
+                    ) : sessionSource === 'hapi' ? (
+                        <div
+                            id="session-source-panel-hapi"
+                            role="tabpanel"
+                            aria-labelledby="session-source-tab-hapi"
+                            className="flex min-h-0 flex-1 flex-col"
+                        >
+                            <SessionList
+                                sessions={sessionsForSelectedRunner}
+                                selectedSessionId={selectedSessionId}
+                                onSelect={handleSelectSession}
+                                onNewSession={goNewSession}
+                                onNewSessionInDirectory={handleNewSessionInDirectory}
+                                onBrowse={handleBrowse}
+                                onRefresh={handleRefresh}
+                                isLoading={isLoading}
+                                renderHeader={false}
+                                api={api}
+                                machineLabelsById={machineLabelsById}
+                            />
+                        </div>
+                    ) : (
+                        <div
+                            id="session-source-panel-codex"
+                            role="tabpanel"
+                            aria-labelledby="session-source-tab-codex"
+                            className="mx-auto flex min-h-0 w-full max-w-[620px] flex-1 flex-col"
+                        >
+                            <RecentCodexSessions
+                                api={api}
+                                machineId={selectedRunnerMachine?.id ?? null}
+                                onOpen={handleOpenCodexSession}
+                                title={t('sessions.recent.title')}
+                            />
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -1131,15 +1218,7 @@ function SessionsPage() {
                 machineId={selectedRunnerMachine?.id ?? null}
                 open={isRecentCodexDrawerOpen}
                 onOpenChange={setIsRecentCodexDrawerOpen}
-                onOpenSession={(session) => {
-                    if (!selectedRunnerMachine) return
-                    setIsRecentCodexDrawerOpen(false)
-                    navigate({
-                        to: '/sessions/codex/$codexSessionId',
-                        params: { codexSessionId: session.id },
-                        search: { machineId: selectedRunnerMachine.id }
-                    })
-                }}
+                onOpenSession={handleOpenCodexSession}
             />
             {/* 中文注释：这里展示的是本地 Codex transcript 列表；默认尝试勾选当前 Hapi 会话关联的 Codex thread。 */}
             <CodexSessionSyncDialog
@@ -1792,38 +1871,6 @@ const sessionTerminalRoute = createRoute({
     component: TerminalPage,
 })
 
-type SessionPreviewSearch = {
-    port?: number
-    protocol?: 'http' | 'https'
-    path?: string
-}
-
-const sessionPreviewRoute = createRoute({
-    getParentRoute: () => sessionDetailRoute,
-    path: 'preview',
-    validateSearch: (search: Record<string, unknown>): SessionPreviewSearch => {
-        const parsePort = (value: unknown): number | undefined => {
-            const text = typeof value === 'number'
-                ? String(value)
-                : typeof value === 'string'
-                    ? value
-                    : ''
-            if (!/^\d+$/.test(text)) return undefined
-            const parsed = Number(text)
-            return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 65535 ? parsed : undefined
-        }
-        const protocol = search.protocol === 'https' ? 'https' : search.protocol === 'http' ? 'http' : undefined
-        const path = typeof search.path === 'string' && search.path.startsWith('/') ? search.path : undefined
-        const port = parsePort(search.port)
-        return {
-            ...(port !== undefined ? { port } : {}),
-            ...(protocol !== undefined ? { protocol } : {}),
-            ...(path !== undefined ? { path } : {})
-        }
-    },
-    component: PreviewPage,
-})
-
 type SessionFileSearch = {
     path: string
     staged?: boolean
@@ -1982,7 +2029,6 @@ export const routeTree = rootRoute.addChildren([
         codexSessionContextRoute,
         sessionDetailRoute.addChildren([
             sessionTerminalRoute,
-            sessionPreviewRoute,
             sessionFilesRoute,
             sessionFileRoute,
         ]),

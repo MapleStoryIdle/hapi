@@ -55,7 +55,7 @@ describe('RecentCodexSessions', () => {
         })
         expect(api.getCodexSessions).toHaveBeenCalledWith({
             machineId: 'machine-1',
-            limit: 10,
+            limit: 5,
             excludeHapiInitiated: true
         })
         expect(screen.getByText('project')).toBeInTheDocument()
@@ -133,6 +133,62 @@ describe('RecentCodexSessions', () => {
 
         expect(await screen.findByText('Running Codex task')).toBeInTheDocument()
         expect(screen.getByText('Running')).toBeInTheDocument()
+    })
+
+    it('can restrict the view to native sessions that are currently processing', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({
+            success: true as const,
+            sessions: [
+                {
+                    id: 'codex-thread-idle',
+                    title: 'Idle Codex task',
+                    cwd: '/workspace/project',
+                    file: '/tmp/idle-rollout.jsonl',
+                    modifiedAt: 20,
+                    runState: 'idle' as const
+                },
+                {
+                    id: 'codex-thread-processing',
+                    title: 'Processing Codex task',
+                    cwd: '/workspace/project',
+                    file: '/tmp/processing-rollout.jsonl',
+                    modifiedAt: 10,
+                    runState: 'processing' as const
+                }
+            ]
+        }))
+
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    onOpen={vi.fn()}
+                    onlyProcessing
+                />
+            </I18nProvider>
+        )
+
+        expect(await screen.findByText('Processing Codex task')).toBeInTheDocument()
+        expect(screen.queryByText('Idle Codex task')).toBeNull()
+    })
+
+    it('turns the default-namespace response into a concise workspace hint', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => {
+            throw new Error('HTTP 403 Forbidden: {"error":"Codex transcript import is not available outside the default namespace"}')
+        })
+
+        render(
+            <I18nProvider>
+                <RecentCodexSessions api={api} machineId="machine-1" onOpen={vi.fn()} />
+            </I18nProvider>
+        )
+
+        expect(await screen.findByText('Native Codex sessions are available from the default workspace only.')).toBeInTheDocument()
+        expect(screen.queryByText(/HTTP 403 Forbidden/)).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
     })
 
     it('refreshes from the selected runner without clearing visible sessions', async () => {

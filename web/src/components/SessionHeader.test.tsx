@@ -7,7 +7,7 @@ import { SessionConnectionProvider } from '@/lib/session-connection-context'
 import { ToastProvider } from '@/lib/toast-context'
 import type { ApiClient } from '@/api/client'
 import type { Session } from '@/types/api'
-import { SessionHeader } from './SessionHeader'
+import { SessionConnectionRecoveryControl, SessionHeader } from './SessionHeader'
 
 afterEach(() => {
     cleanup()
@@ -412,7 +412,7 @@ describe('SessionHeader details', () => {
 })
 
 describe('SessionHeader connection recovery', () => {
-    it('shows the live connection state and lets the operator force recovery', () => {
+    it('hides the connection control while live updates are healthy', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -426,12 +426,32 @@ describe('SessionHeader connection recovery', () => {
                 <ToastProvider>
                     <I18nProvider>
                         <SessionConnectionProvider value={{ health: 'connected', recover }}>
-                            <SessionHeader
-                                session={createSession()}
-                                api={null}
-                                onBack={() => {}}
-                                floating
-                            />
+                            <SessionConnectionRecoveryControl />
+                        </SessionConnectionProvider>
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        expect(screen.queryByTestId('session-connection-recovery')).not.toBeInTheDocument()
+        expect(recover).not.toHaveBeenCalled()
+    })
+
+    it('shows the abnormal connection control in the former local-preview position and lets the operator recover', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const recover = vi.fn(async () => {})
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionConnectionProvider value={{ health: 'degraded', recover }}>
+                            <SessionConnectionRecoveryControl />
                         </SessionConnectionProvider>
                     </I18nProvider>
                 </ToastProvider>
@@ -439,7 +459,12 @@ describe('SessionHeader connection recovery', () => {
         )
 
         const button = screen.getByTestId('session-connection-recovery')
-        expect(button).toHaveAttribute('title', 'Live updates connected · Reconnect and refresh')
+        expect(button).toHaveAttribute('title', 'Using backup live updates · Reconnect and refresh')
+        expect(screen.getByTestId('session-connection-recovery-float')).toHaveClass(
+            'fixed',
+            'top-[calc(var(--app-safe-area-top)+4.75rem)]',
+            'z-30'
+        )
         fireEvent.click(button)
 
         expect(recover).toHaveBeenCalledTimes(1)
@@ -458,12 +483,7 @@ describe('SessionHeader connection recovery', () => {
                 <ToastProvider>
                     <I18nProvider>
                         <SessionConnectionProvider value={{ health: 'recovering', recover: async () => {} }}>
-                            <SessionHeader
-                                session={createSession()}
-                                api={null}
-                                onBack={() => {}}
-                                floating
-                            />
+                            <SessionConnectionRecoveryControl />
                         </SessionConnectionProvider>
                     </I18nProvider>
                 </ToastProvider>
@@ -472,5 +492,53 @@ describe('SessionHeader connection recovery', () => {
 
         expect(screen.getByTestId('session-connection-recovery')).toBeDisabled()
         expect(screen.getByTitle('Restoring live updates…')).toBeInTheDocument()
+    })
+
+    it('uses the weak-signal icon for a degraded connection', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionConnectionProvider value={{ health: 'degraded', recover: async () => {} }}>
+                            <SessionConnectionRecoveryControl />
+                        </SessionConnectionProvider>
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const signal = screen.getByTestId('session-connection-recovery').querySelector('svg')
+        expect(signal).toHaveClass('lucide-signal-low', 'h-5', 'w-5')
+    })
+
+    it('uses the unplug icon for a disconnected connection', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionConnectionProvider value={{ health: 'offline', recover: async () => {} }}>
+                            <SessionConnectionRecoveryControl />
+                        </SessionConnectionProvider>
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const icon = screen.getByTestId('session-connection-recovery').querySelector('svg')
+        expect(icon).toHaveClass('lucide-unplug', 'h-5', 'w-5')
     })
 })

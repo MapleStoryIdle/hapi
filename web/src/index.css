@@ -522,6 +522,32 @@ select {
     }
 }
 
+/*
+ * Session rows remain visually quiet, but their interaction surface is
+ * deliberately generous on touch devices. Keep the selected state in the
+ * same tonal language as the existing list instead of introducing a new card
+ * treatment or changing the list geometry.
+ */
+.session-list-item,
+.session-list-new-button {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.session-list-item {
+    min-height: 2.75rem;
+}
+
+.session-list-item:active,
+.session-list-new-button:active {
+    background-color: var(--app-secondary-bg);
+}
+
+.session-list-item[aria-current="page"] {
+    background-color: var(--app-subtle-bg);
+    box-shadow: inset 2px 0 0 var(--app-link);
+}
+
 /* Collapsible panel animation */
 .collapsible-panel {
     display: grid;

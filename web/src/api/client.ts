@@ -44,8 +44,6 @@ import type {
     FileReadResponse,
     GitCommandResponse,
     ListDirectoryResponse,
-    LocalPreviewCheckRequest,
-    LocalPreviewCheckResponse,
     MachineListDirectoryResponse,
     MachinePathsExistsResponse,
     OpencodeModelsResponse,
@@ -392,16 +390,6 @@ export class ApiClient {
         // Message pages are the authoritative reconciliation source after an
         // SSE gap. Never let a browser/service-worker cache satisfy this read.
         return await this.request<MessagesResponse>(url, { cache: 'no-store' })
-    }
-
-    async checkLocalPreview(sessionId: string, request: LocalPreviewCheckRequest): Promise<LocalPreviewCheckResponse> {
-        return await this.request<LocalPreviewCheckResponse>(
-            `/api/sessions/${encodeURIComponent(sessionId)}/previews/check`,
-            {
-                method: 'POST',
-                body: JSON.stringify(request)
-            }
-        )
     }
 
     async getGitStatus(sessionId: string): Promise<GitCommandResponse> {

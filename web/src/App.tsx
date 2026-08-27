@@ -26,9 +26,8 @@ import { getAppGlobalSseSubscription, getAppSessionSseSubscription } from '@/lib
 import { LoginPrompt } from '@/components/LoginPrompt'
 import { InstallPrompt } from '@/components/InstallPrompt'
 import { OfflineBanner } from '@/components/OfflineBanner'
-import { PwaUpdateBanner, PwaUpdateBannerWithStatusOffset } from '@/components/PwaUpdateBanner'
+import { PwaUpdateBanner } from '@/components/PwaUpdateBanner'
 import { SyncingBanner } from '@/components/SyncingBanner'
-import { ReconnectingBanner } from '@/components/ReconnectingBanner'
 import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
@@ -163,9 +162,7 @@ function AppInner() {
     const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
     const { isSyncing, startSync, endSync } = useSyncingState()
     const [sseDisconnected, setSseDisconnected] = useState(false)
-    const [sseDisconnectReason, setSseDisconnectReason] = useState<string | null>(null)
     const [sessionSseDisconnected, setSessionSseDisconnected] = useState(false)
-    const [sessionSseDisconnectReason, setSessionSseDisconnectReason] = useState<string | null>(null)
     const [globalSseConnected, setGlobalSseConnected] = useState(false)
     const [sessionSseConnected, setSessionSseConnected] = useState(false)
     const [isRecoveringSessionConnection, setIsRecoveringSessionConnection] = useState(false)
@@ -189,9 +186,7 @@ function AppInner() {
         sessionSseConnectedRef.current = false
         sessionReconcileInFlightRef.current.clear()
         setSseDisconnected(false)
-        setSseDisconnectReason(null)
         setSessionSseDisconnected(false)
-        setSessionSseDisconnectReason(null)
         setGlobalSseConnected(false)
         setSessionSseConnected(false)
         setIsRecoveringSessionConnection(false)
@@ -205,7 +200,6 @@ function AppInner() {
             sessionReconcileInFlightRef.current.delete(selectedSessionId)
         }
         setSessionSseDisconnected(false)
-        setSessionSseDisconnectReason(null)
         setSessionSseConnected(false)
         setIsRecoveringSessionConnection(false)
     }, [selectedSessionId])
@@ -293,15 +287,14 @@ function AppInner() {
     const handleSseConnect = useCallback(() => {
         // Clear disconnected state on successful connection
         setSseDisconnected(false)
-        setSseDisconnectReason(null)
         setGlobalSseConnected(true)
 
         // Increment token to track this specific connection
         const token = ++syncTokenRef.current
 
-        // Only force show banner on first connect (page load)
-        // Subsequent connects (session switches) use non-forced mode
-        // which only shows banner when returning from background
+        // Force the initial data synchronization on the first connection.
+        // Later connections still reconcile in the background without the
+        // initial loading treatment.
         if (isFirstConnectRef.current) {
             isFirstConnectRef.current = false
             startSync({ force: true })
@@ -339,12 +332,11 @@ function AppInner() {
         })
     }, [queryClient, reconcileSelectedSessionMessages, startSync, endSync])
 
-    const handleSseDisconnect = useCallback((reason: string) => {
+    const handleSseDisconnect = useCallback(() => {
         setGlobalSseConnected(false)
-        // Only show reconnecting banner if we've already connected once
+        // Ignore the initial connection attempt when deriving session health.
         if (!isFirstConnectRef.current) {
             setSseDisconnected(true)
-            setSseDisconnectReason(reason)
         }
     }, [])
 
@@ -379,20 +371,18 @@ function AppInner() {
     const handleSessionSseConnect = useCallback(() => {
         sessionSseConnectedRef.current = true
         setSessionSseDisconnected(false)
-        setSessionSseDisconnectReason(null)
         setSessionSseConnected(true)
         scheduleBackgroundWork(() => {
             void reconcileSelectedSessionMessages()
         })
     }, [reconcileSelectedSessionMessages])
 
-    const handleSessionSseDisconnect = useCallback((reason: string) => {
+    const handleSessionSseDisconnect = useCallback(() => {
         setSessionSseConnected(false)
         if (!sessionSseConnectedRef.current) {
             return
         }
         setSessionSseDisconnected(true)
-        setSessionSseDisconnectReason(reason)
     }, [])
 
     useEffect(() => {
@@ -692,26 +682,12 @@ function AppInner() {
         )
     }
 
-    const isAnySseDisconnected = sseDisconnected || sessionSseDisconnected
-    const activeSseDisconnectReason = sessionSseDisconnected
-        ? sessionSseDisconnectReason
-        : sseDisconnectReason
-
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
             <SessionConnectionProvider value={sessionConnectionContext}>
                 <VoiceProvider>
-                    <PwaUpdateBannerWithStatusOffset
-                        isSyncing={isSyncing}
-                        isReconnecting={isAnySseDisconnected && !isSyncing}
-                        offsetFromTitleBar={Boolean(selectedSessionId)}
-                    />
+                    <PwaUpdateBanner />
                     <SyncingBanner isSyncing={isSyncing} offsetFromTitleBar={Boolean(selectedSessionId)} />
-                    <ReconnectingBanner
-                        isReconnecting={isAnySseDisconnected && !isSyncing}
-                        reason={activeSseDisconnectReason}
-                        offsetFromTitleBar={Boolean(selectedSessionId)}
-                    />
                     <VoiceErrorBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
                     <OfflineBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
                     <div className="h-full min-h-0 flex flex-col">
