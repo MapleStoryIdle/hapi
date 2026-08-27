@@ -51,6 +51,15 @@ function fireWebKitTouchPointerUp(target: Element) {
     fireEvent(target, event)
 }
 
+function fireWebKitTouchPointerDown(target: Element) {
+    const event = createEvent.pointerDown(target, { bubbles: true, cancelable: true })
+    Object.defineProperties(event, {
+        button: { value: -1 },
+        pointerType: { value: 'touch' },
+    })
+    fireEvent(target, event)
+}
+
 describe('mobile layout contract', () => {
     it('keeps the full title-bar shell transparent without changing the control surface', () => {
         const queryClient = new QueryClient({
@@ -204,13 +213,13 @@ describe('SessionHeader back action', () => {
         )
 
         const titleButton = screen.getByRole('button', { name: 'hapi' })
-        expect(titleButton).toHaveClass('pointer-events-auto', 'touch-manipulation')
+        expect(titleButton).toHaveClass('pointer-events-auto', 'touch-manipulation', 'h-11')
         fireEvent.click(titleButton)
 
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
     })
 
-    it('uses pointer-up for title details without closing it again on the follow-up click', () => {
+    it('opens title details on touch pointer-down without closing it again on the follow-up click', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -234,10 +243,47 @@ describe('SessionHeader back action', () => {
         )
 
         const titleButton = screen.getByRole('button', { name: 'hapi' })
+        fireWebKitTouchPointerDown(titleButton)
         fireWebKitTouchPointerUp(titleButton)
         fireEvent.click(titleButton, { detail: 1 })
 
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+    })
+
+    it('closes title details on a second touch of the same title button', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={createSession()}
+                            api={null}
+                            onBack={() => {}}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const titleButton = screen.getByRole('button', { name: 'hapi' })
+        fireWebKitTouchPointerDown(titleButton)
+        fireWebKitTouchPointerUp(titleButton)
+        fireEvent.click(titleButton, { detail: 1 })
+        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+
+        fireWebKitTouchPointerDown(titleButton)
+        fireWebKitTouchPointerUp(titleButton)
+        fireEvent.click(titleButton, { detail: 1 })
+
+        expect(screen.queryByRole('dialog', { name: 'Session details' })).not.toBeInTheDocument()
     })
 
     it('keeps title details open when a delayed compatibility click arrives after a busy frame', () => {

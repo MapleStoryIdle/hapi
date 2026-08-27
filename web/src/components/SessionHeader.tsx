@@ -135,7 +135,9 @@ export function SessionTitleDetails(props: {
         setDetailsOpen((open) => !open)
     }, [])
 
-    const detailsActivation = useReliableTopEdgeAction(toggleDetails)
+    const detailsActivation = useReliableTopEdgeAction(toggleDetails, {
+        activateOnTouchPointerDown: true
+    })
 
     const copyDetail = async (key: string, value: string) => {
         try {
@@ -178,7 +180,7 @@ export function SessionTitleDetails(props: {
             <button
                 type="button"
                 {...detailsActivation}
-                className="pointer-events-auto touch-manipulation block max-w-full truncate rounded-full px-1.5 pr-2 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                className="pointer-events-auto touch-manipulation flex h-11 max-w-full items-center truncate rounded-full px-1.5 pr-2 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                 aria-haspopup="dialog"
                 aria-expanded={detailsOpen}
                 aria-controls={detailsOpen ? detailsId : undefined}
@@ -262,24 +264,24 @@ function SessionConnectionRecoveryButton() {
     const presentation = connection.health === 'connected'
         ? {
             label: t('session.connection.connected'),
-            icon: <WifiHigh className="h-5 w-5" aria-hidden="true" />,
+            icon: <WifiHigh className="h-6 w-6" strokeWidth={2.25} aria-hidden="true" />,
             iconClass: 'text-emerald-500'
         }
         : connection.health === 'degraded'
             ? {
                 label: t('session.connection.degraded'),
-                icon: <WifiLow className="h-5 w-5" aria-hidden="true" />,
+                icon: <WifiLow className="h-6 w-6" strokeWidth={2.25} aria-hidden="true" />,
                 iconClass: 'text-amber-500'
             }
             : connection.health === 'recovering'
                 ? {
                     label: t('session.connection.recovering'),
-                    icon: <Wifi className="h-5 w-5 animate-pulse" aria-hidden="true" />,
+                    icon: <Wifi className="h-6 w-6 animate-pulse" strokeWidth={2.25} aria-hidden="true" />,
                     iconClass: 'text-sky-600 dark:text-sky-400'
                 }
                 : {
                     label: t('session.connection.offline'),
-                    icon: <WifiOff className="h-5 w-5" aria-hidden="true" />,
+                    icon: <WifiOff className="h-6 w-6" strokeWidth={2.25} aria-hidden="true" />,
                     iconClass: 'text-red-500'
                 }
     const actionLabel = connection.health === 'recovering'
