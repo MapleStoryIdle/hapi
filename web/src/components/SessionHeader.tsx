@@ -1,9 +1,11 @@
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { CodexSubscriptionLimits, CodexSubscriptionLimitWindow, Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexSubscriptionLimits } from '@/hooks/queries/useCodexSubscriptionLimits'
+import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
+import { useSessionConnection } from '@/lib/session-connection-context'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
@@ -15,6 +17,7 @@ import { MOBILE_LAYOUT_CONTRACT, mobileLayoutHeaderShellStyle } from '@/lib/mobi
 import type { StatusBarProps } from '@/components/AssistantChat/StatusBar'
 import { CheckIcon, CopyIcon } from '@/components/icons'
 import { SESSION_DETAIL_HEADER_ROW_CLASS, SESSION_DETAIL_HEADER_SAFE_AREA_CLASS } from '@/components/SessionDetailHeader'
+import { Wifi, WifiHigh, WifiLow, WifiOff } from 'lucide-react'
 
 type Translator = (key: string, params?: Record<string, string | number>) => string
 
@@ -55,7 +58,7 @@ function SessionHeaderDetailRow(props: {
     value: string
     copied: boolean
     onCopy: () => void
-    isAgentInfo: boolean
+    isAgentInfo?: boolean
 }) {
     const { t } = useTranslation()
     const agentParts = props.isAgentInfo
@@ -105,6 +108,251 @@ function SessionHeaderDetailRow(props: {
             ) : (
                 <div className="break-words text-sm font-medium leading-5 text-[var(--app-fg)]">{props.value}</div>
             )}
+        </div>
+    )
+}
+
+export type SessionHeaderDetail = {
+    key: string
+    label: string
+    value: string
+    isAgentInfo?: boolean
+}
+
+/** The shared title trigger and details popover used by all session chat pages. */
+export function SessionTitleDetails(props: {
+    title: string
+    details: readonly SessionHeaderDetail[]
+}) {
+    const { t } = useTranslation()
+    const [detailsOpen, setDetailsOpen] = useState(false)
+    const detailsId = useId()
+    const titleDetailsRef = useRef<HTMLDivElement | null>(null)
+    const copyResetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+    const [copiedDetailKey, setCopiedDetailKey] = useState<string | null>(null)
+
+    const toggleDetails = useCallback(() => {
+        setDetailsOpen((open) => !open)
+    }, [])
+
+    const detailsActivation = useReliableTopEdgeAction(toggleDetails)
+
+    const copyDetail = async (key: string, value: string) => {
+        try {
+            await navigator.clipboard.writeText(value)
+            setCopiedDetailKey(key)
+            clearTimeout(copyResetTimerRef.current)
+            copyResetTimerRef.current = setTimeout(() => setCopiedDetailKey(null), 1400)
+        } catch {
+            // Clipboard may be unavailable in insecure/local browser contexts.
+        }
+    }
+
+    useEffect(() => {
+        if (!detailsOpen) return
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target as Node
+            if (titleDetailsRef.current?.contains(target)) return
+            setDetailsOpen(false)
+        }
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setDetailsOpen(false)
+            }
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown)
+        document.addEventListener('keydown', handleKeyDown)
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown)
+            document.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [detailsOpen])
+
+    useEffect(() => () => clearTimeout(copyResetTimerRef.current), [])
+
+    return (
+        <div ref={titleDetailsRef} className="relative min-w-0 max-w-[min(58vw,22rem)]">
+            <button
+                type="button"
+                {...detailsActivation}
+                className="pointer-events-auto touch-manipulation block max-w-full truncate rounded-full px-1.5 pr-2 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                aria-haspopup="dialog"
+                aria-expanded={detailsOpen}
+                aria-controls={detailsOpen ? detailsId : undefined}
+                title={props.title}
+            >
+                {props.title}
+            </button>
+
+            {detailsOpen ? (
+                <div
+                    id={detailsId}
+                    role="dialog"
+                    aria-label={t('session.header.details.title')}
+                    className="fixed left-3 top-[calc(var(--app-safe-area-top)+4.25rem)] z-50 w-[min(calc(100vw-1.5rem),22rem)] rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+                >
+                    <div className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">{t('session.header.details.title')}</div>
+                    <div className="flex flex-col gap-2">
+                        {props.details.map((row) => (
+                            <SessionHeaderDetailRow
+                                key={row.key}
+                                label={row.label}
+                                value={row.value}
+                                copied={copiedDetailKey === row.key}
+                                onCopy={() => copyDetail(row.key, row.value)}
+                                isAgentInfo={row.isAgentInfo}
+                            />
+                        ))}
+                    </div>
+                </div>
+            ) : null}
+        </div>
+    )
+}
+
+export function SessionHeaderBackButton(props: { onBack: () => void; label?: string }) {
+    const backActivation = useReliableTopEdgeAction(props.onBack)
+
+    const { t } = useTranslation()
+
+    return (
+        <button
+            type="button"
+            {...backActivation}
+            data-testid="session-header-back"
+            aria-label={props.label ?? t('session.back')}
+            title={props.label ?? t('session.back')}
+            className="pointer-events-auto touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+        >
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            >
+                <polyline points="15 18 9 12 15 6" />
+            </svg>
+        </button>
+    )
+}
+
+function SessionConnectionRecoveryButton() {
+    const connection = useSessionConnection()
+    const { t } = useTranslation()
+    const recover = useCallback(() => {
+        if (!connection || connection.health === 'recovering') {
+            return
+        }
+        void connection.recover()
+    }, [connection])
+    const recoveryActivation = useReliableTopEdgeAction(recover)
+
+    if (!connection) {
+        return null
+    }
+
+    const presentation = connection.health === 'connected'
+        ? {
+            label: t('session.connection.connected'),
+            icon: <WifiHigh className="h-5 w-5" aria-hidden="true" />,
+            iconClass: 'text-emerald-500'
+        }
+        : connection.health === 'degraded'
+            ? {
+                label: t('session.connection.degraded'),
+                icon: <WifiLow className="h-5 w-5" aria-hidden="true" />,
+                iconClass: 'text-amber-500'
+            }
+            : connection.health === 'recovering'
+                ? {
+                    label: t('session.connection.recovering'),
+                    icon: <Wifi className="h-5 w-5 animate-pulse" aria-hidden="true" />,
+                    iconClass: 'text-sky-600 dark:text-sky-400'
+                }
+                : {
+                    label: t('session.connection.offline'),
+                    icon: <WifiOff className="h-5 w-5" aria-hidden="true" />,
+                    iconClass: 'text-red-500'
+                }
+    const actionLabel = connection.health === 'recovering'
+        ? presentation.label
+        : `${presentation.label} · ${t('session.connection.recover')}`
+
+    return (
+        <button
+            type="button"
+            {...recoveryActivation}
+            disabled={connection.health === 'recovering'}
+            data-testid="session-connection-recovery"
+            className="pointer-events-auto touch-manipulation relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:border-[var(--app-hint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
+            aria-label={actionLabel}
+            title={actionLabel}
+        >
+            <span className={presentation.iconClass}>{presentation.icon}</span>
+        </button>
+    )
+}
+
+/** Shared floating header shell for normal and external Codex session details. */
+export function FloatingSessionHeader(props: {
+    onBack: () => void
+    backLabel?: string
+    title: string
+    details: readonly SessionHeaderDetail[]
+    actions?: ReactNode
+    floating?: boolean
+}) {
+    // In Telegram, don't render header (Telegram provides its own).
+    if (isTelegramApp()) {
+        return null
+    }
+
+    // A small visual minimum keeps the title clear of the top edge when a
+    // standalone WebKit viewport reports a zero inset. On notched devices the
+    // browser-provided inset remains the source of truth.
+    const headerTopInsetClass = SESSION_DETAIL_HEADER_SAFE_AREA_CLASS
+    // The message viewport intentionally scrolls under this transparent
+    // shell. Keep the shell and every control in one isolated, explicit hit
+    // testing layer: inherited pointer-events:none is unreliable for nested
+    // controls in iOS standalone WebKit.
+    const headerShellClass = props.floating
+        ? `pointer-events-auto absolute inset-x-0 top-0 z-40 isolate touch-manipulation ${headerTopInsetClass}`
+        : headerTopInsetClass
+    // The full-width title-bar shell is transparent. Its compact controls
+    // deliberately keep their own solid surface for legibility.
+    const headerSurfaceClass = 'border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)]'
+    const headerElevationClass = 'shadow-[0_8px_24px_rgba(15,23,42,0.10)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]'
+
+    return (
+        <div
+            className={`${headerShellClass} session-header-shell`}
+            style={mobileLayoutHeaderShellStyle}
+            data-testid={MOBILE_LAYOUT_CONTRACT.header.testId}
+            data-mobile-layout-contract={MOBILE_LAYOUT_CONTRACT.header.state}
+        >
+            <div className={SESSION_DETAIL_HEADER_ROW_CLASS} data-testid="session-header-row">
+                <div
+                    data-testid="session-header-controls"
+                    className={`pointer-events-auto flex h-11 min-w-0 items-center gap-1 rounded-full border px-1 ${headerSurfaceClass} ${headerElevationClass}`}
+                >
+                    <SessionHeaderBackButton onBack={props.onBack} label={props.backLabel} />
+                    <SessionTitleDetails title={props.title} details={props.details} />
+                </div>
+
+                {props.actions ? (
+                    <div className="ml-auto flex shrink-0 items-center gap-1">
+                        {props.actions}
+                    </div>
+                ) : null}
+            </div>
         </div>
     )
 }
@@ -234,6 +482,10 @@ function CodexSubscriptionLimitsBadge(props: {
 }) {
     const { t, locale } = useTranslation()
     const [open, setOpen] = useState(false)
+    const toggleOpen = useCallback(() => {
+        setOpen((value) => !value)
+    }, [])
+    const limitsActivation = useReliableTopEdgeAction(toggleOpen)
     const rootRef = useRef<HTMLDivElement | null>(null)
     const windows = getDisplayLimitWindows(props.limits)
     const text = windows.map((window) => formatLimitWindow(window, t)).filter(Boolean).join(' · ')
@@ -294,7 +546,7 @@ function CodexSubscriptionLimitsBadge(props: {
         <div ref={rootRef} className="pointer-events-auto relative shrink-0">
             <button
                 type="button"
-                onClick={() => setOpen((value) => !value)}
+                {...limitsActivation}
                 className={[
                     'flex h-11 min-w-[50px] flex-col items-start justify-center gap-1 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-2 text-[11px] font-semibold leading-none tabular-nums text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                     props.isFetching ? 'opacity-60' : ''
@@ -377,7 +629,6 @@ export const SessionHeader = memo(function SessionHeader(props: {
     const title = useMemo(() => getSessionTitle(session), [session])
     const projectPath = useMemo(() => getSessionProjectPath(session), [session])
     const agentInfo = useMemo(() => formatSessionAgentInfo(session, t), [session, t])
-    const [detailsOpen, setDetailsOpen] = useState(false)
     const sessionDetails = useMemo(() => [
         { key: 'title', label: t('session.header.details.fullName'), value: title, isAgentInfo: false },
         { key: 'session-id', label: t('session.header.details.sessionId'), value: session.id, isAgentInfo: false },
@@ -389,12 +640,6 @@ export const SessionHeader = memo(function SessionHeader(props: {
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const menuId = useId()
     const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
-    const detailsId = useId()
-    const titleDetailsRef = useRef<HTMLDivElement | null>(null)
-    const copyResetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-    const backPointerUpAtRef = useRef(0)
-    const detailsPointerUpAtRef = useRef(0)
-    const [copiedDetailKey, setCopiedDetailKey] = useState<string | null>(null)
     const [renameOpen, setRenameOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
@@ -438,195 +683,25 @@ export const SessionHeader = memo(function SessionHeader(props: {
         }
         setMenuOpen((open) => !open)
     }
+    const menuActivation = useReliableTopEdgeAction(handleMenuToggle)
 
-    // iOS standalone WebKit occasionally drops the compatibility `click`
-    // generated after a touch on a top-edge control. Trigger the explicit
-    // action from pointer-up for touch/pen only, then consume one follow-up
-    // click. Mouse and keyboard activations stay on the normal click path.
-    const handleBackPointerUp = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-        if (event.pointerType === 'mouse') return
-
-        backPointerUpAtRef.current = Date.now()
-        event.preventDefault()
-        props.onBack()
-    }, [props.onBack])
-
-    const handleBackClick = useCallback(() => {
-        // A touch/pen pointer-up activation has already navigated. Browsers
-        // that still emit the synthetic click must not create a second action.
-        const pointerUpAt = backPointerUpAtRef.current
-        backPointerUpAtRef.current = 0
-        if (pointerUpAt > 0 && Date.now() - pointerUpAt < 500) return
-
-        props.onBack()
-    }, [props.onBack])
-
-    const toggleDetails = useCallback(() => {
-        setDetailsOpen((open) => !open)
-    }, [])
-
-    // Keep the title-details control on the same reliable top-edge activation
-    // path as Back. Standalone iOS WebKit can delay or omit the compatibility
-    // click after a touch in this area; keyboard activation still uses click.
-    const handleDetailsPointerUp = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-        if (event.pointerType === 'mouse') return
-
-        detailsPointerUpAtRef.current = Date.now()
-        event.preventDefault()
-        toggleDetails()
-    }, [toggleDetails])
-
-    const handleDetailsClick = useCallback(() => {
-        // Do not immediately toggle the dialog a second time when the browser
-        // emits the synthetic click after the pointer-up fallback.
-        const pointerUpAt = detailsPointerUpAtRef.current
-        detailsPointerUpAtRef.current = 0
-        if (pointerUpAt > 0 && Date.now() - pointerUpAt < 500) return
-
-        toggleDetails()
-    }, [toggleDetails])
-
-    const copyDetail = async (key: string, value: string) => {
-        try {
-            await navigator.clipboard.writeText(value)
-            setCopiedDetailKey(key)
-            clearTimeout(copyResetTimerRef.current)
-            copyResetTimerRef.current = setTimeout(() => setCopiedDetailKey(null), 1400)
-        } catch {
-            // Clipboard may be unavailable in insecure/local browser contexts.
-        }
-    }
-
-    useEffect(() => {
-        if (!detailsOpen) return
-
-        const handlePointerDown = (event: PointerEvent) => {
-            const target = event.target as Node
-            if (titleDetailsRef.current?.contains(target)) return
-            setDetailsOpen(false)
-        }
-
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                setDetailsOpen(false)
-            }
-        }
-
-        document.addEventListener('pointerdown', handlePointerDown)
-        document.addEventListener('keydown', handleKeyDown)
-        return () => {
-            document.removeEventListener('pointerdown', handlePointerDown)
-            document.removeEventListener('keydown', handleKeyDown)
-        }
-    }, [detailsOpen])
-
-    useEffect(() => () => clearTimeout(copyResetTimerRef.current), [])
-
-    // In Telegram, don't render header (Telegram provides its own)
+    // Keep the normal-session Telegram behavior unchanged: Telegram provides
+    // its own header and must not receive the normal action menu either.
     if (isTelegramApp()) {
         return null
     }
 
-    // A small visual minimum keeps the title clear of the top edge when a
-    // standalone WebKit viewport reports a zero inset. On notched devices the
-    // browser-provided inset remains the source of truth.
-    const headerTopInsetClass = SESSION_DETAIL_HEADER_SAFE_AREA_CLASS
-    // The message viewport intentionally scrolls under this transparent
-    // shell. Keep the shell and every control in one isolated, explicit hit
-    // testing layer: inherited pointer-events:none is unreliable for nested
-    // controls in iOS standalone WebKit.
-    const headerShellClass = props.floating
-        // The conversation outline's dismiss layer spans the thread below.
-        // Keep the title controls above it so they never become an inert
-        // visual element while that drawer is open.
-        ? `pointer-events-auto absolute inset-x-0 top-0 z-40 isolate touch-manipulation ${headerTopInsetClass}`
-        : headerTopInsetClass
-    // The full-width title-bar shell is transparent. Its compact controls
-    // deliberately keep their own solid surface for legibility.
-    const headerSurfaceClass = 'border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)]'
-    const headerElevationClass = 'shadow-[0_8px_24px_rgba(15,23,42,0.10)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]'
-    const menuButtonSurfaceClass = `${headerSurfaceClass} ${headerElevationClass}`
-
     return (
         <>
-            <div
-                className={`${headerShellClass} session-header-shell`}
-                style={mobileLayoutHeaderShellStyle}
-                data-testid={MOBILE_LAYOUT_CONTRACT.header.testId}
-                data-mobile-layout-contract={MOBILE_LAYOUT_CONTRACT.header.state}
-            >
-                <div className={SESSION_DETAIL_HEADER_ROW_CLASS} data-testid="session-header-row">
-                    <div
-                        data-testid="session-header-controls"
-                        className={`pointer-events-auto flex h-11 min-w-0 items-center gap-1 rounded-full border px-1 ${headerSurfaceClass} ${headerElevationClass}`}
-                    >
-                        {/* Back button */}
-                        <button
-                            type="button"
-                            onPointerUp={handleBackPointerUp}
-                            onPointerCancel={() => { backPointerUpAtRef.current = 0 }}
-                            onClick={handleBackClick}
-                            data-testid="session-header-back"
-                            aria-label={t('session.back')}
-                            title={t('session.back')}
-                            className="pointer-events-auto touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                        >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="20"
-                                height="20"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            >
-                                <polyline points="15 18 9 12 15 6" />
-                            </svg>
-                        </button>
+            <FloatingSessionHeader
+                onBack={props.onBack}
+                title={title}
+                details={sessionDetails}
+                floating={props.floating}
+                actions={(
+                    <>
+                        <SessionConnectionRecoveryButton />
 
-                        <div ref={titleDetailsRef} className="relative min-w-0 max-w-[min(58vw,22rem)]">
-                            <button
-                                type="button"
-                                onPointerUp={handleDetailsPointerUp}
-                                onPointerCancel={() => { detailsPointerUpAtRef.current = 0 }}
-                                onClick={handleDetailsClick}
-                                className="pointer-events-auto touch-manipulation block max-w-full truncate rounded-full px-1.5 pr-2 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                aria-haspopup="dialog"
-                                aria-expanded={detailsOpen}
-                                aria-controls={detailsOpen ? detailsId : undefined}
-                                title={title}
-                            >
-                                {title}
-                            </button>
-
-                            {detailsOpen ? (
-                                <div
-                                    id={detailsId}
-                                    role="dialog"
-                                    aria-label={t('session.header.details.title')}
-                                    className="fixed left-3 top-[calc(var(--app-safe-area-top)+4.25rem)] z-50 w-[min(calc(100vw-1.5rem),22rem)] rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
-                                >
-                                    <div className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">{t('session.header.details.title')}</div>
-                                    <div className="flex flex-col gap-2">
-                                        {sessionDetails.map((row) => (
-                                            <SessionHeaderDetailRow
-                                                key={row.key}
-                                                label={row.label}
-                                                value={row.value}
-                                                copied={copiedDetailKey === row.key}
-                                                onCopy={() => copyDetail(row.key, row.value)}
-                                                isAgentInfo={row.isAgentInfo}
-                                            />
-                                        ))}
-                                    </div>
-                                </div>
-                            ) : null}
-                        </div>
-                    </div>
-
-                    <div className="ml-auto flex shrink-0 items-center gap-1">
                         {session.metadata?.flavor === 'codex' ? (
                             <CodexSubscriptionLimitsBadge
                                 limits={codexLimitsState.limits}
@@ -637,13 +712,16 @@ export const SessionHeader = memo(function SessionHeader(props: {
 
                         <button
                             type="button"
-                            onClick={handleMenuToggle}
-                            onPointerDown={(e) => e.stopPropagation()}
+                            {...menuActivation}
+                            onPointerDown={(event) => {
+                                menuActivation.onPointerDown(event)
+                                event.stopPropagation()
+                            }}
                             ref={menuAnchorRef}
                             aria-haspopup="menu"
                             aria-expanded={menuOpen}
                             aria-controls={menuOpen ? menuId : undefined}
-                            className={`pointer-events-auto touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] ${menuButtonSurfaceClass}`}
+                            className="pointer-events-auto touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] text-[var(--app-hint)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
                             title={t('session.more')}
                         >
                             <AgentFlavorStatusIcon
@@ -653,9 +731,9 @@ export const SessionHeader = memo(function SessionHeader(props: {
                                 statusClassName={getStatusDotClass(props.status)}
                             />
                         </button>
-                    </div>
-                </div>
-            </div>
+                    </>
+                )}
+            />
 
             <SessionActionMenu
                 isOpen={menuOpen}

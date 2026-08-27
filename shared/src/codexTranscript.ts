@@ -14,6 +14,8 @@ export type CodexLocalSessionSummary = {
     modifiedAt: number
     originator?: string | null
     cliVersion?: string | null
+    /** Last native turn lifecycle observed while scanning this transcript. */
+    runState?: CodexLocalSessionRunState
 }
 
 export type CodexLocalSessionListOptions = {
@@ -95,6 +97,35 @@ export type CodexLocalSessionDataRpcResponse = {
 } | {
     success: false
     error: string
+}
+
+/**
+ * The native Codex transcript records task lifecycle events. A missing
+ * lifecycle is deliberately "unknown" rather than assumed idle: direct
+ * delivery must never race an already-running native turn.
+ */
+export type CodexLocalSessionRunState = 'idle' | 'processing' | 'unknown'
+
+export type CodexLocalSessionStatusRpcResponse = {
+    success: true
+    status: CodexLocalSessionRunState
+    /** Present while the runner owns a direct native send for this thread. */
+    startedAt?: number
+    /** Short runner-side launch/exit failure, if the most recent send failed. */
+    lastError?: string
+} | {
+    success: false
+    error: string
+}
+
+export type SendCodexLocalSessionMessageRpcResponse = {
+    success: true
+    status: 'processing'
+    startedAt: number
+} | {
+    success: false
+    error: string
+    code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'launch_failed'
 }
 
 type CodexTranscriptFileCandidate = {
@@ -368,7 +399,8 @@ function parseCodexLocalSession(filePath: string, knownModifiedAt?: number): Cod
         file: filePath,
         modifiedAt,
         originator,
-        cliVersion
+        cliVersion,
+        runState: getCodexTranscriptRunState(content)
     }
 }
 
@@ -403,6 +435,43 @@ export function findLocalCodexSession(sessionId: string): CodexLocalSessionSumma
         if (session?.id === sessionId) return session
     }
     return null
+}
+
+/**
+ * Return the last native turn lifecycle state from the raw Codex transcript.
+ *
+ * `task_started` is emitted before a native turn begins. `task_complete` and
+ * `turn_aborted` close it. Older transcript formats which do not carry these
+ * records intentionally remain unknown, so callers do not append to a thread
+ * whose live state cannot be proven.
+ */
+export function getLocalCodexSessionRunState(sessionId: string): CodexLocalSessionRunState | null {
+    const session = findLocalCodexSession(sessionId)
+    if (!session) return null
+    return session.runState ?? 'unknown'
+}
+
+function getCodexTranscriptRunState(content: string): CodexLocalSessionRunState {
+    let state: CodexLocalSessionRunState = 'unknown'
+    for (const line of content.split(/\r?\n/)) {
+        if (!line) continue
+        try {
+            const record = asRecord(JSON.parse(line))
+            if (record?.type !== 'event_msg') continue
+            const payload = asRecord(record.payload)
+            const eventType = asString(payload?.type)
+            if (eventType === 'task_started') {
+                state = 'processing'
+            } else if (eventType === 'task_complete' || eventType === 'turn_aborted') {
+                state = 'idle'
+            }
+        } catch {
+            // A runner can observe the transcript while Codex is appending a
+            // partial final line. Earlier well-formed lifecycle records still
+            // give us the safest known state.
+        }
+    }
+    return state
 }
 
 function getCodexRecordTimestamp(record: Record<string, unknown>): number | undefined {

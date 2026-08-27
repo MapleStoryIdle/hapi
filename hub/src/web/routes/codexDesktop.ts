@@ -4,7 +4,11 @@ import { randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { homedir, hostname, platform } from 'node:os'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
-import { isHapiInitiatedCodexSession } from '@hapi/protocol/codexTranscript'
+import {
+    isHapiInitiatedCodexSession,
+    type CodexLocalSessionStatusRpcResponse,
+    type SendCodexLocalSessionMessageRpcResponse
+} from '@hapi/protocol/codexTranscript'
 import { parseAutomationHeartbeatMessageContent } from '@hapi/protocol/messages'
 import { Hono } from 'hono'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
@@ -63,6 +67,7 @@ type CodexLocalSessionSummary = {
     modifiedAt: number
     originator?: string | null
     cliVersion?: string | null
+    runState?: 'idle' | 'processing' | 'unknown'
 }
 
 type CodexTranscriptFileCandidate = {
@@ -99,6 +104,17 @@ type ForkCodexLocalSessionResponse = {
     session?: unknown
 } | {
     type: 'error'
+    code?: 'hub_unavailable' | 'invalid_fork_request' | 'runner_offline' | 'session_read_failed' | 'session_not_found' | 'workspace_missing' | 'codex_home_unavailable' | 'fork_spawn_failed'
+    message: string
+}
+
+type DirectCodexLocalSessionTarget = {
+    type: 'success'
+    machine: Machine
+    session: CodexLocalSessionSummary
+} | {
+    type: 'error'
+    status: 404 | 409 | 502 | 503
     message: string
 }
 
@@ -900,6 +916,15 @@ function parseForkCodexLocalSessionRequest(value: unknown): { machineId: string 
     return { machineId: machineId.trim() }
 }
 
+function parseSendCodexLocalSessionMessageRequest(value: unknown): { machineId: string; message: string } | null {
+    const record = asRecord(value)
+    if (!record) return null
+    const machineId = typeof record.machineId === 'string' ? record.machineId.trim() : ''
+    const message = typeof record.message === 'string' ? record.message.trim() : ''
+    if (!machineId || !message) return null
+    return { machineId, message }
+}
+
 function getOnlineCodexRunner(engine: SyncEngine, namespace: string, machineId: string): Machine | null {
     return engine.getOnlineMachinesByNamespace(namespace).find((machine) => machine.id === machineId) ?? null
 }
@@ -947,11 +972,55 @@ function machineOwnsCodexCwd(machine: Machine, cwd: string): boolean {
     return workspaceRoots.some((workspaceRoot) => isPathInsideWorkspaceRoot(cwd, workspaceRoot))
 }
 
-function machineCanForkLocalCodexSession(machine: Machine, cwd: string): boolean {
-    // The selected runner supplied the transcript itself, so it owns that
-    // CODEX_HOME. Only ensure the runner can also spawn in its transcript cwd.
+function machineCanUseLocalCodexSession(machine: Machine): boolean {
+    // The selected runner supplied the transcript itself. workspaceRoots only
+    // scopes discovery and the file browser; an explicit native Codex session
+    // may legitimately use a worktree under CODEX_HOME.
     return typeof machine.metadata?.codexHome === 'string'
-        && machineOwnsCodexCwd(machine, cwd)
+}
+
+async function resolveDirectCodexLocalSessionTarget(options: {
+    engine: SyncEngine | null
+    namespace: string
+    machineId: string
+    sessionId: string
+}): Promise<DirectCodexLocalSessionTarget> {
+    const engine = options.engine
+    if (!engine) {
+        return { type: 'error', status: 503, message: 'HAPI hub is not connected' }
+    }
+    const machine = getOnlineCodexRunner(engine, options.namespace, options.machineId)
+    if (!machine) {
+        return { type: 'error', status: 409, message: 'Selected runner is not online' }
+    }
+
+    let localSession
+    try {
+        localSession = await engine.readCodexLocalSession(machine.id, options.sessionId, { limit: 1 })
+    } catch (error) {
+        return {
+            type: 'error',
+            status: 502,
+            message: error instanceof Error ? error.message : 'Failed to read Codex session on the selected runner'
+        }
+    }
+    if (localSession.success !== true) {
+        return { type: 'error', status: 404, message: localSession.error || 'Codex session not found' }
+    }
+
+    const session = localSession.data.session
+    if (isHapiInitiatedCodexSession(session)) {
+        return { type: 'error', status: 409, message: 'Only original native Codex sessions support direct delivery' }
+    }
+    const cwd = session.cwd?.trim()
+    if (!cwd || !machineCanUseLocalCodexSession(machine)) {
+        return {
+            type: 'error',
+            status: 409,
+            message: 'Selected runner does not advertise a Codex transcript home'
+        }
+    }
+    return { type: 'success', machine, session }
 }
 
 function resolveImportMachineId(
@@ -2045,15 +2114,88 @@ export function createCodexDesktopRoutes(options: {
         }
     })
 
+    app.get('/codex/sessions/:id/status', async (c) => {
+        const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
+        if (!machineId) {
+            return c.json({ success: false, error: 'machineId is required' }, 400)
+        }
+
+        const engine = options.getSyncEngine()
+        const target = await resolveDirectCodexLocalSessionTarget({
+            engine,
+            namespace: c.get('namespace'),
+            machineId,
+            sessionId: c.req.param('id')
+        })
+        if (target.type === 'error') {
+            return c.json({ success: false, error: target.message }, target.status)
+        }
+
+        try {
+            const result = await engine!.getCodexLocalSessionStatus(target.machine.id, c.req.param('id'))
+            if (result.success !== true) {
+                return c.json(result, 404)
+            }
+            return c.json(result satisfies CodexLocalSessionStatusRpcResponse)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to read native Codex session status'
+            }, 502)
+        }
+    })
+
+    app.post('/codex/sessions/:id/messages', async (c) => {
+        const request = parseSendCodexLocalSessionMessageRequest(await c.req.json().catch(() => null))
+        if (!request) {
+            return c.json({ success: false, error: 'machineId and message are required' }, 400)
+        }
+
+        const engine = options.getSyncEngine()
+        const target = await resolveDirectCodexLocalSessionTarget({
+            engine,
+            namespace: c.get('namespace'),
+            machineId: request.machineId,
+            sessionId: c.req.param('id')
+        })
+        if (target.type === 'error') {
+            return c.json({ success: false, error: target.message }, target.status)
+        }
+
+        try {
+            const result = await engine!.sendCodexLocalSessionMessage(
+                target.machine.id,
+                c.req.param('id'),
+                request.message
+            )
+            if (result.success === true) {
+                return c.json(result satisfies SendCodexLocalSessionMessageRpcResponse, 202)
+            }
+            const status = result.code === 'invalid_message'
+                ? 400
+                : result.code === 'session_not_found'
+                    ? 404
+                    : result.code === 'launch_failed'
+                        ? 502
+                        : 409
+            return c.json(result satisfies SendCodexLocalSessionMessageRpcResponse, status)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to send message to native Codex session'
+            }, 502)
+        }
+    })
+
     app.post('/codex/sessions/:id/fork', async (c) => {
         const engine = options.getSyncEngine()
         if (!engine) {
-            return c.json({ type: 'error', message: 'HAPI hub is not connected' } satisfies ForkCodexLocalSessionResponse, 503)
+            return c.json({ type: 'error', code: 'hub_unavailable', message: 'HAPI hub is not connected' } satisfies ForkCodexLocalSessionResponse, 503)
         }
 
         const request = parseForkCodexLocalSessionRequest(await c.req.json().catch(() => null))
         if (!request) {
-            return c.json({ type: 'error', message: 'Invalid fork request' } satisfies ForkCodexLocalSessionResponse, 400)
+            return c.json({ type: 'error', code: 'invalid_fork_request', message: 'Invalid fork request' } satisfies ForkCodexLocalSessionResponse, 400)
         }
 
         const namespace = c.get('namespace')
@@ -2061,6 +2203,7 @@ export function createCodexDesktopRoutes(options: {
         if (!machine) {
             return c.json({
                 type: 'error',
+                code: 'runner_offline',
                 message: 'Selected runner is not online'
             } satisfies ForkCodexLocalSessionResponse, 409)
         }
@@ -2071,22 +2214,24 @@ export function createCodexDesktopRoutes(options: {
         } catch (error) {
             return c.json({
                 type: 'error',
+                code: 'session_read_failed',
                 message: error instanceof Error ? error.message : 'Failed to read Codex session on the selected runner'
             } satisfies ForkCodexLocalSessionResponse, 502)
         }
         if (localSession.success !== true) {
-            return c.json({ type: 'error', message: localSession.error || 'Codex session not found' } satisfies ForkCodexLocalSessionResponse, 404)
+            return c.json({ type: 'error', code: 'session_not_found', message: localSession.error || 'Codex session not found' } satisfies ForkCodexLocalSessionResponse, 404)
         }
 
         const summary = localSession.data.session
         const cwd = summary.cwd?.trim()
         if (!cwd) {
-            return c.json({ type: 'error', message: 'The Codex session does not have a workspace path' } satisfies ForkCodexLocalSessionResponse, 409)
+            return c.json({ type: 'error', code: 'workspace_missing', message: 'The Codex session does not have a workspace path' } satisfies ForkCodexLocalSessionResponse, 409)
         }
-        if (!machineCanForkLocalCodexSession(machine, cwd)) {
+        if (!machineCanUseLocalCodexSession(machine)) {
             return c.json({
                 type: 'error',
-                message: 'Selected runner does not advertise a Codex transcript home or cannot access this session workspace'
+                code: 'codex_home_unavailable',
+                message: 'Selected runner does not advertise a Codex transcript home'
             } satisfies ForkCodexLocalSessionResponse, 409)
         }
 
@@ -2106,7 +2251,7 @@ export function createCodexDesktopRoutes(options: {
             summary.id
         )
         if (spawn.type !== 'success') {
-            return c.json({ type: 'error', message: spawn.message } satisfies ForkCodexLocalSessionResponse, 502)
+            return c.json({ type: 'error', code: 'fork_spawn_failed', message: spawn.message } satisfies ForkCodexLocalSessionResponse, 502)
         }
 
         const forkedSession = engine.getSessionByNamespace(spawn.sessionId, namespace)

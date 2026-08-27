@@ -1,6 +1,7 @@
 import type { ApiClient } from '@/api/client'
 import type { DecryptedMessage, MessageStatus, MessagesResponse } from '@/types/api'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
+import { deferUntilUserInteractionSettles } from '@/lib/interaction-priority'
 import { isQueuedForInvocation, isUserMessage, mergeMessages } from '@/lib/messages'
 
 export type MessageWindowState = {
@@ -193,6 +194,19 @@ function scheduleIncomingMessageFlush(): void {
     incomingMessageFlushScheduled = true
     const flush = () => {
         flushQueuedIncomingMessages()
+    }
+    // A stream update is never urgent enough to take the same main-thread
+    // slice as a person pressing a control. Keep the normal rAF path outside
+    // that window, but defer the merge briefly when a direct interaction is
+    // underway. Messages remain queued and are merged losslessly afterward.
+    if (deferUntilUserInteractionSettles(() => {
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(flush)
+            return
+        }
+        setTimeout(flush, 16)
+    })) {
+        return
     }
     if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(flush)

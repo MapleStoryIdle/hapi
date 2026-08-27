@@ -3,7 +3,9 @@ import type {
     AuthResponse,
     CodexLocalSessionsResponse,
     CodexLocalSessionContextResponse,
+    CodexLocalSessionStatusResponse,
     ForkCodexLocalSessionResponse,
+    SendCodexLocalSessionMessageResponse,
     CodexDuplicateSessionsResponse,
     CodexMergeDuplicateSessionsResponse,
     CodexDesktopScriptResponse,
@@ -282,6 +284,29 @@ export class ApiClient {
         if (options.limit !== undefined) queryParams.set('limit', String(options.limit))
         return await this.request<CodexLocalSessionContextResponse>(
             `/api/codex/sessions/${encodeURIComponent(sessionId)}/context?${queryParams.toString()}`
+        )
+    }
+
+    async getCodexSessionStatus(
+        sessionId: string,
+        machineId: string
+    ): Promise<CodexLocalSessionStatusResponse> {
+        const queryParams = new URLSearchParams({ machineId })
+        return await this.request<CodexLocalSessionStatusResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/status?${queryParams.toString()}`
+        )
+    }
+
+    async sendCodexSessionMessage(
+        sessionId: string,
+        payload: { machineId: string; message: string }
+    ): Promise<SendCodexLocalSessionMessageResponse> {
+        return await this.request<SendCodexLocalSessionMessageResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/messages`,
+            {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            }
         )
     }
 

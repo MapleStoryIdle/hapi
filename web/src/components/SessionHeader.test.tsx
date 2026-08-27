@@ -3,6 +3,7 @@ import { cleanup, createEvent, fireEvent, render, screen } from '@testing-librar
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
 import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
+import { SessionConnectionProvider } from '@/lib/session-connection-context'
 import { ToastProvider } from '@/lib/toast-context'
 import type { ApiClient } from '@/api/client'
 import type { Session } from '@/types/api'
@@ -11,6 +12,7 @@ import { SessionHeader } from './SessionHeader'
 afterEach(() => {
     cleanup()
     localStorage.removeItem('hapi-lang')
+    vi.useRealTimers()
 })
 
 function createSession(): Session {
@@ -144,7 +146,7 @@ describe('SessionHeader back action', () => {
 
         const backButton = screen.getByTestId('session-header-back')
         fireEvent.pointerUp(backButton, { button: 0, pointerType: 'touch' })
-        fireEvent.click(backButton)
+        fireEvent.click(backButton, { detail: 1 })
 
         expect(onBack).toHaveBeenCalledTimes(1)
     })
@@ -233,9 +235,69 @@ describe('SessionHeader back action', () => {
 
         const titleButton = screen.getByRole('button', { name: 'hapi' })
         fireWebKitTouchPointerUp(titleButton)
-        fireEvent.click(titleButton)
+        fireEvent.click(titleButton, { detail: 1 })
 
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+    })
+
+    it('keeps title details open when a delayed compatibility click arrives after a busy frame', () => {
+        vi.useFakeTimers()
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={createSession()}
+                            api={null}
+                            onBack={() => {}}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const titleButton = screen.getByRole('button', { name: 'hapi' })
+        fireWebKitTouchPointerUp(titleButton)
+        vi.advanceTimersByTime(750)
+        fireEvent.click(titleButton, { detail: 1 })
+
+        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+    })
+
+    it('opens the top action menu from the touch pointer-up fallback', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={createSession()}
+                            api={null}
+                            onBack={() => {}}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        fireWebKitTouchPointerUp(screen.getByTitle('More actions'))
+
+        expect(screen.getByRole('menu')).toBeInTheDocument()
     })
 
     it('uses the selected locale for session detail labels', () => {
@@ -300,5 +362,69 @@ describe('SessionHeader details', () => {
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
         expect(screen.queryByText('Current branch')).not.toBeInTheDocument()
         expect(getGitStatus).not.toHaveBeenCalled()
+    })
+})
+
+describe('SessionHeader connection recovery', () => {
+    it('shows the live connection state and lets the operator force recovery', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const recover = vi.fn(async () => {})
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionConnectionProvider value={{ health: 'connected', recover }}>
+                            <SessionHeader
+                                session={createSession()}
+                                api={null}
+                                onBack={() => {}}
+                                floating
+                            />
+                        </SessionConnectionProvider>
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const button = screen.getByTestId('session-connection-recovery')
+        expect(button).toHaveAttribute('title', 'Live updates connected · Reconnect and refresh')
+        fireEvent.click(button)
+
+        expect(recover).toHaveBeenCalledTimes(1)
+    })
+
+    it('shows a non-clickable recovery state while the refresh is running', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionConnectionProvider value={{ health: 'recovering', recover: async () => {} }}>
+                            <SessionHeader
+                                session={createSession()}
+                                api={null}
+                                onBack={() => {}}
+                                floating
+                            />
+                        </SessionConnectionProvider>
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        expect(screen.getByTestId('session-connection-recovery')).toBeDisabled()
+        expect(screen.getByTitle('Restoring live updates…')).toBeInTheDocument()
     })
 })

@@ -2,7 +2,9 @@ import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type {
     CodexLocalSessionDataRpcResponse,
-    CodexLocalSessionsRpcResponse
+    CodexLocalSessionStatusRpcResponse,
+    CodexLocalSessionsRpcResponse,
+    SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import type { BinaryFileReadRequest, BinaryFileReadResponse, BinaryFileUploadRequest, BinaryFileUploadResponse } from '@hapi/protocol'
 import type {
@@ -85,6 +87,8 @@ export type RpcOpenVikingContextListResponse = OpenVikingContextListResponse
 export type RpcOpenVikingContextReadResponse = OpenVikingContextReadResponse
 export type RpcCodexLocalSessionsResponse = CodexLocalSessionsRpcResponse
 export type RpcCodexLocalSessionDataResponse = CodexLocalSessionDataRpcResponse
+export type RpcCodexLocalSessionStatusResponse = CodexLocalSessionStatusRpcResponse
+export type RpcSendCodexLocalSessionMessageResponse = SendCodexLocalSessionMessageRpcResponse
 export type RpcForkCodexSideSessionResponse =
     | { type: 'success'; childCodexThreadId: string; parentCodexThreadId: string }
     | { type: 'error'; message: string; code?: string }
@@ -256,6 +260,26 @@ export class RpcGateway {
             sessionId,
             ...options
         }) as RpcCodexLocalSessionDataResponse
+    }
+
+    async getCodexLocalSessionStatus(
+        machineId: string,
+        sessionId: string
+    ): Promise<RpcCodexLocalSessionStatusResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.GetCodexLocalSessionStatus, {
+            sessionId
+        }) as RpcCodexLocalSessionStatusResponse
+    }
+
+    async sendCodexLocalSessionMessage(
+        machineId: string,
+        sessionId: string,
+        message: string
+    ): Promise<RpcSendCodexLocalSessionMessageResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.SendCodexLocalSessionMessage, {
+            sessionId,
+            message
+        }) as RpcSendCodexLocalSessionMessageResponse
     }
 
     async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {

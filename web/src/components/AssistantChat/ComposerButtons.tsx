@@ -1102,6 +1102,8 @@ export function ComposerButtons(props: {
     pendingSchedule?: PendingSchedule | null
     onSchedule?: (pending: PendingSchedule) => void
     onClearSchedule?: () => void
+    /** Hide the input-tools launcher when the transport is text-only. */
+    showInputTools?: boolean
     // The backend rejects scheduled-send + attachment combinations (the per-CLI
     // upload directory is torn down before a mature emit could read the files).
     // The composer must surface that constraint at UI time so the user never
@@ -1158,6 +1160,7 @@ export function ComposerButtons(props: {
 
     const hasSchedule = props.pendingSchedule != null
     const hasAttachments = props.hasAttachments ?? false
+    const showInputTools = props.showInputTools ?? true
     const scratchlistCount = props.scratchlistCount ?? 0
     const routesToScratchlist = (props.scratchlistMode ?? false)
         && !hasAttachments
@@ -1198,6 +1201,7 @@ export function ComposerButtons(props: {
         || props.showSwitchButton
         || props.contextUsagePercent != null
     )
+    const showToolsLauncher = showInputTools || showExecutionTools || showSessionTools
     const openPermissionMenuFromTools = () => {
         setShowToolsMenu(false)
         setShowSkillMenu(false)
@@ -1227,19 +1231,20 @@ export function ComposerButtons(props: {
     }
     const toolsMenuContent = (
         <div className="py-1">
-            <ToolbarMenuSection title={t('composer.menu.input')}>
-                <ComposerPrimitive.AddAttachment
-                    aria-label={t('composer.attach')}
-                    title={t('composer.attach')}
-                    disabled={props.controlsDisabled || hasSchedule}
-                    onClick={() => setShowToolsMenu(false)}
-                    className={toolMenuItemClass}
-                >
-                    <AttachmentIcon />
-                    <span className="flex-1">{t('composer.attach')}</span>
-                </ComposerPrimitive.AddAttachment>
+            {showInputTools ? (
+                <ToolbarMenuSection title={t('composer.menu.input')}>
+                    <ComposerPrimitive.AddAttachment
+                        aria-label={t('composer.attach')}
+                        title={t('composer.attach')}
+                        disabled={props.controlsDisabled || hasSchedule}
+                        onClick={() => setShowToolsMenu(false)}
+                        className={toolMenuItemClass}
+                    >
+                        <AttachmentIcon />
+                        <span className="flex-1">{t('composer.attach')}</span>
+                    </ComposerPrimitive.AddAttachment>
 
-                {props.onSchedule ? (
+                    {props.onSchedule ? (
                     <button
                         type="button"
                         aria-label={t('composer.scheduleSend')}
@@ -1260,9 +1265,9 @@ export function ComposerButtons(props: {
                         <span className="flex-1">{t('composer.scheduleSend')}</span>
                         {hasSchedule ? <span className="text-[var(--app-hint)]">✓</span> : null}
                     </button>
-                ) : null}
+                    ) : null}
 
-                {props.onScratchlistToggle ? (
+                    {props.onScratchlistToggle ? (
                     <button
                         type="button"
                         aria-label={t('scratchlist.toggleAriaLabel')}
@@ -1284,8 +1289,9 @@ export function ComposerButtons(props: {
                             </span>
                         ) : null}
                     </button>
-                ) : null}
-            </ToolbarMenuSection>
+                    ) : null}
+                </ToolbarMenuSection>
+            ) : null}
 
             {showExecutionTools ? (
                 <ToolbarMenuSection title={t('composer.menu.execution')}>
@@ -1661,6 +1667,7 @@ export function ComposerButtons(props: {
     if (props.compact) {
         return (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-between px-3">
+                {showToolsLauncher ? (
                 <button
                     ref={toolsButtonRef}
                     type="button"
@@ -1684,6 +1691,7 @@ export function ComposerButtons(props: {
                 >
                     <PlusIcon />
                 </button>
+                ) : null}
 
                 <div className="pointer-events-auto">
                     <UnifiedButton
@@ -1700,7 +1708,7 @@ export function ComposerButtons(props: {
                         routesToScratchlist={routesToScratchlist}
                     />
                 </div>
-                {showToolsMenu ? (
+                {showToolsLauncher && showToolsMenu ? (
                     <ToolbarMenu
                         anchorRef={toolsButtonRef}
                         align="left"
@@ -1786,6 +1794,7 @@ export function ComposerButtons(props: {
 
     return (
         <div ref={toolbarRef} className="flex flex-nowrap items-center gap-0.5 pb-2 pl-1 pr-2">
+            {showToolsLauncher ? (
             <button
                 ref={toolsButtonRef}
                 type="button"
@@ -1813,6 +1822,7 @@ export function ComposerButtons(props: {
             >
                 <PlusIcon />
             </button>
+            ) : null}
 
             {showInlinePermissionButton ? (
                 <button
@@ -2028,7 +2038,7 @@ export function ComposerButtons(props: {
                 </div>
             </div>
 
-            {showToolsMenu ? (
+            {showToolsLauncher && showToolsMenu ? (
                 <ToolbarMenu
                     anchorRef={toolsButtonRef}
                     align="left"

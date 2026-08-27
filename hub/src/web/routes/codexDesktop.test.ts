@@ -542,7 +542,13 @@ describe('Codex Desktop import routes', () => {
         const store = new Store(':memory:')
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
         const sessionId = '12121212-1212-4212-8212-121212121212'
-        const data = createRunnerLocalSessionData(sessionId)
+        const data = {
+            ...createRunnerLocalSessionData(sessionId),
+            session: {
+                ...createRunnerLocalSessionData(sessionId).session,
+                runState: 'processing' as const
+            }
+        }
         const listCalls: unknown[][] = []
         const readCalls: unknown[][] = []
         const engine = {
@@ -563,7 +569,7 @@ describe('Codex Desktop import routes', () => {
             expect(listResponse.status).toBe(200)
             expect(await listResponse.json()).toMatchObject({
                 success: true,
-                sessions: [{ id: sessionId, title: 'Runner-local Codex task' }]
+                sessions: [{ id: sessionId, title: 'Runner-local Codex task', runState: 'processing' }]
             })
             expect(listCalls).toEqual([['mac-runner', 5]])
 
@@ -588,6 +594,84 @@ describe('Codex Desktop import routes', () => {
                 ]
             })
             expect(readCalls).toEqual([['mac-runner', sessionId, { limit: 50 }]])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('starts a direct message on the exact runner-local native Codex thread', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '56565656-5656-4656-8656-565656565656'
+        const data = createRunnerLocalSessionData(sessionId, '/runner/.codex/worktrees/direct-thread')
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const sendCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            readCodexLocalSession: async () => ({ success: true as const, data }),
+            getCodexLocalSessionStatus: async () => ({ success: true as const, status: 'idle' as const }),
+            sendCodexLocalSessionMessage: async (...args: unknown[]) => {
+                sendCalls.push(args)
+                return { success: true as const, status: 'processing' as const, startedAt: 123 }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const statusResponse = await app.request(`/api/codex/sessions/${sessionId}/status?machineId=mac-runner`)
+            expect(statusResponse.status).toBe(200)
+            expect(await statusResponse.json()).toEqual({ success: true, status: 'idle' })
+
+            const sendResponse = await app.request(`/api/codex/sessions/${sessionId}/messages`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ machineId: 'mac-runner', message: 'Continue the original thread' })
+            })
+            expect(sendResponse.status).toBe(202)
+            expect(await sendResponse.json()).toEqual({ success: true, status: 'processing', startedAt: 123 })
+            expect(sendCalls).toEqual([[
+                'mac-runner',
+                sessionId,
+                'Continue the original thread'
+            ]])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('does not direct-send a HAPI-initiated Codex thread', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '57575757-5757-4757-8757-575757575757'
+        const data = {
+            ...createRunnerLocalSessionData(sessionId),
+            session: {
+                ...createRunnerLocalSessionData(sessionId).session,
+                originator: 'hapi-codex-client'
+            }
+        }
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        let sendCount = 0
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            readCodexLocalSession: async () => ({ success: true as const, data }),
+            sendCodexLocalSessionMessage: async () => {
+                sendCount += 1
+                return { success: true as const, status: 'processing' as const, startedAt: 123 }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${sessionId}/messages`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ machineId: 'mac-runner', message: 'Do not send' })
+            })
+            expect(response.status).toBe(409)
+            expect(await response.json()).toMatchObject({
+                success: false,
+                error: expect.stringContaining('original native')
+            })
+            expect(sendCount).toBe(0)
         } finally {
             store.close()
         }
@@ -631,8 +715,8 @@ describe('Codex Desktop import routes', () => {
     it('forks the selected runner-local Codex thread and copies visible history', async () => {
         const store = new Store(':memory:')
         const codexSessionId = '66666666-6666-4666-8666-666666666666'
-        const data = createRunnerLocalSessionData(codexSessionId, '/runner/workspace/project')
-        const machine = createMachine('machine-1', [], 'default', '/runner/.codex')
+        const data = createRunnerLocalSessionData(codexSessionId, '/runner/.codex/worktrees/fork-thread')
+        const machine = createMachine('machine-1', ['/runner/workspace'], 'default', '/runner/.codex')
         const spawnCalls: unknown[][] = []
         const readCalls: unknown[][] = []
         process.env.HAPI_HOSTNAME = 'hub-host'
@@ -651,7 +735,7 @@ describe('Codex Desktop import routes', () => {
                 spawnSession: async (...args: unknown[]) => {
                     spawnCalls.push(args)
                     const session = store.sessions.getOrCreateSession('forked-hapi-session', {
-                        path: '/runner/workspace/project',
+                        path: '/runner/.codex/worktrees/fork-thread',
                         host: 'machine-1',
                         machineId: 'machine-1',
                         flavor: 'codex'
@@ -673,7 +757,7 @@ describe('Codex Desktop import routes', () => {
             expect(spawnCalls).toHaveLength(1)
             expect(spawnCalls[0]?.slice(0, 3)).toEqual([
                 'machine-1',
-                '/runner/workspace/project',
+                '/runner/.codex/worktrees/fork-thread',
                 'codex'
             ])
             expect(spawnCalls[0]?.[12]).toBe(codexSessionId)
@@ -718,6 +802,7 @@ describe('Codex Desktop import routes', () => {
             expect(response.status).toBe(409)
             expect(await response.json()).toMatchObject({
                 type: 'error',
+                code: 'codex_home_unavailable',
                 message: expect.stringContaining('Codex transcript home')
             })
             expect(spawnCount).toBe(0)
@@ -726,35 +811,4 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
-    it('rejects a selected runner that cannot spawn in the transcript workspace', async () => {
-        const store = new Store(':memory:')
-        const codexSessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-        const data = createRunnerLocalSessionData(codexSessionId, '/runner/outside-workspace')
-        let spawnCount = 0
-
-        try {
-            const engine = {
-                ...createImportSyncEngine(store, [
-                    createMachine('runner', ['/runner/allowed'], 'default', '/runner/.codex')
-                ]),
-                readCodexLocalSession: async () => ({ success: true as const, data }),
-                spawnSession: async () => {
-                    spawnCount += 1
-                    return { type: 'success' as const, sessionId: 'unexpected-session' }
-                }
-            } as unknown as SyncEngine
-            const app = createRoutesAppWithEngine('default', store, engine)
-
-            const response = await app.request(`/api/codex/sessions/${codexSessionId}/fork`, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ machineId: 'runner' })
-            })
-
-            expect(response.status).toBe(409)
-            expect(spawnCount).toBe(0)
-        } finally {
-            store.close()
-        }
-    })
 })

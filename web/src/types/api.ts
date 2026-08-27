@@ -199,6 +199,7 @@ export type CodexLocalSessionSummary = {
     modifiedAt: number
     originator?: string | null
     cliVersion?: string | null
+    runState?: CodexLocalSessionRunState
 }
 
 export type CodexLocalSessionsResponse = {
@@ -229,9 +230,39 @@ export type CodexLocalSessionContextResponse = {
     }
 }
 
+export type CodexLocalSessionRunState = 'idle' | 'processing' | 'unknown'
+
+export type CodexLocalSessionStatusResponse =
+    | {
+        success: true
+        status: CodexLocalSessionRunState
+        startedAt?: number
+        lastError?: string
+    }
+    | {
+        success: false
+        error: string
+    }
+
+export type SendCodexLocalSessionMessageResponse =
+    | {
+        success: true
+        status: 'processing'
+        startedAt: number
+    }
+    | {
+        success: false
+        error: string
+        code?: string
+    }
+
 export type ForkCodexLocalSessionResponse =
     | { type: 'success'; sessionId: string; session?: Session }
-    | { type: 'error'; message: string }
+    | {
+        type: 'error'
+        code?: 'hub_unavailable' | 'invalid_fork_request' | 'runner_offline' | 'session_read_failed' | 'session_not_found' | 'workspace_missing' | 'codex_home_unavailable' | 'fork_spawn_failed'
+        message: string
+    }
 
 export type CodexDesktopSyncRequest = {
     // 中文注释：前端弹窗直接提交 Codex thread ID，后端会按这些 transcript 直接导入到 Hapi。

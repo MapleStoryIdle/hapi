@@ -71,11 +71,13 @@ import {
     type RpcOpenVikingStatusResponse,
     type RpcCursorModel,
     type RpcCodexLocalSessionDataResponse,
+    type RpcCodexLocalSessionStatusResponse,
     type RpcCodexLocalSessionsResponse,
     type RpcOpencodeModel,
     type RpcPathExistsResponse,
     type RpcReadFileResponse,
-    type RpcUploadFileResponse
+    type RpcUploadFileResponse,
+    type RpcSendCodexLocalSessionMessageResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 
@@ -102,11 +104,13 @@ export type {
     RpcOpenVikingStatusResponse,
     RpcCursorModel,
     RpcCodexLocalSessionDataResponse,
+    RpcCodexLocalSessionStatusResponse,
     RpcCodexLocalSessionsResponse,
     RpcOpencodeModel,
     RpcPathExistsResponse,
     RpcReadFileResponse,
-    RpcUploadFileResponse
+    RpcUploadFileResponse,
+    RpcSendCodexLocalSessionMessageResponse
 } from './rpcGateway'
 
 export type ResumeSessionResult =
@@ -2012,6 +2016,21 @@ export class SyncEngine {
         options?: { before?: number; limit?: number }
     ): Promise<RpcCodexLocalSessionDataResponse> {
         return await this.rpcGateway.readCodexLocalSession(machineId, sessionId, options)
+    }
+
+    async getCodexLocalSessionStatus(
+        machineId: string,
+        sessionId: string
+    ): Promise<RpcCodexLocalSessionStatusResponse> {
+        return await this.rpcGateway.getCodexLocalSessionStatus(machineId, sessionId)
+    }
+
+    async sendCodexLocalSessionMessage(
+        machineId: string,
+        sessionId: string,
+        message: string
+    ): Promise<RpcSendCodexLocalSessionMessageResponse> {
+        return await this.rpcGateway.sendCodexLocalSessionMessage(machineId, sessionId, message)
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {

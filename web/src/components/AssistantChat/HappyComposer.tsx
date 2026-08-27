@@ -326,6 +326,8 @@ export function HappyComposer(props: {
     sendError?: ComposerSendError | null
     onClearSendError?: () => void
     showStatusBar?: boolean
+    /** Hide file input affordances for transports that only accept text. */
+    allowAttachments?: boolean
     remoteServerContext?: {
         api: ApiClient
         session: Session
@@ -388,6 +390,7 @@ export function HappyComposer(props: {
         sendError = null,
         onClearSendError,
         showStatusBar = true,
+        allowAttachments = true,
         remoteServerContext,
         activeSideSessions = [],
         onSelectSideSession
@@ -953,6 +956,7 @@ export function HappyComposer(props: {
     }, [])
 
     const handlePaste = useCallback(async (e: ReactClipboardEvent<HTMLTextAreaElement>) => {
+        if (!allowAttachments) return
         const files = Array.from(e.clipboardData?.files || [])
         const imageFiles = files.filter(file => file.type.startsWith('image/'))
 
@@ -977,7 +981,7 @@ export function HappyComposer(props: {
         } catch (error) {
             console.error('Error adding pasted image:', error)
         }
-    }, [api, pendingSchedule])
+    }, [allowAttachments, api, pendingSchedule])
 
     const handleSettingsToggle = useCallback(() => {
         haptic('light')
@@ -1932,6 +1936,7 @@ export function HappyComposer(props: {
                                 pendingSchedule={pendingSchedule}
                                 onSchedule={setPendingSchedule}
                                 onClearSchedule={isControlled ? onClearScheduleProp : () => setPendingScheduleLocal(null)}
+                                showInputTools={allowAttachments}
                                 hasAttachments={hasAttachments}
                                 piModelLabel={piModelLabel}
                                 piModelButtonRef={piModelButtonRef}

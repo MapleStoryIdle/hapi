@@ -198,4 +198,33 @@ describe('useSSE reconnect handling', () => {
 
         expect(MockEventSource.instances[1]?.url).toContain('lastEventId=7')
     })
+
+    it('rebuilds immediately when the operator requests a reconnect', () => {
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+
+        const { rerender } = renderHook(({ reconnectKey }: { reconnectKey: number }) => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            reconnectKey,
+            subscription: { all: true },
+            scope: 'global',
+            onEvent: vi.fn()
+        }), {
+            initialProps: { reconnectKey: 0 },
+            wrapper: createWrapper()
+        })
+
+        const source = MockEventSource.instances[0]
+        expect(source).toBeDefined()
+
+        rerender({ reconnectKey: 1 })
+
+        expect(source?.close).toHaveBeenCalledTimes(1)
+        expect(MockEventSource.instances).toHaveLength(2)
+    })
 })

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Folder, History, RefreshCw } from 'lucide-react'
+import { Folder, History, LoaderCircle, RefreshCw } from 'lucide-react'
 import type { ApiClient } from '@/api/client'
 import type { CodexLocalSessionSummary } from '@/types/api'
 import { formatRelativeTime } from '@/lib/relativeTime'
@@ -177,12 +177,23 @@ export function RecentCodexSessions(props: {
                                                     <span className="min-w-0 flex-1 truncate text-sm font-normal leading-5 tracking-normal text-[var(--app-fg)]" title={session.title}>
                                                         {session.title}
                                                     </span>
-                                                    <time
-                                                        className="shrink-0 text-[11px] tabular-nums text-[var(--app-hint)]"
-                                                        title={formatTimestamp(session.modifiedAt)}
-                                                    >
-                                                        {lastActiveLabel}
-                                                    </time>
+                                                    <span className="flex shrink-0 items-center gap-1.5">
+                                                        {session.runState === 'processing' ? (
+                                                            <span
+                                                                className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-600 dark:text-sky-400"
+                                                                title={t('recentCodex.status.processing')}
+                                                            >
+                                                                <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden="true" />
+                                                                {t('recentCodex.status.processing.short')}
+                                                            </span>
+                                                        ) : null}
+                                                        <time
+                                                            className="text-[11px] tabular-nums text-[var(--app-hint)]"
+                                                            title={formatTimestamp(session.modifiedAt)}
+                                                        >
+                                                            {lastActiveLabel}
+                                                        </time>
+                                                    </span>
                                                 </button>
                                             </li>
                                         )

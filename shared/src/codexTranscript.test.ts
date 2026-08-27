@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { getLocalCodexSessionData, listLocalCodexSessions } from './codexTranscript'
+import { getLocalCodexSessionData, getLocalCodexSessionRunState, listLocalCodexSessions } from './codexTranscript'
 
 const originalCodexHome = process.env.CODEX_HOME
 
@@ -85,6 +85,35 @@ describe('listLocalCodexSessions', () => {
         try {
             expect(listLocalCodexSessions(1).map((session) => session.id)).toEqual([hapiSessionId])
             expect(listLocalCodexSessions(1, { excludeHapiInitiated: true }).map((session) => session.id)).toEqual([externalSessionId])
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+})
+
+describe('getLocalCodexSessionRunState', () => {
+    it('uses explicit task lifecycle records instead of transcript mtime', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-run-state-test-'))
+        const sessionDir = join(codexHome, 'sessions', '2026', '08', '26')
+        const idleSessionId = '33333333-3333-4333-8333-333333333333'
+        const activeSessionId = '44444444-4444-4444-8444-444444444444'
+        const legacySessionId = '55555555-5555-4555-8555-555555555555'
+        mkdirSync(sessionDir, { recursive: true })
+        const writeTranscript = (sessionId: string, events: string[]) => {
+            writeFileSync(join(sessionDir, `rollout-${sessionId}.jsonl`), [
+                JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+                ...events.map((eventType) => JSON.stringify({ type: 'event_msg', payload: { type: eventType } }))
+            ].join('\n'))
+        }
+        writeTranscript(idleSessionId, ['task_started', 'task_complete'])
+        writeTranscript(activeSessionId, ['task_started', 'task_complete', 'task_started'])
+        writeTranscript(legacySessionId, [])
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            expect(getLocalCodexSessionRunState(idleSessionId)).toBe('idle')
+            expect(getLocalCodexSessionRunState(activeSessionId)).toBe('processing')
+            expect(getLocalCodexSessionRunState(legacySessionId)).toBe('unknown')
         } finally {
             rmSync(codexHome, { recursive: true, force: true })
         }

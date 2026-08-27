@@ -17,6 +17,7 @@ import {
     VISIBLE_WINDOW_SIZE,
     updateMessageStatus,
 } from '@/lib/message-window-store'
+import { markUserInteraction, resetInteractionPriorityForTests } from '@/lib/interaction-priority'
 
 function makeMsg(overrides: Partial<DecryptedMessage> = {}): DecryptedMessage {
     const id = overrides.id ?? 'msg-1'
@@ -132,6 +133,8 @@ describe('message-window-store frame-batched ingestion', () => {
 
     afterEach(() => {
         clearMessageWindow(SESSION_ID)
+        resetInteractionPriorityForTests()
+        vi.useRealTimers()
         vi.unstubAllGlobals()
         vi.restoreAllMocks()
     })
@@ -179,6 +182,25 @@ describe('message-window-store frame-batched ingestion', () => {
         callbacks[0](0)
 
         expect(getMessageWindowState(SESSION_ID).messages).toHaveLength(0)
+    })
+
+    it('holds an SSE merge until a direct interaction has settled', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-08-27T00:00:00.000Z'))
+        const callbacks = stubAnimationFrame()
+
+        markUserInteraction()
+        enqueueIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'after-tap', seq: 1 })])
+
+        expect(callbacks).toHaveLength(0)
+        vi.advanceTimersByTime(249)
+        expect(callbacks).toHaveLength(0)
+
+        vi.advanceTimersByTime(1)
+        expect(callbacks).toHaveLength(1)
+        callbacks[0](0)
+
+        expect(getMessageWindowState(SESSION_ID).messages.map((message) => message.id)).toEqual(['after-tap'])
     })
 
     it('flushes queued server messages before processing a consume acknowledgement', () => {

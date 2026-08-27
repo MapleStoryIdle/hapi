@@ -14,6 +14,7 @@ import type {
 } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow, enqueueIncomingMessages, getMessageWindowState, markMessagesConsumed, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
+import { scheduleBackgroundWork } from '@/lib/interaction-priority'
 
 type SSESubscription = {
     all?: boolean
@@ -121,6 +122,8 @@ export function useSSE(options: {
     enabled: boolean
     token: string
     baseUrl: string
+    /** Changes only when the operator explicitly asks to rebuild this stream. */
+    reconnectKey?: number
     subscription?: SSESubscription
     scope?: SSEScope
     onEvent: (event: SyncEvent) => void
@@ -590,7 +593,17 @@ export function useSSE(options: {
                 return
             }
 
-            handleSyncEvent(parsed as SyncEvent)
+            const event = parsed as SyncEvent
+            // Token/message events already flow through the frame-batched
+            // message store. Put every other server-driven cache update behind
+            // a task boundary so it cannot steal a simultaneous tap/click.
+            if (event.type === 'heartbeat' || event.type === 'message-received') {
+                handleSyncEvent(event)
+            } else {
+                scheduleBackgroundWork(() => {
+                    handleSyncEvent(event)
+                })
+            }
         }
 
         eventSource.onmessage = handleMessage
@@ -661,7 +674,7 @@ export function useSSE(options: {
             }
             setSubscriptionId(null)
         }
-    }, [options.baseUrl, options.enabled, options.scope, options.token, scope, subscriptionKey, queryClient, reconnectNonce])
+    }, [options.baseUrl, options.enabled, options.reconnectKey, options.scope, options.token, scope, subscriptionKey, queryClient, reconnectNonce])
 
     return { subscriptionId }
 }

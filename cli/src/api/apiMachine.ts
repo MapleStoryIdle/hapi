@@ -14,9 +14,12 @@ import {
     getLocalCodexSessionData,
     listLocalCodexSessions,
     type CodexLocalSessionDataRpcResponse,
-    type CodexLocalSessionsRpcResponse
+    type CodexLocalSessionStatusRpcResponse,
+    type CodexLocalSessionsRpcResponse,
+    type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+import { NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
 import type { RunnerState, Machine, MachineMetadata } from './types'
 import { RunnerStateSchema, MachineMetadataSchema } from './types'
 import { backoff } from '@/utils/time'
@@ -57,6 +60,15 @@ interface ReadCodexLocalSessionRequest {
     sessionId?: unknown
     before?: unknown
     limit?: unknown
+}
+
+interface GetCodexLocalSessionStatusRequest {
+    sessionId?: unknown
+}
+
+interface SendCodexLocalSessionMessageRequest {
+    sessionId?: unknown
+    message?: unknown
 }
 
 function normalizeWorkspaceRoots(paths?: string[]): string[] | undefined {
@@ -128,6 +140,7 @@ export class ApiMachineClient {
     private keepAliveInterval: NodeJS.Timeout | null = null
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
     private rpcHandlerManager: RpcHandlerManager
+    private readonly nativeCodexSessionDirectSender = new NativeCodexSessionDirectSender()
 
     private readonly normalizedWorkspaceRoots: string[] | undefined
 
@@ -186,6 +199,28 @@ export class ApiMachineClient {
                 return data
                     ? { success: true, data }
                     : { success: false, error: 'Codex session not found' }
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<GetCodexLocalSessionStatusRequest, CodexLocalSessionStatusRpcResponse>(
+            RPC_METHODS.GetCodexLocalSessionStatus,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                if (!sessionId) {
+                    return { success: false, error: 'sessionId is required' }
+                }
+                return this.nativeCodexSessionDirectSender.getStatus(sessionId)
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<SendCodexLocalSessionMessageRequest, SendCodexLocalSessionMessageRpcResponse>(
+            RPC_METHODS.SendCodexLocalSessionMessage,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                if (!sessionId) {
+                    return { success: false, code: 'invalid_message', error: 'sessionId is required' }
+                }
+                return this.nativeCodexSessionDirectSender.send(sessionId, params?.message)
             }
         )
 

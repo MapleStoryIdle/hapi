@@ -227,13 +227,15 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
             JSON.stringify({ timestamp: '2026-08-13T10:00:00.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'runner-local prompt' }] } }),
             JSON.stringify({ timestamp: '2026-08-13T10:00:00.001Z', type: 'event_msg', payload: { type: 'user_message', message: 'runner-local prompt' } }),
             JSON.stringify({ timestamp: '2026-08-13T10:00:01.001Z', type: 'event_msg', payload: { type: 'agent_message', message: 'runner-local answer' } }),
-            JSON.stringify({ timestamp: '2026-08-13T10:00:01.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'runner-local answer' }] } })
+            JSON.stringify({ timestamp: '2026-08-13T10:00:01.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'runner-local answer' }] } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })
         ].join('\n'))
         const client = new ApiMachineClient('cli-token', machine)
 
         try {
-            const listed = await callMachineRpc(client, machine.id, 'listCodexLocalSessions', { limit: 5 }) as { success: boolean; sessions?: Array<{ id: string }> }
-            expect(listed).toMatchObject({ success: true, sessions: [{ id: sessionId }] })
+            const listed = await callMachineRpc(client, machine.id, 'listCodexLocalSessions', { limit: 5 }) as { success: boolean; sessions?: Array<{ id: string; runState?: string }> }
+            expect(listed).toMatchObject({ success: true, sessions: [{ id: sessionId, runState: 'idle' }] })
 
             const hapiSessionId = '87654321-4321-4321-8321-210987654321'
             writeFileSync(join(transcriptDir, `rollout-${hapiSessionId}.jsonl`), JSON.stringify({

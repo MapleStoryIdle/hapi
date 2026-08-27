@@ -111,6 +111,30 @@ describe('RecentCodexSessions', () => {
         expect(screen.getAllByRole('button')).toHaveLength(2)
     })
 
+    it('shows a compact running state when the runner reports a native turn in progress', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({
+            success: true as const,
+            sessions: [{
+                id: 'codex-thread-running',
+                title: 'Running Codex task',
+                cwd: '/workspace/project',
+                file: '/tmp/running-rollout.jsonl',
+                modifiedAt: Date.now(),
+                runState: 'processing' as const
+            }]
+        }))
+
+        render(
+            <I18nProvider>
+                <RecentCodexSessions api={api} machineId="machine-1" onOpen={vi.fn()} />
+            </I18nProvider>
+        )
+
+        expect(await screen.findByText('Running Codex task')).toBeInTheDocument()
+        expect(screen.getByText('Running')).toBeInTheDocument()
+    })
+
     it('refreshes from the selected runner without clearing visible sessions', async () => {
         const api = createApi()
         let resolveRefresh!: (value: { success: true; sessions: CodexLocalSessionSummary[] }) => void

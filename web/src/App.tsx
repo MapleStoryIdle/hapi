@@ -15,7 +15,9 @@ import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
+import { SessionConnectionProvider, type SessionConnectionHealth } from '@/lib/session-connection-context'
 import { clearMessageWindow, enqueueIncomingMessages, fetchLatestMessages, getMessageWindowState } from '@/lib/message-window-store'
+import { markUserInteraction, scheduleBackgroundWork } from '@/lib/interaction-priority'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
@@ -76,6 +78,27 @@ function AppInner() {
         initializeTheme()
         initializeThemeColors()
         initializeChatSurfaceColors()
+    }, [])
+
+    // Native capture runs before React's synthetic click handlers. Mark the
+    // short interaction window here so SSE/reconnect work that arrives at the
+    // same moment yields to every control, not only the session header.
+    useEffect(() => {
+        const handlePointerDown = () => {
+            markUserInteraction()
+        }
+        const handleActivationKey = (event: KeyboardEvent) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                markUserInteraction()
+            }
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown, true)
+        document.addEventListener('keydown', handleActivationKey, true)
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown, true)
+            document.removeEventListener('keydown', handleActivationKey, true)
+        }
     }, [])
 
     // Track visual viewport height for mobile keyboard avoidance (see useViewportHeight.ts)
@@ -143,10 +166,15 @@ function AppInner() {
     const [sseDisconnectReason, setSseDisconnectReason] = useState<string | null>(null)
     const [sessionSseDisconnected, setSessionSseDisconnected] = useState(false)
     const [sessionSseDisconnectReason, setSessionSseDisconnectReason] = useState<string | null>(null)
+    const [globalSseConnected, setGlobalSseConnected] = useState(false)
+    const [sessionSseConnected, setSessionSseConnected] = useState(false)
+    const [isRecoveringSessionConnection, setIsRecoveringSessionConnection] = useState(false)
+    const [sseReconnectKey, setSseReconnectKey] = useState(0)
     const syncTokenRef = useRef(0)
     const isFirstConnectRef = useRef(true)
     const sessionSseConnectedRef = useRef(false)
     const sessionReconcileInFlightRef = useRef<Set<string>>(new Set())
+    const sessionRecoveryTokenRef = useRef(0)
     const baseUrlRef = useRef(baseUrl)
     const pushPromptedRef = useRef(false)
     const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
@@ -164,16 +192,22 @@ function AppInner() {
         setSseDisconnectReason(null)
         setSessionSseDisconnected(false)
         setSessionSseDisconnectReason(null)
+        setGlobalSseConnected(false)
+        setSessionSseConnected(false)
+        setIsRecoveringSessionConnection(false)
         queryClient.clear()
     }, [baseUrl, queryClient])
 
     useEffect(() => {
         sessionSseConnectedRef.current = false
+        sessionRecoveryTokenRef.current += 1
         if (selectedSessionId) {
             sessionReconcileInFlightRef.current.delete(selectedSessionId)
         }
         setSessionSseDisconnected(false)
         setSessionSseDisconnectReason(null)
+        setSessionSseConnected(false)
+        setIsRecoveringSessionConnection(false)
     }, [selectedSessionId])
 
     // Clean up URL params after successful auth (for direct access links)
@@ -250,7 +284,9 @@ function AppInner() {
             return
         }
         if (incomingSeq > current.newestSeq + 1) {
-            void reconcileSelectedSessionMessages()
+            scheduleBackgroundWork(() => {
+                void reconcileSelectedSessionMessages()
+            })
         }
     }, [api, reconcileSelectedSessionMessages, selectedSessionId])
 
@@ -258,6 +294,7 @@ function AppInner() {
         // Clear disconnected state on successful connection
         setSseDisconnected(false)
         setSseDisconnectReason(null)
+        setGlobalSseConnected(true)
 
         // Increment token to track this specific connection
         const token = ++syncTokenRef.current
@@ -271,29 +308,39 @@ function AppInner() {
         } else {
             startSync()
         }
-        const invalidations = [
-            queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-            // Invalidate ALL cached session-detail entries on reconnect, not just
-            // the selected one.  With `SESSION_DETAIL_STALE_TIME_MS` extending the
-            // freshness window on `useSession`, a previously-viewed session that
-            // received updates during the SSE gap would otherwise serve stale
-            // cached data on remount.  See tiann/hapi#884.
-            queryClient.invalidateQueries({ queryKey: ['session'] })
-        ]
-        const refreshMessages = reconcileSelectedSessionMessages()
-        Promise.all([...invalidations, refreshMessages])
-            .catch((error) => {
-                console.error('Failed to invalidate queries on SSE connect:', error)
-            })
-            .finally(() => {
-                // Only end sync if this is still the latest connection
-                if (syncTokenRef.current === token) {
-                    endSync()
-                }
-            })
+        // Reconnect recovery is authoritative, but it can trigger a broad
+        // cache refetch and a full chat reconciliation. Always put it on a
+        // background task and let an in-progress click finish first.
+        scheduleBackgroundWork(() => {
+            // A newer connection superseded this recovery while it was queued.
+            if (syncTokenRef.current !== token) {
+                return
+            }
+            const invalidations = [
+                queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+                // Invalidate ALL cached session-detail entries on reconnect, not just
+                // the selected one.  With `SESSION_DETAIL_STALE_TIME_MS` extending the
+                // freshness window on `useSession`, a previously-viewed session that
+                // received updates during the SSE gap would otherwise serve stale
+                // cached data on remount.  See tiann/hapi#884.
+                queryClient.invalidateQueries({ queryKey: ['session'] })
+            ]
+            const refreshMessages = reconcileSelectedSessionMessages()
+            void Promise.all([...invalidations, refreshMessages])
+                .catch((error) => {
+                    console.error('Failed to invalidate queries on SSE connect:', error)
+                })
+                .finally(() => {
+                    // Only end sync if this is still the latest connection.
+                    if (syncTokenRef.current === token) {
+                        endSync()
+                    }
+                })
+        })
     }, [queryClient, reconcileSelectedSessionMessages, startSync, endSync])
 
     const handleSseDisconnect = useCallback((reason: string) => {
+        setGlobalSseConnected(false)
         // Only show reconnecting banner if we've already connected once
         if (!isFirstConnectRef.current) {
             setSseDisconnected(true)
@@ -312,8 +359,10 @@ function AppInner() {
         if (!api || event.sessionId !== selectedSessionId) {
             return
         }
-        clearMessageWindow(event.sessionId)
-        void reconcileSelectedSessionMessages()
+        scheduleBackgroundWork(() => {
+            clearMessageWindow(event.sessionId)
+            void reconcileSelectedSessionMessages()
+        })
     }, [api, reconcileOnMessageGap, reconcileSelectedSessionMessages, selectedSessionId])
 
     const handleGlobalSseEvent = useCallback((event: SyncEvent) => {
@@ -331,10 +380,14 @@ function AppInner() {
         sessionSseConnectedRef.current = true
         setSessionSseDisconnected(false)
         setSessionSseDisconnectReason(null)
-        void reconcileSelectedSessionMessages()
+        setSessionSseConnected(true)
+        scheduleBackgroundWork(() => {
+            void reconcileSelectedSessionMessages()
+        })
     }, [reconcileSelectedSessionMessages])
 
     const handleSessionSseDisconnect = useCallback((reason: string) => {
+        setSessionSseConnected(false)
         if (!sessionSseConnectedRef.current) {
             return
         }
@@ -373,7 +426,9 @@ function AppInner() {
                 ), null)
                 const current = getMessageWindowState(selectedSessionId)
                 if (latestSeq !== null && (current.newestSeq === null || latestSeq > current.newestSeq)) {
-                    await reconcileSelectedSessionMessages()
+                    scheduleBackgroundWork(() => {
+                        void reconcileSelectedSessionMessages()
+                    })
                 }
             } catch {
                 // The SSE reconnect path and the next probe will retry. The
@@ -453,10 +508,64 @@ function AppInner() {
     )
     const sseEnabled = Boolean(api && token)
 
+    const recoverSessionConnection = useCallback(async (): Promise<void> => {
+        if (!api || !selectedSessionId || isRecoveringSessionConnection) {
+            return
+        }
+
+        const recoveryToken = ++sessionRecoveryTokenRef.current
+        setIsRecoveringSessionConnection(true)
+        // Rebuild both streams. The session stream is preferred, while the
+        // global stream remains the lossless fallback for visible messages.
+        setGlobalSseConnected(false)
+        setSessionSseConnected(false)
+        setSseReconnectKey((value) => value + 1)
+
+        try {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.session(selectedSessionId) }),
+                reconcileSelectedSessionMessages()
+            ])
+        } catch {
+            // The visible connection state remains in recovery/offline until
+            // one of the rebuilt streams opens; avoid exposing transport text.
+        } finally {
+            if (sessionRecoveryTokenRef.current === recoveryToken) {
+                setIsRecoveringSessionConnection(false)
+            }
+        }
+    }, [api, isRecoveringSessionConnection, queryClient, reconcileSelectedSessionMessages, selectedSessionId])
+
+    const sessionConnectionHealth = useMemo<SessionConnectionHealth>(() => {
+        if (!selectedSessionId) {
+            return 'offline'
+        }
+        if (isRecoveringSessionConnection) {
+            return 'recovering'
+        }
+        if (sessionSseConnected) {
+            return 'connected'
+        }
+        if (globalSseConnected) {
+            return 'degraded'
+        }
+        if (sseDisconnected || sessionSseDisconnected) {
+            return 'offline'
+        }
+        return 'recovering'
+    }, [globalSseConnected, isRecoveringSessionConnection, selectedSessionId, sessionSseConnected, sessionSseDisconnected, sseDisconnected])
+
+    const sessionConnectionContext = useMemo(() => ({
+        health: sessionConnectionHealth,
+        recover: recoverSessionConnection
+    }), [recoverSessionConnection, sessionConnectionHealth])
+
     const { subscriptionId: globalSubscriptionId } = useSSE({
         enabled: sseEnabled,
         token: token ?? '',
         baseUrl,
+        reconnectKey: sseReconnectKey,
         subscription: globalEventSubscription,
         scope: 'global',
         onConnect: handleSseConnect,
@@ -469,6 +578,7 @@ function AppInner() {
         enabled: sseEnabled && Boolean(sessionEventSubscription),
         token: token ?? '',
         baseUrl,
+        reconnectKey: sseReconnectKey,
         subscription: sessionEventSubscription ?? undefined,
         scope: 'full',
         onConnect: handleSessionSseConnect,
@@ -481,7 +591,9 @@ function AppInner() {
             if (document.visibilityState !== 'visible') {
                 return
             }
-            void reconcileSelectedSessionMessages()
+            scheduleBackgroundWork(() => {
+                void reconcileSelectedSessionMessages()
+            })
         }
 
         document.addEventListener('visibilitychange', onVisibilityChange)
@@ -587,32 +699,34 @@ function AppInner() {
 
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
-            <VoiceProvider>
-                <PwaUpdateBannerWithStatusOffset
-                    isSyncing={isSyncing}
-                    isReconnecting={isAnySseDisconnected && !isSyncing}
-                    offsetFromTitleBar={Boolean(selectedSessionId)}
-                />
-                <SyncingBanner isSyncing={isSyncing} offsetFromTitleBar={Boolean(selectedSessionId)} />
-                <ReconnectingBanner
-                    isReconnecting={isAnySseDisconnected && !isSyncing}
-                    reason={activeSseDisconnectReason}
-                    offsetFromTitleBar={Boolean(selectedSessionId)}
-                />
-                <VoiceErrorBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
-                <OfflineBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
-                <div className="h-full min-h-0 flex flex-col">
-                    <Suspense fallback={
-                        <div className="flex flex-1 items-center justify-center p-4">
-                            <LoadingState label={t('loading.session')} className="text-sm" />
-                        </div>
-                    }>
-                        <Outlet />
-                    </Suspense>
-                </div>
-                <ToastContainer />
-                <InstallPrompt />
-            </VoiceProvider>
+            <SessionConnectionProvider value={sessionConnectionContext}>
+                <VoiceProvider>
+                    <PwaUpdateBannerWithStatusOffset
+                        isSyncing={isSyncing}
+                        isReconnecting={isAnySseDisconnected && !isSyncing}
+                        offsetFromTitleBar={Boolean(selectedSessionId)}
+                    />
+                    <SyncingBanner isSyncing={isSyncing} offsetFromTitleBar={Boolean(selectedSessionId)} />
+                    <ReconnectingBanner
+                        isReconnecting={isAnySseDisconnected && !isSyncing}
+                        reason={activeSseDisconnectReason}
+                        offsetFromTitleBar={Boolean(selectedSessionId)}
+                    />
+                    <VoiceErrorBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
+                    <OfflineBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
+                    <div className="h-full min-h-0 flex flex-col">
+                        <Suspense fallback={
+                            <div className="flex flex-1 items-center justify-center p-4">
+                                <LoadingState label={t('loading.session')} className="text-sm" />
+                            </div>
+                        }>
+                            <Outlet />
+                        </Suspense>
+                    </div>
+                    <ToastContainer />
+                    <InstallPrompt />
+                </VoiceProvider>
+            </SessionConnectionProvider>
         </AppContextProvider>
     )
 }

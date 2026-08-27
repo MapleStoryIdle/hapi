@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
-import type { ApiClient } from '@/api/client'
+import { ApiError, type ApiClient } from '@/api/client'
 import { buildReadOnlyCodexBlocks, CodexSessionContextPage } from './CodexSessionContextPage'
 
 afterEach(() => {
@@ -39,6 +39,15 @@ function createApi() {
                     }
                 }
             ]
+        })),
+        getCodexSessionStatus: vi.fn(async () => ({
+            success: true as const,
+            status: 'idle' as const
+        })),
+        sendCodexSessionMessage: vi.fn(async () => ({
+            success: true as const,
+            status: 'processing' as const,
+            startedAt: Date.now()
         })),
         forkCodexSession: vi.fn(async () => ({
             type: 'success' as const,
@@ -80,17 +89,18 @@ function renderPage(props: {
 }
 
 describe('CodexSessionContextPage', () => {
-    it('renders the transcript through the normal conversation thread without a composer', async () => {
+    it('renders the native transcript through the normal conversation thread with a direct-send composer', async () => {
         const { api, onBack } = renderPage()
 
         await waitFor(() => {
             expect(screen.getByText('Original response')).toBeInTheDocument()
         })
 
-        // 验证详情页读取 runner 上的原始上下文，而不会渲染可编辑的会话输入框。
+        // 详情页读取 runner 上的原始上下文，并仅在原生会话确认空闲时开放直发。
         expect(api.getCodexSessionContext).toHaveBeenCalledWith('codex-thread-1', 'machine-1', { limit: 50 })
+        expect(api.getCodexSessionStatus).toHaveBeenCalledWith('codex-thread-1', 'machine-1')
         expect(screen.getByText('Original prompt')).toBeInTheDocument()
-        expect(screen.queryByRole('textbox')).toBeNull()
+        expect(screen.getByRole('textbox')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Fork to new session' })).toBeInTheDocument()
         // 正常会话也以 user-text / agent-text 线程节点渲染两端消息。
         expect(screen.getByText('Original prompt').closest('[id^="hapi-message-user-text:"]')).not.toBeNull()
@@ -98,6 +108,52 @@ describe('CodexSessionContextPage', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Back to sessions' }))
         expect(onBack).toHaveBeenCalledTimes(1)
+    })
+
+    it('sends directly to the native Codex thread instead of forking it', async () => {
+        const { api } = renderPage()
+
+        await screen.findByText('Original response')
+        const input = screen.getByRole('textbox')
+        fireEvent.change(input, { target: { value: 'Continue the original thread' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+        await waitFor(() => {
+            expect(api.sendCodexSessionMessage).toHaveBeenCalledWith('codex-thread-1', {
+                machineId: 'machine-1',
+                message: 'Continue the original thread'
+            })
+        })
+        expect(api.forkCodexSession).not.toHaveBeenCalled()
+    })
+
+    it('locks direct-send and Fork while the native thread is processing', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing'
+        })
+        renderPage({ api })
+
+        await screen.findByText('Original response')
+        await waitFor(() => {
+            expect(screen.getByRole('textbox')).toBeDisabled()
+            expect(screen.getByRole('button', { name: 'Fork to new session' })).toBeDisabled()
+        })
+        expect(screen.getByText('Native Codex is running')).toBeInTheDocument()
+    })
+
+    it('uses the normal session title details popover', async () => {
+        renderPage()
+
+        await screen.findByText('Original response')
+        fireEvent.click(screen.getByRole('button', { name: 'Recent Codex task' }))
+
+        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+        expect(screen.getByText('Full name')).toBeInTheDocument()
+        expect(screen.getByText('codex-thread-1')).toBeInTheDocument()
+        expect(screen.getByText('/workspace/project')).toBeInTheDocument()
+        expect(screen.getByText('codex')).toBeInTheDocument()
     })
 
 
@@ -147,6 +203,8 @@ describe('CodexSessionContextPage', () => {
                         page: { limit: 50, nextBefore: 1, hasMore: true }
                     }
             )),
+            getCodexSessionStatus: vi.fn(async () => ({ success: true as const, status: 'idle' as const })),
+            sendCodexSessionMessage: vi.fn(),
             forkCodexSession: vi.fn()
         } as unknown as ApiClient
 
@@ -169,12 +227,53 @@ describe('CodexSessionContextPage', () => {
         const { api, onForked } = renderPage()
 
         await screen.findByText('Original response')
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Fork to new session' })).not.toBeDisabled()
+        })
         fireEvent.click(screen.getByRole('button', { name: 'Fork to new session' }))
 
         await waitFor(() => {
             expect(api.forkCodexSession).toHaveBeenCalledWith('codex-thread-1', { machineId: 'machine-1' })
             expect(onForked).toHaveBeenCalledWith('new-hapi-session')
         })
+    })
+
+    it('shows immediate Fork progress while the runner creates the new session', async () => {
+        const api = createApi()
+        let resolveFork!: (value: { type: 'success'; sessionId: string }) => void
+        ;(api.forkCodexSession as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise((resolve) => {
+            resolveFork = resolve
+        }))
+        const { onForked } = renderPage({ api })
+
+        await screen.findByText('Original response')
+        const forkButton = screen.getByRole('button', { name: 'Fork to new session' })
+        await waitFor(() => expect(forkButton).not.toBeDisabled())
+        fireEvent.click(forkButton)
+
+        expect(screen.getByRole('button', { name: 'Forking…' })).toHaveAttribute('aria-busy', 'true')
+        expect(screen.getByText('Creating new session')).toBeInTheDocument()
+        expect(screen.getByText('Copying the original context into a new HAPI session…')).toBeInTheDocument()
+
+        resolveFork({ type: 'success', sessionId: 'new-hapi-session' })
+        await waitFor(() => expect(onForked).toHaveBeenCalledWith('new-hapi-session'))
+    })
+
+    it('turns a runner failure into a clear Fork notice with retry', async () => {
+        const api = createApi()
+        ;(api.forkCodexSession as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+            new ApiError('HTTP 409 Conflict', 409, 'runner_offline')
+        )
+        renderPage({ api })
+
+        await screen.findByText('Original response')
+        const forkButton = screen.getByRole('button', { name: 'Fork to new session' })
+        await waitFor(() => expect(forkButton).not.toBeDisabled())
+        fireEvent.click(forkButton)
+
+        expect(await screen.findByText('Could not create new session')).toBeInTheDocument()
+        expect(screen.getByText('The selected runner is offline. Reconnect it, then try again.')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
     })
 
     it('normalizes local Codex messages through the normal chat reducer', () => {
