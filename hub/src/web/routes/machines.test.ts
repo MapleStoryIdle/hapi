@@ -137,6 +137,52 @@ describe('machines routes', () => {
         })
     })
 
+    it('returns Codex subscription limits for an online machine and forwards the native model', async () => {
+        const machine = createMachine()
+        const calls: Array<{ machineId: string; model: string | null }> = []
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            getCodexSubscriptionLimitsForMachine: async (machineId: string, model: string | null) => {
+                calls.push({ machineId, model })
+                return {
+                    success: true,
+                    limits: {
+                        limitId: 'codex',
+                        limitName: 'Codex',
+                        planType: 'plus',
+                        primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1_762_000_000 },
+                        secondary: { usedPercent: 50, windowDurationMins: 10_080, resetsAt: 1_762_500_000 },
+                        updatedAt: 1_762_000_000_000
+                    }
+                }
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/codex-subscription-limits?model=gpt-5.6-terra')
+
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{ machineId: 'machine-1', model: 'gpt-5.6-terra' }])
+        expect(await response.json()).toEqual({
+            success: true,
+            limits: {
+                limitId: 'codex',
+                limitName: 'Codex',
+                planType: 'plus',
+                primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1_762_000_000 },
+                secondary: { usedPercent: 50, windowDurationMins: 10_080, resetsAt: 1_762_500_000 },
+                updatedAt: 1_762_000_000_000
+            }
+        })
+    })
+
     it('returns 400 when /opencode-models is called without cwd', async () => {
         const machine = createMachine()
         const engine = {

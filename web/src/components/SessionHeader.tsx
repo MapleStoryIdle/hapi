@@ -1,12 +1,16 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { SignalLow, Unplug } from 'lucide-react'
+import { PlugZap, Unplug } from 'lucide-react'
 import type { CodexSubscriptionLimits, CodexSubscriptionLimitWindow, Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexSubscriptionLimits } from '@/hooks/queries/useCodexSubscriptionLimits'
 import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
-import { useSessionConnection, type SessionConnectionHealth } from '@/lib/session-connection-context'
+import {
+    useSessionConnection,
+    type SessionConnectionContextValue,
+    type SessionConnectionHealth
+} from '@/lib/session-connection-context'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
@@ -37,20 +41,6 @@ function getSessionTitle(session: Session): string {
 
 function getSessionProjectPath(session: Session): string | null {
     return session.metadata?.worktree?.basePath ?? session.metadata?.path ?? null
-}
-
-function formatSessionAgentInfo(session: Session, t: Translator): string {
-    const parts = [
-        session.metadata?.flavor ?? t('session.header.agent.unknown'),
-        session.model ? `${t('session.header.agent.model')}: ${session.model}` : null,
-        session.modelReasoningEffort ? `${t('session.header.agent.reasoning')}: ${session.modelReasoningEffort}` : null,
-        session.effort ? `${t('session.header.agent.effort')}: ${session.effort}` : null,
-        session.serviceTier ? `${t('session.header.agent.tier')}: ${session.serviceTier}` : null,
-        session.permissionMode ? `${t('session.header.agent.permission')}: ${session.permissionMode}` : null,
-        session.collaborationMode ? `${t('session.header.agent.collaboration')}: ${session.collaborationMode}` : null
-    ].filter((part): part is string => Boolean(part))
-
-    return parts.join(' · ')
 }
 
 function SessionHeaderDetailRow(props: {
@@ -119,10 +109,85 @@ export type SessionHeaderDetail = {
     isAgentInfo?: boolean
 }
 
-/** The shared title trigger and details popover used by all session chat pages. */
-export function SessionTitleDetails(props: {
+type SessionHeaderDetailsRef = {
+    current: readonly SessionHeaderDetail[]
+}
+
+const EMPTY_SESSION_HEADER_DETAILS: readonly SessionHeaderDetail[] = []
+
+/**
+ * Keep the title details dialog consistent across HAPI-backed and native
+ * Codex detail pages.  The transports provide different records, but the
+ * operator should see the same rows in the same order.
+ */
+export function buildSessionHeaderDetails(input: {
     title: string
-    details: readonly SessionHeaderDetail[]
+    sessionId: string
+    projectPath?: string | null
+    lastActivityAt?: number | null
+    agentFlavor?: string | null
+    model?: string | null
+    reasoning?: string | null
+    effort?: string | null
+    serviceTier?: string | null
+    permissionMode?: string | null
+    collaborationMode?: string | null
+}, t: Translator): SessionHeaderDetail[] {
+    const agentInfo = [
+        input.agentFlavor?.trim() || t('session.header.agent.unknown'),
+        input.model ? `${t('session.header.agent.model')}: ${input.model}` : null,
+        input.reasoning ? `${t('session.header.agent.reasoning')}: ${input.reasoning}` : null,
+        input.effort ? `${t('session.header.agent.effort')}: ${input.effort}` : null,
+        input.serviceTier ? `${t('session.header.agent.tier')}: ${input.serviceTier}` : null,
+        input.permissionMode ? `${t('session.header.agent.permission')}: ${input.permissionMode}` : null,
+        input.collaborationMode ? `${t('session.header.agent.collaboration')}: ${input.collaborationMode}` : null
+    ].filter((part): part is string => Boolean(part)).join(' · ')
+
+    const lastActivity = input.lastActivityAt === undefined || input.lastActivityAt === null
+        ? t('session.header.details.unavailable')
+        : formatHeaderDateTime(input.lastActivityAt)
+
+    return [
+        { key: 'title', label: t('session.header.details.fullName'), value: input.title },
+        { key: 'session-id', label: t('session.header.details.sessionId'), value: input.sessionId },
+        {
+            key: 'path',
+            label: t('session.header.details.projectPath'),
+            value: input.projectPath?.trim() || t('session.header.details.unavailable')
+        },
+        {
+            key: 'last-activity',
+            label: t('session.header.details.lastActivity'),
+            value: lastActivity
+        },
+        {
+            key: 'agent',
+            label: t('session.header.details.agentInfo'),
+            value: agentInfo || t('session.header.details.unavailable'),
+            isAgentInfo: true
+        }
+    ]
+}
+
+function formatHeaderDateTime(value: number): string {
+    const milliseconds = value < 1_000_000_000_000 ? value * 1_000 : value
+    const date = new Date(milliseconds)
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+}
+
+/** The shared title trigger and details popover used by all session chat pages. */
+export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
+    title: string
+    sessionId?: string
+    details?: readonly SessionHeaderDetail[]
+    /**
+     * Normal HAPI chats keep their latest details in this stable ref. A token
+     * stream can update it without invalidating the title control; opening
+     * the popover reads the newest snapshot.
+     */
+    detailsRef?: SessionHeaderDetailsRef
+    /** Changes only for meaningful title-detail fields, never updatedAt. */
+    detailsRevision?: string
 }) {
     const { t } = useTranslation()
     const [detailsOpen, setDetailsOpen] = useState(false)
@@ -130,6 +195,7 @@ export function SessionTitleDetails(props: {
     const titleDetailsRef = useRef<HTMLDivElement | null>(null)
     const copyResetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
     const [copiedDetailKey, setCopiedDetailKey] = useState<string | null>(null)
+    const details = props.detailsRef?.current ?? props.details ?? EMPTY_SESSION_HEADER_DETAILS
 
     const toggleDetails = useCallback(() => {
         setDetailsOpen((open) => !open)
@@ -175,12 +241,17 @@ export function SessionTitleDetails(props: {
 
     useEffect(() => () => clearTimeout(copyResetTimerRef.current), [])
 
+    useEffect(() => {
+        setDetailsOpen(false)
+        setCopiedDetailKey(null)
+    }, [props.sessionId])
+
     return (
         <div ref={titleDetailsRef} className="relative min-w-0 max-w-[min(58vw,22rem)]">
             <button
                 type="button"
                 {...detailsActivation}
-                className="pointer-events-auto touch-manipulation flex h-11 max-w-full items-center truncate rounded-full px-1.5 pr-2 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                className="pointer-events-auto touch-manipulation flex h-11 max-w-full items-center truncate rounded-full pl-1 pr-2 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                 aria-haspopup="dialog"
                 aria-expanded={detailsOpen}
                 aria-controls={detailsOpen ? detailsId : undefined}
@@ -198,7 +269,7 @@ export function SessionTitleDetails(props: {
                 >
                     <div className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">{t('session.header.details.title')}</div>
                     <div className="flex flex-col gap-2">
-                        {props.details.map((row) => (
+                        {details.map((row) => (
                             <SessionHeaderDetailRow
                                 key={row.key}
                                 label={row.label}
@@ -213,7 +284,7 @@ export function SessionTitleDetails(props: {
             ) : null}
         </div>
     )
-}
+})
 
 export function SessionHeaderBackButton(props: { onBack: () => void; label?: string }) {
     const backActivation = useReliableTopEdgeAction(props.onBack)
@@ -252,7 +323,7 @@ function SessionConnectionIcon(props: { health: SessionConnectionHealth }) {
     }
 
     return (
-        <SignalLow
+        <PlugZap
             className={props.health === 'recovering' ? 'h-5 w-5 animate-pulse' : 'h-5 w-5'}
             strokeWidth={2.25}
             aria-hidden="true"
@@ -260,16 +331,54 @@ function SessionConnectionIcon(props: { health: SessionConnectionHealth }) {
     )
 }
 
-export function SessionConnectionRecoveryControl() {
-    const connection = useSessionConnection()
+function formatConnectionLastUpdated(value: number | null | undefined): string | null {
+    if (value === null || value === undefined || !Number.isFinite(value)) {
+        return null
+    }
+    const milliseconds = value < 1_000_000_000_000 ? value * 1_000 : value
+    const date = new Date(milliseconds)
+    if (Number.isNaN(date.getTime())) {
+        return null
+    }
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+/**
+ * Shared visual control for a detail page whose live data connection needs
+ * attention. HAPI sessions obtain the value from the SSE provider; native
+ * Codex sessions can supply the same shape from their runner queries.
+ */
+export type SessionConnectionStatusLabels = {
+    degraded: string
+    recovering: string
+    offline: string
+    recover: string
+}
+
+export function SessionConnectionStatusControl(props: {
+    connection: SessionConnectionContextValue | null
+    testId?: string
+    labels?: Partial<SessionConnectionStatusLabels>
+}) {
+    const connection = props.connection
     const { t } = useTranslation()
+    const labels: SessionConnectionStatusLabels = {
+        degraded: props.labels?.degraded ?? t('session.connection.degraded'),
+        recovering: props.labels?.recovering ?? t('session.connection.recovering'),
+        offline: props.labels?.offline ?? t('session.connection.offline'),
+        recover: props.labels?.recover ?? t('session.connection.recover')
+    }
     const recover = useCallback(() => {
         if (!connection || connection.health === 'recovering') {
             return
         }
         void connection.recover()
     }, [connection])
-    const recoveryActivation = useReliableTopEdgeAction(recover)
+    const recoveryActivation = useReliableTopEdgeAction(recover, {
+        // This is a state-only action. Starting on touch-down keeps the
+        // recovery affordance responsive in a busy standalone WebKit view.
+        activateOnTouchPointerDown: true
+    })
 
     if (!connection || connection.health === 'connected') {
         return null
@@ -277,30 +386,35 @@ export function SessionConnectionRecoveryControl() {
 
     const presentation = connection.health === 'degraded'
         ? {
-            label: t('session.connection.degraded'),
+            label: labels.degraded,
             icon: <SessionConnectionIcon health={connection.health} />,
             iconClass: 'text-amber-500'
         }
         : connection.health === 'recovering'
             ? {
-                label: t('session.connection.recovering'),
+                label: labels.recovering,
                 icon: <SessionConnectionIcon health={connection.health} />,
                 iconClass: 'text-amber-500'
             }
             : {
-                label: t('session.connection.offline'),
+                label: labels.offline,
                 icon: <SessionConnectionIcon health={connection.health} />,
                 iconClass: 'text-red-500'
             }
+    const lastUpdated = formatConnectionLastUpdated(connection.lastUpdatedAt)
+    const updatedLabel = lastUpdated ? t('session.connection.lastUpdated', { time: lastUpdated }) : null
     const actionLabel = connection.health === 'recovering'
         ? presentation.label
-        : `${presentation.label} · ${t('session.connection.recover')}`
+        : `${presentation.label} · ${labels.recover}${updatedLabel ? ` · ${updatedLabel}` : ''}`
 
     const edgeOffset = 'max(0.75rem, calc((100% - var(--content-max-w, 960px)) / 2 + 0.75rem))'
 
+    const testId = props.testId ?? 'session-connection-recovery'
+
     return (
         <div
-            data-testid="session-connection-recovery-float"
+            data-testid={`${testId}-float`}
+            data-last-updated-at={connection.lastUpdatedAt ?? undefined}
             className="fixed top-[calc(var(--app-safe-area-top)+4.75rem)] z-30"
             style={{ right: edgeOffset }}
         >
@@ -308,10 +422,11 @@ export function SessionConnectionRecoveryControl() {
                 type="button"
                 {...recoveryActivation}
                 disabled={connection.health === 'recovering'}
-                data-testid="session-connection-recovery"
+                data-testid={testId}
                 className="pointer-events-auto touch-manipulation relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:border-[var(--app-hint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
                 aria-label={actionLabel}
                 title={actionLabel}
+                aria-busy={connection.health === 'recovering' || undefined}
             >
                 <span className={presentation.iconClass}>{presentation.icon}</span>
             </button>
@@ -319,12 +434,24 @@ export function SessionConnectionRecoveryControl() {
     )
 }
 
+/** HAPI-session adapter for the shared detail-page connection control. */
+export function SessionConnectionRecoveryControl(props: {
+    labels?: Partial<SessionConnectionStatusLabels>
+    testId?: string
+} = {}) {
+    const connection = useSessionConnection()
+    return <SessionConnectionStatusControl connection={connection} labels={props.labels} testId={props.testId} />
+}
+
 /** Shared floating header shell for normal and external Codex session details. */
 export function FloatingSessionHeader(props: {
     onBack: () => void
     backLabel?: string
     title: string
-    details: readonly SessionHeaderDetail[]
+    sessionId?: string
+    details?: readonly SessionHeaderDetail[]
+    detailsRef?: SessionHeaderDetailsRef
+    detailsRevision?: string
     actions?: ReactNode
     floating?: boolean
 }) {
@@ -359,10 +486,16 @@ export function FloatingSessionHeader(props: {
             <div className={SESSION_DETAIL_HEADER_ROW_CLASS} data-testid="session-header-row">
                 <div
                     data-testid="session-header-controls"
-                    className={`pointer-events-auto flex h-11 min-w-0 items-center gap-1 rounded-full border px-1 ${headerSurfaceClass} ${headerElevationClass}`}
+                    className={`pointer-events-auto flex h-11 min-w-0 items-center gap-0 rounded-full border px-1 ${headerSurfaceClass} ${headerElevationClass}`}
                 >
                     <SessionHeaderBackButton onBack={props.onBack} label={props.backLabel} />
-                    <SessionTitleDetails title={props.title} details={props.details} />
+                    <SessionTitleDetails
+                        title={props.title}
+                        sessionId={props.sessionId}
+                        details={props.details}
+                        detailsRef={props.detailsRef}
+                        detailsRevision={props.detailsRevision}
+                    />
                 </div>
 
                 {props.actions ? (
@@ -375,7 +508,17 @@ export function FloatingSessionHeader(props: {
     )
 }
 
-function getStatusDotClass(status?: StatusBarProps): string {
+/**
+ * The floating header only needs connection state. Keeping this deliberately
+ * narrow means a streaming token/usage update cannot invalidate the memoized
+ * header just because the chat body has new derived metadata.
+ */
+export type SessionHeaderStatus = Pick<
+    StatusBarProps,
+    'active' | 'thinking' | 'agentState' | 'backgroundTaskCount' | 'voiceStatus'
+>
+
+function getStatusDotClass(status?: SessionHeaderStatus): string {
     if (!status) return 'hidden'
     const hasPermissions = status.agentState?.requests && Object.keys(status.agentState.requests).length > 0
     if (!status.active) return 'bg-[#999]'
@@ -493,7 +636,7 @@ function QuotaProgressBar(props: { remainingPercent: number | null }) {
     )
 }
 
-function CodexSubscriptionLimitsBadge(props: {
+export function CodexSubscriptionLimitsBadge(props: {
     limits: CodexSubscriptionLimits | null
     isFetching: boolean
     error: string | null
@@ -630,6 +773,8 @@ function CodexSubscriptionLimitsBadge(props: {
 export const SessionHeader = memo(function SessionHeader(props: {
     session: Session
     onBack: () => void
+    onRefresh?: () => void
+    refreshPending?: boolean
     onToggleFiles?: () => void
     filesActive?: boolean
     onToggleOutline?: () => void
@@ -639,20 +784,56 @@ export const SessionHeader = memo(function SessionHeader(props: {
     onSessionReopened?: (newSessionId: string) => void
     onCreateSideSession?: () => void
     sideSessionPending?: boolean
-    status?: StatusBarProps
+    status?: SessionHeaderStatus
     floating?: boolean
 }) {
     const { t } = useTranslation()
     const { session, api, onSessionDeleted, onSessionReopened } = props
     const title = useMemo(() => getSessionTitle(session), [session])
     const projectPath = useMemo(() => getSessionProjectPath(session), [session])
-    const agentInfo = useMemo(() => formatSessionAgentInfo(session, t), [session, t])
-    const sessionDetails = useMemo(() => [
-        { key: 'title', label: t('session.header.details.fullName'), value: title, isAgentInfo: false },
-        { key: 'session-id', label: t('session.header.details.sessionId'), value: session.id, isAgentInfo: false },
-        { key: 'path', label: t('session.header.details.projectPath'), value: projectPath ?? t('session.header.details.unavailable'), isAgentInfo: false },
-        { key: 'agent', label: t('session.header.details.agentInfo'), value: agentInfo || t('session.header.details.unavailable'), isAgentInfo: true }
-    ], [agentInfo, projectPath, session.id, t, title])
+    const sessionDetails = useMemo(() => buildSessionHeaderDetails({
+        title,
+        sessionId: session.id,
+        projectPath,
+        lastActivityAt: session.updatedAt,
+        agentFlavor: session.metadata?.flavor,
+        model: session.model,
+        reasoning: session.modelReasoningEffort,
+        effort: session.effort,
+        serviceTier: session.serviceTier,
+        permissionMode: session.permissionMode,
+        collaborationMode: session.collaborationMode
+    }, t), [
+        projectPath,
+        session.collaborationMode,
+        session.effort,
+        session.id,
+        session.metadata?.flavor,
+        session.model,
+        session.modelReasoningEffort,
+        session.permissionMode,
+        session.serviceTier,
+        session.updatedAt,
+        t,
+        title
+    ])
+    // The parent must still react to normal session state for menus/status,
+    // but the high-frequency `updatedAt` snapshot stays behind this stable
+    // ref. SessionTitleDetails only renders when the person opens it or a
+    // meaningful title/detail field changes.
+    const sessionDetailsRef = useRef<readonly SessionHeaderDetail[]>(sessionDetails)
+    sessionDetailsRef.current = sessionDetails
+    const sessionDetailsRevision = [
+        session.id,
+        projectPath ?? '',
+        session.metadata?.flavor ?? '',
+        session.model ?? '',
+        session.modelReasoningEffort ?? '',
+        session.effort ?? '',
+        session.serviceTier ?? '',
+        session.permissionMode ?? '',
+        session.collaborationMode ?? ''
+    ].join('\u0000')
 
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -714,7 +895,9 @@ export const SessionHeader = memo(function SessionHeader(props: {
             <FloatingSessionHeader
                 onBack={props.onBack}
                 title={title}
-                details={sessionDetails}
+                sessionId={session.id}
+                detailsRef={sessionDetailsRef}
+                detailsRevision={sessionDetailsRevision}
                 floating={props.floating}
                 actions={(
                     <>
@@ -737,6 +920,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
                             aria-haspopup="menu"
                             aria-expanded={menuOpen}
                             aria-controls={menuOpen ? menuId : undefined}
+                            aria-label={t('session.more')}
                             className="pointer-events-auto touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] text-[var(--app-hint)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
                             title={t('session.more')}
                         >
@@ -755,6 +939,8 @@ export const SessionHeader = memo(function SessionHeader(props: {
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionActive={session.active}
+                onRefresh={props.onRefresh}
+                refreshPending={props.refreshPending}
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}

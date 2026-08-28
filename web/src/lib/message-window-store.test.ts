@@ -12,6 +12,7 @@ import {
     markMessagesConsumed,
     reconcileQueuedAgainstLatest,
     removeOptimisticMessage,
+    resetMessageWindowStoreForTests,
     setAtBottom,
     subscribeMessageWindow,
     VISIBLE_WINDOW_SIZE,
@@ -132,7 +133,7 @@ describe('message-window-store frame-batched ingestion', () => {
     const SESSION_ID = 'session-message-window-frame-batch-test'
 
     afterEach(() => {
-        clearMessageWindow(SESSION_ID)
+        resetMessageWindowStoreForTests()
         resetInteractionPriorityForTests()
         vi.useRealTimers()
         vi.unstubAllGlobals()
@@ -203,6 +204,75 @@ describe('message-window-store frame-batched ingestion', () => {
         expect(getMessageWindowState(SESSION_ID).messages.map((message) => message.id)).toEqual(['after-tap'])
     })
 
+    it('holds an already queued stream notification until a direct interaction settles', () => {
+        const now = Date.now()
+        vi.useFakeTimers()
+        // Keep this later than a notification timestamp left by an earlier
+        // real-timer test, so the first notification takes the rAF path.
+        vi.setSystemTime(now + 1_000)
+        const callbacks = stubAnimationFrame()
+        const listener = vi.fn()
+        const unsubscribe = subscribeMessageWindow(SESSION_ID, listener)
+
+        ingestIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'queued-before-tap', seq: 1 })])
+        expect(callbacks).toHaveLength(1)
+
+        markUserInteraction()
+        callbacks[0](0)
+        expect(listener).not.toHaveBeenCalled()
+
+        vi.advanceTimersByTime(250)
+        expect(callbacks).toHaveLength(2)
+        callbacks[1](0)
+        expect(listener).toHaveBeenCalledTimes(1)
+        unsubscribe()
+    })
+
+    it('rechecks an already queued stream merge when pointer-down starts before its frame', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-08-27T00:00:00.000Z'))
+        const callbacks = stubAnimationFrame()
+
+        enqueueIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'merge-after-tap', seq: 1 })])
+        expect(callbacks).toHaveLength(1)
+
+        // The rAF was already queued. The subsequent touch must still win
+        // over the expensive merge that used to run in this exact gap.
+        markUserInteraction()
+        callbacks[0](0)
+        expect(getMessageWindowState(SESSION_ID).messages).toHaveLength(0)
+
+        vi.advanceTimersByTime(250)
+        expect(callbacks).toHaveLength(2)
+        callbacks[1](0)
+
+        expect(getMessageWindowState(SESSION_ID).messages.map((message) => message.id))
+            .toEqual(['merge-after-tap'])
+    })
+
+    it('keeps a full live-window burst out of the pointer-down frame', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-08-27T00:00:00.000Z'))
+        const callbacks = stubAnimationFrame()
+        const burst = Array.from({ length: VISIBLE_WINDOW_SIZE }, (_, index) => makeAgentMessage({
+            id: `busy-${index}`,
+            seq: index + 1,
+            text: `large streamed payload ${index}`.repeat(16)
+        }))
+
+        enqueueIncomingMessages(SESSION_ID, burst)
+        markUserInteraction()
+        callbacks[0](0)
+
+        // This is the action-to-paint guard: even the largest mounted window
+        // cannot begin normalization/merge in the same frame as pointer-down.
+        expect(getMessageWindowState(SESSION_ID).messages).toHaveLength(0)
+
+        vi.advanceTimersByTime(250)
+        callbacks[1](0)
+        expect(getMessageWindowState(SESSION_ID).messages).toHaveLength(VISIBLE_WINDOW_SIZE)
+    })
+
     it('flushes queued server messages before processing a consume acknowledgement', () => {
         stubAnimationFrame()
         enqueueIncomingMessages(SESSION_ID, [{
@@ -219,6 +289,51 @@ describe('message-window-store frame-batched ingestion', () => {
         const message = getMessageWindowState(SESSION_ID).messages.find((entry) => entry.id === 'server-queued')
         expect(message?.status).toBe('sent')
         expect(message?.invokedAt).toBe(1_700_000_000_000)
+    })
+})
+
+describe('message-window-store persistence scheduling', () => {
+    const SESSION_ID = 'session-message-window-persist-scheduling-test'
+    const STORAGE_KEY = `hapi:message-window:v1:${SESSION_ID}`
+
+    afterEach(() => {
+        resetMessageWindowStoreForTests()
+        resetInteractionPriorityForTests()
+        sessionStorage.clear()
+        vi.useRealTimers()
+        vi.unstubAllGlobals()
+        vi.restoreAllMocks()
+    })
+
+    it('waits for a quiet idle period before serializing a streaming window', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-08-27T00:00:00.000Z'))
+
+        ingestIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'first', seq: 1 })])
+        vi.advanceTimersByTime(500)
+        ingestIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'second', seq: 2 })])
+
+        vi.advanceTimersByTime(749)
+        expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull()
+
+        vi.advanceTimersByTime(1)
+        expect(sessionStorage.getItem(STORAGE_KEY)).toContain('second')
+    })
+
+    it('does not serialize when a direct interaction begins just before the idle write', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-08-27T00:00:00.000Z'))
+
+        ingestIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'after-interaction', seq: 1 })])
+        vi.advanceTimersByTime(740)
+        markUserInteraction()
+        vi.advanceTimersByTime(10)
+
+        expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull()
+        vi.advanceTimersByTime(239)
+        expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull()
+        vi.advanceTimersByTime(1)
+        expect(sessionStorage.getItem(STORAGE_KEY)).toContain('after-interaction')
     })
 })
 
@@ -424,7 +539,7 @@ describe('message-window-store async generations', () => {
             })
         ])
 
-        await new Promise((resolve) => setTimeout(resolve, 250))
+        await new Promise((resolve) => setTimeout(resolve, 800))
         vi.resetModules()
 
         const reloadedStore = await import('@/lib/message-window-store')
@@ -620,7 +735,7 @@ describe('message-window-store visible trimming', () => {
         clearMessageWindow(SESSION_ID)
     })
 
-    it('does not evict main conversation messages when Codex subagent events flood the window', () => {
+    it('keeps the main conversation and caps mounted Codex subagent history during a flood', () => {
         const baseTime = 1_700_000_000_000
         const messages: DecryptedMessage[] = [
             makeUserMessage({
@@ -643,7 +758,11 @@ describe('message-window-store visible trimming', () => {
 
         const state = getMessageWindowState(SESSION_ID)
         expect(state.messages.some((message) => message.id === 'main-user')).toBe(true)
-        expect(state.messages.some((message) => message.id === 'agent-run-0')).toBe(true)
+        // Agent-run traffic has its own bounded budget, so a noisy child
+        // agent cannot turn the mobile thread into hundreds of mounted cards.
+        expect(state.messages.some((message) => message.id === 'agent-run-0')).toBe(false)
+        expect(state.messages.some((message) => message.id === `agent-run-${VISIBLE_WINDOW_SIZE}`)).toBe(true)
+        expect(state.messages).toHaveLength(VISIBLE_WINDOW_SIZE + 1)
     })
 
     it('marks the window as pageable when regular live messages are trimmed', () => {

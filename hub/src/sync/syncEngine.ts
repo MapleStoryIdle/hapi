@@ -2185,8 +2185,11 @@ export class SyncEngine {
         return await this.rpcGateway.listCodexModelsForMachine(machineId)
     }
 
-    async getCodexSubscriptionLimitsForMachine(machineId: string): Promise<RpcGetCodexSubscriptionLimitsResponse> {
-        return await this.rpcGateway.getCodexSubscriptionLimitsForMachine(machineId)
+    async getCodexSubscriptionLimitsForMachine(
+        machineId: string,
+        model?: string | null
+    ): Promise<RpcGetCodexSubscriptionLimitsResponse> {
+        return await this.rpcGateway.getCodexSubscriptionLimitsForMachine(machineId, model)
     }
 
     async listCursorModelsForSession(sessionId: string): Promise<RpcListCursorModelsResponse> {

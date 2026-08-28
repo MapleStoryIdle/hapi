@@ -31,6 +31,12 @@ const machineUpdateStateSchema = z.object({
     runnerState: z.unknown().nullable()
 })
 
+const nativeCodexSessionUpdatedSchema = z.object({
+    machineId: z.string().min(1),
+    codexSessionId: z.string().min(1),
+    modifiedAt: z.number().finite().optional()
+}).strict()
+
 export type MachineHandlersDeps = {
     store: Store
     resolveMachineAccess: ResolveMachineAccess
@@ -170,6 +176,40 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
 
         onExternalCodexRequest?.({
             ...parsed.data,
+            namespace
+        })
+    })
+
+    socket.on('codex-session-updated', (data: unknown) => {
+        const parsed = nativeCodexSessionUpdatedSchema.safeParse(data)
+        if (!parsed.success) {
+            return
+        }
+
+        const machineAccess = resolveMachineAccess(parsed.data.machineId)
+        if (!machineAccess.ok) {
+            emitAccessError('machine', parsed.data.machineId, machineAccess.reason)
+            return
+        }
+
+        const auth = socket.handshake.auth as Record<string, unknown> | undefined
+        const authenticatedMachineId = typeof auth?.machineId === 'string' ? auth.machineId : null
+        if (authenticatedMachineId !== parsed.data.machineId) {
+            emitAccessError('machine', parsed.data.machineId, 'access-denied')
+            return
+        }
+
+        const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null
+        if (!namespace) {
+            emitAccessError('machine', parsed.data.machineId, 'namespace-missing')
+            return
+        }
+
+        onWebappEvent?.({
+            type: 'codex-session-updated',
+            machineId: parsed.data.machineId,
+            codexSessionId: parsed.data.codexSessionId,
+            ...(parsed.data.modifiedAt === undefined ? {} : { modifiedAt: parsed.data.modifiedAt }),
             namespace
         })
     })

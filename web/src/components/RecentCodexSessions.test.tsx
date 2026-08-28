@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { I18nProvider } from '@/lib/i18n-context'
+import { NativeCodexRealtimeProvider } from '@/lib/native-codex-realtime-context'
+import { publishNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
 import type { ApiClient } from '@/api/client'
-import type { CodexLocalSessionSummary } from '@/types/api'
-import { RecentCodexSessions, groupRecentCodexSessionsByDirectory } from './RecentCodexSessions'
+import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
+import {
+    RECENT_CODEX_WINDOW_MS,
+    RecentCodexSessions,
+    groupRecentCodexSessionsByDirectory,
+    mergeRecentCodexSessions
+} from './RecentCodexSessions'
 
 afterEach(() => cleanup())
 
@@ -41,6 +48,117 @@ function createApi() {
 }
 
 describe('RecentCodexSessions', () => {
+    it('merges recent HAPI and native Codex rows, filters older/non-Codex rows, and de-duplicates managed transcripts', () => {
+        const now = 1_800_000_000_000
+        const recent = now - 60_000
+        const old = now - RECENT_CODEX_WINDOW_MS - 1
+        const hapiSession = {
+            id: 'hapi-session-1',
+            active: true,
+            thinking: false,
+            activeAt: recent,
+            updatedAt: recent,
+            metadata: {
+                path: '/workspace/hapi',
+                flavor: 'codex',
+                name: 'Managed Codex task',
+                agentSessionId: 'thread-managed'
+            },
+            todoProgress: null,
+            pendingRequestsCount: 0,
+            pendingRequestKinds: [],
+            pendingRequests: [],
+            backgroundTaskCount: 0,
+            futureScheduledMessageCount: 0,
+            nextScheduledAt: null,
+            model: null,
+            effort: null
+        } as SessionSummary
+        const rows = mergeRecentCodexSessions(
+            [
+                hapiSession,
+                { ...hapiSession, id: 'old-hapi', updatedAt: old, metadata: { path: '/workspace/hapi', flavor: 'codex', name: 'Old task', agentSessionId: 'old-thread' } },
+                { ...hapiSession, id: 'claude-session', metadata: { path: '/workspace/hapi', flavor: 'claude', name: 'Claude task' } }
+            ],
+            [
+                {
+                    id: 'thread-managed', title: 'Duplicate transcript', cwd: '/workspace/hapi', file: '/tmp/managed.jsonl', modifiedAt: recent
+                },
+                {
+                    id: 'thread-native', title: 'Native Codex task', cwd: '/workspace/web', file: '/tmp/native.jsonl', modifiedAt: recent - 1
+                },
+                {
+                    id: 'thread-old', title: 'Old native task', cwd: '/workspace/old', file: '/tmp/old.jsonl', modifiedAt: old
+                }
+            ],
+            { now }
+        )
+
+        expect(rows.map((row) => `${row.source}:${row.id}`)).toEqual([
+            'hapi:hapi-session-1',
+            'native:thread-native'
+        ])
+    })
+
+    it('renders managed and native rows from the selected runner in one list', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({
+            success: true as const,
+            sessions: [{
+                id: 'native-thread',
+                title: 'Native task',
+                cwd: '/workspace/project',
+                file: '/tmp/native.jsonl',
+                modifiedAt: Date.now(),
+                runState: 'processing' as const
+            }]
+        }))
+        const hapiSession = {
+            id: 'hapi-session',
+            active: false,
+            thinking: false,
+            activeAt: Date.now(),
+            updatedAt: Date.now(),
+            metadata: {
+                path: '/workspace/project',
+                flavor: 'codex',
+                name: 'Managed task'
+            },
+            todoProgress: null,
+            pendingRequestsCount: 0,
+            pendingRequestKinds: [],
+            pendingRequests: [],
+            backgroundTaskCount: 0,
+            futureScheduledMessageCount: 0,
+            nextScheduledAt: null,
+            model: null,
+            effort: null
+        } as SessionSummary
+
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    hapiSessions={[hapiSession]}
+                    onOpen={vi.fn()}
+                    onOpenHapi={vi.fn()}
+                    embedded
+                    hideHeader
+                    recentOnly
+                />
+            </I18nProvider>
+        )
+
+        expect(await screen.findByText('Managed task')).toBeInTheDocument()
+        expect(screen.getByText('Native task')).toBeInTheDocument()
+        expect(screen.getByTestId('recent-codex-sessions').querySelector('[data-session-source="native"][data-session-active="true"]')).not.toBeNull()
+        expect(screen.queryByText('Running')).toBeNull()
+        expect(api.getCodexSessions).toHaveBeenCalledWith({ machineId: 'machine-1', limit: 100 })
+        expect(screen.getByTestId('recent-codex-sessions').querySelector('[data-session-source="hapi"]')).not.toBeNull()
+        expect(screen.getByTestId('recent-codex-sessions').querySelector('[data-session-source="native"]')).not.toBeNull()
+    })
+
     it('groups sessions by directory and shows only title and activity time', async () => {
         const api = createApi()
         const onOpen = vi.fn()
@@ -76,6 +194,42 @@ describe('RecentCodexSessions', () => {
         expect(api.forkCodexSession).not.toHaveBeenCalled()
     })
 
+    it('refreshes the matching runner list from a native transcript invalidation', async () => {
+        const api = createApi()
+        render(
+            <NativeCodexRealtimeProvider value={{ connected: true }}>
+                <I18nProvider>
+                    <RecentCodexSessions
+                        api={api}
+                        machineId="machine-1"
+                        onOpen={vi.fn()}
+                        realtimeAvailable
+                    />
+                </I18nProvider>
+            </NativeCodexRealtimeProvider>
+        )
+
+        await screen.findByText('Recent Codex task')
+        expect(api.getCodexSessions).toHaveBeenCalledTimes(1)
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'another-machine',
+            codexSessionId: 'codex-thread-1'
+        })
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        expect(api.getCodexSessions).toHaveBeenCalledTimes(1)
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1'
+        })
+        await waitFor(() => {
+            expect(api.getCodexSessions).toHaveBeenCalledTimes(2)
+        })
+    })
+
     it('orders projects and sessions by their latest activity', () => {
         const groups = groupRecentCodexSessionsByDirectory([
             {
@@ -108,10 +262,31 @@ describe('RecentCodexSessions', () => {
         expect(screen.queryByLabelText('View context')).toBeNull()
         expect(screen.queryByLabelText('Fork to new session')).toBeNull()
         expect(screen.getByLabelText('Refresh')).toBeInTheDocument()
-        expect(screen.getAllByRole('button')).toHaveLength(2)
+        expect(screen.getAllByRole('button')).toHaveLength(3)
     })
 
-    it('shows a compact running state when the runner reports a native turn in progress', async () => {
+    it('expands and collapses each directory while keeping the session rows indented under it', async () => {
+        const api = createApi()
+        render(
+            <I18nProvider>
+                <RecentCodexSessions api={api} machineId="machine-1" onOpen={vi.fn()} />
+            </I18nProvider>
+        )
+
+        await screen.findByText('Recent Codex task')
+        const collapseButton = screen.getByRole('button', { name: 'Collapse project' })
+        expect(collapseButton).toHaveAttribute('aria-expanded', 'true')
+        expect(collapseButton.closest('[data-directory]')?.querySelector('ul.border-l')).not.toBeNull()
+
+        fireEvent.click(collapseButton)
+        expect(screen.queryByText('Recent Codex task')).toBeNull()
+        expect(screen.getByRole('button', { name: 'Expand project' })).toHaveAttribute('aria-expanded', 'false')
+
+        fireEvent.click(screen.getByRole('button', { name: 'Expand project' }))
+        expect(screen.getByText('Recent Codex task')).toBeInTheDocument()
+    })
+
+    it('marks a running native turn with a subtle activity indicator instead of text', async () => {
         const api = createApi()
         api.getCodexSessions = vi.fn(async () => ({
             success: true as const,
@@ -132,7 +307,8 @@ describe('RecentCodexSessions', () => {
         )
 
         expect(await screen.findByText('Running Codex task')).toBeInTheDocument()
-        expect(screen.getByText('Running')).toBeInTheDocument()
+        expect(screen.getByTestId('recent-codex-sessions').querySelector('[data-session-source="native"][data-session-active="true"]')).not.toBeNull()
+        expect(screen.queryByText('Running')).toBeNull()
     })
 
     it('can restrict the view to native sessions that are currently processing', async () => {

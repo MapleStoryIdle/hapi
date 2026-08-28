@@ -1,30 +1,197 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AssistantRuntimeProvider } from '@assistant-ui/react'
 import { useQuery } from '@tanstack/react-query'
-import { CircleAlert, GitFork, LoaderCircle } from 'lucide-react'
 import { ApiError, type ApiClient } from '@/api/client'
-import type { CodexLocalSessionContextMessage, CodexLocalSessionContextResponse, DecryptedMessage } from '@/types/api'
-import { LoadingState } from '@/components/LoadingState'
-import { FloatingSessionHeader, type SessionHeaderDetail } from '@/components/SessionHeader'
+import type {
+    CodexLocalSessionContextMessage,
+    CodexLocalSessionContextResponse,
+    CodexLocalSessionQueuedMessage,
+    CodexLocalSessionStatusResponse,
+    DecryptedMessage,
+    SessionMetadataSummary
+} from '@/types/api'
+import {
+    buildSessionHeaderDetails,
+    CodexSubscriptionLimitsBadge,
+    FloatingSessionHeader,
+    SessionConnectionRecoveryControl,
+    type SessionHeaderDetail
+} from '@/components/SessionHeader'
+import { AgentFlavorIcon, AgentFlavorStatusIcon } from '@/components/AgentFlavorIcon'
+import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SESSION_DETAIL_HEADER_HEIGHT_PX } from '@/components/SessionDetailHeader'
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { HappyComposer, type ComposerSendError } from '@/components/AssistantChat/HappyComposer'
+import { NativeQueuedMessagesBar } from '@/components/NativeQueuedMessagesBar'
 import { buildConversationOutline } from '@/chat/outline'
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { reduceChatBlocks } from '@/chat/reducer'
-import { buildVisibleChatBlocks } from '@/chat/toolGroups'
-import { groupAssistantResultDetails } from '@/chat/assistantResultGrouping'
+import { buildSessionDetailTimeline } from '@/chat/sessionDetailTimeline'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
+import { makeClientSideId } from '@/lib/messages'
 import { queryKeys } from '@/lib/query-keys'
 import { useTranslation } from '@/lib/use-translation'
+import {
+    SessionConnectionProvider,
+    type SessionConnectionHealth
+} from '@/lib/session-connection-context'
+import { useNativeCodexRealtime } from '@/lib/native-codex-realtime-context'
+import { subscribeNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
+import { useCodexSubscriptionLimits } from '@/hooks/queries/useCodexSubscriptionLimits'
+import { SessionDetailContent, SessionDetailSurface } from '@/components/SessionDetailSurface'
+import { SessionDetailStatusNotice } from '@/components/SessionDetailStatusNotice'
+import {
+    SessionDetailBottomDock,
+    SessionDetailBottomDockAccessory,
+    SessionDetailBottomDockComposer,
+    SESSION_DETAIL_BOTTOM_ACCESSORY_GAP_PX
+} from '@/components/SessionDetailBottomDock'
 
 type Translator = (key: string, params?: Record<string, string | number>) => string
 
+const NATIVE_QUEUE_FLOATING_GAP_PX = SESSION_DETAIL_BOTTOM_ACCESSORY_GAP_PX
+const NATIVE_CONTEXT_REFRESH_INTERVAL_MS = 5_000
+const NATIVE_CONTEXT_ACTIVE_REFRESH_INTERVAL_MS = 1_000
+const NATIVE_STATUS_REFRESH_INTERVAL_MS = 2_000
+const NATIVE_STATUS_ACTIVE_REFRESH_INTERVAL_MS = 1_000
+const NATIVE_CONTEXT_STALE_AFTER_MS = 12_000
+const NATIVE_STATUS_STALE_AFTER_MS = 6_000
+
+/**
+ * The first native transcript request can take a moment while the runner
+ * reads Codex's local history. Keep that wait inside the conversation rather
+ * than presenting it as an app-level dialog or a blocking spinner.
+ */
+function NativeContextTypingIndicator(props: { label: string }) {
+    return (
+        <div
+            className="flex flex-1 items-center px-5"
+            data-testid="codex-session-context-loading"
+            role="status"
+            aria-label={props.label}
+            aria-live="polite"
+            aria-busy="true"
+        >
+            <div className="mx-auto flex w-full max-w-content items-end gap-2">
+                <AgentFlavorIcon
+                    flavor="codex"
+                    className="mb-0.5 h-5 w-5 shrink-0 text-[var(--app-hint)]"
+                />
+                <div
+                    className="flex h-9 items-center gap-1.5 rounded-2xl rounded-bl-md bg-[var(--app-subtle-bg)] px-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.06)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.18)]"
+                    data-testid="codex-session-context-typing"
+                    aria-hidden="true"
+                >
+                    {[0, 1, 2].map((index) => (
+                        <span
+                            key={index}
+                            data-typing-dot
+                            className="h-1.5 w-1.5 rounded-full bg-[var(--app-hint)] motion-safe:animate-bounce"
+                            style={{ animationDelay: `${index * 140}ms` }}
+                        />
+                    ))}
+                </div>
+            </div>
+        </div>
+    )
+}
+
+export function getNativeContextRefreshInterval(
+    status: CodexLocalSessionStatusResponse | undefined
+): number | false {
+    return status?.success === true && status.status === 'processing'
+        ? NATIVE_CONTEXT_ACTIVE_REFRESH_INTERVAL_MS
+        : NATIVE_CONTEXT_REFRESH_INTERVAL_MS
+}
+
+export function getNativeStatusRefreshInterval(
+    status: CodexLocalSessionStatusResponse | undefined
+): number | false {
+    return status?.success === true && status.status === 'processing'
+        ? NATIVE_STATUS_ACTIVE_REFRESH_INTERVAL_MS
+        : NATIVE_STATUS_REFRESH_INTERVAL_MS
+}
+
+export function deriveNativeSessionConnectionHealth(input: {
+    machineAvailable: boolean
+    recovering: boolean
+    contextAvailable: boolean
+    contextError: boolean
+    contextUpdatedAt: number
+    statusAvailable: boolean
+    statusError: boolean
+    statusUpdatedAt: number
+    realtimeConnected?: boolean
+    now?: number
+}): SessionConnectionHealth {
+    if (input.recovering) {
+        return 'recovering'
+    }
+    if (!input.machineAvailable) {
+        return 'offline'
+    }
+
+    const now = input.now ?? Date.now()
+    const hasAnyData = input.contextAvailable || input.statusAvailable
+    const hasTransportError = input.contextError || input.statusError
+    if (!hasAnyData && hasTransportError) {
+        return 'offline'
+    }
+    if (!input.contextAvailable || !input.statusAvailable) {
+        if (hasTransportError) {
+            return 'degraded'
+        }
+        return 'recovering'
+    }
+    if (hasTransportError) {
+        return 'degraded'
+    }
+    if (input.realtimeConnected) {
+        return 'connected'
+    }
+    if (
+        now - input.contextUpdatedAt > NATIVE_CONTEXT_STALE_AFTER_MS
+        || now - input.statusUpdatedAt > NATIVE_STATUS_STALE_AFTER_MS
+    ) {
+        return 'degraded'
+    }
+    return 'connected'
+}
+
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error)
+}
+
+function formatDirectSendError(error: unknown, t: Translator): string {
+    if (error instanceof ApiError) {
+        switch (error.code) {
+            case 'queue_full':
+                return t('recentCodex.direct.error.queueFull')
+            case 'session_status_unknown':
+                return t('recentCodex.direct.error.statusUnknown')
+            case 'workspace_unavailable':
+                return t('recentCodex.direct.error.workspaceUnavailable')
+            case 'session_not_found':
+                return t('recentCodex.direct.error.sessionMissing')
+        }
+        if (error.code === 'session_busy' || error.status === 409) {
+            return t('recentCodex.direct.error.conflict')
+        }
+        if (error.status === 408) {
+            return t('recentCodex.direct.error.timeout')
+        }
+        if (error.status >= 500) {
+            return t('recentCodex.direct.error.runnerUnavailable')
+        }
+        // ApiClient includes the raw response body in ApiError.message for
+        // diagnostics. Keep that payload out of the composer; it can contain
+        // long transcript paths or implementation details.
+        return t('recentCodex.direct.error.generic')
+    }
+    return errorMessage(error)
 }
 
 function formatForkError(error: unknown, t: Translator): string {
@@ -64,52 +231,188 @@ function buildReadOnlyCodexMessages(
 export function buildReadOnlyCodexBlocks(
     messages: readonly CodexLocalSessionContextMessage[]
 ): ChatBlock[] {
+    return buildCodexBlocksFromDecryptedMessages(buildReadOnlyCodexMessages(messages))
+}
+
+/**
+ * Merge the newest context page with older pages without allowing an
+ * overlapping transcript read to render the same message twice.  Native
+ * transcript files can grow between requests, so the page boundary is not a
+ * sufficient identity on its own; the stable local message id is.
+ */
+export function mergeCodexContextMessages(
+    pages: readonly CodexLocalSessionContextResponse[]
+): CodexLocalSessionContextMessage[] {
+    const byId = new Map<string, CodexLocalSessionContextMessage>()
+    for (const page of pages) {
+        for (const message of page.messages) {
+            byId.set(message.id, message)
+        }
+    }
+
+    return [...byId.values()].sort((left, right) => {
+        const leftPosition = left.position ?? left.createdAt
+        const rightPosition = right.position ?? right.createdAt
+        return leftPosition - rightPosition || left.createdAt - right.createdAt || left.id.localeCompare(right.id)
+    })
+}
+
+/**
+ * A native prompt is accepted by a separate local Codex process, so there is
+ * no HAPI message row or localId for the transcript to echo back. Keep a
+ * small client-side copy until a *new* matching transcript record arrives.
+ */
+export type NativeDirectMessageEcho = {
+    id: string
+    text: string
+    createdAt: number
+    status: 'sending' | 'queued'
+    queueId: string | null
+    /** Transcript records present when this prompt was submitted. */
+    observedTranscriptMessageIds: readonly string[]
+    /** Highest transcript position present when this prompt was submitted. */
+    observedThroughPosition: number | null
+}
+
+function getNativeUserMessageText(message: CodexLocalSessionContextMessage): string | null {
+    if (message.content.role !== 'user') return null
+    const content = message.content.content
+    if (
+        content
+        && typeof content === 'object'
+        && 'type' in content
+        && 'text' in content
+        && (content as { type?: unknown }).type === 'text'
+        && typeof (content as { text?: unknown }).text === 'string'
+    ) {
+        return (content as { text: string }).text.trim()
+    }
+    return null
+}
+
+/**
+ * Hide an optimistic native bubble as soon as its authoritative transcript
+ * entry arrives. IDs seen at submit time protect repeated prompts ("continue"
+ * sent twice) from reconciling against an older, identical message.
+ */
+export function getVisibleNativeDirectMessageEchoes(
+    echoes: readonly NativeDirectMessageEcho[],
+    transcriptMessages: readonly CodexLocalSessionContextMessage[]
+): NativeDirectMessageEcho[] {
+    const matchedTranscriptIds = new Set<string>()
+    return echoes.filter((echo) => {
+        const observedIds = new Set(echo.observedTranscriptMessageIds)
+        const match = transcriptMessages.find((message) => (
+            (echo.observedThroughPosition === null
+                ? !observedIds.has(message.id)
+                : typeof message.position === 'number' && message.position > echo.observedThroughPosition)
+            && !matchedTranscriptIds.has(message.id)
+            && getNativeUserMessageText(message) === echo.text
+        ))
+        if (!match) return true
+        matchedTranscriptIds.add(match.id)
+        return false
+    })
+}
+
+function buildNativeDirectEchoMessages(
+    echoes: readonly NativeDirectMessageEcho[]
+): DecryptedMessage[] {
+    return echoes.map((echo) => ({
+        id: echo.id,
+        seq: null,
+        localId: echo.id,
+        content: {
+            role: 'user',
+            content: { type: 'text', text: echo.text }
+        },
+        createdAt: echo.createdAt,
+        status: echo.status,
+        originalText: echo.text
+    }))
+}
+
+function buildCodexBlocksFromDecryptedMessages(messages: readonly DecryptedMessage[]): ChatBlock[] {
     const normalizedMessages: NormalizedMessage[] = []
-    for (const message of buildReadOnlyCodexMessages(messages)) {
+    for (const message of messages) {
         const normalized = normalizeDecryptedMessage(message)
         if (normalized) normalizedMessages.push(normalized)
     }
     return reduceChatBlocks(normalizedMessages, null).blocks
 }
 
+/** Build a native transcript plus any unconfirmed direct-send bubbles. */
+export function buildNativeCodexBlocks(
+    messages: readonly CodexLocalSessionContextMessage[],
+    echoes: readonly NativeDirectMessageEcho[] = []
+): ChatBlock[] {
+    return buildCodexBlocksFromDecryptedMessages([
+        ...buildReadOnlyCodexMessages(messages),
+        ...buildNativeDirectEchoMessages(echoes)
+    ])
+}
+
 function NativeCodexThread(props: {
     api: ApiClient
     sessionId: string
     title: string
+    metadata: SessionMetadataSummary
     messages: readonly CodexLocalSessionContextMessage[]
+    directMessageEchoes: readonly NativeDirectMessageEcho[]
     version: number
     hasMoreMessages: boolean
     isLoadingMoreMessages: boolean
     onLoadMore: () => Promise<unknown>
+    outlineOpen: boolean
+    onOutlineOpenChange: (open: boolean) => void
     isProcessing: boolean
+    queuedMessages: readonly CodexLocalSessionQueuedMessage[]
     composerDisabled: boolean
     composerNotice: string | null
     sendError: ComposerSendError | null
     onClearSendError: () => void
     onSendMessage: (text: string) => void
+    onRefresh: () => void
+    forceScrollToken: number
 }) {
-    const [outlineOpen, setOutlineOpen] = useState(false)
     const composerOverlayRef = useRef<HTMLDivElement | null>(null)
+    const queueOverlayRef = useRef<HTMLDivElement | null>(null)
     const [composerHeight, setComposerHeight] = useState(0)
+    const [queueHeight, setQueueHeight] = useState(0)
+    const [queueAccessoryExpanded, setQueueAccessoryExpanded] = useState(false)
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const nativeSession = useMemo(() => ({ active: true, thinking: props.isProcessing }), [props.isProcessing])
-    const ungroupedBlocks = useMemo(
+    const transcriptBlocks = useMemo(
         () => buildReadOnlyCodexBlocks(props.messages),
         [props.messages]
     )
-    const blocks = useMemo(
-        () => groupAssistantResultDetails(buildVisibleChatBlocks(ungroupedBlocks, {
-            hasMoreMessages: props.hasMoreMessages,
-            terminalToolDisplayMode
-        })),
-        [props.hasMoreMessages, terminalToolDisplayMode, ungroupedBlocks]
+    const ungroupedBlocks = useMemo(
+        () => buildNativeCodexBlocks(props.messages, props.directMessageEchoes),
+        [props.directMessageEchoes, props.messages]
     )
-    const outlineItems = useMemo(() => buildConversationOutline(ungroupedBlocks), [ungroupedBlocks])
+    const timeline = useMemo(
+        () => buildSessionDetailTimeline(ungroupedBlocks, {
+            hasMoreMessages: props.hasMoreMessages,
+            terminalToolDisplayMode,
+            runActive: props.isProcessing
+        }),
+        [props.hasMoreMessages, props.isProcessing, terminalToolDisplayMode, ungroupedBlocks]
+    )
+    const blocks = timeline.visible
+    // A local echo is useful in the thread immediately, but it must not become
+    // a durable outline anchor until the runner has actually written it.
+    const outlineItems = useMemo(() => buildConversationOutline(transcriptBlocks), [transcriptBlocks])
     const runtime = useHappyRuntime({
         session: nativeSession,
         blocks,
+        // Processing a native turn does not disable the composer: the runner
+        // accepts the prompt into its FIFO queue. Only status uncertainty or
+        // an in-flight HTTP request is represented by composerDisabled.
         isSending: props.composerDisabled,
-        isRunning: props.isProcessing,
+        // This is a read-only transcript adapter. A native turn is owned by
+        // the external Codex process, so exposing assistant-ui's cancel/stop
+        // control would look actionable but could never abort that process.
+        isRunning: false,
         onSendMessage: props.onSendMessage,
         onAbort: async () => {}
     })
@@ -136,6 +439,34 @@ function NativeCodexThread(props: {
         }
     }, [])
 
+    useLayoutEffect(() => {
+        const node = queueOverlayRef.current
+        if (!node) {
+            setQueueHeight(0)
+            return
+        }
+
+        const measure = () => {
+            const height = Math.ceil(node.getBoundingClientRect().height)
+            setQueueHeight((current) => current === height ? current : height)
+        }
+        measure()
+        if (typeof ResizeObserver === 'undefined') {
+            window.addEventListener('resize', measure)
+            return () => window.removeEventListener('resize', measure)
+        }
+        const observer = new ResizeObserver(measure)
+        observer.observe(node)
+        window.addEventListener('resize', measure)
+        return () => {
+            observer.disconnect()
+            window.removeEventListener('resize', measure)
+        }
+    }, [props.queuedMessages.length])
+
+    const queueAccessoryVisible = props.queuedMessages.length > 0
+    const totalBottomInset = composerHeight + (queueHeight > 0 ? queueHeight + NATIVE_QUEUE_FLOATING_GAP_PX : 0)
+
     return (
         <AssistantRuntimeProvider runtime={runtime}>
             <div className="relative flex min-h-0 flex-1 flex-col">
@@ -143,9 +474,9 @@ function NativeCodexThread(props: {
                     key={`codex-context-thread-${props.sessionId}`}
                     api={props.api}
                     sessionId={`codex-context-${props.sessionId}`}
-                    metadata={null}
+                    metadata={props.metadata}
                     disabled={false}
-                    onRefresh={() => {}}
+                    onRefresh={props.onRefresh}
                     onFlushPending={() => {}}
                     onAtBottomChange={() => {}}
                     isLoadingMessages={false}
@@ -154,41 +485,58 @@ function NativeCodexThread(props: {
                     isLoadingMoreMessages={props.isLoadingMoreMessages}
                     onLoadMore={props.onLoadMore}
                     pendingCount={0}
-                    rawMessagesCount={props.messages.length}
+                    rawMessagesCount={props.messages.length + props.directMessageEchoes.length}
                     normalizedMessagesCount={ungroupedBlocks.length}
                     messagesVersion={props.version}
                     toolGroupRunActive={props.isProcessing}
                     toolGroupCompletionKey={null}
-                    forceScrollToken={0}
-                    outlineOpen={outlineOpen}
+                    forceScrollToken={props.forceScrollToken}
+                    outlineOpen={props.outlineOpen}
                     outlineTitle={props.title}
                     outlineItems={outlineItems}
                     topInset={SESSION_DETAIL_HEADER_HEIGHT_PX}
-                    bottomInset={composerHeight || undefined}
-                    scrollButtonBottomInset={composerHeight > 0 ? composerHeight + 8 : undefined}
-                    onOutlineOpenChange={setOutlineOpen}
+                    bottomInset={totalBottomInset || undefined}
+                    scrollButtonBottomInset={totalBottomInset > 0 ? totalBottomInset + 8 : undefined}
+                    bottomAccessoryVisible={queueAccessoryVisible}
+                    bottomAccessoryExpanded={queueAccessoryExpanded}
+                    onOutlineOpenChange={props.onOutlineOpenChange}
                 />
 
-                <div
-                    ref={composerOverlayRef}
-                    className="pointer-events-none absolute inset-x-0 bottom-0 z-10"
-                    data-testid="codex-native-session-composer-overlay"
-                >
-                    <div className="pointer-events-auto">
-                        <HappyComposer
-                            key={`codex-native-composer-${props.sessionId}`}
-                            sessionId={`codex-native-${props.sessionId}`}
-                            disabled={props.composerDisabled}
-                            active
-                            agentFlavor={null}
-                            showStatusBar={false}
-                            allowAttachments={false}
-                            inactiveNotice={props.composerNotice}
-                            sendError={props.sendError}
-                            onClearSendError={props.onClearSendError}
-                        />
-                    </div>
-                </div>
+                <SessionDetailBottomDock>
+                    <SessionDetailBottomDockComposer
+                        ref={composerOverlayRef}
+                        testId="codex-native-session-composer-overlay"
+                    >
+                        <div className="pointer-events-auto">
+                            <HappyComposer
+                                key={`codex-native-composer-${props.sessionId}`}
+                                sessionId={`codex-native-${props.sessionId}`}
+                                disabled={props.composerDisabled}
+                                active
+                                agentFlavor={null}
+                                showStatusBar={false}
+                                allowAttachments={false}
+                                inactiveNotice={props.composerNotice}
+                                sendError={props.sendError}
+                                onClearSendError={props.onClearSendError}
+                            />
+                        </div>
+                    </SessionDetailBottomDockComposer>
+
+                    {queueAccessoryVisible ? (
+                        <SessionDetailBottomDockAccessory
+                            ref={queueOverlayRef}
+                            testId="codex-native-session-queue-overlay"
+                        >
+                            <div className="pointer-events-auto">
+                                <NativeQueuedMessagesBar
+                                    messages={props.queuedMessages}
+                                    onExpandedChange={setQueueAccessoryExpanded}
+                                />
+                            </div>
+                        </SessionDetailBottomDockAccessory>
+                    ) : null}
+                </SessionDetailBottomDock>
             </div>
         </AssistantRuntimeProvider>
     )
@@ -196,30 +544,26 @@ function NativeCodexThread(props: {
 
 /**
  * Renders a local Codex CLI transcript through the normal session thread.
- * Text can be delivered directly to the original native thread only after its
- * lifecycle confirms that it is idle; Fork remains available in the header.
+ * Text is delivered to the original native thread. When its lifecycle is
+ * processing, the runner keeps the prompt in a FIFO queue; Fork remains
+ * available in the header once the native thread is idle.
  */
 export function CodexSessionContextPage(props: {
     api: ApiClient
     sessionId: string
     machineId?: string
+    /** Known runner liveness when the route has already loaded its machine. */
+    machineAvailable?: boolean
+    /** Older runners remain on polling until they advertise transcript events. */
+    realtimeAvailable?: boolean
     onBack: () => void
     onForked: (sessionId: string) => void
 }) {
     const { t } = useTranslation()
+    const nativeRealtime = useNativeCodexRealtime()
+    const hasRealtimeUpdates = props.realtimeAvailable === true && nativeRealtime?.connected === true
     const [isForking, setIsForking] = useState(false)
     const [forkError, setForkError] = useState<string | null>(null)
-    const contextQuery = useQuery({
-        queryKey: queryKeys.codexSessionContext(props.machineId ?? 'unknown', props.sessionId),
-        queryFn: async () => {
-            if (!props.machineId) {
-                throw new Error(t('recentCodex.runnerRequired'))
-            }
-            return await props.api.getCodexSessionContext(props.sessionId, props.machineId, { limit: 50 })
-        },
-        enabled: Boolean(props.machineId),
-        retry: false,
-    })
     const statusQuery = useQuery({
         queryKey: queryKeys.codexSessionStatus(props.machineId ?? 'unknown', props.sessionId),
         queryFn: async () => {
@@ -231,30 +575,123 @@ export function CodexSessionContextPage(props: {
         enabled: Boolean(props.machineId),
         retry: 1,
         retryDelay: 500,
-        // Native Codex can start a new turn outside HAPI while this page is
-        // open. Keep the direct-send gate current instead of trusting only
-        // the status captured when the detail page first mounted.
-        refetchInterval: 2_000,
+        // SSE is the fast path, not the only path. Keep a visible-page poll
+        // running so one lost native transcript invalidation cannot leave a
+        // person staring at an unchanged conversation forever.
+        refetchInterval: (query) => getNativeStatusRefreshInterval(
+            query.state.data as CodexLocalSessionStatusResponse | undefined
+        ),
         refetchIntervalInBackground: false,
+        refetchOnMount: 'always',
+        refetchOnReconnect: true,
+        refetchOnWindowFocus: true,
+    })
+    const contextQuery = useQuery({
+        queryKey: queryKeys.codexSessionContext(props.machineId ?? 'unknown', props.sessionId),
+        queryFn: async () => {
+            if (!props.machineId) {
+                throw new Error(t('recentCodex.runnerRequired'))
+            }
+            return await props.api.getCodexSessionContext(props.sessionId, props.machineId, { limit: 50 })
+        },
+        enabled: Boolean(props.machineId),
+        retry: 1,
+        retryDelay: 500,
+        // Same hybrid model as status: SSE makes updates feel instant, while
+        // this visible-page poll repairs missed file-watcher/SSE events.
+        refetchInterval: getNativeContextRefreshInterval(
+            statusQuery.data as CodexLocalSessionStatusResponse | undefined
+        ),
+        refetchIntervalInBackground: false,
+        refetchOnMount: 'always',
+        refetchOnReconnect: true,
+        refetchOnWindowFocus: true,
     })
     const [olderPages, setOlderPages] = useState<CodexLocalSessionContextResponse[]>([])
     const [isLoadingMore, setIsLoadingMore] = useState(false)
     const [isSendingDirect, setIsSendingDirect] = useState(false)
+    const [isRecoveringConnection, setIsRecoveringConnection] = useState(false)
+    const [nativeQueuedMessages, setNativeQueuedMessages] = useState<CodexLocalSessionQueuedMessage[]>([])
+    const [nativeDirectMessageEchoes, setNativeDirectMessageEchoes] = useState<NativeDirectMessageEcho[]>([])
+    const [nativeForceScrollToken, setNativeForceScrollToken] = useState(0)
     const [directSendError, setDirectSendError] = useState<ComposerSendError | null>(null)
     const [dismissedRunnerError, setDismissedRunnerError] = useState<string | null>(null)
+    const [connectionNow, setConnectionNow] = useState(() => Date.now())
+    const [outlineOpen, setOutlineOpen] = useState(false)
+    const [menuOpen, setMenuOpen] = useState(false)
+    const [menuAnchorPoint, setMenuAnchorPoint] = useState({ x: 0, y: 0 })
     const pageScope = `${props.machineId ?? ''}:${props.sessionId}`
     const pageScopeRef = useRef(pageScope)
+    const connectionRecoveryTokenRef = useRef(0)
+    const foregroundRefreshAtRef = useRef(0)
+    const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
+    const menuId = useId()
     pageScopeRef.current = pageScope
 
     useEffect(() => {
         setOlderPages([])
         setIsLoadingMore(false)
+        setIsSendingDirect(false)
+        setNativeQueuedMessages([])
+        setNativeDirectMessageEchoes([])
+        setNativeForceScrollToken(0)
+        setIsRecoveringConnection(false)
+        setDirectSendError(null)
+        setDismissedRunnerError(null)
+        setConnectionNow(Date.now())
+        foregroundRefreshAtRef.current = 0
+        setOutlineOpen(false)
+        setMenuOpen(false)
+        connectionRecoveryTokenRef.current += 1
     }, [props.machineId, props.sessionId])
 
+    useEffect(() => {
+        const response = statusQuery.data
+        if (response?.success === true && Array.isArray(response.queuedMessages)) {
+            // Do not clear a locally confirmed queue from a response produced
+            // by an older runner (or from the short processing window before
+            // the runner has published its queue). Once the native turn is
+            // idle, an explicit empty array is authoritative and clears it.
+            setNativeQueuedMessages((current) => response.queuedMessages!.length === 0
+                && current.length > 0
+                && response.status !== 'idle'
+                ? current
+                : response.queuedMessages!)
+            const queuedMessageIds = new Set(response.queuedMessages.map((message) => message.id))
+            setNativeDirectMessageEchoes((current) => {
+                let changed = false
+                const next = current.map((echo) => {
+                    if (echo.status !== 'queued' || !echo.queueId || queuedMessageIds.has(echo.queueId)) {
+                        return echo
+                    }
+                    changed = true
+                    return { ...echo, status: 'sending' as const }
+                })
+                return changed ? next : current
+            })
+        }
+    }, [statusQuery.data])
+
     const messages = useMemo(
-        () => [...olderPages.flatMap((page) => page.messages), ...(contextQuery.data?.messages ?? [])],
-        [contextQuery.data?.messages, olderPages]
+        () => mergeCodexContextMessages([
+            ...olderPages,
+            ...(contextQuery.data ? [contextQuery.data] : [])
+        ]),
+        [contextQuery.data, olderPages]
     )
+    const visibleNativeDirectMessageEchoes = useMemo(
+        () => getVisibleNativeDirectMessageEchoes(nativeDirectMessageEchoes, messages),
+        [messages, nativeDirectMessageEchoes]
+    )
+    // Once a local echo has been reconciled, actually remove it from state.
+    // Otherwise it could reappear after its transcript row eventually rolls
+    // out of the latest 50-message context page.
+    useEffect(() => {
+        setNativeDirectMessageEchoes((current) => {
+            const next = getVisibleNativeDirectMessageEchoes(current, messages)
+            return next.length === current.length ? current : next
+        })
+    }, [messages])
     const oldestPage = olderPages[0] ?? contextQuery.data
     const hasMoreMessages = oldestPage?.page.hasMore ?? false
     const loadMore = useCallback(async () => {
@@ -280,25 +717,163 @@ export function CodexSessionContextPage(props: {
     }, [isLoadingMore, oldestPage, pageScope, props.api, props.machineId, props.sessionId])
 
     const context = contextQuery.data
+    // Native transcripts do not carry HAPI's SessionMetadata row. Supplying a
+    // small, explicit Codex metadata view keeps the shared thread renderer's
+    // agent icon, path shortening and permission presentation identical to a
+    // normal Codex session without inventing HAPI-only state.
+    const nativeMetadata = useMemo<SessionMetadataSummary>(() => ({
+        path: context?.session.cwd ?? '',
+        host: 'local',
+        flavor: 'codex',
+        capabilities: { terminal: true }
+    }), [context?.session.cwd])
     const directStatus = statusQuery.data?.success === true ? statusQuery.data.status : null
     const directStatusError = statusQuery.data?.success === true ? statusQuery.data.lastError ?? null : null
+    const codexLimitsState = useCodexSubscriptionLimits({
+        api: props.api,
+        machineId: props.machineId,
+        model: context?.session.model ?? null,
+        // Read the model from the transcript first, so a native GPT-specific
+        // session renders the matching Codex quota bucket instead of a
+        // generic one during the first paint.
+        enabled: Boolean(props.machineId && context),
+        thinking: directStatus === 'processing'
+    })
     const refetchContext = contextQuery.refetch
     const refetchStatus = statusQuery.refetch
+
+    // Freshness is time-based, so it must be re-evaluated even when a hung
+    // request has not produced a new React Query notification.  The clock is
+    // cheap, pauses while the tab is hidden, and also makes the native status
+    // control react predictably after the stale thresholds are crossed.
+    useEffect(() => {
+        const tick = () => {
+            if (document.visibilityState === 'visible') {
+                setConnectionNow(Date.now())
+            }
+        }
+        tick()
+        const timer = window.setInterval(tick, 1_000)
+        return () => window.clearInterval(timer)
+    }, [])
+
+    // React Query normally refetches on focus/reconnect, but an explicit
+    // foreground read avoids waiting for stale-time bookkeeping and keeps the
+    // native detail route aligned with HAPI's reconnect behaviour.
+    const refreshNativeDataOnForeground = useCallback(() => {
+        if (document.visibilityState !== 'visible') return
+        const now = Date.now()
+        if (now - foregroundRefreshAtRef.current < 300) return
+        foregroundRefreshAtRef.current = now
+        setConnectionNow(now)
+        void Promise.allSettled([refetchContext(), refetchStatus()])
+    }, [refetchContext, refetchStatus])
+
+    useEffect(() => {
+        if (!hasRealtimeUpdates || !props.machineId) {
+            return
+        }
+
+        const refreshFromNativeEvent = () => {
+            setConnectionNow(Date.now())
+            void Promise.allSettled([refetchContext(), refetchStatus()])
+        }
+        // Reconcile once when this detail first gets a healthy event stream;
+        // any file writes missed before subscription are covered too.
+        refreshFromNativeEvent()
+        return subscribeNativeCodexSessionUpdated((event) => {
+            if (event.machineId !== props.machineId || event.codexSessionId !== props.sessionId) {
+                return
+            }
+            refreshFromNativeEvent()
+        })
+    }, [hasRealtimeUpdates, props.machineId, props.sessionId, refetchContext, refetchStatus])
+
+    useEffect(() => {
+        window.addEventListener('focus', refreshNativeDataOnForeground)
+        window.addEventListener('pageshow', refreshNativeDataOnForeground)
+        window.addEventListener('online', refreshNativeDataOnForeground)
+        document.addEventListener('visibilitychange', refreshNativeDataOnForeground)
+        return () => {
+            window.removeEventListener('focus', refreshNativeDataOnForeground)
+            window.removeEventListener('pageshow', refreshNativeDataOnForeground)
+            window.removeEventListener('online', refreshNativeDataOnForeground)
+            document.removeEventListener('visibilitychange', refreshNativeDataOnForeground)
+        }
+    }, [refreshNativeDataOnForeground])
+
+    const nativeConnectionHealth = deriveNativeSessionConnectionHealth({
+        machineAvailable: props.machineAvailable ?? Boolean(props.machineId),
+        recovering: isRecoveringConnection,
+        contextAvailable: Boolean(contextQuery.data),
+        contextError: Boolean(contextQuery.error),
+        contextUpdatedAt: contextQuery.dataUpdatedAt,
+        statusAvailable: statusQuery.data?.success === true,
+        statusError: Boolean(statusQuery.error),
+        statusUpdatedAt: statusQuery.dataUpdatedAt,
+        realtimeConnected: hasRealtimeUpdates,
+        now: connectionNow
+    })
+    const recoverNativeConnection = useCallback(async (): Promise<void> => {
+        if (!props.machineId || isRecoveringConnection) {
+            return
+        }
+
+        const recoveryToken = ++connectionRecoveryTokenRef.current
+        setIsRecoveringConnection(true)
+        try {
+            // A native transcript has no HAPI session SSE stream. Re-reading
+            // both runner endpoints is the authoritative reconnect operation.
+            await Promise.all([refetchContext(), refetchStatus()])
+        } finally {
+            if (connectionRecoveryTokenRef.current === recoveryToken) {
+                setIsRecoveringConnection(false)
+            }
+        }
+    }, [isRecoveringConnection, props.machineId, refetchContext, refetchStatus])
+    const handleMenuToggle = useCallback(() => {
+        if (!menuOpen && menuAnchorRef.current) {
+            const rect = menuAnchorRef.current.getBoundingClientRect()
+            setMenuAnchorPoint({ x: rect.right, y: rect.bottom })
+        }
+        setMenuOpen((open) => !open)
+    }, [menuOpen])
+    const menuActivation = useReliableTopEdgeAction(handleMenuToggle)
+    const nativeConnectionContext = useMemo(() => ({
+        health: nativeConnectionHealth,
+        recover: recoverNativeConnection,
+        lastUpdatedAt: Math.max(
+            contextQuery.dataUpdatedAt || 0,
+            statusQuery.dataUpdatedAt || 0
+        ) || null
+    }), [contextQuery.dataUpdatedAt, nativeConnectionHealth, recoverNativeConnection, statusQuery.dataUpdatedAt])
+    const hasNativeQueuedMessages = nativeQueuedMessages.length > 0
     const isNativeProcessing = isSendingDirect || directStatus === 'processing'
-    const isNativeIdle = !isSendingDirect && directStatus === 'idle'
+    // A runner can briefly report idle between the native turn ending and the
+    // queue pump starting its next child. Treat that window as non-idle so
+    // Fork cannot race a prompt that is already waiting for delivery.
+    const isNativeQueueWaiting = hasNativeQueuedMessages && directStatus === 'idle'
+    const isNativeIdle = !isSendingDirect && directStatus === 'idle' && !hasNativeQueuedMessages
     const canFork = Boolean(props.machineId) && !isForking && isNativeIdle
-    const composerDisabled = !props.machineId || !isNativeIdle
+    const composerDisabled = !props.machineId
+        || isSendingDirect
+        || statusQuery.isLoading
+        || statusQuery.isError
+        || directStatus === null
+        || directStatus === 'unknown'
     const composerNotice = isNativeProcessing
         ? t('recentCodex.direct.processing')
-        : directStatus === 'idle'
-            ? null
-            : directStatus === 'unknown'
-            ? t('recentCodex.direct.unknown')
-            : statusQuery.isLoading
-                ? t('recentCodex.direct.checking')
-                : statusQuery.isError || directStatus === null
-                ? t('recentCodex.direct.statusFailed')
-                : null
+        : isNativeQueueWaiting
+            ? t('recentCodex.status.queued')
+            : directStatus === 'idle'
+                ? null
+                : directStatus === 'unknown'
+                    ? t('recentCodex.direct.unknown')
+                    : statusQuery.isLoading
+                        ? t('recentCodex.direct.checking')
+                        : statusQuery.isError || directStatus === null
+                            ? t('recentCodex.direct.statusFailed')
+                            : null
     const visibleRunnerError = directStatusError === dismissedRunnerError ? null : directStatusError
     const composerSendError = directSendError ?? (visibleRunnerError
         ? {
@@ -309,17 +884,24 @@ export function CodexSessionContextPage(props: {
         }
         : null)
 
+    const nativeAgentStatusClass = nativeConnectionHealth === 'offline'
+        ? 'bg-[#FF3B30]'
+        : nativeConnectionHealth === 'degraded' || nativeConnectionHealth === 'recovering'
+            ? 'bg-[#FF9500] animate-pulse'
+            : directStatus === 'processing'
+                ? 'bg-[#007AFF] animate-pulse'
+                : 'bg-[#34C759]'
+
     const title = context?.session.title ?? t('recentCodex.context.title')
-    const sessionDetails = useMemo<SessionHeaderDetail[]>(() => [
-        { key: 'title', label: t('session.header.details.fullName'), value: title },
-        { key: 'session-id', label: t('session.header.details.sessionId'), value: props.sessionId },
-        {
-            key: 'path',
-            label: t('session.header.details.projectPath'),
-            value: context?.session.cwd ?? t('session.header.details.unavailable')
-        },
-        { key: 'agent', label: t('session.header.details.agentInfo'), value: 'codex', isAgentInfo: true }
-    ], [context?.session.cwd, props.sessionId, t, title])
+    const sessionDetails = useMemo<SessionHeaderDetail[]>(() => buildSessionHeaderDetails({
+        title,
+        sessionId: props.sessionId,
+        projectPath: context?.session.cwd,
+        lastActivityAt: context?.session.modifiedAt,
+        agentFlavor: 'codex',
+        model: context?.session.model,
+        reasoning: context?.session.modelReasoningEffort
+    }, t), [context?.session.cwd, context?.session.model, context?.session.modelReasoningEffort, context?.session.modifiedAt, props.sessionId, t, title])
 
     const fork = useCallback(async () => {
         if (!canFork || !props.machineId) {
@@ -340,14 +922,30 @@ export function CodexSessionContextPage(props: {
         }
     }, [canFork, props.api, props.machineId, props.onForked, props.sessionId, t])
 
-    const forkActivation = useReliableTopEdgeAction(() => {
-        void fork()
-    })
-
     const sendDirectMessage = useCallback((text: string) => {
-        if (!props.machineId || isSendingDirect || directStatus !== 'idle') {
+        if (!props.machineId || isSendingDirect || directStatus === null || directStatus === 'unknown') {
             return
         }
+        const requestScope = pageScope
+        const echoId = makeClientSideId('native')
+        const echo: NativeDirectMessageEcho = {
+            id: echoId,
+            text,
+            createdAt: Date.now(),
+            status: 'sending',
+            queueId: null,
+            observedTranscriptMessageIds: messages.map((message) => message.id),
+            observedThroughPosition: messages.reduce<number | null>((latest, message) => (
+                typeof message.position !== 'number'
+                    ? latest
+                    : Math.max(latest ?? message.position, message.position)
+            ), null)
+        }
+        // Show the person's words before the hub/runner round trip completes.
+        // This makes a slow native process feel like an acknowledged action,
+        // rather than a button press that appears to have done nothing.
+        setNativeDirectMessageEchoes((current) => [...current, echo])
+        setNativeForceScrollToken((token) => token + 1)
         setIsSendingDirect(true)
         setDirectSendError(null)
         setDismissedRunnerError(null)
@@ -358,164 +956,223 @@ export function CodexSessionContextPage(props: {
                     message: text
                 })
                 if (response.success !== true) {
-                    throw new Error(response.error)
+                    throw new ApiError(response.error, 409, response.code)
+                }
+                if (pageScopeRef.current !== requestScope) {
+                    return
+                }
+                setNativeDirectMessageEchoes((current) => current.map((message) => (
+                    message.id !== echoId
+                        ? message
+                        : {
+                            ...message,
+                            status: response.status === 'queued' ? 'queued' : 'sending',
+                            queueId: response.queueId ?? null
+                        }
+                )))
+                if (Array.isArray(response.queuedMessages) && response.queuedMessages.length > 0) {
+                    setNativeQueuedMessages(response.queuedMessages)
+                } else if (response.status === 'queued' && response.queueId && response.queuedAt !== undefined) {
+                    setNativeQueuedMessages((messages) => [
+                        ...messages,
+                        { id: response.queueId!, text, queuedAt: response.queuedAt! }
+                    ])
                 }
                 await Promise.all([refetchStatus(), refetchContext()])
             } catch (error) {
+                if (pageScopeRef.current !== requestScope) {
+                    return
+                }
+                // Match normal HAPI text sends: a rejected post returns the
+                // text to the composer, so do not leave a second failed bubble
+                // that could be mistaken for a delivered native prompt.
+                setNativeDirectMessageEchoes((current) => current.filter((message) => message.id !== echoId))
                 setDirectSendError({
                     id: Date.now(),
                     text,
-                    message: errorMessage(error),
+                    message: formatDirectSendError(error, t),
                     scheduledAt: null
                 })
             } finally {
-                setIsSendingDirect(false)
+                if (pageScopeRef.current === requestScope) {
+                    setIsSendingDirect(false)
+                }
             }
         })()
-    }, [directStatus, isSendingDirect, props.api, props.machineId, props.sessionId, refetchContext, refetchStatus])
-
-    useEffect(() => {
-        if (!isNativeProcessing) return
-        const refresh = () => {
-            void refetchStatus()
-            void refetchContext()
-        }
-        refresh()
-        const interval = window.setInterval(refresh, 1_000)
-        return () => window.clearInterval(interval)
-    }, [isNativeProcessing, refetchContext, refetchStatus])
+    }, [directStatus, isSendingDirect, messages, pageScope, props.api, props.machineId, props.sessionId, refetchContext, refetchStatus, t])
 
     return (
-        <div className="relative flex h-full min-h-0 flex-col bg-[var(--app-bg)]" data-testid="codex-session-context-page">
-            <FloatingSessionHeader
-                onBack={props.onBack}
-                backLabel={t('recentCodex.back')}
-                title={title}
-                details={sessionDetails}
-                floating
-                actions={(
-                    <button
-                        type="button"
-                        {...forkActivation}
-                        disabled={!canFork}
-                        className="pointer-events-auto touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] text-[var(--app-hint)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-50 dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
-                        aria-busy={isForking || undefined}
-                        aria-label={isForking ? t('recentCodex.forking') : t('recentCodex.fork')}
-                        title={isForking ? t('recentCodex.forking') : t('recentCodex.fork')}
-                    >
-                        {isForking
-                            ? <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" />
-                            : <GitFork className="h-5 w-5" aria-hidden="true" />}
-                    </button>
-                )}
-            />
-
-            <main className="flex min-h-0 flex-1 flex-col" aria-label={t('recentCodex.context.title')}>
-                {!props.machineId ? (
-                    <div className="px-3 py-3">
-                        <div className="mx-auto w-full max-w-content rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
-                            {t('recentCodex.runnerRequired')}
-                        </div>
-                    </div>
-                ) : contextQuery.isLoading ? (
-                    <div className="flex flex-1 items-center justify-center" data-testid="codex-session-context-loading">
-                        <LoadingState label={t('recentCodex.context.loading')} className="text-sm" />
-                    </div>
-                ) : contextQuery.error ? (
-                    <div className="px-3 py-3">
-                        <div className="mx-auto w-full max-w-content rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-3 text-sm text-red-600">
-                            <div>{t('recentCodex.context.failed')}: {errorMessage(contextQuery.error)}</div>
+        <SessionConnectionProvider value={nativeConnectionContext}>
+            <SessionDetailSurface source="codex" testId="codex-session-context-page">
+                <FloatingSessionHeader
+                    onBack={props.onBack}
+                    backLabel={t('recentCodex.back')}
+                    title={title}
+                    details={sessionDetails}
+                    floating
+                    actions={(
+                        <div className="flex shrink-0 items-center gap-1">
+                            <CodexSubscriptionLimitsBadge
+                                limits={codexLimitsState.limits}
+                                isFetching={codexLimitsState.isFetching}
+                                error={codexLimitsState.error}
+                            />
                             <button
                                 type="button"
-                                onClick={() => void contextQuery.refetch()}
-                                className="mt-2 rounded-md border border-current/30 px-2 py-1 text-xs font-medium transition-colors hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
+                                {...menuActivation}
+                                onPointerDown={(event) => {
+                                    menuActivation.onPointerDown(event)
+                                    event.stopPropagation()
+                                }}
+                                ref={menuAnchorRef}
+                                data-testid="codex-native-session-menu-trigger"
+                                aria-haspopup="menu"
+                                aria-expanded={menuOpen}
+                                aria-controls={menuOpen ? menuId : undefined}
+                                aria-label={t('session.more')}
+                                className="pointer-events-auto touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] text-[var(--app-hint)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
+                                title={t('session.more')}
                             >
-                                {t('recentCodex.retry')}
+                                <AgentFlavorStatusIcon
+                                    flavor="codex"
+                                    className="h-5 w-5"
+                                    showStatus
+                                    statusClassName={nativeAgentStatusClass}
+                                />
                             </button>
                         </div>
+                    )}
+                />
+                <SessionActionMenu
+                    isOpen={menuOpen}
+                    onClose={() => setMenuOpen(false)}
+                    sessionActive={directStatus === 'processing'}
+                    onRefresh={() => void recoverNativeConnection()}
+                    refreshLabel={t('recentCodex.refresh')}
+                    refreshPending={isRecoveringConnection}
+                    onFork={() => void fork()}
+                    forkLabel={t('recentCodex.fork')}
+                    forkPendingLabel={t('recentCodex.forking')}
+                    forkPending={isForking}
+                    forkDisabled={!canFork}
+                    onToggleOutline={() => setOutlineOpen((open) => !open)}
+                    outlineActive={outlineOpen}
+                    anchorPoint={menuAnchorPoint}
+                    menuId={menuId}
+                />
+                <SessionConnectionRecoveryControl
+                    labels={{
+                        degraded: t('session.connection.native.degraded'),
+                        recovering: t('session.connection.native.recovering'),
+                        offline: t('session.connection.native.offline'),
+                        recover: t('session.connection.native.recover')
+                    }}
+                />
+
+                <SessionDetailContent ariaLabel={t('recentCodex.context.title')}>
+                    {!props.machineId ? (
+                        <div className="px-3 py-3">
+                            <SessionDetailStatusNotice
+                                tone="error"
+                                title={t('recentCodex.runnerRequired')}
+                                testId="codex-runner-required"
+                            />
+                        </div>
+                    ) : contextQuery.isLoading ? (
+                        <NativeContextTypingIndicator label={t('recentCodex.context.loading')} />
+                    ) : contextQuery.error && !context ? (
+                        <div className="px-3 py-3">
+                            <SessionDetailStatusNotice
+                                tone="error"
+                                title={t('recentCodex.context.failed')}
+                                detail={errorMessage(contextQuery.error)}
+                                action={{
+                                    label: t('recentCodex.retry'),
+                                    onClick: () => void contextQuery.refetch(),
+                                    busy: contextQuery.isFetching
+                                }}
+                                testId="codex-session-context-error"
+                            />
+                        </div>
+                    ) : context ? (
+                        <NativeCodexThread
+                            api={props.api}
+                            sessionId={props.sessionId}
+                            title={title}
+                            metadata={nativeMetadata}
+                            messages={messages}
+                            directMessageEchoes={visibleNativeDirectMessageEchoes}
+                            version={contextQuery.dataUpdatedAt + olderPages.length + nativeForceScrollToken}
+                            hasMoreMessages={hasMoreMessages}
+                            isLoadingMoreMessages={isLoadingMore}
+                            onLoadMore={loadMore}
+                            outlineOpen={outlineOpen}
+                            onOutlineOpenChange={setOutlineOpen}
+                            isProcessing={isNativeProcessing}
+                            queuedMessages={nativeQueuedMessages}
+                            composerDisabled={composerDisabled}
+                            composerNotice={composerNotice}
+                            sendError={composerSendError}
+                            onClearSendError={() => {
+                                setDirectSendError(null)
+                                if (directStatusError) {
+                                    setDismissedRunnerError(directStatusError)
+                                }
+                            }}
+                            onSendMessage={sendDirectMessage}
+                            onRefresh={refreshNativeDataOnForeground}
+                            forceScrollToken={nativeForceScrollToken}
+                        />
+                    ) : null}
+                </SessionDetailContent>
+                {isForking ? (
+                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
+                        <SessionDetailStatusNotice
+                            tone="loading"
+                            title={t('recentCodex.fork.progress.title')}
+                            detail={t('recentCodex.fork.progress.body')}
+                            testId="codex-fork-progress"
+                        />
                     </div>
-                ) : context ? (
-                    <NativeCodexThread
-                        api={props.api}
-                        sessionId={props.sessionId}
-                        title={title}
-                        messages={messages}
-                        version={contextQuery.dataUpdatedAt + olderPages.length}
-                        hasMoreMessages={hasMoreMessages}
-                        isLoadingMoreMessages={isLoadingMore}
-                        onLoadMore={loadMore}
-                        isProcessing={isNativeProcessing}
-                        composerDisabled={composerDisabled}
-                        composerNotice={composerNotice}
-                        sendError={composerSendError}
-                        onClearSendError={() => {
-                            setDirectSendError(null)
-                            if (directStatusError) {
-                                setDismissedRunnerError(directStatusError)
-                            }
-                        }}
-                        onSendMessage={sendDirectMessage}
-                    />
+                ) : forkError ? (
+                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
+                        <SessionDetailStatusNotice
+                            tone="error"
+                            title={t('recentCodex.fork.failed.title')}
+                            detail={forkError}
+                            action={{
+                                label: t('recentCodex.retry'),
+                                onClick: () => void fork(),
+                                disabled: !canFork
+                            }}
+                            testId="codex-fork-error"
+                        />
+                    </div>
+                ) : isNativeQueueWaiting ? (
+                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
+                        <SessionDetailStatusNotice
+                            tone="processing"
+                            title={t('recentCodex.status.queued')}
+                            compact
+                            testId="codex-status-queued"
+                        />
+                    </div>
+                ) : directStatus === 'unknown' || statusQuery.isError ? (
+                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
+                        <SessionDetailStatusNotice
+                            tone="warning"
+                            title={directStatus === 'unknown' ? t('recentCodex.status.unknown') : t('recentCodex.status.failed')}
+                            detail={t('recentCodex.status.locked')}
+                            action={{
+                                label: t('recentCodex.retry'),
+                                onClick: () => void refetchStatus(),
+                                busy: statusQuery.isFetching
+                            }}
+                            testId="codex-status-error"
+                        />
+                    </div>
                 ) : null}
-            </main>
-            {isForking ? (
-                <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                    <div className="pointer-events-auto mx-auto flex w-full max-w-content items-center gap-2.5 rounded-xl border border-sky-500/20 bg-[var(--app-bg)] px-3 py-2.5 text-left shadow-[0_10px_28px_rgba(15,23,42,0.12)]" role="status" aria-live="polite">
-                        <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-sky-600" aria-hidden="true" />
-                        <div className="min-w-0">
-                            <div className="text-xs font-semibold text-[var(--app-fg)]">{t('recentCodex.fork.progress.title')}</div>
-                            <div className="mt-0.5 text-[11px] leading-4 text-[var(--app-hint)]">{t('recentCodex.fork.progress.body')}</div>
-                        </div>
-                    </div>
-                </div>
-            ) : forkError ? (
-                <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                    <div className="pointer-events-auto mx-auto flex w-full max-w-content items-start gap-2.5 rounded-xl border border-red-500/25 bg-[var(--app-bg)] px-3 py-2.5 text-left shadow-[0_10px_28px_rgba(15,23,42,0.12)]" role="alert">
-                        <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-500" aria-hidden="true" />
-                        <div className="min-w-0 flex-1">
-                            <div className="text-xs font-semibold text-[var(--app-fg)]">{t('recentCodex.fork.failed.title')}</div>
-                            <div className="mt-0.5 text-[11px] leading-4 text-[var(--app-hint)]">{forkError}</div>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => void fork()}
-                            disabled={!canFork}
-                            className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-red-600 transition-colors hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-45"
-                        >
-                            {t('recentCodex.retry')}
-                        </button>
-                    </div>
-                </div>
-            ) : isNativeProcessing ? (
-                <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                    <div className="pointer-events-auto mx-auto flex w-full max-w-content items-center gap-2.5 rounded-xl border border-sky-500/20 bg-[var(--app-bg)] px-3 py-2.5 text-left shadow-[0_10px_28px_rgba(15,23,42,0.12)]" role="status" aria-live="polite">
-                        <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-sky-600" aria-hidden="true" />
-                        <div className="min-w-0">
-                            <div className="text-xs font-semibold text-[var(--app-fg)]">{t('recentCodex.status.processing')}</div>
-                            <div className="mt-0.5 text-[11px] leading-4 text-[var(--app-hint)]">{t('recentCodex.status.locked')}</div>
-                        </div>
-                    </div>
-                </div>
-            ) : directStatus === 'unknown' || statusQuery.isError ? (
-                <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                    <div className="pointer-events-auto mx-auto flex w-full max-w-content items-center gap-2.5 rounded-xl border border-amber-500/25 bg-[var(--app-bg)] px-3 py-2.5 text-left shadow-[0_10px_28px_rgba(15,23,42,0.12)]" role="status">
-                        <CircleAlert className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
-                        <div className="min-w-0 flex-1">
-                            <div className="text-xs font-semibold text-[var(--app-fg)]">
-                                {directStatus === 'unknown' ? t('recentCodex.status.unknown') : t('recentCodex.status.failed')}
-                            </div>
-                            <div className="mt-0.5 text-[11px] leading-4 text-[var(--app-hint)]">{t('recentCodex.status.locked')}</div>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => void refetchStatus()}
-                            className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-amber-400"
-                        >
-                            {t('recentCodex.retry')}
-                        </button>
-                    </div>
-                </div>
-            ) : null}
-        </div>
+            </SessionDetailSurface>
+        </SessionConnectionProvider>
     )
 }

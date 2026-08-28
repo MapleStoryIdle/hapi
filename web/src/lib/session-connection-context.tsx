@@ -5,6 +5,8 @@ export type SessionConnectionHealth = 'connected' | 'recovering' | 'degraded' | 
 export type SessionConnectionContextValue = {
     health: SessionConnectionHealth
     recover: () => Promise<void>
+    /** Last successful data/stream observation, when the source can provide it. */
+    lastUpdatedAt?: number | null
 }
 
 const SessionConnectionContext = createContext<SessionConnectionContextValue | null>(null)

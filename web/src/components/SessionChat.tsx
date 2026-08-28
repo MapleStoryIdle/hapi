@@ -21,8 +21,11 @@ import { getPendingCodexQuickReplyPrompt } from '@/chat/codexQuickReply'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { buildConversationOutline } from '@/chat/outline'
-import { buildVisibleChatBlocks, isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
-import { groupAssistantResultDetails } from '@/chat/assistantResultGrouping'
+import { isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
+import {
+    buildIncrementalSessionDetailTimeline,
+    type SessionDetailTimelineCache
+} from '@/chat/sessionDetailTimeline'
 import { isQueuedForInvocation, mergeMessages } from '@/lib/messages'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { HappyComposer, type ComposerSendError } from '@/components/AssistantChat/HappyComposer'
@@ -48,7 +51,11 @@ import { consumeSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer, getShareTransfer } from '@/lib/shareTransfer'
 import { getDraft } from '@/lib/composer-drafts'
 import { useTranslation } from '@/lib/use-translation'
-import { SessionConnectionRecoveryControl, SessionHeader } from '@/components/SessionHeader'
+import {
+    SessionConnectionRecoveryControl,
+    SessionHeader,
+    type SessionHeaderStatus
+} from '@/components/SessionHeader'
 import { SESSION_DETAIL_HEADER_HEIGHT_PX } from '@/components/SessionDetailHeader'
 import {
     CursorMigrationBanner,
@@ -90,6 +97,12 @@ import { ArrowRightIcon } from '@/components/icons'
 import { encodeBase64 } from '@/lib/utils'
 import { queryKeys } from '@/lib/query-keys'
 import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
+import { SessionDetailContent, SessionDetailSurface } from '@/components/SessionDetailSurface'
+import { SessionDetailStatusNotice } from '@/components/SessionDetailStatusNotice'
+import {
+    SessionDetailBottomDock,
+    SessionDetailBottomDockComposer
+} from '@/components/SessionDetailBottomDock'
 
 const LazyVoiceBackendSession = lazy(() => import('@/realtime/VoiceBackendSession').then((module) => ({
     default: module.VoiceBackendSession
@@ -99,7 +112,17 @@ const RUN_SETTLE_DELAY_MS = 1500
 const RUN_ACTIVITY_KEY_LOOKBACK = 12
 const CODEX_QUICK_REPLY_CONTINUE_TEXT = '继续'
 const THREAD_WORK_BUDGET_MS = 12
-const threadWorkLastWarningAt = new Map<'normalize' | 'reduce', number>()
+const THREAD_WORK_METRICS_INTERVAL_MS = 1_000
+const HAPI_THREAD_WORK_EVENT = 'hapi:thread-work'
+type ThreadWorkStage = 'normalize' | 'reduce' | 'timeline'
+type ThreadWorkMetrics = {
+    sampleCount: number
+    totalMs: number
+    maxMs: number
+    lastReportAt: number
+}
+const threadWorkLastWarningAt = new Map<ThreadWorkStage, number>()
+const threadWorkMetrics = new Map<ThreadWorkStage, ThreadWorkMetrics>()
 export const BOTTOM_FLOATING_CONTROL_GAP_PX = 8
 export const BOTTOM_OVERLAY_INSET_PX = 0
 // Keep the chat's scroll reservation aligned with every session title bar.
@@ -108,7 +131,7 @@ export const FLOATING_SESSION_HEADER_HEIGHT_PX = SESSION_DETAIL_HEADER_HEIGHT_PX
 
 function measureThreadWork<T>(
     sessionId: string,
-    stage: 'normalize' | 'reduce',
+    stage: ThreadWorkStage,
     messagesVersion: number,
     work: () => T
 ): T {
@@ -119,13 +142,47 @@ function measureThreadWork<T>(
     const startedAt = performance.now()
     const result = work()
     const elapsedMs = performance.now() - startedAt
+    const now = Date.now()
+    const metrics = threadWorkMetrics.get(stage) ?? {
+        sampleCount: 0,
+        totalMs: 0,
+        maxMs: 0,
+        lastReportAt: now
+    }
+    metrics.sampleCount += 1
+    metrics.totalMs += elapsedMs
+    metrics.maxMs = Math.max(metrics.maxMs, elapsedMs)
+    threadWorkMetrics.set(stage, metrics)
+
+    // DevTools can listen for `hapi:thread-work` and see one compact sample
+    // per second instead of a console line for every streaming token.
+    if (
+        now - metrics.lastReportAt >= THREAD_WORK_METRICS_INTERVAL_MS
+        && typeof window !== 'undefined'
+        && typeof CustomEvent === 'function'
+    ) {
+        window.dispatchEvent(new CustomEvent(HAPI_THREAD_WORK_EVENT, {
+            detail: {
+                sessionId,
+                stage,
+                messagesVersion,
+                samples: metrics.sampleCount,
+                averageMs: Number((metrics.totalMs / metrics.sampleCount).toFixed(1)),
+                maxMs: Number(metrics.maxMs.toFixed(1))
+            }
+        }))
+        metrics.sampleCount = 0
+        metrics.totalMs = 0
+        metrics.maxMs = 0
+        metrics.lastReportAt = now
+    }
+
     if (elapsedMs < THREAD_WORK_BUDGET_MS) {
         return result
     }
 
     // A continuous stream can run this path every frame. Keep development
     // diagnostics actionable without flooding the console.
-    const now = Date.now()
     const lastWarningAt = threadWorkLastWarningAt.get(stage) ?? 0
     if (now - lastWarningAt >= 1_000) {
         threadWorkLastWarningAt.set(stage, now)
@@ -448,6 +505,27 @@ export function buildGoalStateMessages(
         : eligibleMessages
 }
 
+/**
+ * The normal live-stream path has no queued/scheduled message to merge back
+ * into goal state. In that common case the already-normalized timeline is
+ * exactly the goal-state source, so doing a second full-window filter and
+ * parse on every token is needless work. Keep the conservative fallback for
+ * queued and scheduled rows: they are intentionally hidden from the visible
+ * timeline but can still clear a completed goal.
+ */
+export function canReuseTimelineMessagesForGoalState(
+    messages: readonly DecryptedMessage[],
+    pendingMessages: readonly DecryptedMessage[] = []
+): boolean {
+    if (pendingMessages.length > 0) {
+        return false
+    }
+
+    return messages.every((message) => (
+        !isQueuedForInvocation(message) && !isUninvokedScheduledMessage(message)
+    ))
+}
+
 function getOutlineTitle(session: Session): string {
     if (session.metadata?.name) {
         return session.metadata.name
@@ -760,6 +838,7 @@ function SessionChatInner(props: SessionChatProps) {
     const normalizedGoalStateCacheRef = useRef<NormalizedMessageCache>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
+    const timelineCacheRef = useRef<SessionDetailTimelineCache | null>(null)
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const [dismissedCodexQuickReplyPromptId, setDismissedCodexQuickReplyPromptId] = useState<string | null>(null)
     const [codexQuickReplySending, setCodexQuickReplySending] = useState(false)
@@ -1254,6 +1333,7 @@ function SessionChatInner(props: SessionChatProps) {
         normalizedGoalStateCacheRef.current.clear()
         blocksByIdRef.current.clear()
         visibleGroupsRef.current = []
+        timelineCacheRef.current = null
         setOutlineOpen(false)
     }, [props.session.id])
 
@@ -1290,6 +1370,7 @@ function SessionChatInner(props: SessionChatProps) {
             normalizedGoalStateCacheRef.current.clear()
             blocksByIdRef.current.clear()
             visibleGroupsRef.current = []
+            timelineCacheRef.current = null
         }
         prevSessionIdRef.current = props.session.id
 
@@ -1300,20 +1381,36 @@ function SessionChatInner(props: SessionChatProps) {
             () => normalizeMessagesWithCache(visibleMessages, normalizedCacheRef.current)
         )
     }, [props.session.id, threadSnapshot.messagesVersion, visibleMessages])
-    const goalStateSourceMessages = useMemo(
-        () => buildGoalStateMessages(threadSnapshot.messages, threadSnapshot.pendingMessages),
+    const canReuseTimelineForGoalState = useMemo(
+        () => canReuseTimelineMessagesForGoalState(threadSnapshot.messages, threadSnapshot.pendingMessages),
         [threadSnapshot.messages, threadSnapshot.pendingMessages]
     )
 
-    const normalizedGoalStateMessages = useMemo(
-        () => measureThreadWork(
+    const goalStateSourceMessages = useMemo(
+        () => canReuseTimelineForGoalState
+            ? null
+            : buildGoalStateMessages(threadSnapshot.messages, threadSnapshot.pendingMessages),
+        [canReuseTimelineForGoalState, threadSnapshot.messages, threadSnapshot.pendingMessages]
+    )
+
+    const normalizedGoalStateMessages = useMemo(() => {
+        if (canReuseTimelineForGoalState) {
+            return normalizedMessages
+        }
+
+        return measureThreadWork(
             props.session.id,
             'normalize',
             threadSnapshot.messagesVersion,
-            () => normalizeMessagesWithCache(goalStateSourceMessages, normalizedGoalStateCacheRef.current)
-        ),
-        [goalStateSourceMessages, props.session.id, threadSnapshot.messagesVersion]
-    )
+            () => normalizeMessagesWithCache(goalStateSourceMessages ?? [], normalizedGoalStateCacheRef.current)
+        )
+    }, [
+        canReuseTimelineForGoalState,
+        goalStateSourceMessages,
+        normalizedMessages,
+        props.session.id,
+        threadSnapshot.messagesVersion
+    ])
 
     const codexQuickReplyPrompt = useMemo(() => {
         if (agentFlavor !== 'codex') {
@@ -1406,26 +1503,42 @@ function SessionChatInner(props: SessionChatProps) {
         blocksByIdRef.current = reconciled.byId
     }, [reconciled.byId])
 
-    const groupedVisibleBlocks = useMemo(
-        () => buildVisibleChatBlocks(displayBlocks, {
-            hasMoreMessages: props.hasMoreMessages,
-            previousGroups: visibleGroupsRef.current,
-            terminalToolDisplayMode
-        }),
-        [displayBlocks, props.hasMoreMessages, terminalToolDisplayMode]
+    const timelineResult = useMemo(
+        () => measureThreadWork(
+            props.session.id,
+            'timeline',
+            threadSnapshot.messagesVersion,
+            () => buildIncrementalSessionDetailTimeline(displayBlocks, {
+                hasMoreMessages: props.hasMoreMessages,
+                previousGroups: visibleGroupsRef.current,
+                terminalToolDisplayMode,
+                runActive
+            }, timelineCacheRef.current)
+        ),
+        [
+            displayBlocks,
+            props.hasMoreMessages,
+            props.session.id,
+            runActive,
+            terminalToolDisplayMode,
+            threadSnapshot.messagesVersion
+        ]
     )
-
-    const visibleBlocks = useMemo(
-        () => groupAssistantResultDetails(groupedVisibleBlocks, { runActive }),
-        [groupedVisibleBlocks, runActive]
-    )
+    const timeline = timelineResult.timeline
+    const groupedVisibleBlocks = timeline.grouped
+    const visibleBlocks = timeline.visible
+    useEffect(() => {
+        timelineCacheRef.current = timelineResult.cache
+    }, [timelineResult.cache])
     useEffect(() => {
         visibleGroupsRef.current = groupedVisibleBlocks.filter(isToolGroupBlock)
     }, [groupedVisibleBlocks])
 
+    // The outline is a demand-driven drawer. Avoid another complete timeline
+    // walk during a stream until the operator actually opens it.
     const outlineItems = useMemo(
-        () => buildConversationOutline(reconciled.blocks),
-        [reconciled.blocks]
+        () => outlineOpen ? buildConversationOutline(reconciled.blocks) : [],
+        [outlineOpen, reconciled.blocks]
     )
 
     const outlineTitle = useMemo(
@@ -1774,49 +1887,30 @@ function SessionChatInner(props: SessionChatProps) {
         pendingScheduleRef
     })
 
-    const sessionHeaderStatus = useMemo(() => ({
+    // Keep the memoized header independent from message-derived state (usage,
+    // goals, etc.). Those values change on nearly every stream event but are
+    // not rendered in the header, so passing them through made title actions
+    // needlessly compete with timeline rendering.
+    const sessionHeaderStatus = useMemo<SessionHeaderStatus>(() => ({
         active: props.session.active,
         thinking: props.session.thinking,
         agentState: props.session.agentState,
         backgroundTaskCount: props.session.backgroundTaskCount,
-        contextSize: reduced.latestUsage?.contextSize,
-        contextCacheRead: reduced.latestUsage?.cacheRead,
-        contextWindow: reduced.latestUsage?.contextWindow,
-        model: props.session.model,
-        modelReasoningEffort: agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined,
-        serviceTier: props.session.serviceTier,
-        permissionMode: props.session.permissionMode,
-        collaborationMode: codexCollaborationModeSupported ? props.session.collaborationMode : undefined,
-        threadGoal: reduced.latestGoal,
-        agentFlavor,
         voiceStatus: voice?.status
     }), [
-        agentFlavor,
-        codexCollaborationModeSupported,
         props.session.active,
         props.session.agentState,
         props.session.backgroundTaskCount,
-        props.session.collaborationMode,
-        props.session.model,
-        props.session.modelReasoningEffort,
-        props.session.permissionMode,
-        props.session.serviceTier,
         props.session.thinking,
-        reduced.latestGoal,
-        reduced.latestUsage?.cacheRead,
-        reduced.latestUsage?.contextSize,
-        reduced.latestUsage?.contextWindow,
         voice?.status
     ])
 
     return (
-        <div
-            className="relative flex h-full min-h-0 flex-col overflow-hidden"
-            data-testid="session-chat-surface"
-        >
+        <SessionDetailSurface source="hapi" testId="session-chat-surface">
             <SessionHeader
                 session={props.session}
                 onBack={props.onBack}
+                onRefresh={props.onRefresh}
                 onToggleFiles={props.session.metadata?.path ? handleToggleFiles : undefined}
                 filesActive={false}
                 onToggleOutline={handleToggleOutline}
@@ -1852,16 +1946,16 @@ function SessionChatInner(props: SessionChatProps) {
 
                         {sideSessionError ? (
                             <div className="px-3 pt-3">
-                                <div className="mx-auto flex w-full max-w-content items-center justify-between gap-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
-                                    <span className="min-w-0 break-words">{sideSessionError}</span>
-                                    <button
-                                        type="button"
-                                        onClick={() => setSideSessionError(null)}
-                                        className="shrink-0 rounded-full px-2 py-1 text-xs font-semibold hover:bg-red-500/10"
-                                    >
-                                        关闭
-                                    </button>
-                                </div>
+                                <SessionDetailStatusNotice
+                                    tone="error"
+                                    title={t('session.action.sideSession')}
+                                    detail={sideSessionError}
+                                    action={{
+                                        label: t('button.close'),
+                                        onClick: () => setSideSessionError(null)
+                                    }}
+                                    testId="session-side-session-error"
+                                />
                             </div>
                         ) : null}
 
@@ -1872,9 +1966,10 @@ function SessionChatInner(props: SessionChatProps) {
                 </div>
             ) : null}
 
-            <AssistantRuntimeProvider runtime={runtime}>
-                <ShareSeedConsumer sessionId={props.session.id} sessionActive={props.session.active} />
-                <DragDropZone disabled={sessionInactive || props.isSending || pendingSchedule != null}>
+            <SessionDetailContent ariaLabel={t('settings.chat.title')}>
+                <AssistantRuntimeProvider runtime={runtime}>
+                    <ShareSeedConsumer sessionId={props.session.id} sessionActive={props.session.active} />
+                    <DragDropZone disabled={sessionInactive || props.isSending || pendingSchedule != null}>
 
                     <HappyThread
                         // Key with prefix: different components under the same session
@@ -1940,16 +2035,18 @@ function SessionChatInner(props: SessionChatProps) {
 
                     {codexCollaborationModeSupported && codexModelsState.error ? (
                         <div className="px-3 pb-2">
-                            <div className="mx-auto w-full max-w-content rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-red-600">
-                                {t('session.codexModelsLoadFailed')}: {codexModelsState.error}
-                            </div>
+                            <SessionDetailStatusNotice
+                                tone="error"
+                                title={t('session.codexModelsLoadFailed')}
+                                detail={codexModelsState.error}
+                                testId="session-codex-models-error"
+                            />
                         </div>
                     ) : null}
 
-                    <div
+                    <SessionDetailBottomDock
                         ref={bottomOverlayRef}
-                        className="pointer-events-none absolute inset-x-0 z-10"
-                        style={{ bottom: BOTTOM_OVERLAY_INSET_PX }}
+                        bottom={BOTTOM_OVERLAY_INSET_PX}
                     >
                         <div className="pointer-events-auto px-3">
                             {agentFlavor === 'codex' ? (
@@ -1979,10 +2076,9 @@ function SessionChatInner(props: SessionChatProps) {
                             ) : null}
                         </div>
 
-                        <div
+                        <SessionDetailBottomDockComposer
                             ref={composerOverlayRef}
-                            className="pointer-events-auto"
-                            data-testid="session-chat-composer-overlay"
+                            testId="session-chat-composer-overlay"
                         >
                             <div className="relative">
                                 {agentFlavor === 'codex' ? (
@@ -2147,7 +2243,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 onClearSendError={props.onClearSendError}
                             />
                             </div>
-                        </div>
+                        </SessionDetailBottomDockComposer>
 
                         {bottomAccessoryVisible ? (
                             <div
@@ -2187,9 +2283,10 @@ function SessionChatInner(props: SessionChatProps) {
                                 </div>
                             </div>
                         ) : null}
-                    </div>
-                </DragDropZone>
-            </AssistantRuntimeProvider>
+                    </SessionDetailBottomDock>
+                    </DragDropZone>
+                </AssistantRuntimeProvider>
+            </SessionDetailContent>
 
             {/* Voice backend is loaded only after the user asks to start voice. */}
             {voice && voiceBackendRequested ? (
@@ -2202,6 +2299,6 @@ function SessionChatInner(props: SessionChatProps) {
                     />
                 </Suspense>
             ) : null}
-        </div>
+        </SessionDetailSurface>
     )
 }

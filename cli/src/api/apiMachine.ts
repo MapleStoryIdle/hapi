@@ -11,6 +11,7 @@ import { configuration } from '@/configuration'
 import type { BinaryFileReadRequest, BinaryFileReadResponse, ClientToServerEvents, ExternalCodexRequestPayload, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
 import type { MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
 import {
+    findLocalCodexSession,
     getLocalCodexSessionData,
     listLocalCodexSessions,
     type CodexLocalSessionDataRpcResponse,
@@ -20,6 +21,7 @@ import {
 } from '@hapi/protocol/codexTranscript'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import { NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
+import { NativeCodexSessionWatcher } from '@/codex/nativeSessionWatcher'
 import type { RunnerState, Machine, MachineMetadata } from './types'
 import { RunnerStateSchema, MachineMetadataSchema } from './types'
 import { backoff } from '@/utils/time'
@@ -108,6 +110,7 @@ function runnerMetadataMatchesAdvertised(
         && current.happyCliVersion === advertised.happyCliVersion
         && current.homeDir === advertised.homeDir
         && current.codexHome === advertised.codexHome
+        && current.nativeCodexRealtime === advertised.nativeCodexRealtime
         && current.happyHomeDir === advertised.happyHomeDir
         && current.happyLibDir === advertised.happyLibDir
         && workspaceRootsEqual(current.workspaceRoots, advertised.workspaceRoots)
@@ -123,6 +126,7 @@ function mergeAdvertisedRunnerMetadata(
         happyCliVersion: _happyCliVersion,
         homeDir: _homeDir,
         codexHome: _codexHome,
+        nativeCodexRealtime: _nativeCodexRealtime,
         happyHomeDir: _happyHomeDir,
         happyLibDir: _happyLibDir,
         workspaceRoots: _workspaceRoots,
@@ -141,6 +145,11 @@ export class ApiMachineClient {
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
     private rpcHandlerManager: RpcHandlerManager
     private readonly nativeCodexSessionDirectSender = new NativeCodexSessionDirectSender()
+    private readonly nativeCodexSessionWatcher = new NativeCodexSessionWatcher({
+        onChange: ({ codexSessionId, modifiedAt }) => {
+            this.reportNativeCodexSessionUpdated(codexSessionId, modifiedAt)
+        }
+    })
 
     private readonly normalizedWorkspaceRoots: string[] | undefined
 
@@ -158,6 +167,9 @@ export class ApiMachineClient {
         this.rpcHandlerManager = new RpcHandlerManager({
             scopePrefix: this.machine.id,
             logger: (msg, data) => logger.debug(msg, data)
+        })
+        this.nativeCodexSessionDirectSender.setStateChangeListener((sessionId) => {
+            this.reportNativeCodexSessionUpdated(sessionId)
         })
 
         registerCommonHandlers(this.rpcHandlerManager, getInvokedCwd())
@@ -195,6 +207,7 @@ export class ApiMachineClient {
                 if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100)) {
                     return { success: false, error: 'limit must be an integer between 1 and 100' }
                 }
+                this.observeNativeCodexSession(sessionId)
                 const data = getLocalCodexSessionData(sessionId, { before, limit })
                 return data
                     ? { success: true, data }
@@ -209,6 +222,7 @@ export class ApiMachineClient {
                 if (!sessionId) {
                     return { success: false, error: 'sessionId is required' }
                 }
+                this.observeNativeCodexSession(sessionId)
                 return this.nativeCodexSessionDirectSender.getStatus(sessionId)
             }
         )
@@ -220,6 +234,7 @@ export class ApiMachineClient {
                 if (!sessionId) {
                     return { success: false, code: 'invalid_message', error: 'sessionId is required' }
                 }
+                this.observeNativeCodexSession(sessionId)
                 return this.nativeCodexSessionDirectSender.send(sessionId, params?.message)
             }
         )
@@ -517,6 +532,27 @@ export class ApiMachineClient {
         return true
     }
 
+    private observeNativeCodexSession(sessionId: string): void {
+        const session = findLocalCodexSession(sessionId)
+        if (!session) {
+            return
+        }
+        this.nativeCodexSessionWatcher.observeTranscript(session.file, session.id)
+    }
+
+    private reportNativeCodexSessionUpdated(codexSessionId: string, modifiedAt = Date.now()): boolean {
+        const socket = this.socket as Socket<ServerToClientEvents, ClientToServerEvents> | undefined
+        if (!socket) {
+            return false
+        }
+        socket.emit('codex-session-updated', {
+            machineId: this.machine.id,
+            codexSessionId,
+            modifiedAt
+        })
+        return true
+    }
+
     connect(): void {
         this.socket = io(`${configuration.apiUrl}/cli`, {
             transports: ['websocket'],
@@ -531,6 +567,9 @@ export class ApiMachineClient {
             reconnectionDelayMax: 5000,
             ...buildSocketIoExtraHeaderOptions()
         })
+        // Create the socket before the transcript watcher so a change during
+        // runner startup is queued by Socket.IO instead of being dropped.
+        this.nativeCodexSessionWatcher.start()
 
         this.socket.on('connect', () => {
             logger.debug('[API MACHINE] Connected to bot')
@@ -658,6 +697,8 @@ export class ApiMachineClient {
 
     shutdown(): void {
         this.stopKeepAlive()
+        this.nativeCodexSessionWatcher.stop()
+        this.nativeCodexSessionDirectSender.dispose()
         if (this.socket) {
             this.socket.close()
         }

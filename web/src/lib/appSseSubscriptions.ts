@@ -18,3 +18,17 @@ export function getAppSessionSseSubscription(
     }
     return { sessionId: selectedSessionId }
 }
+
+/**
+ * The global stream is a fallback while the selected-session stream starts or
+ * reconnects. Once the narrow stream is healthy it owns message delivery, so
+ * the same row is not merged twice on the main thread.
+ */
+export function shouldUseGlobalMessageFallback(input: {
+    eventSessionId: string
+    selectedSessionId: string | null
+    sessionStreamConnected: boolean
+}): boolean {
+    return input.eventSessionId === input.selectedSessionId
+        && !input.sessionStreamConnected
+}

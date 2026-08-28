@@ -8,18 +8,26 @@ import {
     type CSSProperties,
     type ReactNode
 } from 'react'
-import { GitBranch } from 'lucide-react'
+import { GitBranch, GitFork, LoaderCircle } from 'lucide-react'
 import { useTranslation } from '@/lib/use-translation'
 
 type SessionActionMenuProps = {
     isOpen: boolean
     onClose: () => void
     sessionActive: boolean
-    onRename: () => void
+    onRename?: () => void
     onExport?: () => void
-    onArchive: () => void
+    onArchive?: () => void
     onReopen?: () => void
-    onDelete: () => void
+    onDelete?: () => void
+    onRefresh?: () => void
+    refreshLabel?: string
+    refreshPending?: boolean
+    onFork?: () => void
+    forkLabel?: string
+    forkPendingLabel?: string
+    forkPending?: boolean
+    forkDisabled?: boolean
     onToggleFiles?: () => void
     filesActive?: boolean
     onToggleOutline?: () => void
@@ -119,6 +127,26 @@ function SideSessionIcon(props: MenuIconProps) {
     )
 }
 
+function ForkIcon(props: MenuIconProps & { pending?: boolean }) {
+    if (props.pending) {
+        return (
+            <LoaderCircle
+                className={`h-[18px] w-[18px] shrink-0 animate-spin ${props.className ?? ''}`}
+                strokeWidth={1.8}
+                aria-hidden="true"
+            />
+        )
+    }
+
+    return (
+        <GitFork
+            className={`h-[18px] w-[18px] shrink-0 ${props.className ?? ''}`}
+            strokeWidth={1.8}
+            aria-hidden="true"
+        />
+    )
+}
+
 function ReopenIcon(props: MenuIconProps) {
     return (
         <MenuIcon {...props}>
@@ -140,6 +168,17 @@ function TrashIcon(props: MenuIconProps) {
     )
 }
 
+function RefreshIcon(props: MenuIconProps) {
+    return (
+        <MenuIcon {...props}>
+            <path d="M20 11a8 8 0 0 0-14.8-4L4 9" />
+            <path d="M4 4v5h5" />
+            <path d="M4 13a8 8 0 0 0 14.8 4L20 15" />
+            <path d="M20 20v-5h-5" />
+        </MenuIcon>
+    )
+}
+
 type MenuPosition = {
     top: number
     left: number
@@ -157,6 +196,14 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onArchive,
         onReopen,
         onDelete,
+        onRefresh,
+        refreshLabel,
+        refreshPending,
+        onFork,
+        forkLabel,
+        forkPendingLabel,
+        forkPending,
+        forkDisabled,
         onToggleFiles,
         filesActive,
         onToggleOutline,
@@ -174,12 +221,12 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
 
     const handleRename = () => {
         onClose()
-        onRename()
+        onRename?.()
     }
 
     const handleArchive = () => {
         onClose()
-        onArchive()
+        onArchive?.()
     }
 
     const handleReopen = () => {
@@ -194,7 +241,17 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
 
     const handleDelete = () => {
         onClose()
-        onDelete()
+        onDelete?.()
+    }
+
+    const handleRefresh = () => {
+        onClose()
+        onRefresh?.()
+    }
+
+    const handleFork = () => {
+        onClose()
+        onFork?.()
     }
 
     const handleToggleFiles = () => {
@@ -299,6 +356,8 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
 
     const baseItemClassName =
         'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
+    const hasTopActions = Boolean(onRefresh || onFork || onToggleFiles || onToggleOutline || onCreateSideSession)
+    const hasLifecycleActions = Boolean(onRename || onExport || onArchive || onReopen || onDelete)
 
     return (
         <div
@@ -318,6 +377,36 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                 aria-labelledby={headingId}
                 className="flex flex-col gap-1"
             >
+                {onRefresh ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)] disabled:cursor-wait disabled:opacity-60`}
+                        onClick={handleRefresh}
+                        disabled={refreshPending}
+                        aria-busy={refreshPending || undefined}
+                    >
+                        <RefreshIcon className="text-[var(--app-hint)]" />
+                        {refreshLabel ?? t('recentCodex.refresh')}
+                    </button>
+                ) : null}
+
+                {onFork ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50`}
+                        onClick={handleFork}
+                        disabled={forkPending || forkDisabled}
+                        aria-busy={forkPending || undefined}
+                    >
+                        <ForkIcon className="text-[var(--app-hint)]" pending={forkPending} />
+                        {forkPending
+                            ? (forkPendingLabel ?? forkLabel ?? t('recentCodex.forking'))
+                            : (forkLabel ?? t('recentCodex.fork'))}
+                    </button>
+                ) : null}
+
                 {onToggleFiles ? (
                     <button
                         type="button"
@@ -355,19 +444,21 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     </button>
                 ) : null}
 
-                {(onToggleFiles || onToggleOutline || onCreateSideSession) ? (
+                {hasTopActions && hasLifecycleActions ? (
                     <div className="mx-2 h-px bg-[var(--app-divider)]" />
                 ) : null}
 
-                <button
-                    type="button"
-                    role="menuitem"
-                    className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
-                    onClick={handleRename}
-                >
-                    <EditIcon className="text-[var(--app-hint)]" />
-                    {t('session.action.rename')}
-                </button>
+                {onRename ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleRename}
+                    >
+                        <EditIcon className="text-[var(--app-hint)]" />
+                        {t('session.action.rename')}
+                    </button>
+                ) : null}
 
                 {onExport ? (
                     <button
@@ -381,7 +472,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     </button>
                 ) : null}
 
-                {sessionActive ? (
+                {sessionActive && onArchive ? (
                     <button
                         type="button"
                         role="menuitem"
@@ -391,7 +482,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                         <ArchiveIcon className="text-red-500" />
                         {t('session.action.archive')}
                     </button>
-                ) : (
+                ) : !sessionActive ? (
                     <>
                         {onReopen ? (
                             <button
@@ -404,17 +495,19 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                                 {t('session.action.reopen')}
                             </button>
                         ) : null}
-                        <button
-                            type="button"
-                            role="menuitem"
-                            className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
-                            onClick={handleDelete}
-                        >
-                            <TrashIcon className="text-red-500" />
-                            {t('session.action.delete')}
-                        </button>
+                        {onDelete ? (
+                            <button
+                                type="button"
+                                role="menuitem"
+                                className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
+                                onClick={handleDelete}
+                            >
+                                <TrashIcon className="text-red-500" />
+                                {t('session.action.delete')}
+                            </button>
+                        ) : null}
                     </>
-                )}
+                ) : null}
             </div>
         </div>
     )

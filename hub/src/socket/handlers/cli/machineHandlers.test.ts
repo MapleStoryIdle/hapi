@@ -74,3 +74,54 @@ describe('external Codex machine socket events', () => {
         expect(accessErrors).toEqual([['machine', 'other-machine', 'access-denied']])
     })
 })
+
+describe('native Codex transcript machine socket events', () => {
+    it('publishes a namespaced lightweight invalidation event', () => {
+        const socket = new FakeSocket()
+        const events: unknown[] = []
+
+        registerMachineHandlers(socket as unknown as CliSocketWithData, {
+            store: {} as Store,
+            resolveMachineAccess: () => ({ ok: true, value: {} as StoredMachine }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onWebappEvent: (event) => events.push(event)
+        })
+
+        socket.trigger('codex-session-updated', {
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            modifiedAt: 1_725_000_000_000
+        })
+
+        expect(events).toEqual([{
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            modifiedAt: 1_725_000_000_000,
+            namespace: 'team-a'
+        }])
+    })
+
+    it('rejects a native event whose machine id differs from the socket identity', () => {
+        const socket = new FakeSocket()
+        const accessErrors: unknown[] = []
+        const events: unknown[] = []
+
+        registerMachineHandlers(socket as unknown as CliSocketWithData, {
+            store: {} as Store,
+            resolveMachineAccess: () => ({ ok: true, value: {} as StoredMachine }),
+            emitAccessError: (...args) => accessErrors.push(args),
+            onWebappEvent: (event) => events.push(event)
+        })
+
+        socket.trigger('codex-session-updated', {
+            machineId: 'other-machine',
+            codexSessionId: 'codex-thread-1'
+        })
+
+        expect(events).toEqual([])
+        expect(accessErrors).toEqual([['machine', 'other-machine', 'access-denied']])
+    })
+})

@@ -55,6 +55,8 @@ const composerButtons = source('web/src/components/AssistantChat/ComposerButtons
 const sessionChat = source('web/src/components/SessionChat.tsx')
 const happyThread = source('web/src/components/AssistantChat/HappyThread.tsx')
 const queuedMessages = source('web/src/components/AssistantChat/QueuedMessagesBar.tsx')
+const queueTrigger = source('web/src/components/SessionDetailQueueTrigger.tsx')
+const bottomDock = source('web/src/components/SessionDetailBottomDock.tsx')
 const viewportHeight = source('web/src/hooks/useViewportHeight.ts')
 
 // Approved visual values. Do not weaken this script to work around a change:
@@ -135,8 +137,10 @@ requireMatch(viewportHeight, /data-ios-system-top-chrome', 'unreachable'/, 'view
 requireMatch(viewportHeight, /safeAreaTopInset\s*<=\s*0/, 'iOS top-chrome detection must require a zero browser safe-area inset')
 requireMatch(queuedMessages, /<Dialog\.Root/, 'queued messages must open from a controlled dialog root')
 requireMatch(queuedMessages, /<Dialog\.Portal>/, 'queued-message detail must render in a portal')
-requireMatch(queuedMessages, /data-testid="queued-messages-trigger"/, 'queued messages must expose a compact entry target')
+requireMatch(queuedMessages, /<SessionDetailQueueTrigger[\s\S]*testId="queued-messages-trigger"/, 'HAPI queue must use the shared compact entry target')
+requireMatch(queueTrigger, /data-testid=\{testId\}/, 'shared queue trigger must expose its compact entry target')
 requireMatch(queuedMessages, /data-testid="queued-messages-drawer"/, 'queued messages must expose a drawer target')
+requireMatch(bottomDock, /SESSION_DETAIL_BOTTOM_ACCESSORY_GAP_PX/, 'detail pages must share one accessory gap')
 if (/backdrop-blur/.test(queuedMessages)) {
     throw new Error('Mobile layout contract violation: queued-message drawer must not add a glass blur')
 }

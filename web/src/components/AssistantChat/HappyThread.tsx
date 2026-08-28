@@ -20,6 +20,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { cn } from '@/lib/utils'
 import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
 import { ArrowDownIcon, CloseIcon } from '@/components/icons'
+import { SessionDetailStatusNotice } from '@/components/SessionDetailStatusNotice'
 
 type ScrollAnchor = {
     id: string
@@ -1464,9 +1465,12 @@ export function HappyThread(props: {
                             ) : (
                                 <>
                                     {props.messagesWarning ? (
-                                        <div className="mb-3 rounded-md bg-amber-500/10 p-2 text-xs">
-                                            {props.messagesWarning}
-                                        </div>
+                                        <SessionDetailStatusNotice
+                                            tone="warning"
+                                            title={props.messagesWarning}
+                                            className="mb-3 ml-0 max-w-full"
+                                            testId="happy-thread-messages-warning"
+                                        />
                                     ) : null}
 
                                     {import.meta.env.DEV && props.normalizedMessagesCount === 0 && props.rawMessagesCount > 0 ? (

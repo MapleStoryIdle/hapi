@@ -13,26 +13,7 @@ import { useToast } from '@/lib/toast-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { formatScheduledTime } from '@/lib/scheduledTime'
 import { CloseIcon, ScheduleIcon } from '@/components/icons'
-
-function QueueIcon(props: { className?: string }) {
-    return (
-        <svg
-            className={props.className ?? 'h-4 w-4'}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-        >
-            <path d="M5 7h14" />
-            <path d="M5 12h10" />
-            <path d="M5 17h7" />
-            <path d="m17 15 2 2 3-4" />
-        </svg>
-    )
-}
+import { QueueIcon, SessionDetailQueueTrigger } from '@/components/SessionDetailQueueTrigger'
 
 function EditIcon(props: { className?: string }) {
     return (
@@ -48,23 +29,6 @@ function EditIcon(props: { className?: string }) {
         >
             <path d="M12 20h9" />
             <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
-        </svg>
-    )
-}
-
-function ChevronUpIcon(props: { className?: string }) {
-    return (
-        <svg
-            className={props.className ?? 'h-4 w-4'}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-        >
-            <path d="m6 15 6-6 6 6" />
         </svg>
     )
 }
@@ -236,26 +200,13 @@ export function QueuedMessagesBar({
                 data-testid="queued-messages-accessory"
             >
                 <Dialog.Trigger asChild>
-                    <button
-                        type="button"
-                        data-testid="queued-messages-trigger"
-                        aria-label={t('queuedMessages.open', { count: queuedMessages.length })}
-                        aria-expanded={open}
-                        className="pointer-events-auto touch-manipulation group flex min-h-16 w-full items-center gap-3 rounded-[28px] border border-[var(--app-border)] bg-[var(--app-bg)] px-4 py-3 text-left shadow-[0_10px_28px_rgba(15,23,42,0.08)] transition-[border-color,box-shadow,background-color] duration-150 hover:border-[color-mix(in_srgb,var(--app-link)_28%,var(--app-border))] hover:shadow-[0_14px_32px_rgba(15,23,42,0.12)] active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] motion-reduce:transition-none"
-                    >
-                        <span className="flex h-6 w-6 shrink-0 items-center justify-center text-[var(--app-hint)]">
-                            <QueueIcon className="h-5 w-5" />
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-5 text-[var(--app-fg)]">
-                            {firstPreviewLabel}
-                        </span>
-                        {queuedMessages.length > 1 ? (
-                            <span className="shrink-0 font-mono text-xs font-medium tabular-nums text-[var(--app-hint)]" aria-hidden="true">
-                                +{queuedMessages.length - 1}
-                            </span>
-                        ) : null}
-                        <ChevronUpIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform duration-150 group-data-[state=open]:rotate-180" />
-                    </button>
+                    <SessionDetailQueueTrigger
+                        testId="queued-messages-trigger"
+                        label={t('queuedMessages.open', { count: queuedMessages.length })}
+                        preview={firstPreviewLabel}
+                        count={queuedMessages.length}
+                        open={open}
+                    />
                 </Dialog.Trigger>
             </div>
 

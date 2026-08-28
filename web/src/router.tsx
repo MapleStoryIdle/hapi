@@ -14,11 +14,8 @@ import {
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import { App } from '@/App'
-import { SessionList } from '@/components/SessionList'
-import { SessionSourceTabs, type SessionSource } from '@/components/SessionSourceTabs'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
 import { RecentCodexSessions } from '@/components/RecentCodexSessions'
-import { RecentCodexSessionsDrawer } from '@/components/RecentCodexSessionsDrawer'
 import { CodexSessionContextPage } from '@/components/CodexSessionContextPage'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
@@ -26,6 +23,7 @@ import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
+import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useSession } from '@/hooks/queries/useSession'
@@ -512,25 +510,12 @@ function SessionsPage() {
     const [isDuplicateMergeConfirmOpen, setIsDuplicateMergeConfirmOpen] = useState(false)
     const [isMergingDuplicateSessions, setIsMergingDuplicateSessions] = useState(false)
     const [isSessionsMenuOpen, setIsSessionsMenuOpen] = useState(false)
-    const [isRecentCodexDrawerOpen, setIsRecentCodexDrawerOpen] = useState(false)
-    const [sessionSource, setSessionSource] = useState<SessionSource>('hapi')
     const [selectedRunnerMachineId, setSelectedRunnerMachineId] = useState<string | null>(loadSelectedRunnerMachineId)
     const [isRunnerDetailsOpen, setIsRunnerDetailsOpen] = useState(false)
     const [isRunnerSwitcherOpen, setIsRunnerSwitcherOpen] = useState(false)
     const sessionsMenuRef = useRef<HTMLDivElement>(null)
     const runnerControlRef = useRef<HTMLDivElement>(null)
 
-    const handleRefresh = useCallback(() => {
-        void refetch()
-    }, [refetch])
-
-    const machineLabelsById = useMemo(() => {
-        const labels: Record<string, string> = {}
-        for (const machine of machines) {
-            labels[machine.id] = getMachineTitle(machine)
-        }
-        return labels
-    }, [machines])
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
     const isRecentCodexContext = pathname.startsWith('/sessions/codex/')
     const selectedSessionId = !isRecentCodexContext && sessionMatch && sessionMatch.sessionId !== 'new'
@@ -568,21 +553,6 @@ function SessionsPage() {
         () => getSessionsForMachine(sessions, selectedRunnerMachine?.id),
         [sessions, selectedRunnerMachine?.id]
     )
-    const runningHapiSessions = useMemo(
-        () => sessionsForSelectedRunner.filter((session) => session.active),
-        [sessionsForSelectedRunner]
-    )
-    // Native Codex context is a separate read-only route. Keep the source tab
-    // in sync when navigation lands there, while allowing a manual tab choice
-    // on the sessions index without rewriting the URL.
-    useEffect(() => {
-        if (isRecentCodexContext) {
-            setSessionSource('codex')
-        } else if (selectedSessionId) {
-            setSessionSource('hapi')
-        }
-    }, [isRecentCodexContext, selectedSessionId])
-
     const selectRunnerMachine = useCallback((machineId: string) => {
         setSelectedRunnerMachineId(machineId)
         saveSelectedRunnerMachineId(machineId)
@@ -626,21 +596,44 @@ function SessionsPage() {
         }
     }, [isRunnerDetailsOpen, isRunnerSwitcherOpen])
 
+    useEffect(() => {
+        if (!isSessionsMenuOpen) return
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target
+            if (target instanceof Node && sessionsMenuRef.current?.contains(target)) return
+            setIsSessionsMenuOpen(false)
+        }
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setIsSessionsMenuOpen(false)
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown)
+        document.addEventListener('keydown', handleKeyDown)
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown)
+            document.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [isSessionsMenuOpen])
+
     const goNewSession = useCallback(() => {
+        setIsSessionsMenuOpen(false)
         navigate({
             to: '/sessions/new',
             search: selectedRunnerMachine ? { machineId: selectedRunnerMachine.id } : {}
         })
     }, [navigate, selectedRunnerMachine])
 
-    const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
-        navigate({
-            to: '/sessions/new',
-            search: args.machineId
-                ? { directory: args.directory, machineId: args.machineId }
-                : { directory: args.directory }
-        })
-    }, [navigate])
+    // Top-edge controls use the touch-safe activation path shared by the
+    // session header. WebKit can otherwise drop a compatibility click while
+    // the list is repainting after a live session update.
+    const newSessionActivation = useReliableTopEdgeAction(goNewSession)
+    const toggleSessionsMenu = useCallback(() => {
+        setIsSessionsMenuOpen((open) => !open)
+        setIsRunnerDetailsOpen(false)
+        setIsRunnerSwitcherOpen(false)
+    }, [])
+    const sessionsMenuActivation = useReliableTopEdgeAction(toggleSessionsMenu)
 
     const handleSelectSession = useCallback((sessionId: string) => {
         navigate({
@@ -651,17 +644,12 @@ function SessionsPage() {
 
     const handleOpenCodexSession = useCallback((session: CodexLocalSessionSummary) => {
         if (!selectedRunnerMachine) return
-        setIsRecentCodexDrawerOpen(false)
         navigate({
             to: '/sessions/codex/$codexSessionId',
             params: { codexSessionId: session.id },
             search: { machineId: selectedRunnerMachine.id }
         })
     }, [navigate, selectedRunnerMachine])
-
-    const handleBrowse = useCallback(() => {
-        navigate({ to: '/browse' })
-    }, [navigate])
 
     const isCodexScriptTimeout = useCallback((message: string | null | undefined): boolean => {
         const raw = (message ?? '').trim()
@@ -910,119 +898,24 @@ function SessionsPage() {
     const sessionsMenuIconClass =
         'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)] transition-colors group-hover:bg-[var(--app-bg)] group-hover:text-[var(--app-fg)]'
 
-    useEffect(() => {
-        if (!isSessionsMenuOpen) return
-
-        const handlePointerDown = (event: PointerEvent) => {
-            const target = event.target
-            if (target instanceof Node && sessionsMenuRef.current?.contains(target)) {
-                return
-            }
-            setIsSessionsMenuOpen(false)
-        }
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                setIsSessionsMenuOpen(false)
-            }
-        }
-
-        document.addEventListener('pointerdown', handlePointerDown)
-        document.addEventListener('keydown', handleKeyDown)
-        return () => {
-            document.removeEventListener('pointerdown', handlePointerDown)
-            document.removeEventListener('keydown', handleKeyDown)
-        }
-    }, [isSessionsMenuOpen])
-
     return (
         <>
             <div className="flex h-full min-h-0">
             <div
-                className={`session-list-screen ${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
+                className={`session-list-screen ${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)] [font-family:var(--app-control-font-family)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">
-                    <div className="mx-auto grid w-full max-w-[620px] grid-cols-[52px_1fr_52px] items-center px-6 pb-3 pt-5">
-                        <button
-                            type="button"
-                            onClick={() => setIsRecentCodexDrawerOpen(true)}
-                            aria-label={t('recentCodex.title')}
-                            aria-expanded={isRecentCodexDrawerOpen}
-                            aria-haspopup="dialog"
-                            className={`flex h-[52px] w-[52px] items-center justify-center rounded-full border text-[var(--app-fg)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
-                                isRecentCodexDrawerOpen
-                                    ? 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
-                                    : 'border-[#eeeeee] bg-[var(--app-bg)] hover:bg-[var(--app-subtle-bg)]'
-                            }`}
-                            title={t('recentCodex.title')}
-                        >
-                            <RecentSessionsIcon className="h-6 w-6" />
-                        </button>
-                        <div className="flex min-w-0 flex-col items-center justify-center px-4 text-center">
-                            <SessionSourceTabs
-                                value={sessionSource}
-                                onChange={(source) => {
-                                    setSessionSource(source)
-                                    setIsRecentCodexDrawerOpen(false)
-                                    setIsSessionsMenuOpen(false)
-                                }}
-                            />
-                            <div ref={runnerControlRef} className="relative mt-0.5 flex min-w-0 items-center justify-center gap-1.5 text-[16px] font-medium leading-5 text-[#9ca3af]">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setIsRunnerDetailsOpen((open) => !open)
-                                        setIsRunnerSwitcherOpen(false)
-                                    }}
-                                    className="group/runner flex min-w-0 items-center gap-1.5 rounded-full px-1.5 py-0.5 transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                    title="Runner 状态"
-                                    aria-haspopup="dialog"
-                                    aria-expanded={isRunnerDetailsOpen}
-                                >
-                                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${selectedRunnerMachine?.active ? 'bg-[#22c55e]' : 'bg-[#a3a3a3]'}`} aria-hidden="true" />
-                                    <LaptopIcon className="h-5 w-5 shrink-0" />
-                                    <span className="truncate">{selectedRunnerLabel}</span>
-                                </button>
-                                {selectableMachines.length > 1 ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setIsRunnerSwitcherOpen((open) => !open)
-                                            setIsRunnerDetailsOpen(false)
-                                        }}
-                                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#9ca3af] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                        title="切换 runner"
-                                        aria-label="切换 runner"
-                                        aria-haspopup="menu"
-                                        aria-expanded={isRunnerSwitcherOpen}
-                                    >
-                                        <SwitchWorkspaceIcon className="h-3.5 w-3.5" />
-                                    </button>
-                                ) : null}
-                                {isRunnerDetailsOpen && selectedRunnerMachine ? (
-                                    <RunnerDetailsPanel machine={selectedRunnerMachine} />
-                                ) : null}
-                                {isRunnerSwitcherOpen && selectableMachines.length > 1 ? (
-                                    <RunnerSwitcherPanel
-                                        machines={selectableMachines}
-                                        selectedMachineId={selectedRunnerMachine?.id ?? null}
-                                        onSelect={selectRunnerMachine}
-                                    />
-                                ) : null}
-                            </div>
-                        </div>
-                        <div ref={sessionsMenuRef} className="relative flex items-center justify-end">
+                    <div className="mx-auto grid w-full max-w-[680px] grid-cols-[52px_1fr_52px] items-center px-4 pb-2 pt-3 sm:px-6">
+                        <div ref={sessionsMenuRef} className="relative flex items-center justify-start">
                             <button
                                 type="button"
-                                onClick={() => setIsSessionsMenuOpen((open) => !open)}
+                                {...sessionsMenuActivation}
                                 aria-label={t('session.more')}
                                 aria-expanded={isSessionsMenuOpen}
                                 aria-haspopup="menu"
-                                className={`flex h-[52px] w-[52px] items-center justify-center rounded-full border text-[var(--app-fg)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors ${
-                                    isSessionsMenuOpen
-                                        ? 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
-                                        : 'border-[var(--app-border)] bg-[var(--app-bg)] hover:bg-[var(--app-subtle-bg)]'
-                                }`}
+                                data-testid="sessions-menu-button"
+                                className={`pointer-events-auto touch-manipulation flex h-[52px] w-[52px] items-center justify-center rounded-full border text-[var(--app-fg)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${isSessionsMenuOpen ? 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]' : 'border-[var(--app-border)] bg-[var(--app-bg)] hover:bg-[var(--app-subtle-bg)]'}`}
                                 title={t('session.more')}
                             >
                                 <MoreHorizontalIcon className="h-7 w-7" />
@@ -1031,7 +924,7 @@ function SessionsPage() {
                                 <div
                                     role="menu"
                                     aria-label={t('session.more')}
-                                    className="absolute right-0 top-full z-50 mt-3 w-56 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
+                                    className="absolute left-0 top-full z-50 mt-2 w-56 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
                                 >
                                     <button
                                         type="button"
@@ -1107,6 +1000,59 @@ function SessionsPage() {
                                 </div>
                             ) : null}
                         </div>
+                        <div ref={runnerControlRef} className="relative flex min-w-0 items-center justify-center gap-1.5 text-sm font-medium leading-5 text-[var(--app-hint)]">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsRunnerDetailsOpen((open) => !open)
+                                        setIsRunnerSwitcherOpen(false)
+                                    }}
+                                    className="group/runner flex min-w-0 items-center gap-2 rounded-xl px-2.5 py-1.5 transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                    title="Runner 状态"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={isRunnerDetailsOpen}
+                                >
+                                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${selectedRunnerMachine?.active ? 'bg-[#22c55e]' : 'bg-[#a3a3a3]'}`} aria-hidden="true" />
+                                    <LaptopIcon className="h-[18px] w-[18px] shrink-0" />
+                                    <span className="truncate">{selectedRunnerLabel}</span>
+                                </button>
+                                {selectableMachines.length > 1 ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsRunnerSwitcherOpen((open) => !open)
+                                            setIsRunnerDetailsOpen(false)
+                                        }}
+                                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                        title="切换 runner"
+                                        aria-label="切换 runner"
+                                        aria-haspopup="menu"
+                                        aria-expanded={isRunnerSwitcherOpen}
+                                    >
+                                        <SwitchWorkspaceIcon className="h-3.5 w-3.5" />
+                                    </button>
+                                ) : null}
+                                {isRunnerDetailsOpen && selectedRunnerMachine ? (
+                                    <RunnerDetailsPanel machine={selectedRunnerMachine} />
+                                ) : null}
+                                {isRunnerSwitcherOpen && selectableMachines.length > 1 ? (
+                                    <RunnerSwitcherPanel
+                                        machines={selectableMachines}
+                                        selectedMachineId={selectedRunnerMachine?.id ?? null}
+                                        onSelect={selectRunnerMachine}
+                                    />
+                                ) : null}
+                            </div>
+                        <button
+                            type="button"
+                            {...newSessionActivation}
+                            aria-label={t('sessions.new')}
+                            title={t('sessions.new')}
+                            data-testid="sessions-new-button"
+                            className="pointer-events-auto touch-manipulation flex h-11 w-11 items-center justify-center rounded-full text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        >
+                            <PlusIcon className="h-5 w-5" />
+                        </button>
                     </div>
                 </div>
 
@@ -1116,87 +1062,23 @@ function SessionsPage() {
                             <div className="text-sm text-red-600">{error}</div>
                         </div>
                     ) : null}
-                    {sessionSource === 'running' ? (
-                        <div
-                            id="session-source-panel-running"
-                            role="tabpanel"
-                            aria-labelledby="session-source-tab-running"
-                            className="app-scroll-y mx-auto flex min-h-0 w-full max-w-[620px] flex-1 flex-col px-8 pb-6 pt-2"
-                        >
-                            {runningHapiSessions.length > 0 ? (
-                                <section className="mb-5 min-w-0" aria-label={t('sessions.running.hapi')}>
-                                    <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--app-hint)]">
-                                        <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" aria-hidden="true" />
-                                        <span>{t('sessions.running.hapi')}</span>
-                                    </div>
-                                    <SessionList
-                                        sessions={runningHapiSessions}
-                                        selectedSessionId={selectedSessionId}
-                                        onSelect={handleSelectSession}
-                                        onNewSession={goNewSession}
-                                        onBrowse={handleBrowse}
-                                        onRefresh={handleRefresh}
-                                        isLoading={isLoading}
-                                        renderHeader={false}
-                                        api={api}
-                                        machineLabelsById={machineLabelsById}
-                                        embedded
-                                    />
-                                </section>
-                            ) : null}
-
-                            <div className="min-w-0">
-                                <RecentCodexSessions
-                                    api={api}
-                                    machineId={selectedRunnerMachine?.id ?? null}
-                                    onOpen={handleOpenCodexSession}
-                                    embedded
-                                    onlyProcessing
-                                    limit={100}
-                                    title={t('sessions.running.codex')}
-                                    description={t('sessions.running.codex.description')}
-                                    emptyMessage={runningHapiSessions.length > 0
-                                        ? t('sessions.running.noCodex')
-                                        : t('sessions.running.empty')}
-                                />
-                            </div>
-                        </div>
-                    ) : sessionSource === 'hapi' ? (
-                        <div
-                            id="session-source-panel-hapi"
-                            role="tabpanel"
-                            aria-labelledby="session-source-tab-hapi"
-                            className="flex min-h-0 flex-1 flex-col"
-                        >
-                            <SessionList
-                                sessions={sessionsForSelectedRunner}
-                                selectedSessionId={selectedSessionId}
-                                onSelect={handleSelectSession}
-                                onNewSession={goNewSession}
-                                onNewSessionInDirectory={handleNewSessionInDirectory}
-                                onBrowse={handleBrowse}
-                                onRefresh={handleRefresh}
-                                isLoading={isLoading}
-                                renderHeader={false}
-                                api={api}
-                                machineLabelsById={machineLabelsById}
-                            />
-                        </div>
-                    ) : (
-                        <div
-                            id="session-source-panel-codex"
-                            role="tabpanel"
-                            aria-labelledby="session-source-tab-codex"
-                            className="mx-auto flex min-h-0 w-full max-w-[620px] flex-1 flex-col"
-                        >
-                            <RecentCodexSessions
-                                api={api}
-                                machineId={selectedRunnerMachine?.id ?? null}
-                                onOpen={handleOpenCodexSession}
-                                title={t('sessions.recent.title')}
-                            />
-                        </div>
-                    )}
+                    <div className="flex min-h-0 flex-1 flex-col">
+                        <RecentCodexSessions
+                            api={api}
+                            machineId={selectedRunnerMachine?.id ?? null}
+                            hapiSessions={sessionsForSelectedRunner}
+                            hapiIsLoading={isLoading}
+                            selectedSessionId={selectedSessionId}
+                            onOpenHapi={(session) => handleSelectSession(session.id)}
+                            onOpen={handleOpenCodexSession}
+                            embedded
+                            hideHeader
+                            recentOnly
+                            limit={100}
+                            realtimeAvailable={selectedRunnerMachine?.active === true
+                                && selectedRunnerMachine.metadata?.nativeCodexRealtime === true}
+                        />
+                    </div>
                 </div>
             </div>
 
@@ -1213,13 +1095,6 @@ function SessionsPage() {
                 </div>
             </div>
             </div>
-            <RecentCodexSessionsDrawer
-                api={api}
-                machineId={selectedRunnerMachine?.id ?? null}
-                open={isRecentCodexDrawerOpen}
-                onOpenChange={setIsRecentCodexDrawerOpen}
-                onOpenSession={handleOpenCodexSession}
-            />
             {/* 中文注释：这里展示的是本地 Codex transcript 列表；默认尝试勾选当前 Hapi 会话关联的 Codex thread。 */}
             <CodexSessionSyncDialog
                 isOpen={isSyncConfirmOpen}
@@ -1626,12 +1501,18 @@ function CodexSessionContextRoute() {
     const navigate = useNavigate()
     const { codexSessionId } = useParams({ from: '/sessions/codex/$codexSessionId' })
     const { machineId } = useSearch({ from: '/sessions/codex/$codexSessionId' })
+    const { machines } = useMachines(api, Boolean(machineId))
+    const selectedMachine = machines.find((machine) => machine.id === machineId)
+    const realtimeAvailable = selectedMachine?.active === true
+        && selectedMachine.metadata?.nativeCodexRealtime === true
 
     return (
         <CodexSessionContextPage
             api={api}
             sessionId={codexSessionId}
             machineId={machineId}
+            machineAvailable={selectedMachine?.active}
+            realtimeAvailable={realtimeAvailable}
             onBack={() => navigate({ to: '/sessions' })}
             onForked={(sessionId) => navigate({
                 to: '/sessions/$sessionId',

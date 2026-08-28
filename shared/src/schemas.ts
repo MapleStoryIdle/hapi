@@ -369,6 +369,8 @@ export const MachineMetadataSchema = z.object({
     homeDir: z.string().optional(),
     /** Absolute CODEX_HOME advertised by a runner for native thread affinity. */
     codexHome: z.string().optional(),
+    /** Runner can publish native Codex transcript invalidations into the Hub SSE stream. */
+    nativeCodexRealtime: z.boolean().optional(),
     happyHomeDir: z.string().optional(),
     happyLibDir: z.string().optional(),
     workspaceRoots: z.array(z.string()).optional()
@@ -520,6 +522,12 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         type: z.literal('message-cancelled'),
         messageId: z.string(),
         localId: z.string().optional()
+    }),
+    MachineChangedSchema.extend({
+        type: z.literal('codex-session-updated'),
+        /** Native Codex thread id; deliberately separate from HAPI sessionId. */
+        codexSessionId: z.string(),
+        modifiedAt: z.number().optional()
     }),
     SessionEventBaseSchema.extend({
         type: z.literal('heartbeat'),

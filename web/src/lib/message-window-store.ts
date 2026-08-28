@@ -19,11 +19,16 @@ export type MessageWindowState = {
     messagesVersion: number
 }
 
-export const VISIBLE_WINDOW_SIZE = 400
+// The thread renderer mounts one DOM subtree per message.  Keep the live
+// window comfortably below the point where a long tool-heavy run makes mobile
+// controls sluggish; older history remains pageable from the hub.
+export const VISIBLE_WINDOW_SIZE = 240
 export const PENDING_WINDOW_SIZE = 200
-const AGENT_RUN_WINDOW_SIZE = 800
-const OLDER_LOAD_WINDOW_SIZE = VISIBLE_WINDOW_SIZE * 2
+const AGENT_RUN_WINDOW_SIZE = 240
 const PAGE_SIZE = 50
+// Browsing upward gets one modest extra page, rather than re-mounting a second
+// full live window in one update.
+const OLDER_LOAD_WINDOW_SIZE = VISIBLE_WINDOW_SIZE + PAGE_SIZE
 const COLD_LOAD_BACKFILL_PAGE_SIZE = 200
 const COLD_LOAD_REGULAR_TARGET = PAGE_SIZE
 const PENDING_OVERFLOW_WARNING = 'New messages arrived while you were away. Scroll to bottom to refresh.'
@@ -86,7 +91,10 @@ const pendingForcedLatestRefreshes = new Map<string, {
 // notification per NOTIFY_THROTTLE_MS during streaming. This prevents
 // Windows UI jank caused by excessive React re-renders during SSE streaming.
 const NOTIFY_THROTTLE_MS = 150
-const PERSIST_THROTTLE_MS = 200
+// Writing a long tool-heavy window requires a full JSON stringify on the main
+// thread. Treat it as idle work: wait for the stream to settle, and never run
+// it inside the short window immediately following a direct tap.
+const PERSIST_IDLE_DELAY_MS = 750
 const STORAGE_KEY_PREFIX = 'hapi:message-window:v1:'
 const pendingNotifySessionIds = new Set<string>()
 const pendingPersistSessionIds = new Set<string>()
@@ -97,8 +105,34 @@ const pendingPersistSessionIds = new Set<string>()
 const pendingIncomingMessagesBySession = new Map<string, DecryptedMessage[]>()
 let notifyRafId: ReturnType<typeof requestAnimationFrame> | null = null
 let persistTimerId: ReturnType<typeof setTimeout> | null = null
+let persistDueAt = 0
 let lastNotifyAt = 0
 let incomingMessageFlushScheduled = false
+
+/** Test-only cleanup for this module's process-wide frame/timer coordinator. */
+export function resetMessageWindowStoreForTests(): void {
+    if (notifyRafId !== null && notifyRafId !== -1 && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(notifyRafId)
+    }
+    notifyRafId = null
+    if (persistTimerId !== null) {
+        clearTimeout(persistTimerId)
+        persistTimerId = null
+    }
+    persistDueAt = 0
+    lastNotifyAt = 0
+    incomingMessageFlushScheduled = false
+    pendingNotifySessionIds.clear()
+    pendingPersistSessionIds.clear()
+    pendingIncomingMessagesBySession.clear()
+    for (const refresh of pendingForcedLatestRefreshes.values()) {
+        resolveForcedLatestRefresh(refresh)
+    }
+    pendingForcedLatestRefreshes.clear()
+    pendingVisibilityCacheBySession.clear()
+    states.clear()
+    listeners.clear()
+}
 
 function resolveForcedLatestRefresh(refresh: { resolvers: Array<() => void> }): void {
     for (const resolve of refresh.resolvers) {
@@ -154,6 +188,23 @@ function scheduleNotify(sessionId: string): void {
 
 function flushNotifications(): void {
     notifyRafId = null
+    // A notification can already be queued when the person presses a header
+    // control. Yield that final React/store fan-out too, not only future SSE
+    // message merges, so a render cannot land between pointer-down and the
+    // control's activation.
+    if (deferUntilUserInteractionSettles(() => {
+        if (notifyRafId !== null) {
+            return
+        }
+        if (typeof requestAnimationFrame === 'function') {
+            notifyRafId = requestAnimationFrame(flushNotifications)
+            return
+        }
+        setTimeout(flushNotifications, 16)
+    })) {
+        return
+    }
+
     lastNotifyAt = Date.now()
     const sessionIds = Array.from(pendingNotifySessionIds)
     pendingNotifySessionIds.clear()
@@ -187,32 +238,37 @@ function flushQueuedIncomingMessages(): void {
     }
 }
 
-function scheduleIncomingMessageFlush(): void {
-    if (incomingMessageFlushScheduled) {
-        return
-    }
-    incomingMessageFlushScheduled = true
+function requestIncomingMessageFlush(): void {
     const flush = () => {
-        flushQueuedIncomingMessages()
-    }
-    // A stream update is never urgent enough to take the same main-thread
-    // slice as a person pressing a control. Keep the normal rAF path outside
-    // that window, but defer the merge briefly when a direct interaction is
-    // underway. Messages remain queued and are merged losslessly afterward.
-    if (deferUntilUserInteractionSettles(() => {
-        if (typeof requestAnimationFrame === 'function') {
-            requestAnimationFrame(flush)
+        // The merge may already be sitting in a rAF queue when a person
+        // presses a header control. Recheck here (not only when scheduling),
+        // otherwise that pre-queued merge can still steal the interaction.
+        if (deferUntilUserInteractionSettles(requestIncomingMessageFlush)) {
             return
         }
-        setTimeout(flush, 16)
-    })) {
-        return
+        flushQueuedIncomingMessages()
     }
+
     if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(flush)
         return
     }
     setTimeout(flush, 16)
+}
+
+function scheduleIncomingMessageFlush(): void {
+    if (incomingMessageFlushScheduled) {
+        return
+    }
+    incomingMessageFlushScheduled = true
+    // A stream update is never urgent enough to take the same main-thread
+    // slice as a person pressing a control. Keep the normal rAF path outside
+    // that window, but defer the merge briefly when a direct interaction is
+    // underway. Messages remain queued and are merged losslessly afterward.
+    if (deferUntilUserInteractionSettles(requestIncomingMessageFlush)) {
+        return
+    }
+    requestIncomingMessageFlush()
 }
 
 function discardQueuedIncomingMessages(sessionId: string): void {
@@ -277,6 +333,11 @@ function persistState(sessionId: string, state: InternalState): void {
 
 function clearPersistedState(sessionId: string): void {
     pendingPersistSessionIds.delete(sessionId)
+    if (pendingPersistSessionIds.size === 0 && persistTimerId !== null) {
+        clearTimeout(persistTimerId)
+        persistTimerId = null
+        persistDueAt = 0
+    }
     if (!isSessionStorageAvailable()) {
         return
     }
@@ -288,6 +349,19 @@ function clearPersistedState(sessionId: string): void {
 
 function flushPersistedStates(): void {
     persistTimerId = null
+    const remaining = persistDueAt - Date.now()
+    if (remaining > 0) {
+        persistTimerId = setTimeout(flushPersistedStates, remaining)
+        return
+    }
+
+    // A timer can become due just after a pointer-down. Keep stringify and
+    // sessionStorage writes behind the same interaction gate as SSE merges.
+    if (deferUntilUserInteractionSettles(flushPersistedStates)) {
+        return
+    }
+
+    persistDueAt = 0
     const sessionIds = Array.from(pendingPersistSessionIds)
     pendingPersistSessionIds.clear()
     for (const sessionId of sessionIds) {
@@ -305,10 +379,11 @@ function schedulePersist(sessionId: string): void {
         return
     }
     pendingPersistSessionIds.add(sessionId)
+    persistDueAt = Date.now() + PERSIST_IDLE_DELAY_MS
     if (persistTimerId !== null) {
-        return
+        clearTimeout(persistTimerId)
     }
-    persistTimerId = setTimeout(flushPersistedStates, PERSIST_THROTTLE_MS)
+    persistTimerId = setTimeout(flushPersistedStates, PERSIST_IDLE_DELAY_MS)
 }
 
 function getPendingVisibilityCache(sessionId: string): Map<string, PendingVisibilityCacheEntry> {

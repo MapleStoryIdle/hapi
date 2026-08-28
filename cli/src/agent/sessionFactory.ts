@@ -54,6 +54,7 @@ export function buildMachineMetadata(options?: { workspaceRoots?: string[] }): M
         happyCliVersion: packageJson.version,
         homeDir: os.homedir(),
         codexHome: resolveCodexHome(),
+        nativeCodexRealtime: true,
         happyHomeDir: configuration.happyHomeDir,
         happyLibDir: runtimePath(),
         workspaceRoots: options?.workspaceRoots

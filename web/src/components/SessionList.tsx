@@ -20,6 +20,7 @@ import { getAttentionLabel, SessionAttentionIndicator } from '@/components/Sessi
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
 import { formatReopenError } from '@/lib/reopenError'
+import { formatRelativeTime } from '@/lib/relativeTime'
 
 type SessionGroup = {
     key: string
@@ -695,6 +696,7 @@ const SessionItem = memo(function SessionItem(props: {
 
     const sessionName = getSessionTitle(s)
     const sessionSubtitle = showPath ? s.metadata?.path ?? s.id : null
+    const lastActivityLabel = formatRelativeTime(s.updatedAt, t)
     const todoProgress = getTodoProgress(s)
     const attention = useMemo(
         () => showDetailedStatus
@@ -724,7 +726,7 @@ const SessionItem = memo(function SessionItem(props: {
             <button
                 type="button"
                 {...longPressHandlers}
-                className={`session-list-item group/session-row flex w-full items-center justify-between gap-3 rounded-xl px-0 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${nested ? 'py-1.5' : 'py-2'} ${selected ? 'text-[var(--app-fg)]' : ''}`}
+                className={`session-list-item group/session-row flex min-h-[3.5rem] w-full items-center justify-between gap-3 rounded-2xl px-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${nested ? 'py-1.5' : 'py-2'} ${selected ? 'text-[var(--app-fg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
                 aria-describedby={describedBy}
@@ -732,12 +734,12 @@ const SessionItem = memo(function SessionItem(props: {
                 <div className={`flex min-w-0 flex-1 items-center ${nested ? 'gap-2.5' : 'gap-3'}`}>
                     <AgentFlavorStatusIcon
                         flavor={s.metadata?.flavor}
-                        className={nested ? 'h-4 w-4' : 'h-[18px] w-[18px]'}
+                        className={nested ? 'h-4 w-4' : 'h-5 w-5'}
                         showStatus={s.active}
                         statusClassName="bg-[#34C759]"
                     />
                     <div className="min-w-0 flex-1">
-                        <div className={`truncate font-normal tracking-normal text-[var(--app-fg)] ${nested ? 'text-[13px] leading-[17px]' : 'text-sm leading-[18px]'}`}>
+                        <div className={`truncate font-medium tracking-normal text-[var(--app-fg)] ${nested ? 'text-[13px] leading-[17px]' : 'text-sm leading-5'}`}>
                             {sessionName}
                         </div>
                         {sessionSubtitle ? (
@@ -747,7 +749,12 @@ const SessionItem = memo(function SessionItem(props: {
                         ) : null}
                     </div>
                 </div>
-                <div className="flex h-6 shrink-0 items-center justify-end gap-2 text-[var(--app-hint)]">
+                <div className="flex h-6 shrink-0 items-center justify-end gap-1.5 text-[var(--app-hint)]">
+                    {lastActivityLabel ? (
+                        <time className="shrink-0 text-[11px] font-medium tabular-nums text-[var(--app-hint)]" title={new Date(s.updatedAt < 1_000_000_000_000 ? s.updatedAt * 1000 : s.updatedAt).toLocaleString()}>
+                            {lastActivityLabel}
+                        </time>
+                    ) : null}
                     {sideSessionCount > 0 ? (
                         <span
                             role="button"
@@ -771,7 +778,7 @@ const SessionItem = memo(function SessionItem(props: {
                         </span>
                     ) : null}
                     {s.active && s.thinking ? (
-                        <LoaderIcon className={`${nested ? 'h-4 w-4' : 'h-6 w-6'} animate-spin-slow text-[var(--app-fg)]`} />
+                        <LoaderIcon className={`${nested ? 'h-4 w-4' : 'h-4 w-4'} animate-spin-slow text-[var(--app-fg)]`} />
                     ) : attention ? (
                         <SessionAttentionIndicator
                             attention={attention}
@@ -1030,7 +1037,7 @@ export const SessionList = memo(function SessionList(props: {
 
         return (
             <div className="collapsible-inner">
-                <div className="flex flex-col py-2 pl-4">
+                <div className="relative mt-1 flex flex-col border-l border-[var(--app-divider)] py-1 pl-3.5">
                     {visibleGroupNodes.map(node => renderSessionNode(node))}
                     {sessionNodes.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canCollapseSessions) ? (
                         <button
@@ -1039,7 +1046,7 @@ export const SessionList = memo(function SessionList(props: {
                                 ? showMoreSessions(group)
                                 : collapseSessionGroup(group)}
                             className={cn(
-                                'my-1 min-h-11 rounded-xl px-0 py-2 text-left text-base text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation'
+                                'my-1 min-h-10 rounded-xl px-2 py-2 text-left text-sm font-medium text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation'
                             )}
                         >
                             {hiddenSessionCount > 0
@@ -1151,10 +1158,10 @@ export const SessionList = memo(function SessionList(props: {
 
     return (
         <div className={embedded
-            ? 'flex w-full min-w-0 flex-col'
-            : 'mx-auto flex h-full min-h-0 w-full max-w-[620px] flex-1 flex-col'}>
+            ? 'flex w-full min-w-0 flex-col [font-family:var(--app-control-font-family)]'
+            : 'mx-auto flex h-full min-h-0 w-full max-w-[680px] flex-1 flex-col [font-family:var(--app-control-font-family)]'}>
             {renderHeader ? (
-                <div className="flex items-center justify-between px-8 pb-2 pt-1">
+                <div className="flex items-center justify-between px-4 pb-2 pt-1 sm:px-6">
                     <div className="text-sm text-[var(--app-hint)]">
                         {t('sessions.count', { n: allSessions.length, m: allGroups.length })}
                     </div>
@@ -1178,7 +1185,7 @@ export const SessionList = memo(function SessionList(props: {
 
             <div className={embedded
                 ? 'flex min-h-0 flex-col px-0 pb-0 pt-0'
-                : 'app-scroll-y desktop-scrollbar-left flex min-h-0 flex-1 flex-col px-8 pb-6 pt-2'}>
+                : 'app-scroll-y desktop-scrollbar-left flex min-h-0 flex-1 flex-col px-4 pb-6 pt-2 sm:px-6'}>
                 {machineGroups.map((mg) => {
                     const machineCollapsed = isMachineCollapsed(mg)
                     const showMachineHeading = machineGroups.length > 1
@@ -1203,18 +1210,22 @@ export const SessionList = memo(function SessionList(props: {
                                         const isCollapsed = isGroupCollapsed(group)
                                         const canStartInGroupDirectory = group.directory !== 'Other'
                                         return (
-                                            <section key={group.key} className="min-w-0">
+                                            <section key={group.key} className="min-w-0 py-1">
                                                 <div
-                                                    className="group/project flex min-w-0 cursor-pointer select-none items-center gap-3 rounded-2xl py-1 text-left transition-colors"
+                                                    className="group/project flex min-w-0 cursor-pointer select-none items-center gap-2 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
                                                     onClick={() => toggleGroup(group.key, isCollapsed)}
                                                     title={group.directory}
                                                 >
-                                                    <FolderIcon open={!isCollapsed} className="h-8 w-8 shrink-0 text-[var(--app-fg)]" />
-                                                    <span className="min-w-0 max-w-[min(18rem,calc(100%-8rem))] truncate text-[20px] font-semibold leading-7 text-[var(--app-fg)]">
-                                                        {group.displayName}
+                                                    <FolderIcon open={!isCollapsed} className="h-5 w-5 shrink-0 text-[var(--app-fg)]" />
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block truncate text-[15px] font-semibold leading-5 text-[var(--app-fg)]">
+                                                            {group.displayName}
+                                                        </span>
                                                     </span>
-                                                    <ChevronIcon className="h-4 w-4 shrink-0 text-[#8e8e93]" collapsed={isCollapsed} />
-                                                    <span className="flex-1" aria-hidden="true" />
+                                                    <span className="shrink-0 text-[11px] font-medium tabular-nums text-[var(--app-hint)]">
+                                                        {group.sessions.length}
+                                                    </span>
+                                                    <ChevronIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)]" collapsed={isCollapsed} />
                                                     <CopyPathButton path={group.directory} className="hidden opacity-0 transition-opacity duration-150 group-hover/project:opacity-100 sm:flex" />
                                                     {onNewSessionInDirectory && canStartInGroupDirectory ? (
                                                         <button
@@ -1226,11 +1237,11 @@ export const SessionList = memo(function SessionList(props: {
                                                                     directory: group.directory
                                                                 })
                                                             }}
-                                                            className="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#8e8e93] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation"
+                                                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation"
                                                             title={t('sessions.group.new')}
                                                             aria-label={t('sessions.group.new')}
                                                         >
-                                                            <ComposeIcon className="h-6 w-6" />
+                                                            <ComposeIcon className="h-5 w-5" />
                                                         </button>
                                                     ) : null}
                                                 </div>

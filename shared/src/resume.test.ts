@@ -72,6 +72,21 @@ describe('resume schemas', () => {
         }).success).toBe(true)
     })
 
+    it('validates native Codex transcript invalidations without treating them as HAPI sessions', () => {
+        expect(SyncEventSchema.safeParse({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: '12345678-1234-4234-8234-123456789012',
+            modifiedAt: 1_725_000_000_000
+        }).success).toBe(true)
+
+        expect(SyncEventSchema.safeParse({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            sessionId: 'hapi-session-1'
+        }).success).toBe(false)
+    })
+
     it('validates structured session and machine update patches', () => {
         expect(SyncEventSchema.safeParse({
             type: 'session-updated',

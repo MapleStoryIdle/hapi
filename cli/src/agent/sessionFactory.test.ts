@@ -202,7 +202,10 @@ describe('bootstrapExistingSession', () => {
         const originalCodexHome = process.env.CODEX_HOME
         process.env.CODEX_HOME = '/tmp/hapi-test-codex-home'
         try {
-            expect(buildMachineMetadata().codexHome).toBe('/tmp/hapi-test-codex-home')
+            expect(buildMachineMetadata()).toMatchObject({
+                codexHome: '/tmp/hapi-test-codex-home',
+                nativeCodexRealtime: true
+            })
         } finally {
             if (originalCodexHome === undefined) delete process.env.CODEX_HOME
             else process.env.CODEX_HOME = originalCodexHome

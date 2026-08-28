@@ -9,6 +9,7 @@ const CODEX_SUBSCRIPTION_LIMITS_MIN_REFETCH_INTERVAL_MS = 5 * 60 * 1000
 export function useCodexSubscriptionLimits(args: {
     api: ApiClient | null
     sessionId?: string | null
+    machineId?: string | null
     model?: string | null
     enabled?: boolean
     thinking?: boolean
@@ -18,17 +19,25 @@ export function useCodexSubscriptionLimits(args: {
     isFetching: boolean
     error: string | null
 } {
-    const { api, sessionId } = args
+    const { api, sessionId, machineId } = args
     const model = args.model ?? null
     const thinking = args.thinking === true
-    const enabled = Boolean(args.enabled && api && sessionId)
+    const enabled = Boolean(args.enabled && api && (sessionId || machineId))
     const query = useQuery({
-        queryKey: queryKeys.sessionCodexSubscriptionLimits(sessionId ?? 'unknown', model),
+        queryKey: sessionId
+            ? queryKeys.sessionCodexSubscriptionLimits(sessionId, model)
+            : queryKeys.machineCodexSubscriptionLimits(machineId ?? 'unknown', model),
         queryFn: async () => {
-            if (!api || !sessionId) {
+            if (!api) {
                 throw new Error('API unavailable')
             }
-            return await api.getSessionCodexSubscriptionLimits(sessionId)
+            if (sessionId) {
+                return await api.getSessionCodexSubscriptionLimits(sessionId)
+            }
+            if (machineId) {
+                return await api.getMachineCodexSubscriptionLimits(machineId, model)
+            }
+            throw new Error('Codex target unavailable')
         },
         enabled,
         staleTime: Number.POSITIVE_INFINITY,
@@ -39,7 +48,7 @@ export function useCodexSubscriptionLimits(args: {
     const prevThinkingRef = useRef(thinking)
     useEffect(() => {
         prevThinkingRef.current = thinking
-    }, [sessionId, model])
+    }, [machineId, sessionId, model])
 
     useEffect(() => {
         if (enabled && prevThinkingRef.current && !thinking) {
@@ -50,7 +59,7 @@ export function useCodexSubscriptionLimits(args: {
             }
         }
         prevThinkingRef.current = thinking
-    }, [enabled, thinking, query, sessionId, model])
+    }, [enabled, thinking, query, machineId, sessionId, model])
 
     return {
         limits: query.data?.limits ?? null,

@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
 import { cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { I18nProvider } from '@/lib/i18n-context'
+import { I18nContext, I18nProvider } from '@/lib/i18n-context'
 import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
 import { SessionConnectionProvider } from '@/lib/session-connection-context'
 import { ToastProvider } from '@/lib/toast-context'
 import type { ApiClient } from '@/api/client'
 import type { Session } from '@/types/api'
-import { SessionConnectionRecoveryControl, SessionHeader } from './SessionHeader'
+import { SessionConnectionRecoveryControl, SessionHeader, SessionTitleDetails } from './SessionHeader'
 
 afterEach(() => {
     cleanup()
@@ -46,7 +47,10 @@ function fireWebKitTouchPointerUp(target: Element) {
     const event = createEvent.pointerUp(target, { bubbles: true, cancelable: true })
     Object.defineProperties(event, {
         button: { value: -1 },
+        clientX: { value: 0 },
+        clientY: { value: 0 },
         pointerType: { value: 'touch' },
+        pointerId: { value: 1 },
     })
     fireEvent(target, event)
 }
@@ -55,8 +59,28 @@ function fireWebKitTouchPointerDown(target: Element) {
     const event = createEvent.pointerDown(target, { bubbles: true, cancelable: true })
     Object.defineProperties(event, {
         button: { value: -1 },
+        clientX: { value: 0 },
+        clientY: { value: 0 },
         pointerType: { value: 'touch' },
+        pointerId: { value: 1 },
     })
+    fireEvent(target, event)
+}
+
+function fireWebKitTouchPointerMove(target: Element, clientY: number) {
+    const event = createEvent.pointerMove(target, { bubbles: true, cancelable: true, clientY })
+    Object.defineProperties(event, {
+        button: { value: -1 },
+        clientX: { value: 0 },
+        clientY: { value: clientY },
+        pointerType: { value: 'touch' },
+        pointerId: { value: 1 },
+    })
+    fireEvent(target, event)
+}
+
+function fireWebKitTouchEnd(target: Element) {
+    const event = createEvent.touchEnd(target, { bubbles: true, cancelable: true })
     fireEvent(target, event)
 }
 
@@ -91,7 +115,8 @@ describe('mobile layout contract', () => {
         expect(shell).toHaveClass('pointer-events-auto', 'z-40', 'isolate', 'touch-manipulation')
 
         const controls = screen.getByTestId('session-header-controls')
-        expect(controls).toHaveClass('pointer-events-auto', 'h-11', 'bg-[var(--app-bg)]')
+        expect(controls).toHaveClass('pointer-events-auto', 'h-11', 'gap-0', 'bg-[var(--app-bg)]')
+        expect(screen.getByRole('button', { name: 'hapi' })).toHaveClass('pl-1', 'pr-2')
         expect(screen.getByTestId('session-header-row')).toHaveClass('h-14')
     })
 })
@@ -189,6 +214,105 @@ describe('SessionHeader back action', () => {
         expect(onBack).toHaveBeenCalledTimes(1)
     })
 
+    it('uses touch-end when a busy standalone WebKit view loses pointer-up', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const onBack = vi.fn()
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={createSession()}
+                            api={null}
+                            onBack={onBack}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const backButton = screen.getByTestId('session-header-back')
+        fireWebKitTouchPointerDown(backButton)
+        fireWebKitTouchEnd(backButton)
+        fireEvent.click(backButton, { detail: 1 })
+
+        expect(onBack).toHaveBeenCalledTimes(1)
+    })
+
+    it('runs one action when WebKit dispatches both pointer-up and touch-end', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const onBack = vi.fn()
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={createSession()}
+                            api={null}
+                            onBack={onBack}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const backButton = screen.getByTestId('session-header-back')
+        fireWebKitTouchPointerDown(backButton)
+        fireWebKitTouchPointerUp(backButton)
+        fireWebKitTouchEnd(backButton)
+        fireEvent.click(backButton, { detail: 1 })
+
+        expect(onBack).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not treat a scrolling gesture as a header tap', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const onBack = vi.fn()
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={createSession()}
+                            api={null}
+                            onBack={onBack}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const backButton = screen.getByTestId('session-header-back')
+        fireWebKitTouchPointerDown(backButton)
+        fireWebKitTouchPointerMove(backButton, 16)
+        fireWebKitTouchPointerUp(backButton)
+        fireWebKitTouchEnd(backButton)
+        fireEvent.click(backButton, { detail: 1 })
+
+        expect(onBack).not.toHaveBeenCalled()
+    })
+
     it('keeps the title details control in the explicit touch hit-test layer', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
@@ -217,6 +341,66 @@ describe('SessionHeader back action', () => {
         fireEvent.click(titleButton)
 
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+    })
+
+    it('reads the newest stable detail snapshot when the title popover opens', () => {
+        const detailsRef = {
+            current: [{ key: 'path', label: 'Project path', value: '/workspace/old' }]
+        }
+
+        render(
+            <I18nProvider>
+                <SessionTitleDetails
+                    title="hapi"
+                    sessionId="title-details-stable-ref"
+                    detailsRef={detailsRef}
+                />
+            </I18nProvider>
+        )
+
+        // A live session patch updates the ref but intentionally does not
+        // re-render the title control before a direct user action.
+        detailsRef.current = [{ key: 'path', label: 'Project path', value: '/workspace/latest' }]
+        fireEvent.click(screen.getByRole('button', { name: 'hapi' }))
+
+        expect(screen.getByText('/workspace/latest')).toBeInTheDocument()
+        expect(screen.queryByText('/workspace/old')).not.toBeInTheDocument()
+    })
+
+    it('does not re-render the title control for an unrelated streaming refresh', () => {
+        let detailReads = 0
+        const detailsRef = {
+            get current() {
+                detailReads += 1
+                return [{ key: 'path', label: 'Project path', value: '/workspace/hapi' }]
+            }
+        } as { current: readonly { key: string; label: string; value: string }[] }
+        const TitleHarness = (props: { streamRevision: number }) => (
+            <div data-stream-revision={props.streamRevision}>
+                <SessionTitleDetails
+                    title="hapi"
+                    sessionId="title-details-memo-test"
+                    detailsRef={detailsRef}
+                    detailsRevision="stable-title-details"
+                />
+            </div>
+        )
+        const translations = {
+            t: (key: string) => key,
+            locale: 'en' as const,
+            setLocale: () => {}
+        }
+        const I18nWrapper = (props: { children: ReactNode }) => (
+            <I18nContext.Provider value={translations}>{props.children}</I18nContext.Provider>
+        )
+        const { rerender } = render(<TitleHarness streamRevision={0} />, { wrapper: I18nWrapper })
+        const readsAfterMount = detailReads
+
+        // Equivalent to `updatedAt` changing in the parent SessionHeader:
+        // the surrounding header renders, but title-detail inputs do not.
+        rerender(<TitleHarness streamRevision={1} />)
+
+        expect(detailReads).toBe(readsAfterMount)
     })
 
     it('opens title details on touch pointer-down without closing it again on the follow-up click', () => {
@@ -248,6 +432,47 @@ describe('SessionHeader back action', () => {
         fireEvent.click(titleButton, { detail: 1 })
 
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+    })
+
+    it('keeps title details open while streaming session state refreshes around it', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const session = createSession()
+        const renderHeader = (nextSession: Session) => (
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={nextSession}
+                            api={null}
+                            onBack={() => {}}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+        const { rerender } = render(renderHeader(session))
+
+        const titleButton = screen.getByRole('button', { name: 'hapi' })
+        fireWebKitTouchPointerDown(titleButton)
+        fireWebKitTouchPointerUp(titleButton)
+        fireEvent.click(titleButton, { detail: 1 })
+        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+
+        rerender(renderHeader({
+            ...session,
+            updatedAt: 1_700_000_000_000,
+            thinking: true,
+            thinkingAt: 1_700_000_000_000
+        }))
+
+        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'hapi' })).toHaveAttribute('aria-expanded', 'true')
     })
 
     it('closes title details on a second touch of the same title button', () => {
@@ -344,6 +569,37 @@ describe('SessionHeader back action', () => {
         fireWebKitTouchPointerUp(screen.getByTitle('More actions'))
 
         expect(screen.getByRole('menu')).toBeInTheDocument()
+    })
+
+    it('exposes the same refresh action when the detail page supplies one', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const onRefresh = vi.fn()
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={createSession()}
+                            api={null}
+                            onBack={() => {}}
+                            onRefresh={onRefresh}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByTitle('More actions'))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh' }))
+
+        expect(onRefresh).toHaveBeenCalledTimes(1)
     })
 
     it('uses the selected locale for session detail labels', () => {
@@ -494,7 +750,7 @@ describe('SessionHeader connection recovery', () => {
         expect(screen.getByTitle('Restoring live updates…')).toBeInTheDocument()
     })
 
-    it('uses the weak-signal icon for a degraded connection', () => {
+    it('uses the intermittent-contact icon for a degraded connection', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -515,7 +771,7 @@ describe('SessionHeader connection recovery', () => {
         )
 
         const signal = screen.getByTestId('session-connection-recovery').querySelector('svg')
-        expect(signal).toHaveClass('lucide-signal-low', 'h-5', 'w-5')
+        expect(signal).toHaveClass('lucide-plug-zap', 'h-5', 'w-5')
     })
 
     it('uses the unplug icon for a disconnected connection', () => {

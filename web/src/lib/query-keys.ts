@@ -6,6 +6,11 @@ export const queryKeys = {
     remoteServers: ['remote-servers'] as const,
     remoteServerCandidates: ['remote-server-candidates'] as const,
     machineCodexModels: (machineId: string) => ['machine-codex-models', machineId] as const,
+    machineCodexSubscriptionLimits: (machineId: string, model: string | null) => [
+        'machine-codex-subscription-limits',
+        machineId,
+        model
+    ] as const,
     gitStatus: (sessionId: string) => ['git-status', sessionId] as const,
     sessionFiles: (sessionId: string, query: string) => ['session-files', sessionId, query] as const,
     sessionDirectory: (sessionId: string, path: string) => ['session-directory', sessionId, path] as const,

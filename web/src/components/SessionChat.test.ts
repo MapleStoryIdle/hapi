@@ -3,6 +3,7 @@ import {
     BOTTOM_FLOATING_CONTROL_GAP_PX,
     BOTTOM_OVERLAY_INSET_PX,
     buildGoalStateMessages,
+    canReuseTimelineMessagesForGoalState,
     canCreateSideSessionFromSession,
     getBottomOverlayThreadInset,
     getScrollButtonBottomInset,
@@ -327,6 +328,29 @@ describe('isScratchlistHotkeyBlockedTarget', () => {
 })
 
 describe('buildGoalStateMessages', () => {
+    it('reuses the already-visible timeline when there is no hidden goal-state input', () => {
+        const now = 1_700_000_000_000
+        expect(canReuseTimelineMessagesForGoalState([
+            userMessage({ id: 'visible', createdAt: now, invokedAt: now })
+        ])).toBe(true)
+    })
+
+    it('keeps the full goal-state path for queued, pending, and scheduled messages', () => {
+        const now = 1_700_000_000_000
+        const queued = userMessage({ id: 'queued', createdAt: now, invokedAt: null })
+        const scheduled = userMessage({
+            id: 'scheduled',
+            createdAt: now,
+            invokedAt: undefined,
+            scheduledAt: now + 60_000
+        })
+        const pending = userMessage({ id: 'pending', createdAt: now + 1, invokedAt: null })
+
+        expect(canReuseTimelineMessagesForGoalState([queued])).toBe(false)
+        expect(canReuseTimelineMessagesForGoalState([scheduled])).toBe(false)
+        expect(canReuseTimelineMessagesForGoalState([], [pending])).toBe(false)
+    })
+
     it('keeps immediate queued user messages so completed goal status can clear before timeline render', () => {
         const now = 1_700_000_000_000
         const messages = [

@@ -15,6 +15,7 @@ import type {
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow, enqueueIncomingMessages, getMessageWindowState, markMessagesConsumed, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
 import { scheduleBackgroundWork } from '@/lib/interaction-priority'
+import { publishNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
 
 type SSESubscription = {
     all?: boolean
@@ -544,6 +545,10 @@ export function useSSE(options: {
                 if (event.data === undefined) {
                     queueMachinesInvalidation()
                 }
+            }
+
+            if (event.type === 'codex-session-updated') {
+                publishNativeCodexSessionUpdated(event)
             }
 
             if (

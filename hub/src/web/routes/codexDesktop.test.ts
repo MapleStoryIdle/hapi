@@ -482,6 +482,32 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('includes the native processing state in the host-local session list', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-run-state-route-test-'))
+        const codexSessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            createTranscript(codexHome, codexSessionId)
+            const transcriptPath = join(codexHome, 'sessions', '2026', '06', '04', `rollout-${codexSessionId}.jsonl`)
+            writeFileSync(transcriptPath, `${JSON.stringify({
+                type: 'event_msg',
+                payload: { type: 'task_started' }
+            })}\n`, { encoding: 'utf-8', flag: 'a' })
+
+            const app = createRoutesApp('default')
+            const response = await app.request('/api/codex/sessions?limit=5')
+
+            expect(response.status).toBe(200)
+            expect(await response.json()).toMatchObject({
+                success: true,
+                sessions: [{ id: codexSessionId, runState: 'processing' }]
+            })
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
     it('returns displayable context for a recent local Codex session', async () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-context-test-'))
         const codexSessionId = '55555555-5555-4555-8555-555555555555'
@@ -532,6 +558,95 @@ describe('Codex Desktop import routes', () => {
                     }
                 ],
                 page: { limit: 1, nextBefore: null, hasMore: false }
+            })
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('returns native custom exec calls through the host-local context route', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-custom-tool-route-test-'))
+        const codexSessionId = '77777777-7777-4777-8777-777777777777'
+        const sessionDir = join(codexHome, 'sessions', '2026', '08', '26')
+        mkdirSync(sessionDir, { recursive: true })
+        const transcriptPath = join(sessionDir, `rollout-${codexSessionId}.jsonl`)
+        const records = [
+            { type: 'session_meta', payload: { id: codexSessionId, cwd: '/workspace/project' } },
+            {
+                timestamp: '2026-08-26T09:59:59.000Z',
+                type: 'turn_context',
+                payload: { model: 'gpt-5.6-terra', effort: 'high' }
+            },
+            {
+                timestamp: '2026-08-26T10:00:00.000Z',
+                type: 'response_item',
+                payload: {
+                    type: 'message',
+                    role: 'user',
+                    content: [{ type: 'input_text', text: 'inspect the project' }]
+                }
+            },
+            {
+                timestamp: '2026-08-26T10:00:01.000Z',
+                type: 'response_item',
+                payload: {
+                    type: 'custom_tool_call',
+                    call_id: 'call-route-terminal',
+                    name: 'exec',
+                    input: 'pwd',
+                    status: 'completed'
+                }
+            },
+            {
+                timestamp: '2026-08-26T10:00:01.500Z',
+                type: 'response_item',
+                payload: {
+                    type: 'custom_tool_call_output',
+                    call_id: 'call-route-terminal',
+                    output: [{
+                        type: 'input_text',
+                        text: JSON.stringify({
+                            output: '/workspace/project',
+                            metadata: { exit_code: 0, duration_seconds: 0.5 }
+                        })
+                    }]
+                }
+            }
+        ]
+        writeFileSync(transcriptPath, `${records.map((record) => JSON.stringify(record)).join('\n')}\n`, 'utf-8')
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            const app = createRoutesApp('default')
+            const response = await app.request(`/api/codex/sessions/${codexSessionId}/context?limit=10`)
+            const body = await response.json() as {
+                session?: { model?: string | null; modelReasoningEffort?: string | null }
+                messages: Array<{ content: { role: string; content: { data?: Record<string, unknown> } } }>
+            }
+
+            expect(response.status).toBe(200)
+            expect(body).toMatchObject({
+                session: {
+                    model: 'gpt-5.6-terra',
+                    modelReasoningEffort: 'high'
+                }
+            })
+            const toolCall = body.messages.find((message) => message.content.content.data?.type === 'tool-call')
+            const toolResult = body.messages.find((message) => message.content.content.data?.type === 'tool-call-result')
+            expect(toolCall?.content.content.data).toMatchObject({
+                name: 'CodexBash',
+                callId: 'call-route-terminal',
+                input: { command: 'pwd' }
+            })
+            expect(toolResult?.content.content.data).toMatchObject({
+                callId: 'call-route-terminal',
+                durationMs: 500,
+                output: {
+                    stdout: '/workspace/project',
+                    exit_code: 0,
+                    is_error: false,
+                    durationMs: 500
+                }
             })
         } finally {
             rmSync(codexHome, { recursive: true, force: true })
@@ -633,6 +748,44 @@ describe('Codex Desktop import routes', () => {
                 sessionId,
                 'Continue the original thread'
             ]])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('accepts a direct message while the native thread is processing and returns its queue position', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '57565656-5756-4756-8756-575656565656'
+        const data = createRunnerLocalSessionData(sessionId, '/runner/.codex/worktrees/queued-thread')
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            readCodexLocalSession: async () => ({ success: true as const, data }),
+            getCodexLocalSessionStatus: async () => ({ success: true as const, status: 'processing' as const }),
+            sendCodexLocalSessionMessage: async () => ({
+                success: true as const,
+                status: 'queued' as const,
+                queuedAt: 456,
+                queuePosition: 1,
+                queueId: 'queued-message-1',
+                queuedMessages: [{ id: 'queued-message-1', text: 'Wait for the current turn', queuedAt: 456 }]
+            })
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${sessionId}/messages`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ machineId: 'mac-runner', message: 'Wait for the current turn' })
+            })
+            expect(response.status).toBe(202)
+            expect(await response.json()).toMatchObject({
+                success: true,
+                status: 'queued',
+                queuePosition: 1,
+                queuedMessages: [{ text: 'Wait for the current turn' }]
+            })
         } finally {
             store.close()
         }

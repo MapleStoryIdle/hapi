@@ -396,7 +396,10 @@ describe('ApiMachineClient external Codex requests', () => {
         const machine = makeMachine('machine-external-codex')
         const client = new ApiMachineClient('cli-token', machine)
         const emit = vi.fn()
-        ;(client as unknown as { socket: { emit: typeof emit } }).socket = { emit } as never
+        ;(client as unknown as { socket: { emit: typeof emit; close: () => void } }).socket = {
+            emit,
+            close: vi.fn()
+        } as never
 
         expect(client.reportExternalCodexRequest({
             codexSessionId: 'codex-thread-1',
@@ -412,5 +415,27 @@ describe('ApiMachineClient external Codex requests', () => {
             kind: 'permission',
             toolName: 'Bash'
         })
+    })
+
+    it('emits native transcript invalidations through the authenticated machine socket', () => {
+        const machine = makeMachine('machine-native-codex')
+        const client = new ApiMachineClient('cli-token', machine)
+        const emit = vi.fn()
+        ;(client as unknown as { socket: { emit: typeof emit; close: () => void } }).socket = {
+            emit,
+            close: vi.fn()
+        } as never
+
+        const report = (client as unknown as {
+            reportNativeCodexSessionUpdated: (sessionId: string, modifiedAt?: number) => boolean
+        }).reportNativeCodexSessionUpdated.bind(client)
+
+        expect(report('12345678-1234-4234-8234-123456789012', 1_725_000_000_000)).toBe(true)
+        expect(emit).toHaveBeenCalledWith('codex-session-updated', {
+            machineId: 'machine-native-codex',
+            codexSessionId: '12345678-1234-4234-8234-123456789012',
+            modifiedAt: 1_725_000_000_000
+        })
+        client.shutdown()
     })
 })

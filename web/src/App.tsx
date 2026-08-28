@@ -16,13 +16,18 @@ import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
 import { SessionConnectionProvider, type SessionConnectionHealth } from '@/lib/session-connection-context'
+import { NativeCodexRealtimeProvider } from '@/lib/native-codex-realtime-context'
 import { clearMessageWindow, enqueueIncomingMessages, fetchLatestMessages, getMessageWindowState } from '@/lib/message-window-store'
 import { markUserInteraction, scheduleBackgroundWork } from '@/lib/interaction-priority'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
-import { getAppGlobalSseSubscription, getAppSessionSseSubscription } from '@/lib/appSseSubscriptions'
+import {
+    getAppGlobalSseSubscription,
+    getAppSessionSseSubscription,
+    shouldUseGlobalMessageFallback
+} from '@/lib/appSseSubscriptions'
 import { LoginPrompt } from '@/components/LoginPrompt'
 import { InstallPrompt } from '@/components/InstallPrompt'
 import { OfflineBanner } from '@/components/OfflineBanner'
@@ -166,15 +171,34 @@ function AppInner() {
     const [globalSseConnected, setGlobalSseConnected] = useState(false)
     const [sessionSseConnected, setSessionSseConnected] = useState(false)
     const [isRecoveringSessionConnection, setIsRecoveringSessionConnection] = useState(false)
+    const [sessionLastUpdatedAt, setSessionLastUpdatedAt] = useState<number | null>(null)
     const [sseReconnectKey, setSseReconnectKey] = useState(0)
     const syncTokenRef = useRef(0)
     const isFirstConnectRef = useRef(true)
     const sessionSseConnectedRef = useRef(false)
     const sessionReconcileInFlightRef = useRef<Set<string>>(new Set())
     const sessionRecoveryTokenRef = useRef(0)
+    // Track every selected-session event without forcing App + Outlet to
+    // re-render. The timestamp is only visualized while the connection is
+    // unhealthy, where a throttled update is sufficient.
+    const sessionLastUpdatedAtRef = useRef<number | null>(null)
+    const sessionLastUpdatedAtVisibleRef = useRef(0)
     const baseUrlRef = useRef(baseUrl)
     const pushPromptedRef = useRef(false)
     const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
+
+    const recordSelectedSessionActivity = useCallback((publishWhenDisconnected = false) => {
+        const now = Date.now()
+        sessionLastUpdatedAtRef.current = now
+        if (
+            publishWhenDisconnected
+            && !sessionSseConnectedRef.current
+            && now - sessionLastUpdatedAtVisibleRef.current >= 1_000
+        ) {
+            sessionLastUpdatedAtVisibleRef.current = now
+            setSessionLastUpdatedAt(now)
+        }
+    }, [])
 
     useEffect(() => {
         if (baseUrlRef.current === baseUrl) {
@@ -188,8 +212,12 @@ function AppInner() {
         setSseDisconnected(false)
         setSessionSseDisconnected(false)
         setGlobalSseConnected(false)
+        sessionSseConnectedRef.current = false
         setSessionSseConnected(false)
         setIsRecoveringSessionConnection(false)
+        sessionLastUpdatedAtRef.current = null
+        sessionLastUpdatedAtVisibleRef.current = 0
+        setSessionLastUpdatedAt(null)
         queryClient.clear()
     }, [baseUrl, queryClient])
 
@@ -202,6 +230,9 @@ function AppInner() {
         setSessionSseDisconnected(false)
         setSessionSseConnected(false)
         setIsRecoveringSessionConnection(false)
+        sessionLastUpdatedAtRef.current = null
+        sessionLastUpdatedAtVisibleRef.current = 0
+        setSessionLastUpdatedAt(null)
     }, [selectedSessionId])
 
     // Clean up URL params after successful auth (for direct access links)
@@ -260,10 +291,16 @@ function AppInner() {
         // SSE replays a short cursor window, while this HTTP read repairs gaps
         // outside that window and validates the authoritative message snapshot.
         // `force` queues one follow-up read behind an in-flight initial load.
-        return fetchLatestMessages(api, selectedSessionId, { force: true }).finally(() => {
-            sessionReconcileInFlightRef.current.delete(selectedSessionId)
-        })
-    }, [api, selectedSessionId])
+        return fetchLatestMessages(api, selectedSessionId, { force: true })
+            .then(() => {
+                if (selectedSessionId) {
+                    recordSelectedSessionActivity(true)
+                }
+            })
+            .finally(() => {
+                sessionReconcileInFlightRef.current.delete(selectedSessionId)
+            })
+    }, [api, recordSelectedSessionActivity, selectedSessionId])
 
     const reconcileOnMessageGap = useCallback((event: SyncEvent): void => {
         if (event.type !== 'message-received' || !api || event.sessionId !== selectedSessionId) {
@@ -341,6 +378,9 @@ function AppInner() {
     }, [])
 
     const handleSseEvent = useCallback((event: SyncEvent) => {
+        if ('sessionId' in event && event.sessionId === selectedSessionId) {
+            recordSelectedSessionActivity(true)
+        }
         reconcileOnMessageGap(event)
         if (event.type === 'message-received') {
             return
@@ -355,15 +395,25 @@ function AppInner() {
             clearMessageWindow(event.sessionId)
             void reconcileSelectedSessionMessages()
         })
-    }, [api, reconcileOnMessageGap, reconcileSelectedSessionMessages, selectedSessionId])
+    }, [api, reconcileOnMessageGap, reconcileSelectedSessionMessages, recordSelectedSessionActivity, selectedSessionId])
 
     const handleGlobalSseEvent = useCallback((event: SyncEvent) => {
         // The all-session stream stays connected while the selected-session
         // stream is being opened or recovered. Feed its copy of a visible
-        // message into the window as a lossless fallback; merge is idempotent
-        // when the session stream also delivers the same event.
-        if (event.type === 'message-received' && event.sessionId === selectedSessionId) {
-            enqueueIncomingMessages(event.sessionId, [event.message])
+        // message into the window as a lossless fallback. Once the narrow
+        // stream is connected, leave its duplicate entirely alone: avoiding
+        // the second handler is more important than a later idempotent merge.
+        if (event.type === 'message-received') {
+            if (event.sessionId === selectedSessionId && sessionSseConnectedRef.current) {
+                return
+            }
+            if (shouldUseGlobalMessageFallback({
+                eventSessionId: event.sessionId,
+                selectedSessionId,
+                sessionStreamConnected: sessionSseConnectedRef.current
+            })) {
+                enqueueIncomingMessages(event.sessionId, [event.message])
+            }
         }
         handleSseEvent(event)
     }, [handleSseEvent, selectedSessionId])
@@ -372,14 +422,17 @@ function AppInner() {
         sessionSseConnectedRef.current = true
         setSessionSseDisconnected(false)
         setSessionSseConnected(true)
+        recordSelectedSessionActivity()
         scheduleBackgroundWork(() => {
             void reconcileSelectedSessionMessages()
         })
-    }, [reconcileSelectedSessionMessages])
+    }, [reconcileSelectedSessionMessages, recordSelectedSessionActivity])
 
     const handleSessionSseDisconnect = useCallback(() => {
         setSessionSseConnected(false)
-        if (!sessionSseConnectedRef.current) {
+        const wasConnected = sessionSseConnectedRef.current
+        sessionSseConnectedRef.current = false
+        if (!wasConnected) {
             return
         }
         setSessionSseDisconnected(true)
@@ -508,6 +561,7 @@ function AppInner() {
         // Rebuild both streams. The session stream is preferred, while the
         // global stream remains the lossless fallback for visible messages.
         setGlobalSseConnected(false)
+        sessionSseConnectedRef.current = false
         setSessionSseConnected(false)
         setSseReconnectKey((value) => value + 1)
 
@@ -546,10 +600,25 @@ function AppInner() {
         return 'recovering'
     }, [globalSseConnected, isRecoveringSessionConnection, selectedSessionId, sessionSseConnected, sessionSseDisconnected, sseDisconnected])
 
+    useEffect(() => {
+        if (sessionConnectionHealth === 'connected') {
+            return
+        }
+        const lastUpdatedAt = sessionLastUpdatedAtRef.current
+        if (lastUpdatedAt !== null) {
+            sessionLastUpdatedAtVisibleRef.current = lastUpdatedAt
+            setSessionLastUpdatedAt(lastUpdatedAt)
+        }
+    }, [sessionConnectionHealth])
+
     const sessionConnectionContext = useMemo(() => ({
         health: sessionConnectionHealth,
-        recover: recoverSessionConnection
-    }), [recoverSessionConnection, sessionConnectionHealth])
+        recover: recoverSessionConnection,
+        lastUpdatedAt: sessionLastUpdatedAt
+    }), [recoverSessionConnection, sessionConnectionHealth, sessionLastUpdatedAt])
+    const nativeCodexRealtimeContext = useMemo(() => ({
+        connected: globalSseConnected
+    }), [globalSseConnected])
 
     const { subscriptionId: globalSubscriptionId } = useSSE({
         enabled: sseEnabled,
@@ -684,25 +753,27 @@ function AppInner() {
 
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
-            <SessionConnectionProvider value={sessionConnectionContext}>
-                <VoiceProvider>
-                    <PwaUpdateBanner />
-                    <SyncingBanner isSyncing={isSyncing} offsetFromTitleBar={Boolean(selectedSessionId)} />
-                    <VoiceErrorBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
-                    <OfflineBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
-                    <div className="h-full min-h-0 flex flex-col">
-                        <Suspense fallback={
-                            <div className="flex flex-1 items-center justify-center p-4">
-                                <LoadingState label={t('loading.session')} className="text-sm" />
-                            </div>
-                        }>
-                            <Outlet />
-                        </Suspense>
-                    </div>
-                    <ToastContainer />
-                    <InstallPrompt />
-                </VoiceProvider>
-            </SessionConnectionProvider>
+            <NativeCodexRealtimeProvider value={nativeCodexRealtimeContext}>
+                <SessionConnectionProvider value={sessionConnectionContext}>
+                    <VoiceProvider>
+                        <PwaUpdateBanner />
+                        <SyncingBanner isSyncing={isSyncing} offsetFromTitleBar={Boolean(selectedSessionId)} />
+                        <VoiceErrorBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
+                        <OfflineBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
+                        <div className="h-full min-h-0 flex flex-col">
+                            <Suspense fallback={
+                                <div className="flex flex-1 items-center justify-center p-4">
+                                    <LoadingState label={t('loading.session')} className="text-sm" />
+                                </div>
+                            }>
+                                <Outlet />
+                            </Suspense>
+                        </div>
+                        <ToastContainer />
+                        <InstallPrompt />
+                    </VoiceProvider>
+                </SessionConnectionProvider>
+            </NativeCodexRealtimeProvider>
         </AppContextProvider>
     )
 }

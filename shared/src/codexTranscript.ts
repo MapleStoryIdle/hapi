@@ -14,8 +14,17 @@ export type CodexLocalSessionSummary = {
     modifiedAt: number
     originator?: string | null
     cliVersion?: string | null
+    /** Latest model configuration observed in a native turn context. */
+    model?: string | null
+    /** Latest reasoning-effort configuration observed in a native turn context. */
+    modelReasoningEffort?: string | null
     /** Last native turn lifecycle observed while scanning this transcript. */
     runState?: CodexLocalSessionRunState
+}
+
+export type CodexLocalSessionConfig = {
+    model: string | null
+    modelReasoningEffort: string | null
 }
 
 export type CodexLocalSessionListOptions = {
@@ -113,19 +122,33 @@ export type CodexLocalSessionStatusRpcResponse = {
     startedAt?: number
     /** Short runner-side launch/exit failure, if the most recent send failed. */
     lastError?: string
+    /** Messages waiting for the native thread to become idle. */
+    queuedMessages?: CodexLocalSessionQueuedMessage[]
 } | {
     success: false
     error: string
 }
 
+export type CodexLocalSessionQueuedMessage = {
+    id: string
+    text: string
+    queuedAt: number
+}
+
 export type SendCodexLocalSessionMessageRpcResponse = {
     success: true
-    status: 'processing'
-    startedAt: number
+    status: 'processing' | 'queued'
+    /** Present when the request started a Codex child immediately. */
+    startedAt?: number
+    /** Present when the request waits behind an existing native turn. */
+    queuedAt?: number
+    queuePosition?: number
+    queueId?: string
+    queuedMessages?: CodexLocalSessionQueuedMessage[]
 } | {
     success: false
     error: string
-    code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'launch_failed'
+    code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'launch_failed' | 'queue_full'
 }
 
 type CodexTranscriptFileCandidate = {
@@ -253,6 +276,171 @@ function extractCodexToolCallId(payload: Record<string, unknown>): string | null
     return null
 }
 
+/**
+ * Newer Codex rollouts represent the built-in terminal as a custom tool.
+ * Normalize it to the same semantic tool name used by live HAPI messages so
+ * native and HAPI details can share the exact renderer and grouping rules.
+ */
+export function normalizeCodexCustomToolName(name: string): string {
+    return name === 'exec' ? 'CodexBash' : name
+}
+
+export function normalizeCodexCustomToolInput(name: string, input: unknown): unknown {
+    return name === 'exec' ? { command: input } : input
+}
+
+function getNumericOutputField(record: Record<string, unknown> | null, keys: string[]): number | null {
+    if (!record) return null
+    for (const key of keys) {
+        const value = record[key]
+        if (typeof value === 'number' && Number.isFinite(value)) return value
+        if (typeof value === 'string' && value.trim().length > 0) {
+            const parsed = Number(value)
+            if (Number.isFinite(parsed)) return parsed
+        }
+    }
+    return null
+}
+
+function getBooleanOutputField(record: Record<string, unknown> | null, keys: string[]): boolean | null {
+    if (!record) return null
+    for (const key of keys) {
+        const value = record[key]
+        if (typeof value === 'boolean') return value
+    }
+    return null
+}
+
+/**
+ * Codex versions used by the desktop app sometimes serialize an exec result
+ * as a JSON envelope inside an `input_text` chunk. Lift its metadata to the
+ * shape understood by the shared Terminal card instead of displaying raw JSON.
+ */
+function normalizeCodexCustomToolOutputEnvelope(text: string): unknown {
+    const trimmed = text.trim()
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return text
+
+    let parsed: unknown
+    try {
+        parsed = JSON.parse(trimmed)
+    } catch {
+        return text
+    }
+
+    const record = asRecord(parsed)
+    if (!record) return text
+    const metadata = asRecord(record.metadata)
+    const hasKnownEnvelopeField = 'stdout' in record
+        || 'stderr' in record
+        || 'status' in record
+        || 'is_error' in record
+        || 'isError' in record
+        || getNumericOutputField(record, ['exit_code', 'exitCode', 'durationMs', 'duration_ms']) !== null
+        || getNumericOutputField(metadata, ['exit_code', 'exitCode', 'duration_seconds', 'durationSeconds']) !== null
+    if (!hasKnownEnvelopeField) return text
+
+    const result: Record<string, unknown> = { ...record }
+    const output = typeof record.stdout === 'string'
+        ? record.stdout
+        : typeof record.output === 'string'
+            ? record.output
+            : null
+    if (output !== null && result.stdout === undefined) result.stdout = output
+
+    const exitCode = getNumericOutputField(record, ['exit_code', 'exitCode', 'exitcode'])
+        ?? getNumericOutputField(metadata, ['exit_code', 'exitCode', 'exitcode'])
+    if (exitCode !== null && result.exit_code === undefined && result.exitCode === undefined) {
+        result.exit_code = exitCode
+    }
+
+    const durationMs = getNumericOutputField(record, ['durationMs', 'duration_ms'])
+        ?? (() => {
+            const seconds = getNumericOutputField(metadata, ['duration_seconds', 'durationSeconds'])
+            return seconds === null ? null : Math.max(0, seconds * 1_000)
+        })()
+    if (durationMs !== null && result.durationMs === undefined && result.duration_ms === undefined) {
+        result.durationMs = durationMs
+    }
+
+    const status = typeof record.status === 'string'
+        ? record.status
+        : typeof metadata?.status === 'string'
+            ? metadata.status
+            : null
+    if (status !== null && result.status === undefined) result.status = status
+
+    const explicitError = getBooleanOutputField(record, ['is_error', 'isError'])
+        ?? getBooleanOutputField(metadata, ['is_error', 'isError'])
+    if (explicitError !== null && result.is_error === undefined && result.isError === undefined) {
+        result.is_error = explicitError
+    } else if (explicitError === null && exitCode !== null && result.is_error === undefined && result.isError === undefined) {
+        result.is_error = exitCode !== 0
+    }
+
+    return result
+}
+
+export function normalizeCodexCustomToolOutput(output: unknown): unknown {
+    if (typeof output === 'string') {
+        return normalizeCodexCustomToolOutputEnvelope(output)
+    }
+    if (!Array.isArray(output)) return output
+
+    const textParts = output
+        .map((item) => {
+            const record = asRecord(item)
+            if ((record?.type === 'input_text' || record?.type === 'output_text' || record?.type === 'text')
+                && typeof record.text === 'string') {
+                return record.text
+            }
+            return null
+        })
+        .filter((part): part is string => part !== null)
+
+    if (textParts.length === 0) return output
+    return normalizeCodexCustomToolOutputEnvelope(textParts.join('\n'))
+}
+
+/** Attach transcript timestamps so imported tool cards show real durations. */
+function enrichImportedToolTiming(messages: CodexImportedMessageContent[]): CodexImportedMessageContent[] {
+    const startedAtByCallId = new Map<string, number>()
+
+    for (const message of messages) {
+        if (message.role !== 'agent' || message.createdAt === undefined) continue
+        const data = asRecord(message.content.data)
+        if (data?.type !== 'tool-call') continue
+        const callId = asString(data.callId)
+        if (callId && !startedAtByCallId.has(callId)) {
+            startedAtByCallId.set(callId, message.createdAt)
+        }
+    }
+
+    return messages.map((message) => {
+        if (message.role !== 'agent' || message.createdAt === undefined) return message
+        const data = asRecord(message.content.data)
+        if (!data) return message
+        const callId = asString(data.callId)
+        if (!callId) return message
+
+        const startedAt = startedAtByCallId.get(callId)
+        const nextData: Record<string, unknown> = { ...data }
+        if (data.type === 'tool-call') {
+            if (nextData.startedAt === undefined && nextData.started_at === undefined) {
+                nextData.startedAt = message.createdAt
+            }
+            return { ...message, content: { ...message.content, data: nextData } }
+        }
+        if (data.type !== 'tool-call-result') return message
+        if (nextData.completedAt === undefined && nextData.completed_at === undefined) {
+            nextData.completedAt = message.createdAt
+        }
+        if (nextData.durationMs === undefined && nextData.duration_ms === undefined && startedAt !== undefined) {
+            nextData.durationMs = Math.max(0, message.createdAt - startedAt)
+        }
+        return { ...message, content: { ...message.content, data: nextData } }
+    })
+}
+
 function extractCodexChangedTitle(record: Record<string, unknown>): string | null {
     if (record.type === 'response_item') {
         const payload = asRecord(record.payload)
@@ -311,6 +499,49 @@ function getLatestCodexUserMessage(lines: string[]): string | null {
         }
     }
     return null
+}
+
+function extractCodexSessionConfig(record: Record<string, unknown>): Partial<CodexLocalSessionConfig> {
+    if (record.type !== 'turn_context' && record.type !== 'session_meta') return {}
+    const payload = asRecord(record.payload)
+    if (!payload) return {}
+
+    const collaborationMode = asRecord(payload.collaboration_mode ?? payload.collaborationMode)
+    const settings = asRecord(collaborationMode?.settings)
+    return {
+        model: asString(payload.model) ?? asString(settings?.model) ?? undefined,
+        modelReasoningEffort: asString(payload.effort)
+            ?? asString(payload.reasoning_effort)
+            ?? asString(payload.model_reasoning_effort)
+            ?? asString(payload.modelReasoningEffort)
+            ?? asString(settings?.reasoning_effort)
+            ?? asString(settings?.model_reasoning_effort)
+            ?? asString(settings?.modelReasoningEffort)
+            ?? undefined
+    }
+}
+
+/** Return the latest native model settings without treating arbitrary output as config. */
+export function getLatestCodexSessionConfig(lines: readonly string[]): CodexLocalSessionConfig {
+    let model: string | null = null
+    let modelReasoningEffort: string | null = null
+
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        try {
+            const record = asRecord(JSON.parse(lines[index] ?? ''))
+            if (!record) continue
+            const config = extractCodexSessionConfig(record)
+            if (model === null && config.model) model = config.model
+            if (modelReasoningEffort === null && config.modelReasoningEffort) {
+                modelReasoningEffort = config.modelReasoningEffort
+            }
+            if (model !== null && modelReasoningEffort !== null) break
+        } catch {
+            // Ignore malformed or partially-written transcript records.
+        }
+    }
+
+    return { model, modelReasoningEffort }
 }
 
 function getCodexSessionTitle(
@@ -390,6 +621,7 @@ function parseCodexLocalSession(filePath: string, knownModifiedAt?: number): Cod
             return Date.now()
         }
     })()
+    const config = getLatestCodexSessionConfig(allLines)
 
     return {
         id: sessionId,
@@ -400,6 +632,8 @@ function parseCodexLocalSession(filePath: string, knownModifiedAt?: number): Cod
         modifiedAt,
         originator,
         cliVersion,
+        model: config.model,
+        modelReasoningEffort: config.modelReasoningEffort,
         runState: getCodexTranscriptRunState(content)
     }
 }
@@ -543,6 +777,30 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
         if (role === 'assistant') return buildImportedAgentMessage({ type: 'message', message: text, id: randomUUID() }, createdAt)
         return null
     }
+    if (itemType === 'custom_tool_call') {
+        const name = asString(payload.name)
+        const callId = extractCodexToolCallId(payload)
+        return name && callId
+            ? buildImportedAgentMessage({
+                type: 'tool-call',
+                name: normalizeCodexCustomToolName(name),
+                callId,
+                input: normalizeCodexCustomToolInput(name, payload.input),
+                id: randomUUID()
+            }, createdAt)
+            : null
+    }
+    if (itemType === 'custom_tool_call_output') {
+        const callId = extractCodexToolCallId(payload)
+        return callId
+            ? buildImportedAgentMessage({
+                type: 'tool-call-result',
+                callId,
+                output: normalizeCodexCustomToolOutput(payload.output),
+                id: randomUUID()
+            }, createdAt)
+            : null
+    }
     if (itemType === 'function_call') {
         const name = asString(payload.name)
         const callId = extractCodexToolCallId(payload)
@@ -619,7 +877,7 @@ export function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary
             // Ignore malformed transcript records.
         }
     }
-    return { ...summary, messages }
+    return { ...summary, messages: enrichImportedToolTiming(messages) }
 }
 
 function getCodexTranscriptContextFromImportedMessages(importedMessages: readonly CodexImportedMessageContent[]): CodexLocalSessionContextMessage[] {

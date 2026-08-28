@@ -67,6 +67,47 @@ describe('SSEManager namespace filtering', () => {
         expect(received.map((entry) => entry.id).sort()).toEqual(['alpha', 'beta'])
     })
 
+    it('routes native Codex transcript invalidations by namespace and runner', async () => {
+        const manager = new SSEManager(0, new VisibilityTracker())
+        const matchingMachine: SyncEvent[] = []
+        const wrongMachine: SyncEvent[] = []
+        const otherNamespace: SyncEvent[] = []
+
+        manager.subscribe({
+            id: 'matching-machine',
+            namespace: 'alpha',
+            machineId: 'machine-1',
+            send: (event) => { matchingMachine.push(event) },
+            sendHeartbeat: () => {}
+        })
+        manager.subscribe({
+            id: 'wrong-machine',
+            namespace: 'alpha',
+            machineId: 'machine-2',
+            send: (event) => { wrongMachine.push(event) },
+            sendHeartbeat: () => {}
+        })
+        manager.subscribe({
+            id: 'other-namespace',
+            namespace: 'beta',
+            all: true,
+            send: (event) => { otherNamespace.push(event) },
+            sendHeartbeat: () => {}
+        })
+
+        manager.broadcast({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: '12345678-1234-4234-8234-123456789012',
+            namespace: 'alpha'
+        })
+        await Promise.resolve()
+
+        expect(matchingMachine).toHaveLength(1)
+        expect(wrongMachine).toHaveLength(0)
+        expect(otherNamespace).toHaveLength(0)
+    })
+
     it('sends toast only to visible connections in a namespace', async () => {
         const manager = new SSEManager(0, new VisibilityTracker())
         const received: Array<{ id: string; event: SyncEvent }> = []

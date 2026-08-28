@@ -305,6 +305,12 @@ export interface ClientToServerEvents {
     'machine-update-metadata': (data: { machineId: string; expectedVersion: number; metadata: unknown }, cb: (answer: MachineUpdateMetadataAck) => void) => void
     'machine-update-state': (data: { machineId: string; expectedVersion: number; runnerState: unknown | null }, cb: (answer: MachineUpdateStateAck) => void) => void
     'external-codex-request': (data: ExternalCodexRequestPayload) => void
+    /** Lightweight invalidation from a runner-local native Codex transcript watcher. */
+    'codex-session-updated': (data: {
+        machineId: string
+        codexSessionId: string
+        modifiedAt?: number
+    }) => void
     'rpc-register': (data: { method: string }) => void
     'rpc-unregister': (data: { method: string }) => void
     'terminal:ready': (data: TerminalReadyPayload) => void

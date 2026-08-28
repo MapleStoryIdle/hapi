@@ -195,6 +195,8 @@ export type CodexLocalSessionSummary = {
     modifiedAt: number
     originator?: string | null
     cliVersion?: string | null
+    model?: string | null
+    modelReasoningEffort?: string | null
     runState?: CodexLocalSessionRunState
 }
 
@@ -217,7 +219,7 @@ export type CodexLocalSessionContextMessage = {
 
 export type CodexLocalSessionContextResponse = {
     success: true
-    session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt'>
+    session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort'>
     messages: CodexLocalSessionContextMessage[]
     page: {
         limit: number
@@ -234,6 +236,7 @@ export type CodexLocalSessionStatusResponse =
         status: CodexLocalSessionRunState
         startedAt?: number
         lastError?: string
+        queuedMessages?: CodexLocalSessionQueuedMessage[]
     }
     | {
         success: false
@@ -243,14 +246,24 @@ export type CodexLocalSessionStatusResponse =
 export type SendCodexLocalSessionMessageResponse =
     | {
         success: true
-        status: 'processing'
-        startedAt: number
+        status: 'processing' | 'queued'
+        startedAt?: number
+        queuedAt?: number
+        queuePosition?: number
+        queueId?: string
+        queuedMessages?: CodexLocalSessionQueuedMessage[]
     }
     | {
         success: false
         error: string
         code?: string
     }
+
+export type CodexLocalSessionQueuedMessage = {
+    id: string
+    text: string
+    queuedAt: number
+}
 
 export type ForkCodexLocalSessionResponse =
     | { type: 'success'; sessionId: string; session?: Session }

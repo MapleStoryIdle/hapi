@@ -2,6 +2,8 @@ import { createElement, type ReactNode } from 'react'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { resetInteractionPriorityForTests } from '@/lib/interaction-priority'
+import { subscribeNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
 import { isGlobalScopedMessageStreamEvent, useSSE } from './useSSE'
 
 class MockEventSource {
@@ -65,6 +67,7 @@ function createWrapper() {
 
 afterEach(() => {
     cleanup()
+    resetInteractionPriorityForTests()
     vi.useRealTimers()
     vi.restoreAllMocks()
     MockEventSource.instances = []
@@ -226,5 +229,45 @@ describe('useSSE reconnect handling', () => {
 
         expect(source?.close).toHaveBeenCalledTimes(1)
         expect(MockEventSource.instances).toHaveLength(2)
+    })
+})
+
+describe('useSSE native Codex session events', () => {
+    it('publishes a native session invalidation received from SSE', () => {
+        vi.useFakeTimers()
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+        const listener = vi.fn()
+        const unsubscribe = subscribeNativeCodexSessionUpdated(listener)
+
+        renderHook(() => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            subscription: { all: true },
+            scope: 'global',
+            onEvent: vi.fn()
+        }), { wrapper: createWrapper() })
+
+        const event = {
+            type: 'codex-session-updated' as const,
+            machineId: 'machine-1',
+            codexSessionId: 'c2dbc948-4075-4ac0-a9b9-896bd0901fec',
+            modifiedAt: 1_234
+        }
+
+        act(() => {
+            MockEventSource.instances[0]?.onmessage?.({
+                data: JSON.stringify(event),
+                lastEventId: '1'
+            } as MessageEvent<string>)
+            vi.advanceTimersByTime(0)
+        })
+
+        expect(listener).toHaveBeenCalledWith(event)
+        unsubscribe()
     })
 })

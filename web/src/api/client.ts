@@ -852,6 +852,17 @@ export class ApiClient {
         )
     }
 
+    async getMachineCodexSubscriptionLimits(
+        machineId: string,
+        model?: string | null
+    ): Promise<CodexSubscriptionLimitsResponse> {
+        const normalizedModel = model?.trim()
+        const query = normalizedModel ? `?model=${encodeURIComponent(normalizedModel)}` : ''
+        return await this.request<CodexSubscriptionLimitsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/codex-subscription-limits${query}`
+        )
+    }
+
     async getSessionCodexModels(sessionId: string): Promise<CodexModelsResponse> {
         return await this.request<CodexModelsResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/codex-models`

@@ -72,3 +72,53 @@ describe('SessionActionMenu - Reopen action', () => {
         expect(screen.queryByRole('menuitem', { name: /Archive/ })).toBeNull()
     })
 })
+
+describe('SessionActionMenu - capability-scoped actions', () => {
+    it('supports a native-session menu without rendering HAPI lifecycle actions', () => {
+        const onRefresh = vi.fn()
+        const onFork = vi.fn()
+        renderMenu({
+            sessionActive: true,
+            onRefresh,
+            refreshLabel: 'Refresh native session',
+            onFork,
+            forkLabel: 'Fork native session',
+            onRename: undefined,
+            onExport: undefined,
+            onArchive: undefined,
+            onReopen: undefined,
+            onDelete: undefined,
+            onToggleOutline: vi.fn(),
+        })
+
+        expect(screen.getByRole('menuitem', { name: 'Refresh native session' })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: 'Fork native session' })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: /Conversation outline/ })).toBeInTheDocument()
+        expect(screen.queryByRole('menuitem', { name: /Rename/ })).toBeNull()
+        expect(screen.queryByRole('menuitem', { name: /Archive/ })).toBeNull()
+        expect(screen.queryByRole('menuitem', { name: /Delete/ })).toBeNull()
+
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh native session' }))
+        expect(onRefresh).toHaveBeenCalledTimes(1)
+    })
+
+    it('disables Fork while a native turn is not safe to fork', () => {
+        const onFork = vi.fn()
+        renderMenu({
+            sessionActive: true,
+            onRename: undefined,
+            onExport: undefined,
+            onArchive: undefined,
+            onReopen: undefined,
+            onDelete: undefined,
+            onFork,
+            forkLabel: 'Fork native session',
+            forkDisabled: true,
+        })
+
+        const forkItem = screen.getByRole('menuitem', { name: 'Fork native session' })
+        expect(forkItem).toBeDisabled()
+        fireEvent.click(forkItem)
+        expect(onFork).not.toHaveBeenCalled()
+    })
+})

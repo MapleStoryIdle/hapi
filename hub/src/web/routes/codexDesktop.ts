@@ -5,7 +5,11 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { homedir, hostname, platform } from 'node:os'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import {
+    getLatestCodexSessionConfig,
     isHapiInitiatedCodexSession,
+    normalizeCodexCustomToolInput,
+    normalizeCodexCustomToolName,
+    normalizeCodexCustomToolOutput,
     type CodexLocalSessionStatusRpcResponse,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
@@ -67,6 +71,8 @@ type CodexLocalSessionSummary = {
     modifiedAt: number
     originator?: string | null
     cliVersion?: string | null
+    model?: string | null
+    modelReasoningEffort?: string | null
     runState?: 'idle' | 'processing' | 'unknown'
 }
 
@@ -89,7 +95,7 @@ type CodexLocalSessionContextMessage = {
 
 type CodexLocalSessionContextResponse = {
     success: true
-    session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt'>
+    session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort'>
     messages: CodexLocalSessionContextMessage[]
     page: {
         limit: number
@@ -304,6 +310,33 @@ function asString(value: unknown): string | null {
     return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+/**
+ * Read the last native turn lifecycle from a host-local Codex transcript.
+ * Keep the Hub-side scanner aligned with the runner/shared scanner: the
+ * no-machineId path is used by the native session list and must expose the
+ * same processing state as the runner RPC path.
+ */
+function getCodexTranscriptRunState(content: string): 'idle' | 'processing' | 'unknown' {
+    let state: 'idle' | 'processing' | 'unknown' = 'unknown'
+    for (const line of content.split(/\r?\n/)) {
+        if (!line) continue
+        try {
+            const record = asRecord(JSON.parse(line))
+            if (record?.type !== 'event_msg') continue
+            const payload = asRecord(record.payload)
+            const eventType = asString(payload?.type)
+            if (eventType === 'task_started') {
+                state = 'processing'
+            } else if (eventType === 'task_complete' || eventType === 'turn_aborted') {
+                state = 'idle'
+            }
+        } catch {
+            // Ignore a partially-written final transcript line.
+        }
+    }
+    return state
+}
+
 function extractCodexText(value: unknown): string {
     if (typeof value === 'string') {
         return value.trim()
@@ -388,6 +421,46 @@ function extractCodexToolCallId(payload: Record<string, unknown>): string | null
         }
     }
     return null
+}
+
+/** Attach transcript timestamps so imported tool cards show real durations. */
+function enrichImportedToolTiming(messages: CodexImportedMessageContent[]): CodexImportedMessageContent[] {
+    const startedAtByCallId = new Map<string, number>()
+
+    for (const message of messages) {
+        if (message.role !== 'agent' || message.createdAt === undefined) continue
+        const data = asRecord(message.content.data)
+        if (data?.type !== 'tool-call') continue
+        const callId = asString(data.callId)
+        if (callId && !startedAtByCallId.has(callId)) {
+            startedAtByCallId.set(callId, message.createdAt)
+        }
+    }
+
+    return messages.map((message) => {
+        if (message.role !== 'agent' || message.createdAt === undefined) return message
+        const data = asRecord(message.content.data)
+        if (!data) return message
+        const callId = asString(data.callId)
+        if (!callId) return message
+
+        const startedAt = startedAtByCallId.get(callId)
+        const nextData: Record<string, unknown> = { ...data }
+        if (data.type === 'tool-call') {
+            if (nextData.startedAt === undefined && nextData.started_at === undefined) {
+                nextData.startedAt = message.createdAt
+            }
+            return { ...message, content: { ...message.content, data: nextData } }
+        }
+        if (data.type !== 'tool-call-result') return message
+        if (nextData.completedAt === undefined && nextData.completed_at === undefined) {
+            nextData.completedAt = message.createdAt
+        }
+        if (nextData.durationMs === undefined && nextData.duration_ms === undefined && startedAt !== undefined) {
+            nextData.durationMs = Math.max(0, message.createdAt - startedAt)
+        }
+        return { ...message, content: { ...message.content, data: nextData } }
+    })
 }
 
 function extractCodexChangedTitle(record: Record<string, unknown>): string | null {
@@ -549,6 +622,7 @@ function parseCodexLocalSession(filePath: string, knownModifiedAt?: number): Cod
 
     const changedTitle = getLatestCodexChangedTitle(allLines)
     const lastUserMessage = getLatestCodexUserMessage(allLines)
+    const config = getLatestCodexSessionConfig(allLines)
 
     sessionId = sessionId ?? inferSessionIdFromFileName(filePath)
     if (!sessionId) return null
@@ -570,7 +644,10 @@ function parseCodexLocalSession(filePath: string, knownModifiedAt?: number): Cod
         file: filePath,
         modifiedAt,
         originator,
-        cliVersion
+        cliVersion,
+        model: config.model,
+        modelReasoningEffort: config.modelReasoningEffort,
+        runState: getCodexTranscriptRunState(content)
     }
 }
 
@@ -716,6 +793,34 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
             return null
         }
 
+        if (itemType === 'custom_tool_call') {
+            const name = asString(payload.name)
+            const callId = extractCodexToolCallId(payload)
+            if (!name || !callId) {
+                return null
+            }
+            return buildImportedAgentMessage({
+                type: 'tool-call',
+                name: normalizeCodexCustomToolName(name),
+                callId,
+                input: normalizeCodexCustomToolInput(name, payload.input),
+                id: randomUUID()
+            }, createdAt)
+        }
+
+        if (itemType === 'custom_tool_call_output') {
+            const callId = extractCodexToolCallId(payload)
+            if (!callId) {
+                return null
+            }
+            return buildImportedAgentMessage({
+                type: 'tool-call-result',
+                callId,
+                output: normalizeCodexCustomToolOutput(payload.output),
+                id: randomUUID()
+            }, createdAt)
+        }
+
         if (itemType === 'function_call') {
             const name = asString(payload.name)
             const callId = extractCodexToolCallId(payload)
@@ -826,7 +931,7 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
 
     return {
         ...summary,
-        messages
+        messages: enrichImportedToolTiming(messages)
     }
 }
 
@@ -2073,7 +2178,9 @@ export function createCodexDesktopRoutes(options: {
                     id: summary.id,
                     title: summary.title,
                     cwd: summary.cwd,
-                    modifiedAt: summary.modifiedAt
+                    modifiedAt: summary.modifiedAt,
+                    model: summary.model,
+                    modelReasoningEffort: summary.modelReasoningEffort
                 },
                 messages: contextPage.messages,
                 page: contextPage.page
@@ -2101,7 +2208,9 @@ export function createCodexDesktopRoutes(options: {
                     id: session.id,
                     title: session.title,
                     cwd: session.cwd,
-                    modifiedAt: session.modifiedAt
+                    modifiedAt: session.modifiedAt,
+                    model: session.model,
+                    modelReasoningEffort: session.modelReasoningEffort
                 },
                 messages: createCodexTranscriptContextMessages(session.id, importedMessages, result.data.startIndex, session.modifiedAt),
                 page: result.data.page
@@ -2177,7 +2286,9 @@ export function createCodexDesktopRoutes(options: {
                     ? 404
                     : result.code === 'launch_failed'
                         ? 502
-                        : 409
+                        : result.code === 'queue_full'
+                            ? 429
+                            : 409
             return c.json(result satisfies SendCodexLocalSessionMessageRpcResponse, status)
         } catch (error) {
             return c.json({
