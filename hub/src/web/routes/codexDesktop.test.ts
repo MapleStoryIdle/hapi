@@ -688,6 +688,13 @@ describe('Codex Desktop import routes', () => {
             })
             expect(listCalls).toEqual([['mac-runner', 5]])
 
+            const forcedListResponse = await app.request('/api/codex/sessions?machineId=mac-runner&forceRefresh=true')
+            expect(forcedListResponse.status).toBe(200)
+            expect(listCalls).toEqual([
+                ['mac-runner', 5],
+                ['mac-runner', 5, { forceRefresh: true }]
+            ])
+
             const contextResponse = await app.request(`/api/codex/sessions/${sessionId}/context?machineId=mac-runner`)
             expect(contextResponse.status).toBe(200)
             expect(await contextResponse.json()).toMatchObject({

@@ -6,11 +6,45 @@ import { formatRelativeTime } from '@/lib/relativeTime'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { useNativeCodexRealtime } from '@/lib/native-codex-realtime-context'
-import { subscribeNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
+import {
+    getNativeCodexSessionListUpdate,
+    subscribeNativeCodexSessionUpdated,
+    type NativeCodexSessionListUpdate
+} from '@/lib/native-codex-realtime-events'
 
 /** The sessions index intentionally stays focused on the last three days. */
 export const RECENT_CODEX_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
 const NATIVE_CODEX_LIST_FALLBACK_REFRESH_INTERVAL_MS = 5_000
+const HAPI_CODEX_ORIGINATOR = 'hapi-codex-client'
+
+function isHapiInitiatedCodexSessionUpdate(update: NativeCodexSessionListUpdate): boolean {
+    return update.originator?.trim().toLowerCase() === HAPI_CODEX_ORIGINATOR
+}
+
+/** Apply a runner-sent row update without waiting for a full list RPC. */
+export function applyNativeCodexSessionListUpdate(
+    sessions: CodexLocalSessionSummary[],
+    update: NativeCodexSessionListUpdate,
+    limit: number,
+    options: { excludeHapiInitiated?: boolean } = {}
+): CodexLocalSessionSummary[] {
+    const withoutUpdated = sessions.filter((session) => session.id !== update.id)
+    if (options.excludeHapiInitiated && isHapiInitiatedCodexSessionUpdate(update)) {
+        return withoutUpdated
+    }
+
+    const previous = sessions.find((session) => session.id === update.id)
+    const next: CodexLocalSessionSummary = {
+        ...previous,
+        ...update,
+        // Transcript paths are intentionally omitted from realtime events. The
+        // list does not need one to open the native thread by id.
+        file: previous?.file ?? ''
+    }
+    return [...withoutUpdated, next]
+        .sort((left, right) => right.modifiedAt - left.modifiedAt || left.id.localeCompare(right.id))
+        .slice(0, limit)
+}
 
 function toEpochMilliseconds(value: number): number {
     return value < 1_000_000_000_000 ? value * 1000 : value
@@ -375,6 +409,7 @@ export function RecentCodexSessions(props: {
     const [collapsedDirectories, setCollapsedDirectories] = useState<Set<string>>(() => new Set())
     const autoExpandedSelectionRef = useRef<string | null>(null)
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const realtimeListUpdatesRef = useRef(new Map<string, { receivedAt: number; update: NativeCodexSessionListUpdate }>())
     const hasInitializedRealtimeStateRef = useRef(false)
     const visibleSessions = useMemo(
         () => onlyProcessing ? sessions.filter((session) => session.runState === 'processing') : sessions,
@@ -451,7 +486,8 @@ export function RecentCodexSessions(props: {
         })
     }, [directoryGroupsForDisclosure, isMerged, mergedDirectoryGroups, props.selectedSessionId])
 
-    const refresh = useCallback(async () => {
+    const refresh = useCallback(async (forceRefresh = false) => {
+        const startedAt = Date.now()
         setIsLoading(true)
         setLoadError(null)
         const machineId = props.machineId
@@ -462,13 +498,26 @@ export function RecentCodexSessions(props: {
         }
         try {
             const response = isMerged
-                ? await props.api.getCodexSessions({ machineId, limit })
+                ? await props.api.getCodexSessions({
+                    machineId,
+                    limit,
+                    ...(forceRefresh ? { forceRefresh: true } : {})
+                })
                 : await props.api.getCodexSessions({
                     machineId,
                     limit,
-                    excludeHapiInitiated: true
+                    excludeHapiInitiated: true,
+                    ...(forceRefresh ? { forceRefresh: true } : {})
                 })
-            setSessions(response.sessions)
+            const updatesWhileFetching = Array.from(realtimeListUpdatesRef.current.values())
+                .filter((entry) => entry.receivedAt >= startedAt)
+                .map((entry) => entry.update)
+            setSessions(() => updatesWhileFetching.reduce(
+                (next, update) => applyNativeCodexSessionListUpdate(next, update, limit, {
+                    excludeHapiInitiated: !isMerged
+                }),
+                response.sessions
+            ))
             setLastUpdatedAt(Date.now())
         } catch (error) {
             setLoadError(error instanceof Error ? error.message : String(error))
@@ -509,15 +558,24 @@ export function RecentCodexSessions(props: {
             if (event.machineId !== machineId) {
                 return
             }
+            const update = getNativeCodexSessionListUpdate(event)
+            if (update) {
+                realtimeListUpdatesRef.current.set(update.id, { receivedAt: Date.now(), update })
+                setSessions((current) => applyNativeCodexSessionListUpdate(current, update, limit, {
+                    excludeHapiInitiated: !isMerged
+                }))
+                setLastUpdatedAt(Date.now())
+                return
+            }
             if (realtimeRefreshTimerRef.current) {
                 clearTimeout(realtimeRefreshTimerRef.current)
             }
             realtimeRefreshTimerRef.current = setTimeout(() => {
                 realtimeRefreshTimerRef.current = null
-                void refresh()
+                void refresh(true)
             }, 100)
         })
-    }, [props.machineId, refresh])
+    }, [isMerged, limit, props.machineId, refresh])
 
     useEffect(() => {
         return () => {
@@ -528,9 +586,8 @@ export function RecentCodexSessions(props: {
         }
     }, [])
 
-    // Current runners update this list through the SSE invalidation above.
-    // Older runners, or a temporarily disconnected event stream, retain a
-    // small foreground-only poll as a correctness fallback.
+    // Current runners patch this list through SSE. Older runners, or a
+    // temporarily disconnected event stream, retain a small polling fallback.
     useEffect(() => {
         if (!props.machineId || hasRealtimeUpdates) {
             return
@@ -538,7 +595,7 @@ export function RecentCodexSessions(props: {
 
         const refreshIfVisible = () => {
             if (document.visibilityState === 'visible') {
-                void refresh()
+                void refresh(true)
             }
         }
         const interval = window.setInterval(refreshIfVisible, NATIVE_CODEX_LIST_FALLBACK_REFRESH_INTERVAL_MS)
@@ -582,7 +639,7 @@ export function RecentCodexSessions(props: {
                         ) : null}
                         <button
                             type="button"
-                            onClick={() => void refresh()}
+                            onClick={() => void refresh(true)}
                             disabled={isLoading || !props.machineId}
                             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
                             aria-label={t('recentCodex.refresh')}
@@ -604,7 +661,7 @@ export function RecentCodexSessions(props: {
                     {isDefaultNamespaceUnavailable ? null : (
                         <button
                             type="button"
-                            onClick={() => void refresh()}
+                            onClick={() => void refresh(true)}
                             className="shrink-0 font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
                         >
                             {t('recentCodex.retry')}

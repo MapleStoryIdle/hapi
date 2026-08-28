@@ -1,4 +1,5 @@
 import { ExternalCodexRequestPayloadSchema, type ClientToServerEvents, type ExternalCodexRequestPayload } from '@hapi/protocol'
+import { CodexLocalSessionListUpdateSchema } from '@hapi/protocol/schemas'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { Store, StoredMachine } from '../../../store'
@@ -35,6 +36,7 @@ const nativeCodexSessionUpdatedSchema = z.object({
     machineId: z.string().min(1),
     codexSessionId: z.string().min(1),
     modifiedAt: z.number().finite().optional(),
+    summary: CodexLocalSessionListUpdateSchema.optional(),
     snapshot: z.unknown().optional()
 }).strict()
 
@@ -211,6 +213,7 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
             machineId: parsed.data.machineId,
             codexSessionId: parsed.data.codexSessionId,
             ...(parsed.data.modifiedAt === undefined ? {} : { modifiedAt: parsed.data.modifiedAt }),
+            ...(parsed.data.summary === undefined ? {} : { summary: parsed.data.summary }),
             ...(parsed.data.snapshot === undefined ? {} : { snapshot: parsed.data.snapshot }),
             namespace
         })

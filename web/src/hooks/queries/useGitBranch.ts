@@ -32,7 +32,7 @@ export function useGitBranch(
                 throw new Error('Session unavailable')
             }
 
-            const result = await api.getGitStatus(sessionId)
+            const result = await api.getGitBranch(sessionId)
             if (!result.success) {
                 return null
             }

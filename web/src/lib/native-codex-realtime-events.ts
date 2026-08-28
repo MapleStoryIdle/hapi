@@ -1,6 +1,7 @@
 import type { CodexLocalSessionRealtimeSnapshot, SyncEvent } from '@/types/api'
 
 export type NativeCodexSessionUpdatedEvent = Extract<SyncEvent, { type: 'codex-session-updated' }>
+export type NativeCodexSessionListUpdate = NonNullable<NativeCodexSessionUpdatedEvent['summary']>
 
 type NativeCodexSessionUpdatedListener = (event: NativeCodexSessionUpdatedEvent) => void
 
@@ -20,6 +21,16 @@ export function publishNativeCodexSessionUpdated(event: NativeCodexSessionUpdate
 export function subscribeNativeCodexSessionUpdated(listener: NativeCodexSessionUpdatedListener): () => void {
     listeners.add(listener)
     return () => listeners.delete(listener)
+}
+
+/**
+ * Current runners include a sanitized list row with an invalidation. Older
+ * runners omit it, so callers can retain their one-shot HTTP fallback.
+ */
+export function getNativeCodexSessionListUpdate(
+    event: NativeCodexSessionUpdatedEvent
+): NativeCodexSessionListUpdate | null {
+    return event.summary ?? null
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

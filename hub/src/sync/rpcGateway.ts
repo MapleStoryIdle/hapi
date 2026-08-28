@@ -245,7 +245,7 @@ export class RpcGateway {
     async listCodexLocalSessions(
         machineId: string,
         limit: number,
-        options?: { excludeHapiInitiated?: boolean }
+        options?: { excludeHapiInitiated?: boolean; forceRefresh?: boolean }
     ): Promise<RpcCodexLocalSessionsResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.ListCodexLocalSessions, {
             limit,
@@ -311,6 +311,10 @@ export class RpcGateway {
             exists[key] = value === true
         }
         return exists
+    }
+
+    async getMachineGitBranch(machineId: string, cwd: string): Promise<RpcCommandResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.GetMachineGitBranch, { cwd }) as RpcCommandResponse
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {

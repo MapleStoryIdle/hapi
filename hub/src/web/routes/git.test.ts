@@ -14,6 +14,77 @@ function buildApp(engine: Partial<SyncEngine>): Hono<WebAppEnv> {
     return app
 }
 
+describe('git branch route', () => {
+    it('uses the runner-scoped directory RPC for a historical session group', async () => {
+        const session = {
+            id: 'session-1',
+            namespace: 'default',
+            active: false,
+            metadata: { path: '/work/project', machineId: 'machine-1' }
+        } as unknown as Session
+        let machineCalls = 0
+        let sessionCalls = 0
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            getMachine: () => ({ id: 'machine-1', namespace: 'default' }),
+            getMachineGitBranch: async (machineId: string, cwd: string) => {
+                machineCalls += 1
+                expect(machineId).toBe('machine-1')
+                expect(cwd).toBe('/work/project')
+                return {
+                    success: true,
+                    stdout: '# branch.oid abc123\n# branch.head feature/list-branch\n',
+                    stderr: '',
+                    exitCode: 0
+                }
+            },
+            getGitStatus: async () => {
+                sessionCalls += 1
+                return { success: false, error: 'inactive session' }
+            }
+        } as unknown as Partial<SyncEngine>
+
+        const response = await buildApp(engine).request('/api/sessions/session-1/git-branch')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject({ success: true })
+        expect(machineCalls).toBe(1)
+        expect(sessionCalls).toBe(0)
+    })
+
+    it('keeps the full status endpoint session-scoped for the Files view', async () => {
+        const session = {
+            id: 'session-1',
+            namespace: 'default',
+            active: true,
+            metadata: { path: '/work/project', machineId: 'machine-1' }
+        } as unknown as Session
+        let machineCalls = 0
+        let sessionCalls = 0
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            getMachine: () => ({ id: 'machine-1', namespace: 'default' }),
+            getMachineGitBranch: async () => {
+                machineCalls += 1
+                return { success: true, stdout: '', stderr: '', exitCode: 0 }
+            },
+            getGitStatus: async (sessionId: string, cwd: string) => {
+                sessionCalls += 1
+                expect(sessionId).toBe('session-1')
+                expect(cwd).toBe('/work/project')
+                return { success: true, stdout: '# branch.head main\n? new-file\n', stderr: '', exitCode: 0 }
+            }
+        } as unknown as Partial<SyncEngine>
+
+        const response = await buildApp(engine).request('/api/sessions/session-1/git-status')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject({ success: true })
+        expect(sessionCalls).toBe(1)
+        expect(machineCalls).toBe(0)
+    })
+})
+
 describe('generated images route', () => {
     it('serves generated images with an immutable cache header instead of no-store', async () => {
         const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])

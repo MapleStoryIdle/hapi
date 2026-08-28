@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { CodexCollaborationMode, PermissionMode } from './modes'
-import type { SessionEndReason } from './schemas'
+import type { CodexLocalSessionListUpdate, SessionEndReason } from './schemas'
 export { SessionEndReasonSchema, type SessionEndReason } from './schemas'
 
 export type SocketErrorReason = 'namespace-missing' | 'access-denied' | 'not-found'
@@ -320,6 +320,8 @@ export interface ClientToServerEvents {
         machineId: string
         codexSessionId: string
         modifiedAt?: number
+        /** Sanitized list-row update; never includes the local transcript path. */
+        summary?: CodexLocalSessionListUpdate
         snapshot?: NativeCodexRealtimeSocketSnapshot
     }) => void
     'rpc-register': (data: { method: string }) => void

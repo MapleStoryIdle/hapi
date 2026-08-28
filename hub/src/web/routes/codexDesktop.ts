@@ -10,6 +10,7 @@ import {
     normalizeCodexCustomToolInput,
     normalizeCodexCustomToolName,
     normalizeCodexCustomToolOutput,
+    readLocalCodexSessionSummary,
     type CodexLocalSessionData as RunnerCodexLocalSessionData,
     type CodexLocalSessionReadTiming,
     type CodexLocalSessionStatusRpcResponse,
@@ -81,6 +82,7 @@ type CodexLocalSessionSummary = {
 type CodexTranscriptFileCandidate = {
     file: string
     modifiedAt: number
+    size: number
 }
 
 type CodexLocalSessionsResponse = {
@@ -211,6 +213,7 @@ const DEFAULT_SCRIPT_TIMEOUT_MS = 60_000
 const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 500
 const DEFAULT_RECENT_CODEX_SESSION_LIMIT = 5
 const DEFAULT_RECENT_CODEX_CONTEXT_PAGE_LIMIT = 50
+const CODEX_SESSION_SUMMARY_FULL_READ_MAX_BYTES = 512 * 1024
 
 function resolveLocalPath(pathValue: string): string {
     return isAbsolute(pathValue) ? pathValue : resolve(process.cwd(), pathValue)
@@ -296,9 +299,11 @@ function collectJsonlFiles(root: string, files: CodexTranscriptFileCandidate[]):
         }
         if (entry.isFile() && fullPath.toLowerCase().endsWith('.jsonl')) {
             try {
+                const stats = statSync(fullPath)
                 files.push({
                     file: fullPath,
-                    modifiedAt: statSync(fullPath).mtimeMs
+                    modifiedAt: stats.mtimeMs,
+                    size: stats.size
                 })
             } catch {
                 // The transcript can disappear while Codex rotates sessions.
@@ -569,7 +574,15 @@ function isSubagentSource(value: unknown): boolean {
     return record ? Object.prototype.hasOwnProperty.call(record, 'subagent') : false
 }
 
-function parseCodexLocalSession(filePath: string, knownModifiedAt?: number): CodexLocalSessionSummary | null {
+function parseCodexLocalSession(
+    filePath: string,
+    knownModifiedAt?: number,
+    knownSize?: number
+): CodexLocalSessionSummary | null {
+    if (knownSize !== undefined && knownSize > CODEX_SESSION_SUMMARY_FULL_READ_MAX_BYTES) {
+        return readLocalCodexSessionSummary(filePath, knownModifiedAt, knownSize)
+    }
+
     let content: string
     try {
         content = readFileSync(filePath, 'utf-8')
@@ -675,7 +688,7 @@ function listLocalCodexSessions(
     // Stat every file cheaply, then only read enough newest rollouts to fill
     // the requested page instead of every transcript.
     for (const candidate of listCodexTranscriptFilesByRecency()) {
-        const session = parseCodexLocalSession(candidate.file, candidate.modifiedAt)
+        const session = parseCodexLocalSession(candidate.file, candidate.modifiedAt, candidate.size)
         if (!session) continue
         if (seenSessionIds.has(session.id)) continue
         if (options.excludeHapiInitiated && isHapiInitiatedCodexSession(session)) continue
@@ -690,7 +703,7 @@ function findLocalCodexSession(sessionId: string): CodexLocalSessionSummary | nu
     for (const candidate of listCodexTranscriptFilesByRecency()) {
         const inferredId = inferSessionIdFromFileName(candidate.file)
         if (inferredId && inferredId !== sessionId) continue
-        const session = parseCodexLocalSession(candidate.file, candidate.modifiedAt)
+        const session = parseCodexLocalSession(candidate.file, candidate.modifiedAt, candidate.size)
         if (session?.id === sessionId) return session
     }
     return null
@@ -1018,6 +1031,12 @@ function parseCodexSessionLimit(value: string | undefined): number | null {
 }
 
 function parseExcludeHapiInitiated(value: string | undefined): boolean | null {
+    if (value === undefined || value === 'false') return false
+    if (value === 'true') return true
+    return null
+}
+
+function parseForceRefresh(value: string | undefined): boolean | null {
     if (value === undefined || value === 'false') return false
     if (value === 'true') return true
     return null
@@ -2123,6 +2142,10 @@ export function createCodexDesktopRoutes(options: {
         if (excludeHapiInitiated === null) {
             return c.json({ success: false, error: 'excludeHapiInitiated must be true or false' }, 400)
         }
+        const forceRefresh = parseForceRefresh(c.req.query('forceRefresh'))
+        if (forceRefresh === null) {
+            return c.json({ success: false, error: 'forceRefresh must be true or false' }, 400)
+        }
         const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
         if (!machineId) {
             return c.json({
@@ -2138,11 +2161,15 @@ export function createCodexDesktopRoutes(options: {
             return c.json({ success: false, error: 'Selected runner is not online' }, 409)
         }
         try {
-            const result = excludeHapiInitiated
+            const listOptions = {
+                ...(excludeHapiInitiated ? { excludeHapiInitiated: true } : {}),
+                ...(forceRefresh ? { forceRefresh: true } : {})
+            }
+            const result = Object.keys(listOptions).length > 0
                 ? await engine.listCodexLocalSessions(
                     machineId,
                     limit ?? DEFAULT_RECENT_CODEX_SESSION_LIMIT,
-                    { excludeHapiInitiated: true }
+                    listOptions
                 )
                 : await engine.listCodexLocalSessions(machineId, limit ?? DEFAULT_RECENT_CODEX_SESSION_LIMIT)
             if (result.success !== true) {

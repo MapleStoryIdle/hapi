@@ -15,6 +15,7 @@ export const RPC_METHODS = {
     SendCodexLocalSessionMessage: 'sendCodexLocalSessionMessage',
     ListMachineDirectory: 'list-directory',
     PathExists: 'path-exists',
+    GetMachineGitBranch: 'get-machine-git-branch',
     GitStatus: 'git-status',
     GitDiffNumstat: 'git-diff-numstat',
     GitDiffFile: 'git-diff-file',

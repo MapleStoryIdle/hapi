@@ -264,11 +264,13 @@ export class ApiClient {
         limit?: number
         machineId?: string
         excludeHapiInitiated?: boolean
+        forceRefresh?: boolean
     }): Promise<CodexLocalSessionsResponse> {
         const queryParams = new URLSearchParams()
         if (options?.machineId) queryParams.set('machineId', options.machineId)
         if (options?.limit) queryParams.set('limit', String(options.limit))
         if (options?.excludeHapiInitiated) queryParams.set('excludeHapiInitiated', 'true')
+        if (options?.forceRefresh) queryParams.set('forceRefresh', 'true')
         const query = queryParams.size > 0 ? `?${queryParams.toString()}` : ''
         return await this.request<CodexLocalSessionsResponse>(`/api/codex/sessions${query}`)
     }
@@ -408,6 +410,10 @@ export class ApiClient {
 
     async getGitStatus(sessionId: string): Promise<GitCommandResponse> {
         return await this.request<GitCommandResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/git-status`)
+    }
+
+    async getGitBranch(sessionId: string): Promise<GitCommandResponse> {
+        return await this.request<GitCommandResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/git-branch`)
     }
 
     async getGitDiffNumstat(sessionId: string, staged: boolean): Promise<GitCommandResponse> {

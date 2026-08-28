@@ -6,7 +6,8 @@ import {
     getLocalCodexSessionData,
     getLocalCodexSessionRunState,
     listLocalCodexSessions,
-    normalizeCodexCustomToolOutput
+    normalizeCodexCustomToolOutput,
+    readLocalCodexSessionSummary
 } from './codexTranscript'
 
 const originalCodexHome = process.env.CODEX_HOME
@@ -241,6 +242,45 @@ describe('listLocalCodexSessions', () => {
         try {
             expect(listLocalCodexSessions(1).map((session) => session.id)).toEqual([hapiSessionId])
             expect(listLocalCodexSessions(1, { excludeHapiInitiated: true }).map((session) => session.id)).toEqual([externalSessionId])
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('reads only the header and tail metadata for a large transcript summary', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-large-list-test-'))
+        const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+        const sessionDir = join(codexHome, 'sessions', '2026', '08', '29')
+        const file = join(sessionDir, `rollout-${sessionId}.jsonl`)
+        mkdirSync(sessionDir, { recursive: true })
+        writeFileSync(file, [
+            JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            JSON.stringify({ type: 'response_item', payload: {
+                type: 'message', role: 'user', content: [{ type: 'input_text', text: 'first prompt' }]
+            } }),
+            JSON.stringify({ type: 'response_item', payload: {
+                type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'x'.repeat(600_000) }]
+            } }),
+            JSON.stringify({ type: 'event_msg', payload: {
+                type: 'mcp_tool_call_end',
+                invocation: { tool: 'change_title', arguments: { title: 'Tail title' } }
+            } }),
+            JSON.stringify({ type: 'response_item', payload: {
+                type: 'message', role: 'user', content: [{ type: 'input_text', text: 'latest tail prompt' }]
+            } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })
+        ].join('\n'), 'utf-8')
+
+        try {
+            const summary = readLocalCodexSessionSummary(file)
+            expect(summary).toMatchObject({
+                id: sessionId,
+                cwd: '/workspace/project',
+                title: 'Tail title',
+                lastUserMessage: 'latest tail prompt',
+                runState: 'idle'
+            })
         } finally {
             rmSync(codexHome, { recursive: true, force: true })
         }

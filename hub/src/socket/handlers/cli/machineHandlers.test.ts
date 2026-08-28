@@ -92,7 +92,14 @@ describe('native Codex transcript machine socket events', () => {
         socket.trigger('codex-session-updated', {
             machineId: 'machine-1',
             codexSessionId: 'codex-thread-1',
-            modifiedAt: 1_725_000_000_000
+            modifiedAt: 1_725_000_000_000,
+            summary: {
+                id: 'codex-thread-1',
+                title: 'Updated native task',
+                cwd: '/workspace/project',
+                modifiedAt: 1_725_000_000_000,
+                runState: 'idle'
+            }
         })
 
         expect(events).toEqual([{
@@ -100,6 +107,13 @@ describe('native Codex transcript machine socket events', () => {
             machineId: 'machine-1',
             codexSessionId: 'codex-thread-1',
             modifiedAt: 1_725_000_000_000,
+            summary: {
+                id: 'codex-thread-1',
+                title: 'Updated native task',
+                cwd: '/workspace/project',
+                modifiedAt: 1_725_000_000_000,
+                runState: 'idle'
+            },
             namespace: 'team-a'
         }])
     })

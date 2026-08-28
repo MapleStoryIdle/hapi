@@ -473,6 +473,21 @@ const MachineChangedSchema = SessionEventBaseSchema.extend({
     machineId: z.string()
 })
 
+export const CodexLocalSessionListUpdateSchema = z.object({
+    id: z.string(),
+    title: z.string(),
+    lastUserMessage: z.string().nullable().optional(),
+    cwd: z.string().nullable().optional(),
+    modifiedAt: z.number().finite(),
+    originator: z.string().nullable().optional(),
+    cliVersion: z.string().nullable().optional(),
+    model: z.string().nullable().optional(),
+    modelReasoningEffort: z.string().nullable().optional(),
+    runState: z.enum(['idle', 'processing', 'unknown']).optional()
+}).strict()
+
+export type CodexLocalSessionListUpdate = z.infer<typeof CodexLocalSessionListUpdateSchema>
+
 export const SyncEventSchema = z.discriminatedUnion('type', [
     SessionChangedSchema.extend({
         type: z.literal('session-added'),
@@ -528,6 +543,8 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         /** Native Codex thread id; deliberately separate from HAPI sessionId. */
         codexSessionId: z.string(),
         modifiedAt: z.number().optional(),
+        /** Sanitized list-row update from a current runner. */
+        summary: CodexLocalSessionListUpdateSchema.optional(),
         /** Bounded runner snapshot; older runners emit an invalidation only. */
         snapshot: z.unknown().optional()
     }),

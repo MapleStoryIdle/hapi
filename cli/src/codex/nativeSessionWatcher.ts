@@ -16,6 +16,7 @@ const SESSION_ID_PATTERN = /(?:^|[\\/])rollout-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]
 
 export type NativeCodexSessionChange = {
     codexSessionId: string
+    filePath: string
     modifiedAt: number
 }
 
@@ -43,6 +44,7 @@ type WatchedTranscript = {
 }
 
 type PendingChange = {
+    filePath: string
     modifiedAt: number
     timer: ReturnType<typeof setTimeout>
 }
@@ -213,7 +215,7 @@ export class NativeCodexSessionWatcher {
                 // A recent-window reshuffle merely changes which files are
                 // watched. Only a real removal needs to invalidate the web.
                 if (!candidatesByPath.has(filePath)) {
-                    this.scheduleChange(previousTranscript.codexSessionId, this.now())
+                    this.scheduleChange(previousTranscript.codexSessionId, filePath, this.now())
                 }
                 this.stopWatchingFile(filePath)
             }
@@ -226,7 +228,7 @@ export class NativeCodexSessionWatcher {
             }
             const wasJustObserved = this.observedFiles.has(filePath) && !previousTranscript
             if (this.initialized && !wasJustObserved && (!previousTranscript || transcript.modifiedAt > previousTranscript.modifiedAt)) {
-                this.scheduleChange(transcript.codexSessionId, transcript.modifiedAt)
+                this.scheduleChange(transcript.codexSessionId, filePath, transcript.modifiedAt)
             }
         }
 
@@ -270,21 +272,22 @@ export class NativeCodexSessionWatcher {
         // the next directory scan would see this same mtime as a second
         // change and emit a duplicate invalidation a few seconds later.
         this.watchedFiles.set(filePath, { ...transcript, modifiedAt })
-        this.scheduleChange(transcript.codexSessionId, modifiedAt)
+        this.scheduleChange(transcript.codexSessionId, filePath, modifiedAt)
     }
 
-    private scheduleChange(codexSessionId: string, modifiedAt: number): void {
+    private scheduleChange(codexSessionId: string, filePath: string, modifiedAt: number): void {
         const previous = this.pendingChanges.get(codexSessionId)
         if (previous) {
             clearTimeout(previous.timer)
         }
 
         const pending: PendingChange = {
+            filePath,
             modifiedAt,
             timer: setTimeout(() => {
                 this.pendingChanges.delete(codexSessionId)
                 if (!this.started) return
-                this.onChange({ codexSessionId, modifiedAt: pending.modifiedAt })
+                this.onChange({ codexSessionId, filePath: pending.filePath, modifiedAt: pending.modifiedAt })
             }, this.debounceMs)
         }
         pending.timer.unref?.()

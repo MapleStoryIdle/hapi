@@ -84,6 +84,33 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         return c.json(result)
     })
 
+    app.get('/sessions/:id/git-branch', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const sessionPath = sessionResult.session.metadata?.path
+        if (!sessionPath) {
+            return c.json({ success: false, error: 'Session path not available' })
+        }
+
+        const machineId = sessionResult.session.metadata?.machineId
+        const machine = machineId ? engine.getMachine(machineId) : null
+        // A project-group row can outlive its original session process. Query
+        // the runner by directory when it belongs to this namespace instead
+        // of routing through an inactive session-scoped RPC handler.
+        const result = machine?.namespace === c.get('namespace')
+            ? await runRpc(() => engine.getMachineGitBranch(machine.id, sessionPath))
+            : await runRpc(() => engine.getGitStatus(sessionResult.sessionId, sessionPath))
+        return c.json(result)
+    })
+
     app.get('/sessions/:id/git-diff-numstat', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {

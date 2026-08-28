@@ -51,7 +51,7 @@ describe('NativeCodexSessionWatcher', () => {
         writeFileSync(file, '{"type":"session_meta"}\n', 'utf-8')
 
         const callbacks = new Map<string, () => void>()
-        const changes: Array<{ codexSessionId: string; modifiedAt: number }> = []
+        const changes: Array<{ codexSessionId: string; filePath: string; modifiedAt: number }> = []
         const watcher = new NativeCodexSessionWatcher({
             root,
             debounceMs: 1,
@@ -71,6 +71,7 @@ describe('NativeCodexSessionWatcher', () => {
 
             await waitForChange(() => expect(changes).toHaveLength(1))
             expect(changes[0]?.codexSessionId).toBe(sessionId)
+            expect(changes[0]?.filePath).toBe(file)
             expect(changes[0]?.modifiedAt).toBeGreaterThan(0)
             // The periodic discovery scan sees the same file too, but must
             // not turn one write into a delayed duplicate invalidation.
@@ -89,7 +90,7 @@ describe('NativeCodexSessionWatcher', () => {
         writeFileSync(file, '{"type":"session_meta"}\n', 'utf-8')
 
         const callbacks = new Map<string, () => void>()
-        const changes: Array<{ codexSessionId: string; modifiedAt: number }> = []
+        const changes: Array<{ codexSessionId: string; filePath: string; modifiedAt: number }> = []
         const watcher = new NativeCodexSessionWatcher({
             root,
             debounceMs: 20,
@@ -123,7 +124,7 @@ describe('NativeCodexSessionWatcher', () => {
         utimesSync(recentFile, new Date(now), new Date(now))
 
         const callbacks = new Map<string, () => void>()
-        const changes: Array<{ codexSessionId: string; modifiedAt: number }> = []
+        const changes: Array<{ codexSessionId: string; filePath: string; modifiedAt: number }> = []
         const watcher = new NativeCodexSessionWatcher({
             root,
             debounceMs: 1,

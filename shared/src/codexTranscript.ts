@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { parseAutomationHeartbeatMessageContent } from './messages'
@@ -21,6 +21,9 @@ export type CodexLocalSessionSummary = {
     /** Last native turn lifecycle observed while scanning this transcript. */
     runState?: CodexLocalSessionRunState
 }
+
+/** Runner-to-browser list update; the local transcript path stays private. */
+export type CodexLocalSessionListUpdate = Omit<CodexLocalSessionSummary, 'file'>
 
 export type CodexLocalSessionConfig = {
     model: string | null
@@ -189,14 +192,20 @@ export type SendCodexLocalSessionMessageRpcResponse = {
     code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'launch_failed' | 'queue_full' | 'not_native_session'
 }
 
-type CodexTranscriptFileCandidate = {
+export type CodexTranscriptFileCandidate = {
     file: string
     modifiedAt: number
+    size: number
 }
 
 const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 500
 const MAX_CODEX_CONTEXT_MESSAGES = 2_000
 const MAX_CODEX_CONTEXT_MESSAGE_CHARS = 24_000
+// Session lists only need metadata from the transcript header and latest
+// records. Large historical transcripts must not be fully loaded just to
+// render a row in the native-session list.
+const CODEX_SESSION_SUMMARY_FULL_READ_MAX_BYTES = 512 * 1024
+const CODEX_SESSION_SUMMARY_WINDOW_BYTES = 64 * 1024
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -237,7 +246,8 @@ function collectJsonlFiles(root: string, files: CodexTranscriptFileCandidate[]):
         }
         if (!entry.isFile() || !fullPath.toLowerCase().endsWith('.jsonl')) continue
         try {
-            files.push({ file: fullPath, modifiedAt: statSync(fullPath).mtimeMs })
+            const stats = statSync(fullPath)
+            files.push({ file: fullPath, modifiedAt: stats.mtimeMs, size: stats.size })
         } catch {
             // The transcript can disappear while Codex rotates sessions.
         }
@@ -568,30 +578,39 @@ export function isHapiInitiatedCodexSession(
     return session.originator?.trim().toLowerCase() === HAPI_CODEX_ORIGINATOR
 }
 
-function parseCodexLocalSession(filePath: string, knownModifiedAt?: number): CodexLocalSessionSummary | null {
-    let content: string
-    try {
-        content = readFileSync(filePath, 'utf-8')
-    } catch {
-        return null
-    }
+type CodexSessionHeader = {
+    sessionId: string | null
+    cwd: string | null
+    originator: string | null
+    cliVersion: string | null
+    firstUserMessage: string | null
+    isSubagent: boolean
+}
 
-    const allLines = content.split(/\r?\n/).filter(Boolean)
-    const headLines = allLines.slice(0, 200)
+function getCodexSessionHeader(lines: readonly string[]): CodexSessionHeader {
     let sessionId: string | null = null
     let cwd: string | null = null
     let originator: string | null = null
     let cliVersion: string | null = null
     let firstUserMessage: string | null = null
 
-    for (const line of headLines) {
+    for (const line of lines.slice(0, 200)) {
         try {
             const record = asRecord(JSON.parse(line))
             const type = typeof record?.type === 'string' ? record.type : null
             if (type === 'session_meta') {
                 const payload = asRecord(record?.payload)
                 if (payload) {
-                    if (isSubagentSource(payload.source)) return null
+                    if (isSubagentSource(payload.source)) {
+                        return {
+                            sessionId,
+                            cwd,
+                            originator,
+                            cliVersion,
+                            firstUserMessage,
+                            isSubagent: true
+                        }
+                    }
                     if (!sessionId && typeof payload.id === 'string') sessionId = payload.id
                     if (!cwd && typeof payload.cwd === 'string') cwd = payload.cwd
                     if (!originator && typeof payload.originator === 'string') originator = payload.originator
@@ -610,33 +629,145 @@ function parseCodexLocalSession(filePath: string, knownModifiedAt?: number): Cod
         }
     }
 
-    sessionId = sessionId ?? inferSessionIdFromFileName(filePath)
-    if (!sessionId) return null
-    const modifiedAt = knownModifiedAt ?? (() => {
-        try {
-            return statSync(filePath).mtimeMs
-        } catch {
-            return Date.now()
-        }
-    })()
-    const config = getLatestCodexSessionConfig(allLines)
+    return { sessionId, cwd, originator, cliVersion, firstUserMessage, isSubagent: false }
+}
 
-    return {
-        id: sessionId,
-        title: getCodexSessionTitle(cwd, sessionId, getLatestCodexChangedTitle(allLines), firstUserMessage),
-        lastUserMessage: getLatestCodexUserMessage(allLines),
-        cwd,
-        file: filePath,
-        modifiedAt,
-        originator,
-        cliVersion,
-        model: config.model,
-        modelReasoningEffort: config.modelReasoningEffort,
-        runState: getCodexTranscriptRunState(content)
+function readCodexTranscriptRange(filePath: string, offset: number, length: number): Buffer | null {
+    if (length <= 0) return Buffer.alloc(0)
+
+    let descriptor: number | null = null
+    try {
+        descriptor = openSync(filePath, 'r')
+        const bytes = Buffer.allocUnsafe(length)
+        const bytesRead = readSync(descriptor, bytes, 0, length, offset)
+        return Buffer.from(bytes.subarray(0, bytesRead))
+    } catch {
+        return null
+    } finally {
+        if (descriptor !== null) {
+            try {
+                closeSync(descriptor)
+            } catch {
+                // The transcript read has already failed or completed.
+            }
+        }
     }
 }
 
-function listCodexTranscriptFilesByRecency(): CodexTranscriptFileCandidate[] {
+function getCodexSummaryHeadLines(filePath: string, size: number): string[] | null {
+    const bytes = readCodexTranscriptRange(filePath, 0, Math.min(size, CODEX_SESSION_SUMMARY_WINDOW_BYTES))
+    return bytes === null ? null : bytes.toString('utf8').split(/\r?\n/).filter(Boolean)
+}
+
+function getCodexSummaryTailLines(filePath: string, size: number): string[] | null {
+    const offset = Math.max(0, size - CODEX_SESSION_SUMMARY_WINDOW_BYTES)
+    const bytes = readCodexTranscriptRange(filePath, offset, size - offset)
+    if (bytes === null) return null
+
+    let text = bytes.toString('utf8')
+    // The start of a tail window can be in the middle of a JSONL record. Drop
+    // that partial line so malformed JSON never obscures a later lifecycle.
+    if (offset > 0) {
+        const firstNewline = text.indexOf('\n')
+        if (firstNewline === -1) return []
+        text = text.slice(firstNewline + 1)
+    }
+    return text.split(/\r?\n/).filter(Boolean)
+}
+
+function buildCodexLocalSessionSummary(
+    filePath: string,
+    modifiedAt: number,
+    header: CodexSessionHeader,
+    latest: {
+        changedTitle: string | null
+        lastUserMessage: string | null
+        config: CodexLocalSessionConfig
+        runState: CodexLocalSessionRunState
+    }
+): CodexLocalSessionSummary | null {
+    if (header.isSubagent) return null
+
+    const sessionId = header.sessionId ?? inferSessionIdFromFileName(filePath)
+    if (!sessionId) return null
+
+    return {
+        id: sessionId,
+        title: getCodexSessionTitle(header.cwd, sessionId, latest.changedTitle, header.firstUserMessage),
+        lastUserMessage: latest.lastUserMessage,
+        cwd: header.cwd,
+        file: filePath,
+        modifiedAt,
+        originator: header.originator,
+        cliVersion: header.cliVersion,
+        model: latest.config.model,
+        modelReasoningEffort: latest.config.modelReasoningEffort,
+        runState: latest.runState
+    }
+}
+
+/**
+ * Read the metadata used by a native-session list row. Small transcripts keep
+ * the exact full-file parser; large histories read just the first and last
+ * window so list rendering is not proportional to transcript size.
+ */
+export function readLocalCodexSessionSummary(
+    filePath: string,
+    knownModifiedAt?: number,
+    knownSize?: number
+): CodexLocalSessionSummary | null {
+    let modifiedAt = knownModifiedAt
+    let size = knownSize
+    if (modifiedAt === undefined || size === undefined) {
+        try {
+            const stats = statSync(filePath)
+            modifiedAt = stats.mtimeMs
+            size = stats.size
+        } catch {
+            return null
+        }
+    }
+
+    if (modifiedAt === undefined || size === undefined) return null
+    const resolvedModifiedAt = modifiedAt
+    const resolvedSize = size
+
+    if (resolvedSize <= CODEX_SESSION_SUMMARY_FULL_READ_MAX_BYTES) {
+        let content: string
+        try {
+            content = readFileSync(filePath, 'utf-8')
+        } catch {
+            return null
+        }
+
+        const allLines = content.split(/\r?\n/).filter(Boolean)
+        return buildCodexLocalSessionSummary(filePath, resolvedModifiedAt, getCodexSessionHeader(allLines), {
+            changedTitle: getLatestCodexChangedTitle(allLines),
+            lastUserMessage: getLatestCodexUserMessage(allLines),
+            config: getLatestCodexSessionConfig(allLines),
+            runState: getCodexTranscriptRunState(content)
+        })
+    }
+
+    const headLines = getCodexSummaryHeadLines(filePath, resolvedSize)
+    const tailLines = getCodexSummaryTailLines(filePath, resolvedSize)
+    if (headLines === null || tailLines === null) return null
+
+    const tail = getCodexTranscriptTailSummary(tailLines)
+    return buildCodexLocalSessionSummary(filePath, resolvedModifiedAt, getCodexSessionHeader(headLines), {
+        changedTitle: tail.title ?? null,
+        lastUserMessage: tail.lastUserMessage ?? null,
+        config: {
+            model: tail.model ?? null,
+            modelReasoningEffort: tail.modelReasoningEffort ?? null
+        },
+        // Unknown is deliberately conservative: direct sends will queue until
+        // a live transcript append proves the native turn is idle.
+        runState: tail.runState ?? 'unknown'
+    })
+}
+
+export function listCodexTranscriptFilesByRecency(): CodexTranscriptFileCandidate[] {
     const files: CodexTranscriptFileCandidate[] = []
     collectJsonlFiles(join(getCodexHome(), 'sessions'), files)
     return files.sort((left, right) => right.modifiedAt - left.modifiedAt)
@@ -649,7 +780,7 @@ export function listLocalCodexSessions(
     const sessions: CodexLocalSessionSummary[] = []
     const seenSessionIds = new Set<string>()
     for (const candidate of listCodexTranscriptFilesByRecency()) {
-        const session = parseCodexLocalSession(candidate.file, candidate.modifiedAt)
+        const session = readLocalCodexSessionSummary(candidate.file, candidate.modifiedAt, candidate.size)
         if (!session || seenSessionIds.has(session.id)) continue
         if (options.excludeHapiInitiated && isHapiInitiatedCodexSession(session)) continue
         seenSessionIds.add(session.id)
@@ -663,7 +794,7 @@ export function findLocalCodexSession(sessionId: string): CodexLocalSessionSumma
     for (const candidate of listCodexTranscriptFilesByRecency()) {
         const inferredId = inferSessionIdFromFileName(candidate.file)
         if (inferredId && inferredId !== sessionId) continue
-        const session = parseCodexLocalSession(candidate.file, candidate.modifiedAt)
+        const session = readLocalCodexSessionSummary(candidate.file, candidate.modifiedAt, candidate.size)
         if (session?.id === sessionId) return session
     }
     return null

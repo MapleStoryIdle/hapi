@@ -276,6 +276,49 @@ describe('RecentCodexSessions', () => {
         await waitFor(() => {
             expect(api.getCodexSessions).toHaveBeenCalledTimes(2)
         })
+        expect(api.getCodexSessions).toHaveBeenLastCalledWith({
+            machineId: 'machine-1',
+            limit: 5,
+            excludeHapiInitiated: true,
+            forceRefresh: true
+        })
+    })
+
+    it('patches a current-runner list row from its realtime summary without another fetch', async () => {
+        const api = createApi()
+        render(
+            <NativeCodexRealtimeProvider value={{ connected: true }}>
+                <I18nProvider>
+                    <RecentCodexSessions
+                        api={api}
+                        machineId="machine-1"
+                        onOpen={vi.fn()}
+                        realtimeAvailable
+                    />
+                </I18nProvider>
+            </NativeCodexRealtimeProvider>
+        )
+
+        await screen.findByText('Recent Codex task')
+        expect(api.getCodexSessions).toHaveBeenCalledTimes(1)
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            summary: {
+                id: 'codex-thread-1',
+                title: 'Updated without refetch',
+                lastUserMessage: 'new prompt',
+                cwd: '/workspace/project',
+                modifiedAt: Date.now(),
+                runState: 'processing'
+            }
+        })
+
+        expect(await screen.findByText('Updated without refetch')).toBeInTheDocument()
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        expect(api.getCodexSessions).toHaveBeenCalledTimes(1)
     })
 
     it('orders projects and sessions by their latest activity', () => {
@@ -462,6 +505,12 @@ describe('RecentCodexSessions', () => {
         await waitFor(() => {
             expect(api.getCodexSessions).toHaveBeenCalledTimes(2)
             expect(screen.getByText('Fresh Codex task')).toBeInTheDocument()
+        })
+        expect(api.getCodexSessions).toHaveBeenLastCalledWith({
+            machineId: 'machine-1',
+            limit: 5,
+            excludeHapiInitiated: true,
+            forceRefresh: true
         })
     })
 

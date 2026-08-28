@@ -102,7 +102,7 @@ describe('SessionList directory action', () => {
     })
 
     it('shows a fetched Git branch below the larger project name', async () => {
-        const getGitStatus = vi.fn(async () => ({
+        const getGitBranch = vi.fn(async () => ({
             success: true,
             stdout: '# branch.oid abc123\n# branch.head feature/list-branch\n',
             stderr: '',
@@ -123,7 +123,7 @@ describe('SessionList directory action', () => {
                 onRefresh={vi.fn()}
                 isLoading={false}
                 renderHeader={false}
-                api={{ getGitStatus } as unknown as ApiClient}
+                api={{ getGitBranch } as unknown as ApiClient}
             />
         )
 
@@ -131,11 +131,11 @@ describe('SessionList directory action', () => {
         expect(projectName).toHaveTextContent('hapi')
         expect(projectName).toHaveClass('text-[17px]')
         expect(await screen.findByTestId('session-project-branch')).toHaveTextContent('feature/list-branch')
-        expect(getGitStatus).toHaveBeenCalledWith('session-git')
+        expect(getGitBranch).toHaveBeenCalledWith('session-git')
     })
 
     it('does not add a branch subtitle when the directory is not a Git project', async () => {
-        const getGitStatus = vi.fn(async () => ({
+        const getGitBranch = vi.fn(async () => ({
             success: false,
             error: 'not a git repository',
             stderr: 'not a git repository',
@@ -156,11 +156,11 @@ describe('SessionList directory action', () => {
                 onRefresh={vi.fn()}
                 isLoading={false}
                 renderHeader={false}
-                api={{ getGitStatus } as unknown as ApiClient}
+                api={{ getGitBranch } as unknown as ApiClient}
             />
         )
 
-        await waitFor(() => expect(getGitStatus).toHaveBeenCalledWith('session-not-git'))
+        await waitFor(() => expect(getGitBranch).toHaveBeenCalledWith('session-not-git'))
         expect(screen.queryByTestId('session-project-branch')).toBeNull()
     })
 })

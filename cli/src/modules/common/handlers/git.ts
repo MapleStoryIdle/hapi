@@ -86,17 +86,39 @@ async function runGitCommand(
     }
 }
 
+/** Return complete status for the Files view. */
+export async function getGitStatusForCwd(cwd: string, timeout?: number): Promise<GitCommandResponse> {
+    return await runGitCommand(
+        ['status', '--porcelain=v2', '--branch', '--untracked-files=all'],
+        cwd,
+        timeout
+    )
+}
+
+/**
+ * Read just the checked-out branch for a project-list subtitle. `git status`
+ * refreshes the worktree index, which is unnecessary and costly when several
+ * project groups render at once. Keep the familiar porcelain header shape so
+ * callers can share the existing branch parser.
+ */
+export async function getGitBranchStatusForCwd(cwd: string, timeout?: number): Promise<GitCommandResponse> {
+    const result = await runGitCommand(['branch', '--show-current'], cwd, timeout)
+    if (!result.success) return result
+
+    const branch = result.stdout?.trim() ?? ''
+    return {
+        ...result,
+        stdout: `# branch.head ${branch || '(detached)'}\n`
+    }
+}
+
 export function registerGitHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
     rpcHandlerManager.registerHandler<GitStatusRequest, GitCommandResponse>(RPC_METHODS.GitStatus, async (data) => {
         const resolved = resolveCwd(data.cwd, workingDirectory)
         if (resolved.error) {
             return rpcError(resolved.error)
         }
-        return await runGitCommand(
-            ['status', '--porcelain=v2', '--branch', '--untracked-files=all'],
-            resolved.cwd,
-            data.timeout
-        )
+        return await getGitStatusForCwd(resolved.cwd, data.timeout)
     })
 
     rpcHandlerManager.registerHandler<GitDiffNumstatRequest, GitCommandResponse>(RPC_METHODS.GitDiffNumstat, async (data) => {

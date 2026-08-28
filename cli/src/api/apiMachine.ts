@@ -9,18 +9,20 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath }
 import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
 import type { BinaryFileReadRequest, BinaryFileReadResponse, ClientToServerEvents, ExternalCodexRequestPayload, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
-import type { MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
+import type { GitCommandResponse, MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
 import {
-    listLocalCodexSessions,
+    type CodexLocalSessionListUpdate,
     type CodexLocalSessionDataRpcResponse,
     type CodexLocalSessionRealtimeSnapshot,
     type CodexLocalSessionSnapshotRpcResponse,
     type CodexLocalSessionStatusRpcResponse,
+    type CodexLocalSessionSummary,
     type CodexLocalSessionsRpcResponse,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import { NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
+import { NativeCodexSessionListCache } from '@/codex/nativeSessionListCache'
 import { NativeCodexTranscriptCache, type NativeCodexTranscriptRead } from '@/codex/nativeTranscriptCache'
 import { NativeCodexSessionWatcher } from '@/codex/nativeSessionWatcher'
 import type { RunnerState, Machine, MachineMetadata } from './types'
@@ -29,6 +31,7 @@ import { backoff } from '@/utils/time'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
+import { getGitBranchStatusForCwd } from '../modules/common/handlers/git'
 import {
     listOpencodeModelsForCwd,
     type ListOpencodeModelsForCwdRequest,
@@ -54,9 +57,14 @@ interface ListMachineDirectoryRequest {
     path: string
 }
 
+interface GetMachineGitBranchRequest {
+    cwd?: unknown
+}
+
 interface ListCodexLocalSessionsRequest {
     limit?: unknown
     excludeHapiInitiated?: unknown
+    forceRefresh?: unknown
 }
 
 interface ReadCodexLocalSessionRequest {
@@ -75,6 +83,11 @@ interface SendCodexLocalSessionMessageRequest {
 }
 
 const MAX_NATIVE_CODEX_REALTIME_SNAPSHOT_BYTES = 96 * 1024
+
+function toNativeCodexSessionListUpdate(session: CodexLocalSessionSummary): CodexLocalSessionListUpdate {
+    const { file: _file, ...summary } = session
+    return summary
+}
 
 function buildNativeCodexRealtimeSnapshot(
     read: NativeCodexTranscriptRead,
@@ -186,12 +199,14 @@ export class ApiMachineClient {
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
     private rpcHandlerManager: RpcHandlerManager
     private readonly nativeCodexTranscriptCache = new NativeCodexTranscriptCache()
+    private readonly nativeCodexSessionListCache = new NativeCodexSessionListCache()
     private readonly nativeCodexSessionDirectSender: NativeCodexSessionDirectSender
     private readonly nativeCodexSessionWatcher = new NativeCodexSessionWatcher({
-        onChange: ({ codexSessionId, modifiedAt }) => {
+        onChange: ({ codexSessionId, filePath, modifiedAt }) => {
+            const listSession = this.nativeCodexSessionListCache.update(filePath, modifiedAt)
             const read = this.nativeCodexTranscriptCache.refreshCached(codexSessionId, { limit: 50 })
             this.nativeCodexSessionDirectSender.notifyTranscriptChanged(codexSessionId)
-            this.reportNativeCodexSessionUpdated(codexSessionId, modifiedAt, read)
+            this.reportNativeCodexSessionUpdated(codexSessionId, modifiedAt, read, listSession)
         }
     })
 
@@ -236,9 +251,17 @@ export class ApiMachineClient {
                 if (excludeHapiInitiated !== undefined && typeof excludeHapiInitiated !== 'boolean') {
                     return { success: false, error: 'excludeHapiInitiated must be a boolean' }
                 }
+                const forceRefresh = params?.forceRefresh
+                if (forceRefresh !== undefined && typeof forceRefresh !== 'boolean') {
+                    return { success: false, error: 'forceRefresh must be a boolean' }
+                }
                 return {
                     success: true,
-                    sessions: listLocalCodexSessions(limit, { excludeHapiInitiated })
+                    sessions: this.nativeCodexSessionListCache.list(
+                        limit ?? 500,
+                        { excludeHapiInitiated },
+                        { forceRefresh }
+                    )
                 }
             }
         )
@@ -347,6 +370,22 @@ export class ApiMachineClient {
 
             return { exists }
         })
+
+        this.rpcHandlerManager.registerHandler<GetMachineGitBranchRequest, GitCommandResponse>(
+            RPC_METHODS.GetMachineGitBranch,
+            async (params) => {
+                const rawCwd = typeof params?.cwd === 'string' ? params.cwd.trim() : ''
+                if (!rawCwd) {
+                    return { success: false, error: 'cwd is required' }
+                }
+
+                // A project header belongs to a directory, not to an active
+                // HAPI process. Match session creation's unrestricted cwd
+                // policy so historical session groups can still show branch.
+                const cwd = await this.resolveForWorkspaceCheck(rawCwd)
+                return await getGitBranchStatusForCwd(cwd)
+            }
+        )
 
         this.rpcHandlerManager.registerHandler<ListMachineDirectoryRequest, MachineListDirectoryResponse>(RPC_METHODS.ListMachineDirectory, async (params) => {
             if (!this.normalizedWorkspaceRoots?.length) {
@@ -633,7 +672,8 @@ export class ApiMachineClient {
     private reportNativeCodexSessionUpdated(
         codexSessionId: string,
         modifiedAt = Date.now(),
-        transcriptRead?: NativeCodexTranscriptRead | null
+        transcriptRead?: NativeCodexTranscriptRead | null,
+        listSession?: CodexLocalSessionSummary | null
     ): boolean {
         const socket = this.socket as Socket<ServerToClientEvents, ClientToServerEvents> | undefined
         if (!socket) {
@@ -655,10 +695,12 @@ export class ApiMachineClient {
         const snapshot = read && status?.success === true
             ? buildNativeCodexRealtimeSnapshot(read, status, includeTranscript)
             : undefined
+        const summary = read?.data.session ?? listSession
         socket.emit('codex-session-updated', {
             machineId: this.machine.id,
             codexSessionId,
             modifiedAt,
+            ...(summary ? { summary: toNativeCodexSessionListUpdate(summary) } : {}),
             ...(snapshot === undefined ? {} : { snapshot })
         })
         return true

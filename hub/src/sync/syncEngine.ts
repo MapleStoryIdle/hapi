@@ -2004,10 +2004,14 @@ export class SyncEngine {
         return await this.rpcGateway.listMachineDirectory(machineId, path)
     }
 
+    async getMachineGitBranch(machineId: string, cwd: string): Promise<RpcCommandResponse> {
+        return await this.rpcGateway.getMachineGitBranch(machineId, cwd)
+    }
+
     async listCodexLocalSessions(
         machineId: string,
         limit: number,
-        options?: { excludeHapiInitiated?: boolean }
+        options?: { excludeHapiInitiated?: boolean; forceRefresh?: boolean }
     ): Promise<RpcCodexLocalSessionsResponse> {
         return await this.rpcGateway.listCodexLocalSessions(machineId, limit, options)
     }
