@@ -68,7 +68,7 @@ const NATIVE_STATUS_STALE_AFTER_MS = 6_000
 function NativeContextTypingIndicator(props: { label: string }) {
     return (
         <div
-            className="flex flex-1 items-center px-5"
+            className="flex flex-1 items-end px-5 pb-5"
             data-testid="codex-session-context-loading"
             role="status"
             aria-label={props.label}
@@ -81,18 +81,12 @@ function NativeContextTypingIndicator(props: { label: string }) {
                     className="mb-0.5 h-5 w-5 shrink-0 text-[var(--app-hint)]"
                 />
                 <div
-                    className="flex h-9 items-center gap-1.5 rounded-2xl rounded-bl-md bg-[var(--app-subtle-bg)] px-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.06)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.18)]"
+                    className="w-36 rounded-2xl rounded-bl-md bg-[var(--app-subtle-bg)] px-3.5 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.06)] animate-bounce-in dark:shadow-[0_1px_2px_rgba(0,0,0,0.18)]"
                     data-testid="codex-session-context-typing"
                     aria-hidden="true"
                 >
-                    {[0, 1, 2].map((index) => (
-                        <span
-                            key={index}
-                            data-typing-dot
-                            className="h-1.5 w-1.5 rounded-full bg-[var(--app-hint)] motion-safe:animate-bounce"
-                            style={{ animationDelay: `${index * 140}ms` }}
-                        />
-                    ))}
+                    <span className="block h-2.5 w-24 rounded-full bg-[var(--app-border)]/70 motion-safe:animate-pulse" data-loading-line />
+                    <span className="mt-2 block h-2.5 w-16 rounded-full bg-[var(--app-border)]/50 motion-safe:animate-pulse" data-loading-line />
                 </div>
             </div>
         </div>

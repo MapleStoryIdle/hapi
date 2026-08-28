@@ -502,7 +502,7 @@ describe('CodexSessionContextPage', () => {
     })
 
 
-    it('shows native context loading as an inline chat typing indicator', () => {
+    it('shows native context loading as an inline refreshing chat bubble', () => {
         const api = createApi()
         let resolveContext: (() => void) | undefined
         const getContext = api.getCodexSessionContext as ReturnType<typeof vi.fn>
@@ -518,10 +518,13 @@ describe('CodexSessionContextPage', () => {
         renderPage({ api })
 
         const loading = screen.getByTestId('codex-session-context-loading')
-        expect(loading).toHaveClass('items-center')
+        expect(loading).toHaveClass('items-end')
         expect(loading).toHaveAttribute('aria-busy', 'true')
         expect(screen.getByRole('status', { name: 'Loading context…' })).toBe(loading)
-        expect(screen.getByTestId('codex-session-context-typing').querySelectorAll('[data-typing-dot]')).toHaveLength(3)
+        const bubble = screen.getByTestId('codex-session-context-typing')
+        expect(bubble).toHaveClass('animate-bounce-in')
+        expect(bubble.querySelectorAll('[data-loading-line]')).toHaveLength(2)
+        expect(bubble.querySelectorAll('[class*="animate-pulse"]')).toHaveLength(2)
         expect(screen.queryByTestId('codex-session-context-loading-status')).toBeNull()
         expect(loading.querySelector('.animate-spin')).toBeNull()
         resolveContext?.()
