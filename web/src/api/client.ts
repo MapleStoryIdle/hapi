@@ -3,6 +3,7 @@ import type {
     AuthResponse,
     CodexLocalSessionsResponse,
     CodexLocalSessionContextResponse,
+    CodexLocalSessionSnapshotResponse,
     CodexLocalSessionStatusResponse,
     ForkCodexLocalSessionResponse,
     SendCodexLocalSessionMessageResponse,
@@ -282,6 +283,19 @@ export class ApiClient {
         if (options.limit !== undefined) queryParams.set('limit', String(options.limit))
         return await this.request<CodexLocalSessionContextResponse>(
             `/api/codex/sessions/${encodeURIComponent(sessionId)}/context?${queryParams.toString()}`
+        )
+    }
+
+    async getCodexSessionSnapshot(
+        sessionId: string,
+        machineId: string,
+        options: { before?: number; limit?: number } = {}
+    ): Promise<CodexLocalSessionSnapshotResponse> {
+        const queryParams = new URLSearchParams({ machineId })
+        if (options.before !== undefined) queryParams.set('before', String(options.before))
+        if (options.limit !== undefined) queryParams.set('limit', String(options.limit))
+        return await this.request<CodexLocalSessionSnapshotResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/snapshot?${queryParams.toString()}`
         )
     }
 

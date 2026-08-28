@@ -226,6 +226,8 @@ export type CodexLocalSessionContextResponse = {
         nextBefore: number | null
         hasMore: boolean
     }
+    /** Runner-local transcript revision when the response came from /snapshot. */
+    revision?: number
 }
 
 export type CodexLocalSessionRunState = 'idle' | 'processing' | 'unknown'
@@ -242,6 +244,33 @@ export type CodexLocalSessionStatusResponse =
         success: false
         error: string
     }
+
+export type CodexLocalSessionSnapshotResponse = CodexLocalSessionContextResponse & {
+    status: Extract<CodexLocalSessionStatusResponse, { success: true }>
+    revision: number
+    timing: {
+        cache: 'hit' | 'miss'
+        durationMs: number
+    }
+}
+
+export type CodexLocalSessionRealtimeSnapshot = {
+    revision: number
+    status: Extract<CodexLocalSessionStatusResponse, { success: true }>
+    timing: {
+        cache: 'hit' | 'miss'
+        durationMs: number
+    }
+    session?: CodexLocalSessionSnapshotResponse['session']
+    importedMessages?: Array<{
+        createdAt?: number
+        role: 'user' | 'agent'
+        content: unknown
+        meta?: unknown
+    }>
+    startIndex?: number
+    page?: CodexLocalSessionContextResponse['page']
+}
 
 export type SendCodexLocalSessionMessageResponse =
     | {

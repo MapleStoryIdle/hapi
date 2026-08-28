@@ -267,6 +267,83 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
             client.shutdown()
         }
     })
+
+    it('returns one cached native snapshot for context and lifecycle state', async () => {
+        const machine = makeMachine('machine-codex-snapshot')
+        const sessionId = '22345678-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        const transcript = join(transcriptDir, `rollout-${sessionId}.jsonl`)
+        writeFileSync(transcript, [
+            JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            JSON.stringify({ timestamp: '2026-08-28T10:00:00.000Z', type: 'response_item', payload: {
+                type: 'message', role: 'user', content: [{ type: 'input_text', text: 'cached prompt' }]
+            } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })
+        ].join('\n'), 'utf8')
+        const client = new ApiMachineClient('cli-token', machine)
+
+        try {
+            const first = await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', { sessionId, limit: 50 }) as {
+                success: boolean
+                snapshot?: { revision: number; timing: { cache: string }; status: { status: string }; data: { importedMessages: unknown[] } }
+            }
+            expect(first).toMatchObject({
+                success: true,
+                snapshot: {
+                    revision: 1,
+                    timing: { cache: 'miss' },
+                    status: { status: 'idle' },
+                    data: { importedMessages: [{ role: 'user' }] }
+                }
+            })
+
+            const warm = await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', { sessionId, limit: 50 }) as {
+                success: boolean
+                snapshot?: { revision: number; timing: { cache: string } }
+            }
+            expect(warm).toMatchObject({
+                success: true,
+                snapshot: { revision: first.snapshot?.revision, timing: { cache: 'hit' } }
+            })
+        } finally {
+            client.shutdown()
+        }
+    })
+
+    it('keeps an unobserved watcher update lightweight', () => {
+        const machine = makeMachine('machine-codex-lightweight-update')
+        const sessionId = '32345678-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(join(transcriptDir, `rollout-${sessionId}.jsonl`), JSON.stringify({
+            type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' }
+        }), 'utf8')
+        const client = new ApiMachineClient('cli-token', machine)
+        const emit = vi.fn()
+        const internals = client as unknown as {
+            socket: { emit: typeof emit; close: () => void }
+            nativeCodexTranscriptCache: { has: (id: string) => boolean }
+            reportNativeCodexSessionUpdated: (id: string, modifiedAt: number) => boolean
+        }
+        internals.socket = { emit, close: () => {} }
+
+        try {
+            expect(internals.nativeCodexTranscriptCache.has(sessionId)).toBe(false)
+            expect(internals.reportNativeCodexSessionUpdated(sessionId, 42)).toBe(true)
+            // Recent-window watcher events must not scan and cache every
+            // transcript just to produce status for a page nobody opened.
+            expect(internals.nativeCodexTranscriptCache.has(sessionId)).toBe(false)
+            expect(emit).toHaveBeenCalledWith('codex-session-updated', {
+                machineId: machine.id,
+                codexSessionId: sessionId,
+                modifiedAt: 42
+            })
+        } finally {
+            client.shutdown()
+        }
+    })
 })
 
 describe('ApiMachineClient runner metadata sync', () => {

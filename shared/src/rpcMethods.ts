@@ -10,6 +10,7 @@ export const RPC_METHODS = {
     StopRunner: 'stop-runner',
     ListCodexLocalSessions: 'listCodexLocalSessions',
     ReadCodexLocalSession: 'readCodexLocalSession',
+    ReadCodexLocalSessionSnapshot: 'readCodexLocalSessionSnapshot',
     GetCodexLocalSessionStatus: 'getCodexLocalSessionStatus',
     SendCodexLocalSessionMessage: 'sendCodexLocalSessionMessage',
     ListMachineDirectory: 'list-directory',

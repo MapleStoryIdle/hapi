@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
 import {
     findLocalCodexSession,
-    getLocalCodexSessionRunState,
+    isHapiInitiatedCodexSession,
+    type CodexLocalSessionSummary,
     type CodexLocalSessionQueuedMessage,
     type CodexLocalSessionStatusRpcResponse,
     type SendCodexLocalSessionMessageRpcResponse
@@ -14,6 +15,10 @@ import { hasCodexAppServerControlSocket } from './codexControlSocket'
 type NativeCodexChildProcess = Pick<ChildProcess, 'once' | 'stderr'>
 
 export type SpawnNativeCodexProcess = (args: string[], cwd: string) => NativeCodexChildProcess
+
+export type NativeCodexSessionLookup = {
+    getSummary: (sessionId: string) => CodexLocalSessionSummary | null
+}
 
 type ActiveSend = {
     startedAt: number
@@ -32,6 +37,10 @@ const MAX_FAILURE_MESSAGE_LENGTH = 400
 const MAX_NATIVE_QUEUE_LENGTH = 50
 const NATIVE_QUEUE_POLL_INTERVAL_MS = 1_000
 const NATIVE_QUEUE_RETRY_INTERVAL_MS = 5_000
+
+const defaultSessionLookup: NativeCodexSessionLookup = {
+    getSummary: findLocalCodexSession
+}
 
 function trimFailureMessage(value: string): string {
     const trimmed = value.trim()
@@ -70,7 +79,8 @@ export class NativeCodexSessionDirectSender {
         private readonly spawnProcess: SpawnNativeCodexProcess = defaultSpawnNativeCodexProcess,
         private readonly now: () => number = Date.now,
         private readonly queuePollIntervalMs: number = NATIVE_QUEUE_POLL_INTERVAL_MS,
-        private readonly hasControlSocket: () => boolean = hasCodexAppServerControlSocket
+        private readonly hasControlSocket: () => boolean = hasCodexAppServerControlSocket,
+        private readonly sessionLookup: NativeCodexSessionLookup = defaultSessionLookup
     ) {
     }
 
@@ -87,7 +97,28 @@ export class NativeCodexSessionDirectSender {
         this.queueTimers.clear()
     }
 
-    getStatus(sessionId: string): CodexLocalSessionStatusRpcResponse {
+    getStatus(
+        sessionId: string,
+        summary?: CodexLocalSessionSummary | null
+    ): CodexLocalSessionStatusRpcResponse {
+        return this.getStatusForSession(
+            sessionId,
+            summary === undefined ? this.sessionLookup.getSummary(sessionId) : summary
+        )
+    }
+
+    /** Let the watcher release a FIFO item as soon as the raw turn closes. */
+    notifyTranscriptChanged(sessionId: string): void {
+        if (this.activeSends.has(sessionId) || !this.queues.get(sessionId)?.length) {
+            return
+        }
+        this.scheduleQueuePump(sessionId, 0, { replacePending: true })
+    }
+
+    private getStatusForSession(
+        sessionId: string,
+        session: CodexLocalSessionSummary | null
+    ): CodexLocalSessionStatusRpcResponse {
         const active = this.activeSends.get(sessionId)
         const queuedMessages = this.getQueuedMessages(sessionId)
         if (queuedMessages.length > 0) {
@@ -102,8 +133,7 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
-        const state = getLocalCodexSessionRunState(sessionId)
-        if (state === null) {
+        if (!session) {
             return { success: false, error: 'Codex session not found' }
         }
 
@@ -113,7 +143,7 @@ export class NativeCodexSessionDirectSender {
         // begin between the child exit and this status read.
         return {
             success: true,
-            status: state,
+            status: session.runState ?? 'unknown',
             ...(recentFailure ? { lastError: recentFailure.message } : {}),
             queuedMessages
         }
@@ -125,13 +155,21 @@ export class NativeCodexSessionDirectSender {
             return { success: false, code: 'invalid_message', error: 'Message is required' }
         }
 
-        const status = this.getStatus(sessionId)
+        const session = this.sessionLookup.getSummary(sessionId)
+        const status = this.getStatusForSession(sessionId, session)
         if (status.success === false) {
             return { success: false, code: 'session_not_found', error: status.error }
         }
 
-        const session = findLocalCodexSession(sessionId)
-        const cwd = session?.cwd?.trim()
+        if (!session || isHapiInitiatedCodexSession(session)) {
+            return {
+                success: false,
+                code: 'not_native_session',
+                error: 'Only original native Codex sessions support direct delivery'
+            }
+        }
+
+        const cwd = session.cwd?.trim()
         if (!cwd || !this.isDirectory(cwd)) {
             return {
                 success: false,
@@ -287,7 +325,16 @@ export class NativeCodexSessionDirectSender {
         return [...(this.queues.get(sessionId) ?? [])]
     }
 
-    private scheduleQueuePump(sessionId: string, delay = this.queuePollIntervalMs): void {
+    private scheduleQueuePump(
+        sessionId: string,
+        delay = this.queuePollIntervalMs,
+        options: { replacePending?: boolean } = {}
+    ): void {
+        const existing = this.queueTimers.get(sessionId)
+        if (existing && options.replacePending) {
+            clearTimeout(existing)
+            this.queueTimers.delete(sessionId)
+        }
         if (this.queueTimers.has(sessionId) || !this.queues.get(sessionId)?.length) {
             return
         }
@@ -316,14 +363,13 @@ export class NativeCodexSessionDirectSender {
         // that the current turn is idle. This is important even when the
         // app-server control socket exists: submitting immediately would make
         // `codex queue` consume the local item before the user can see it.
-        const state = getLocalCodexSessionRunState(sessionId)
-        if (state !== 'idle') {
+        const session = this.sessionLookup.getSummary(sessionId)
+        if (session?.runState !== 'idle') {
             this.scheduleQueuePump(sessionId)
             return
         }
         const controlSocketAvailable = this.hasControlSocket()
 
-        const session = findLocalCodexSession(sessionId)
         const cwd = session?.cwd?.trim()
         if (!cwd || !this.isDirectory(cwd)) {
             this.recentFailures.set(sessionId, {

@@ -92,6 +92,12 @@ export type CodexLocalSessionData = {
     page: CodexLocalSessionPage
 }
 
+/** Runner-side read information used to identify cache effectiveness. */
+export type CodexLocalSessionReadTiming = {
+    cache: 'hit' | 'miss'
+    durationMs: number
+}
+
 export type CodexLocalSessionsRpcResponse = {
     success: true
     sessions: CodexLocalSessionSummary[]
@@ -129,6 +135,38 @@ export type CodexLocalSessionStatusRpcResponse = {
     error: string
 }
 
+export type CodexLocalSessionSnapshot = {
+    data: CodexLocalSessionData
+    status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
+    /** Monotonic for the lifetime of a runner process and native thread. */
+    revision: number
+    timing: CodexLocalSessionReadTiming
+}
+
+export type CodexLocalSessionSnapshotRpcResponse = {
+    success: true
+    snapshot: CodexLocalSessionSnapshot
+} | {
+    success: false
+    error: string
+}
+
+/**
+ * Bounded transcript state sent by the runner only for a browser that has
+ * already opened this native thread. It deliberately excludes the local
+ * transcript path and other runner-only metadata.
+ */
+export type CodexLocalSessionRealtimeSnapshot = {
+    revision: number
+    status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
+    timing: CodexLocalSessionReadTiming
+    /** Present after a transcript append; omitted for a status-only update. */
+    session?: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort'>
+    importedMessages?: CodexImportedMessageContent[]
+    startIndex?: number
+    page?: CodexLocalSessionPage
+}
+
 export type CodexLocalSessionQueuedMessage = {
     id: string
     text: string
@@ -148,7 +186,7 @@ export type SendCodexLocalSessionMessageRpcResponse = {
 } | {
     success: false
     error: string
-    code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'launch_failed' | 'queue_full'
+    code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'launch_failed' | 'queue_full' | 'not_native_session'
 }
 
 type CodexTranscriptFileCandidate = {
@@ -399,46 +437,6 @@ export function normalizeCodexCustomToolOutput(output: unknown): unknown {
 
     if (textParts.length === 0) return output
     return normalizeCodexCustomToolOutputEnvelope(textParts.join('\n'))
-}
-
-/** Attach transcript timestamps so imported tool cards show real durations. */
-function enrichImportedToolTiming(messages: CodexImportedMessageContent[]): CodexImportedMessageContent[] {
-    const startedAtByCallId = new Map<string, number>()
-
-    for (const message of messages) {
-        if (message.role !== 'agent' || message.createdAt === undefined) continue
-        const data = asRecord(message.content.data)
-        if (data?.type !== 'tool-call') continue
-        const callId = asString(data.callId)
-        if (callId && !startedAtByCallId.has(callId)) {
-            startedAtByCallId.set(callId, message.createdAt)
-        }
-    }
-
-    return messages.map((message) => {
-        if (message.role !== 'agent' || message.createdAt === undefined) return message
-        const data = asRecord(message.content.data)
-        if (!data) return message
-        const callId = asString(data.callId)
-        if (!callId) return message
-
-        const startedAt = startedAtByCallId.get(callId)
-        const nextData: Record<string, unknown> = { ...data }
-        if (data.type === 'tool-call') {
-            if (nextData.startedAt === undefined && nextData.started_at === undefined) {
-                nextData.startedAt = message.createdAt
-            }
-            return { ...message, content: { ...message.content, data: nextData } }
-        }
-        if (data.type !== 'tool-call-result') return message
-        if (nextData.completedAt === undefined && nextData.completed_at === undefined) {
-            nextData.completedAt = message.createdAt
-        }
-        if (nextData.durationMs === undefined && nextData.duration_ms === undefined && startedAt !== undefined) {
-            nextData.durationMs = Math.max(0, message.createdAt - startedAt)
-        }
-        return { ...message, content: { ...message.content, data: nextData } }
-    })
 }
 
 function extractCodexChangedTitle(record: Record<string, unknown>): string | null {
@@ -708,6 +706,60 @@ function getCodexTranscriptRunState(content: string): CodexLocalSessionRunState 
     return state
 }
 
+/**
+ * Summary fields that can be safely advanced from newly appended JSONL
+ * records. The cache keeps the previous values when a tail has no matching
+ * record, so a live append never needs to rescan the whole transcript.
+ */
+export type CodexTranscriptTailSummary = {
+    title?: string
+    lastUserMessage?: string
+    model?: string
+    modelReasoningEffort?: string
+    runState?: CodexLocalSessionRunState
+}
+
+export function getCodexTranscriptTailSummary(lines: readonly string[]): CodexTranscriptTailSummary {
+    const summary: CodexTranscriptTailSummary = {}
+    for (const line of lines) {
+        if (!line) continue
+        try {
+            const record = asRecord(JSON.parse(line))
+            if (!record) continue
+
+            const title = extractCodexChangedTitle(record)
+            if (title) summary.title = truncateText(title, 80)
+
+            const config = extractCodexSessionConfig(record)
+            if (config.model) summary.model = config.model
+            if (config.modelReasoningEffort) summary.modelReasoningEffort = config.modelReasoningEffort
+
+            if (record.type === 'response_item') {
+                const payload = asRecord(record.payload)
+                if (payload?.type === 'message' && payload.role === 'user') {
+                    const text = extractCodexText(payload.content)
+                    if (text && !shouldIgnoreSyntheticUserMessage(text)) {
+                        summary.lastUserMessage = truncateText(text, 140)
+                    }
+                }
+            }
+
+            if (record.type === 'event_msg') {
+                const payload = asRecord(record.payload)
+                const eventType = asString(payload?.type)
+                if (eventType === 'task_started') {
+                    summary.runState = 'processing'
+                } else if (eventType === 'task_complete' || eventType === 'turn_aborted') {
+                    summary.runState = 'idle'
+                }
+            }
+        } catch {
+            // A live writer can expose an incomplete final JSONL record.
+        }
+    }
+    return summary
+}
+
 function getCodexRecordTimestamp(record: Record<string, unknown>): number | undefined {
     const timestamp = asString(record.timestamp)
     if (!timestamp) return undefined
@@ -832,18 +884,95 @@ function getHeartbeatTimestamp(message: CodexImportedMessageContent): number | u
     return Number.isFinite(timestamp) ? timestamp : undefined
 }
 
-export function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): CodexTranscriptImportData | null {
-    let content: string
-    try {
-        content = readFileSync(summary.file, 'utf-8')
-    } catch {
-        return null
+/**
+ * Stateful JSONL import parser. Keeping its canonical-message and tool-call
+ * indexes lets a runner append only new transcript records without changing
+ * the shape of a full transcript import.
+ */
+export type CodexTranscriptImportAccumulator = {
+    messages: CodexImportedMessageContent[]
+    canonicalChatMessageIndexByRolloutKey: Map<string, number>
+    startedAtByCallId: Map<string, number>
+    toolResultIndexesByCallId: Map<string, number[]>
+    pendingHeartbeatTimestamp?: number
+}
+
+export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportAccumulator {
+    return {
+        messages: [],
+        canonicalChatMessageIndexByRolloutKey: new Map(),
+        startedAtByCallId: new Map(),
+        toolResultIndexesByCallId: new Map()
+    }
+}
+
+function getImportedToolData(message: CodexImportedMessageContent): Record<string, unknown> | null {
+    return message.role === 'agent' ? asRecord(message.content.data) : null
+}
+
+function applyImportedToolTiming(
+    message: CodexImportedMessageContent,
+    startedAt?: number
+): CodexImportedMessageContent {
+    if (message.role !== 'agent' || message.createdAt === undefined) return message
+    const data = getImportedToolData(message)
+    if (!data) return message
+    const nextData: Record<string, unknown> = { ...data }
+    if (data.type === 'tool-call') {
+        if (nextData.startedAt === undefined && nextData.started_at === undefined) {
+            nextData.startedAt = message.createdAt
+        }
+        return { ...message, content: { ...message.content, data: nextData } }
+    }
+    if (data.type !== 'tool-call-result') return message
+    if (nextData.completedAt === undefined && nextData.completed_at === undefined) {
+        nextData.completedAt = message.createdAt
+    }
+    if (nextData.durationMs === undefined && nextData.duration_ms === undefined && startedAt !== undefined) {
+        nextData.durationMs = Math.max(0, message.createdAt - startedAt)
+    }
+    return { ...message, content: { ...message.content, data: nextData } }
+}
+
+function addImportedMessage(
+    accumulator: CodexTranscriptImportAccumulator,
+    message: CodexImportedMessageContent
+): void {
+    const data = getImportedToolData(message)
+    const callId = data ? asString(data.callId) : null
+    if (data?.type === 'tool-call') {
+        if (callId && message.createdAt !== undefined && !accumulator.startedAtByCallId.has(callId)) {
+            accumulator.startedAtByCallId.set(callId, message.createdAt)
+            for (const index of accumulator.toolResultIndexesByCallId.get(callId) ?? []) {
+                accumulator.messages[index] = applyImportedToolTiming(accumulator.messages[index], message.createdAt)
+            }
+        }
+        accumulator.messages.push(applyImportedToolTiming(message))
+        return
     }
 
-    const messages: CodexImportedMessageContent[] = []
-    const canonicalChatMessageIndexByRolloutKey = new Map<string, number>()
-    let pendingHeartbeatTimestamp: number | undefined
-    for (const line of content.split(/\r?\n/).filter(Boolean)) {
+    if (data?.type === 'tool-call-result') {
+        const startedAt = callId ? accumulator.startedAtByCallId.get(callId) : undefined
+        const index = accumulator.messages.length
+        accumulator.messages.push(applyImportedToolTiming(message, startedAt))
+        if (callId) {
+            const indexes = accumulator.toolResultIndexesByCallId.get(callId) ?? []
+            indexes.push(index)
+            accumulator.toolResultIndexesByCallId.set(callId, indexes)
+        }
+        return
+    }
+
+    accumulator.messages.push(message)
+}
+
+/** Append complete JSONL records to an existing native transcript import. */
+export function appendCodexTranscriptImportLines(
+    accumulator: CodexTranscriptImportAccumulator,
+    lines: readonly string[]
+): void {
+    for (const line of lines) {
+        if (!line) continue
         try {
             const record = asRecord(JSON.parse(line))
             if (!record) continue
@@ -852,32 +981,45 @@ export function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary
 
             const heartbeatTimestamp = getHeartbeatTimestamp(message)
             if (message.role === 'user') {
-                pendingHeartbeatTimestamp = heartbeatTimestamp
+                accumulator.pendingHeartbeatTimestamp = heartbeatTimestamp
             }
             if (heartbeatTimestamp !== undefined) {
                 message = { ...message, createdAt: heartbeatTimestamp }
-            } else if (message.role === 'agent' && pendingHeartbeatTimestamp !== undefined
+            } else if (message.role === 'agent' && accumulator.pendingHeartbeatTimestamp !== undefined
                 && parseAutomationHeartbeatMessageContent(message.content)) {
-                message = { ...message, createdAt: pendingHeartbeatTimestamp }
+                message = { ...message, createdAt: accumulator.pendingHeartbeatTimestamp }
             }
 
             const fingerprint = importedChatMessageFingerprint(message)
             const timestamp = getCodexRolloutTimestampKey(asString(record.timestamp))
             const rolloutKey = fingerprint && timestamp ? `${timestamp}\u0000${fingerprint}` : null
             if (rolloutKey) {
-                const existingIndex = canonicalChatMessageIndexByRolloutKey.get(rolloutKey)
+                const existingIndex = accumulator.canonicalChatMessageIndexByRolloutKey.get(rolloutKey)
                 if (existingIndex !== undefined) {
-                    if (record.type === 'response_item') messages[existingIndex] = message
+                    if (record.type === 'response_item') accumulator.messages[existingIndex] = message
                     continue
                 }
-                canonicalChatMessageIndexByRolloutKey.set(rolloutKey, messages.length)
+                accumulator.canonicalChatMessageIndexByRolloutKey.set(rolloutKey, accumulator.messages.length)
             }
-            messages.push(message)
+            addImportedMessage(accumulator, message)
         } catch {
-            // Ignore malformed transcript records.
+            // Ignore malformed transcript records. A cache retains unfinished
+            // bytes and retries the final line on the next append.
         }
     }
-    return { ...summary, messages: enrichImportedToolTiming(messages) }
+}
+
+export function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): CodexTranscriptImportData | null {
+    let content: string
+    try {
+        content = readFileSync(summary.file, 'utf-8')
+    } catch {
+        return null
+    }
+
+    const accumulator = createCodexTranscriptImportAccumulator()
+    appendCodexTranscriptImportLines(accumulator, content.split(/\r?\n/).filter(Boolean))
+    return { ...summary, messages: accumulator.messages }
 }
 
 function getCodexTranscriptContextFromImportedMessages(importedMessages: readonly CodexImportedMessageContent[]): CodexLocalSessionContextMessage[] {
@@ -924,13 +1066,16 @@ function getCodexTranscriptMessagePage(
     }
 }
 
-export function getLocalCodexSessionData(
-    sessionId: string,
+/**
+ * Builds a page from already parsed transcript messages. The runner uses this
+ * to serve subsequent status/context reads from its native transcript cache
+ * without re-reading a JSONL file.
+ */
+export function createLocalCodexSessionData(
+    session: CodexLocalSessionSummary,
+    importedMessages: CodexImportedMessageContent[],
     options: CodexLocalSessionReadOptions = {}
-): CodexLocalSessionData | null {
-    const session = findLocalCodexSession(sessionId)
-    if (!session) return null
-    const importedMessages = parseCodexTranscriptImportData(session)?.messages ?? []
+): CodexLocalSessionData {
     const transcriptPage = getCodexTranscriptMessagePage(importedMessages, options)
     return {
         session,
@@ -939,4 +1084,14 @@ export function getLocalCodexSessionData(
         startIndex: transcriptPage.startIndex,
         page: transcriptPage.page
     }
+}
+
+export function getLocalCodexSessionData(
+    sessionId: string,
+    options: CodexLocalSessionReadOptions = {}
+): CodexLocalSessionData | null {
+    const session = findLocalCodexSession(sessionId)
+    if (!session) return null
+    const importedMessages = parseCodexTranscriptImportData(session)?.messages ?? []
+    return createLocalCodexSessionData(session, importedMessages, options)
 }

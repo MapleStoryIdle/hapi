@@ -71,6 +71,7 @@ import {
     type RpcOpenVikingStatusResponse,
     type RpcCursorModel,
     type RpcCodexLocalSessionDataResponse,
+    type RpcCodexLocalSessionSnapshotResponse,
     type RpcCodexLocalSessionStatusResponse,
     type RpcCodexLocalSessionsResponse,
     type RpcOpencodeModel,
@@ -104,6 +105,7 @@ export type {
     RpcOpenVikingStatusResponse,
     RpcCursorModel,
     RpcCodexLocalSessionDataResponse,
+    RpcCodexLocalSessionSnapshotResponse,
     RpcCodexLocalSessionStatusResponse,
     RpcCodexLocalSessionsResponse,
     RpcOpencodeModel,
@@ -2016,6 +2018,14 @@ export class SyncEngine {
         options?: { before?: number; limit?: number }
     ): Promise<RpcCodexLocalSessionDataResponse> {
         return await this.rpcGateway.readCodexLocalSession(machineId, sessionId, options)
+    }
+
+    async readCodexLocalSessionSnapshot(
+        machineId: string,
+        sessionId: string,
+        options?: { before?: number; limit?: number }
+    ): Promise<RpcCodexLocalSessionSnapshotResponse> {
+        return await this.rpcGateway.readCodexLocalSessionSnapshot(machineId, sessionId, options)
     }
 
     async getCodexLocalSessionStatus(

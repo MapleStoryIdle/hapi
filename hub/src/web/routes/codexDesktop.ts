@@ -10,6 +10,8 @@ import {
     normalizeCodexCustomToolInput,
     normalizeCodexCustomToolName,
     normalizeCodexCustomToolOutput,
+    type CodexLocalSessionData as RunnerCodexLocalSessionData,
+    type CodexLocalSessionReadTiming,
     type CodexLocalSessionStatusRpcResponse,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
@@ -104,6 +106,12 @@ type CodexLocalSessionContextResponse = {
     }
 }
 
+type CodexLocalSessionSnapshotResponse = CodexLocalSessionContextResponse & {
+    status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
+    revision: number
+    timing: CodexLocalSessionReadTiming
+}
+
 type ForkCodexLocalSessionResponse = {
     type: 'success'
     sessionId: string
@@ -117,7 +125,6 @@ type ForkCodexLocalSessionResponse = {
 type DirectCodexLocalSessionTarget = {
     type: 'success'
     machine: Machine
-    session: CodexLocalSessionSummary
 } | {
     type: 'error'
     status: 404 | 409 | 502 | 503
@@ -951,6 +958,27 @@ function createCodexTranscriptContextMessages(
     }))
 }
 
+function createRunnerCodexSessionContextResponse(
+    data: RunnerCodexLocalSessionData,
+    revision: number
+): CodexLocalSessionContextResponse & { revision: number } {
+    const { session, importedMessages } = data
+    return {
+        success: true,
+        session: {
+            id: session.id,
+            title: session.title,
+            cwd: session.cwd,
+            modifiedAt: session.modifiedAt,
+            model: session.model,
+            modelReasoningEffort: session.modelReasoningEffort
+        },
+        messages: createCodexTranscriptContextMessages(session.id, importedMessages, data.startIndex, session.modifiedAt),
+        page: data.page,
+        revision
+    }
+}
+
 function paginateCodexTranscriptMessages(
     messages: CodexImportedMessageContent[],
     limit: number,
@@ -1084,12 +1112,11 @@ function machineCanUseLocalCodexSession(machine: Machine): boolean {
     return typeof machine.metadata?.codexHome === 'string'
 }
 
-async function resolveDirectCodexLocalSessionTarget(options: {
+function resolveDirectCodexLocalSessionTarget(options: {
     engine: SyncEngine | null
     namespace: string
     machineId: string
-    sessionId: string
-}): Promise<DirectCodexLocalSessionTarget> {
+}): DirectCodexLocalSessionTarget {
     const engine = options.engine
     if (!engine) {
         return { type: 'error', status: 503, message: 'HAPI hub is not connected' }
@@ -1098,34 +1125,14 @@ async function resolveDirectCodexLocalSessionTarget(options: {
     if (!machine) {
         return { type: 'error', status: 409, message: 'Selected runner is not online' }
     }
-
-    let localSession
-    try {
-        localSession = await engine.readCodexLocalSession(machine.id, options.sessionId, { limit: 1 })
-    } catch (error) {
-        return {
-            type: 'error',
-            status: 502,
-            message: error instanceof Error ? error.message : 'Failed to read Codex session on the selected runner'
-        }
-    }
-    if (localSession.success !== true) {
-        return { type: 'error', status: 404, message: localSession.error || 'Codex session not found' }
-    }
-
-    const session = localSession.data.session
-    if (isHapiInitiatedCodexSession(session)) {
-        return { type: 'error', status: 409, message: 'Only original native Codex sessions support direct delivery' }
-    }
-    const cwd = session.cwd?.trim()
-    if (!cwd || !machineCanUseLocalCodexSession(machine)) {
+    if (!machineCanUseLocalCodexSession(machine)) {
         return {
             type: 'error',
             status: 409,
             message: 'Selected runner does not advertise a Codex transcript home'
         }
     }
-    return { type: 'success', machine, session }
+    return { type: 'success', machine }
 }
 
 function resolveImportMachineId(
@@ -2230,11 +2237,10 @@ export function createCodexDesktopRoutes(options: {
         }
 
         const engine = options.getSyncEngine()
-        const target = await resolveDirectCodexLocalSessionTarget({
+        const target = resolveDirectCodexLocalSessionTarget({
             engine,
             namespace: c.get('namespace'),
-            machineId,
-            sessionId: c.req.param('id')
+            machineId
         })
         if (target.type === 'error') {
             return c.json({ success: false, error: target.message }, target.status)
@@ -2254,6 +2260,51 @@ export function createCodexDesktopRoutes(options: {
         }
     })
 
+    app.get('/codex/sessions/:id/snapshot', async (c) => {
+        const limit = parseCodexContextPageLimit(c.req.query('limit'))
+        if (limit === null) {
+            return c.json({ success: false, error: 'limit must be an integer between 1 and 100' }, 400)
+        }
+        const before = parseCodexContextBefore(c.req.query('before'))
+        if (before === null) {
+            return c.json({ success: false, error: 'before must be a non-negative integer' }, 400)
+        }
+        const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
+        if (!machineId) {
+            return c.json({ success: false, error: 'machineId is required' }, 400)
+        }
+
+        const engine = options.getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'HAPI hub is not connected' }, 503)
+        }
+        if (!getOnlineCodexRunner(engine, c.get('namespace'), machineId)) {
+            return c.json({ success: false, error: 'Selected runner is not online' }, 409)
+        }
+
+        try {
+            const result = await engine.readCodexLocalSessionSnapshot(machineId, c.req.param('id'), {
+                limit,
+                ...(before === undefined ? {} : { before })
+            })
+            if (result.success !== true) {
+                return c.json({ success: false, error: result.error || 'Codex session not found' }, 404)
+            }
+            const response: CodexLocalSessionSnapshotResponse = {
+                ...createRunnerCodexSessionContextResponse(result.snapshot.data, result.snapshot.revision),
+                status: result.snapshot.status,
+                timing: result.snapshot.timing
+            }
+            c.header('Server-Timing', `native-cache;desc=${result.snapshot.timing.cache};dur=${result.snapshot.timing.durationMs}`)
+            return c.json(response)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to read native Codex session snapshot'
+            }, 502)
+        }
+    })
+
     app.post('/codex/sessions/:id/messages', async (c) => {
         const request = parseSendCodexLocalSessionMessageRequest(await c.req.json().catch(() => null))
         if (!request) {
@@ -2261,11 +2312,10 @@ export function createCodexDesktopRoutes(options: {
         }
 
         const engine = options.getSyncEngine()
-        const target = await resolveDirectCodexLocalSessionTarget({
+        const target = resolveDirectCodexLocalSessionTarget({
             engine,
             namespace: c.get('namespace'),
-            machineId: request.machineId,
-            sessionId: c.req.param('id')
+            machineId: request.machineId
         })
         if (target.type === 'error') {
             return c.json({ success: false, error: target.message }, target.status)

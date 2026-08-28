@@ -2,6 +2,7 @@ import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type {
     CodexLocalSessionDataRpcResponse,
+    CodexLocalSessionSnapshotRpcResponse,
     CodexLocalSessionStatusRpcResponse,
     CodexLocalSessionsRpcResponse,
     SendCodexLocalSessionMessageRpcResponse
@@ -87,6 +88,7 @@ export type RpcOpenVikingContextListResponse = OpenVikingContextListResponse
 export type RpcOpenVikingContextReadResponse = OpenVikingContextReadResponse
 export type RpcCodexLocalSessionsResponse = CodexLocalSessionsRpcResponse
 export type RpcCodexLocalSessionDataResponse = CodexLocalSessionDataRpcResponse
+export type RpcCodexLocalSessionSnapshotResponse = CodexLocalSessionSnapshotRpcResponse
 export type RpcCodexLocalSessionStatusResponse = CodexLocalSessionStatusRpcResponse
 export type RpcSendCodexLocalSessionMessageResponse = SendCodexLocalSessionMessageRpcResponse
 export type RpcForkCodexSideSessionResponse =
@@ -260,6 +262,17 @@ export class RpcGateway {
             sessionId,
             ...options
         }) as RpcCodexLocalSessionDataResponse
+    }
+
+    async readCodexLocalSessionSnapshot(
+        machineId: string,
+        sessionId: string,
+        options?: { before?: number; limit?: number }
+    ): Promise<RpcCodexLocalSessionSnapshotResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ReadCodexLocalSessionSnapshot, {
+            sessionId,
+            ...options
+        }) as RpcCodexLocalSessionSnapshotResponse
     }
 
     async getCodexLocalSessionStatus(

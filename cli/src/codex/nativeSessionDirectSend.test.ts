@@ -77,6 +77,75 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
+    it('uses one cached lookup and lets only original native threads receive direct prompts', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-cache-workspace-'))
+        const sessionId = '11345678-1234-4234-8234-123456789012'
+        const lookup = vi.fn(() => ({
+            id: sessionId,
+            title: 'HAPI-created thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 0,
+            originator: 'hapi-codex-client',
+            runState: 'idle' as const
+        }))
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const sender = new NativeCodexSessionDirectSender(spawn, Date.now, 1_000, () => false, {
+            getSummary: lookup
+        })
+
+        try {
+            expect(sender.send(sessionId, 'do not forward')).toEqual({
+                success: false,
+                code: 'not_native_session',
+                error: 'Only original native Codex sessions support direct delivery'
+            })
+            expect(lookup).toHaveBeenCalledTimes(1)
+            expect(spawn).not.toHaveBeenCalled()
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('releases a queued prompt immediately when the transcript watcher sees idle', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-watcher-workspace-'))
+        const sessionId = '21345678-1234-4234-8234-123456789012'
+        let runState: 'idle' | 'processing' = 'processing'
+        const lookup = vi.fn(() => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 0,
+            runState
+        }))
+        const child = new FakeChildProcess()
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
+        const sender = new NativeCodexSessionDirectSender(spawn, () => 321, 1_000, () => false, {
+            getSummary: lookup
+        })
+
+        try {
+            expect(sender.send(sessionId, 'release as soon as idle')).toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            runState = 'idle'
+            sender.notifyTranscriptChanged(sessionId)
+
+            await new Promise((resolve) => setTimeout(resolve, 20))
+            expect(spawn).toHaveBeenCalledWith(
+                ['exec', 'resume', '--json', sessionId, 'release as soon as idle'],
+                cwd
+            )
+            child.emit('exit', 0, null)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('notifies the runner when direct-send lifecycle state changes', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-direct-notify-'))
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-notify-workspace-'))

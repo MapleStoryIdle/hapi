@@ -527,7 +527,9 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         type: z.literal('codex-session-updated'),
         /** Native Codex thread id; deliberately separate from HAPI sessionId. */
         codexSessionId: z.string(),
-        modifiedAt: z.number().optional()
+        modifiedAt: z.number().optional(),
+        /** Bounded runner snapshot; older runners emit an invalidation only. */
+        snapshot: z.unknown().optional()
     }),
     SessionEventBaseSchema.extend({
         type: z.literal('heartbeat'),

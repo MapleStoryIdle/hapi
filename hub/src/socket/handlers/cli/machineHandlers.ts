@@ -34,7 +34,8 @@ const machineUpdateStateSchema = z.object({
 const nativeCodexSessionUpdatedSchema = z.object({
     machineId: z.string().min(1),
     codexSessionId: z.string().min(1),
-    modifiedAt: z.number().finite().optional()
+    modifiedAt: z.number().finite().optional(),
+    snapshot: z.unknown().optional()
 }).strict()
 
 export type MachineHandlersDeps = {
@@ -210,6 +211,7 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
             machineId: parsed.data.machineId,
             codexSessionId: parsed.data.codexSessionId,
             ...(parsed.data.modifiedAt === undefined ? {} : { modifiedAt: parsed.data.modifiedAt }),
+            ...(parsed.data.snapshot === undefined ? {} : { snapshot: parsed.data.snapshot }),
             namespace
         })
     })

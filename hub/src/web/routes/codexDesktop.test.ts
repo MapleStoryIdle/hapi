@@ -714,6 +714,58 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('returns context and lifecycle from one selected-runner snapshot RPC', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '13131313-1313-4313-8313-131313131313'
+        const data = createRunnerLocalSessionData(sessionId)
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const snapshotCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            readCodexLocalSessionSnapshot: async (...args: unknown[]) => {
+                snapshotCalls.push(args)
+                return {
+                    success: true as const,
+                    snapshot: {
+                        data,
+                        status: {
+                            success: true as const,
+                            status: 'processing' as const,
+                            queuedMessages: [{ id: 'queued-1', text: 'next', queuedAt: 42 }]
+                        },
+                        revision: 7,
+                        timing: { cache: 'hit' as const, durationMs: 3 }
+                    }
+                }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${sessionId}/snapshot?machineId=mac-runner&limit=50`)
+            expect(response.status).toBe(200)
+            expect(response.headers.get('server-timing')).toBe('native-cache;desc=hit;dur=3')
+            expect(await response.json()).toMatchObject({
+                success: true,
+                revision: 7,
+                timing: { cache: 'hit', durationMs: 3 },
+                status: {
+                    success: true,
+                    status: 'processing',
+                    queuedMessages: [{ text: 'next' }]
+                },
+                session: { id: sessionId },
+                messages: [
+                    { id: `codex-local:${sessionId}:0`, content: data.importedMessages[0] },
+                    { id: `codex-local:${sessionId}:1`, content: data.importedMessages[1] }
+                ]
+            })
+            expect(snapshotCalls).toEqual([['mac-runner', sessionId, { limit: 50 }]])
+        } finally {
+            store.close()
+        }
+    })
+
     it('starts a direct message on the exact runner-local native Codex thread', async () => {
         const store = new Store(':memory:')
         const sessionId = '56565656-5656-4656-8656-565656565656'
@@ -791,24 +843,20 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
-    it('does not direct-send a HAPI-initiated Codex thread', async () => {
+    it('lets the owning runner reject a HAPI-initiated Codex thread without a preflight transcript read', async () => {
         const store = new Store(':memory:')
         const sessionId = '57575757-5757-4757-8757-575757575757'
-        const data = {
-            ...createRunnerLocalSessionData(sessionId),
-            session: {
-                ...createRunnerLocalSessionData(sessionId).session,
-                originator: 'hapi-codex-client'
-            }
-        }
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
         let sendCount = 0
         const engine = {
             ...createImportSyncEngine(store, [machine]),
-            readCodexLocalSession: async () => ({ success: true as const, data }),
             sendCodexLocalSessionMessage: async () => {
                 sendCount += 1
-                return { success: true as const, status: 'processing' as const, startedAt: 123 }
+                return {
+                    success: false as const,
+                    code: 'not_native_session' as const,
+                    error: 'Only original native Codex sessions support direct delivery'
+                }
             }
         } as unknown as SyncEngine
         const app = createRoutesAppWithEngine('default', store, engine)
@@ -824,7 +872,7 @@ describe('Codex Desktop import routes', () => {
                 success: false,
                 error: expect.stringContaining('original native')
             })
-            expect(sendCount).toBe(0)
+            expect(sendCount).toBe(1)
         } finally {
             store.close()
         }

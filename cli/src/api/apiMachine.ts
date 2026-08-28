@@ -11,16 +11,17 @@ import { configuration } from '@/configuration'
 import type { BinaryFileReadRequest, BinaryFileReadResponse, ClientToServerEvents, ExternalCodexRequestPayload, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
 import type { MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
 import {
-    findLocalCodexSession,
-    getLocalCodexSessionData,
     listLocalCodexSessions,
     type CodexLocalSessionDataRpcResponse,
+    type CodexLocalSessionRealtimeSnapshot,
+    type CodexLocalSessionSnapshotRpcResponse,
     type CodexLocalSessionStatusRpcResponse,
     type CodexLocalSessionsRpcResponse,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import { NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
+import { NativeCodexTranscriptCache, type NativeCodexTranscriptRead } from '@/codex/nativeTranscriptCache'
 import { NativeCodexSessionWatcher } from '@/codex/nativeSessionWatcher'
 import type { RunnerState, Machine, MachineMetadata } from './types'
 import { RunnerStateSchema, MachineMetadataSchema } from './types'
@@ -71,6 +72,46 @@ interface GetCodexLocalSessionStatusRequest {
 interface SendCodexLocalSessionMessageRequest {
     sessionId?: unknown
     message?: unknown
+}
+
+const MAX_NATIVE_CODEX_REALTIME_SNAPSHOT_BYTES = 96 * 1024
+
+function buildNativeCodexRealtimeSnapshot(
+    read: NativeCodexTranscriptRead,
+    status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>,
+    includeTranscript: boolean
+): CodexLocalSessionRealtimeSnapshot {
+    const snapshot: CodexLocalSessionRealtimeSnapshot = {
+        revision: read.revision,
+        status,
+        timing: read.timing
+    }
+    if (!includeTranscript) {
+        return snapshot
+    }
+
+    const { data } = read
+    const withTranscript: CodexLocalSessionRealtimeSnapshot = {
+        ...snapshot,
+        session: {
+            id: data.session.id,
+            title: data.session.title,
+            cwd: data.session.cwd,
+            modifiedAt: data.session.modifiedAt,
+            model: data.session.model,
+            modelReasoningEffort: data.session.modelReasoningEffort
+        },
+        importedMessages: data.importedMessages,
+        startIndex: data.startIndex,
+        page: data.page
+    }
+    try {
+        return Buffer.byteLength(JSON.stringify(withTranscript), 'utf8') <= MAX_NATIVE_CODEX_REALTIME_SNAPSHOT_BYTES
+            ? withTranscript
+            : snapshot
+    } catch {
+        return snapshot
+    }
 }
 
 function normalizeWorkspaceRoots(paths?: string[]): string[] | undefined {
@@ -144,10 +185,13 @@ export class ApiMachineClient {
     private keepAliveInterval: NodeJS.Timeout | null = null
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
     private rpcHandlerManager: RpcHandlerManager
-    private readonly nativeCodexSessionDirectSender = new NativeCodexSessionDirectSender()
+    private readonly nativeCodexTranscriptCache = new NativeCodexTranscriptCache()
+    private readonly nativeCodexSessionDirectSender: NativeCodexSessionDirectSender
     private readonly nativeCodexSessionWatcher = new NativeCodexSessionWatcher({
         onChange: ({ codexSessionId, modifiedAt }) => {
-            this.reportNativeCodexSessionUpdated(codexSessionId, modifiedAt)
+            const read = this.nativeCodexTranscriptCache.refreshCached(codexSessionId, { limit: 50 })
+            this.nativeCodexSessionDirectSender.notifyTranscriptChanged(codexSessionId)
+            this.reportNativeCodexSessionUpdated(codexSessionId, modifiedAt, read)
         }
     })
 
@@ -163,6 +207,13 @@ export class ApiMachineClient {
         // canonical, symlink-resolved locations. Falls back to lexical
         // resolution if realpath fails so we still get protection.
         this.normalizedWorkspaceRoots = normalizeWorkspaceRoots(workspaceRoots)
+        this.nativeCodexSessionDirectSender = new NativeCodexSessionDirectSender(
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            { getSummary: (sessionId) => this.nativeCodexTranscriptCache.getSummary(sessionId) }
+        )
 
         this.rpcHandlerManager = new RpcHandlerManager({
             scopePrefix: this.machine.id,
@@ -207,11 +258,50 @@ export class ApiMachineClient {
                 if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100)) {
                     return { success: false, error: 'limit must be an integer between 1 and 100' }
                 }
-                this.observeNativeCodexSession(sessionId)
-                const data = getLocalCodexSessionData(sessionId, { before, limit })
-                return data
-                    ? { success: true, data }
+                const read = this.nativeCodexTranscriptCache.read(sessionId, { before, limit })
+                if (read) {
+                    this.observeNativeCodexSession(sessionId)
+                }
+                return read
+                    ? { success: true, data: read.data }
                     : { success: false, error: 'Codex session not found' }
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<ReadCodexLocalSessionRequest, CodexLocalSessionSnapshotRpcResponse>(
+            RPC_METHODS.ReadCodexLocalSessionSnapshot,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                if (!sessionId) {
+                    return { success: false, error: 'sessionId is required' }
+                }
+                const before = params?.before
+                const limit = params?.limit
+                if (before !== undefined && (typeof before !== 'number' || !Number.isInteger(before) || before < 0)) {
+                    return { success: false, error: 'before must be a non-negative integer' }
+                }
+                if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100)) {
+                    return { success: false, error: 'limit must be an integer between 1 and 100' }
+                }
+
+                const read = this.nativeCodexTranscriptCache.read(sessionId, { before, limit })
+                if (!read) {
+                    return { success: false, error: 'Codex session not found' }
+                }
+                this.observeNativeCodexSession(sessionId)
+                const status = this.nativeCodexSessionDirectSender.getStatus(sessionId, read.data.session)
+                if (status.success !== true) {
+                    return { success: false, error: status.error }
+                }
+                return {
+                    success: true,
+                    snapshot: {
+                        data: read.data,
+                        status,
+                        revision: read.revision,
+                        timing: read.timing
+                    }
+                }
             }
         )
 
@@ -533,22 +623,43 @@ export class ApiMachineClient {
     }
 
     private observeNativeCodexSession(sessionId: string): void {
-        const session = findLocalCodexSession(sessionId)
+        const session = this.nativeCodexTranscriptCache.getSummary(sessionId)
         if (!session) {
             return
         }
         this.nativeCodexSessionWatcher.observeTranscript(session.file, session.id)
     }
 
-    private reportNativeCodexSessionUpdated(codexSessionId: string, modifiedAt = Date.now()): boolean {
+    private reportNativeCodexSessionUpdated(
+        codexSessionId: string,
+        modifiedAt = Date.now(),
+        transcriptRead?: NativeCodexTranscriptRead | null
+    ): boolean {
         const socket = this.socket as Socket<ServerToClientEvents, ClientToServerEvents> | undefined
         if (!socket) {
             return false
         }
+        const read = transcriptRead ?? this.nativeCodexTranscriptCache.readCached(codexSessionId, { limit: 50 })
+        // The watcher also monitors recently active local transcripts that no
+        // browser has opened. Do not turn those lightweight invalidations
+        // into a full cross-directory session lookup merely to construct a
+        // status payload; an open detail already has a hot cache entry.
+        const status = read
+            ? this.nativeCodexSessionDirectSender.getStatus(codexSessionId, read.data.session)
+            : null
+        // A direct-send lifecycle callback can race a JSONL append before the
+        // file watcher fires. If that opportunistic read advanced the cache,
+        // carry its page too; a status-only payload must never skip a newer
+        // transcript revision in the browser.
+        const includeTranscript = transcriptRead !== undefined || read?.timing.cache === 'miss'
+        const snapshot = read && status?.success === true
+            ? buildNativeCodexRealtimeSnapshot(read, status, includeTranscript)
+            : undefined
         socket.emit('codex-session-updated', {
             machineId: this.machine.id,
             codexSessionId,
-            modifiedAt
+            modifiedAt,
+            ...(snapshot === undefined ? {} : { snapshot })
         })
         return true
     }

@@ -5,6 +5,16 @@ export { SessionEndReasonSchema, type SessionEndReason } from './schemas'
 
 export type SocketErrorReason = 'namespace-missing' | 'access-denied' | 'not-found'
 
+type NativeCodexRealtimeSocketSnapshot = {
+    revision: number
+    status: unknown
+    timing: { cache: 'hit' | 'miss'; durationMs: number }
+    session?: unknown
+    importedMessages?: unknown[]
+    startIndex?: number
+    page?: unknown
+}
+
 /**
  * A pending request reported by a Codex session that was launched outside of
  * HAPI.  The runner forwards only routing metadata; command contents and
@@ -310,6 +320,7 @@ export interface ClientToServerEvents {
         machineId: string
         codexSessionId: string
         modifiedAt?: number
+        snapshot?: NativeCodexRealtimeSocketSnapshot
     }) => void
     'rpc-register': (data: { method: string }) => void
     'rpc-unregister': (data: { method: string }) => void

@@ -32,6 +32,7 @@ export const queryKeys = {
     sessionOpencodeModels: (sessionId: string) => ['session-opencode-models', sessionId] as const,
     sessionOpencodeReasoningEffortOptions: (sessionId: string) => ['session-opencode-reasoning-effort-options', sessionId] as const,
     codexSessionContext: (machineId: string, sessionId: string) => ['codex-session-context', machineId, sessionId] as const,
+    codexSessionSnapshot: (machineId: string, sessionId: string) => ['codex-session-snapshot', machineId, sessionId] as const,
     codexSessionStatus: (machineId: string, sessionId: string) => ['codex-session-status', machineId, sessionId] as const,
     machineOpencodeModelsForCwd: (machineId: string, cwd: string) => ['machine-opencode-models', machineId, cwd] as const,
     skills: (sessionId: string) => ['skills', sessionId] as const,
