@@ -15,6 +15,7 @@ export type NewSessionReasoningEffort = CodexReasoningEffort
 export type ClaudeEffort = 'auto' | ClaudeEffortLevel
 
 export const NEW_SESSION_AGENT_OPTIONS = ['claude', 'codex'] as const satisfies readonly AgentType[]
+export const DEFAULT_NEW_SESSION_AGENT = 'codex' satisfies AgentType
 
 function modelPresetOptions<TModel extends string>(
     presets: readonly TModel[],

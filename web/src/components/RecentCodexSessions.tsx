@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, ChevronDown, Folder, FolderOpen, History, RefreshCw, Sparkles } from 'lucide-react'
+import { Activity, ChevronDown, Folder, FolderOpen, History, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import type { ApiClient } from '@/api/client'
 import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import { formatRelativeTime } from '@/lib/relativeTime'
@@ -219,36 +219,67 @@ function DirectoryGroupHeader(props: {
     sessionCount: number
     collapsed: boolean
     onToggle: () => void
+    onNewSessionInDirectory?: (directory: string) => void
+    isNewSessionPending?: boolean
     t: (key: string, params?: Record<string, string | number>) => string
 }) {
-    const { directory, label, sessionCount, collapsed, onToggle, t } = props
+    const {
+        directory,
+        label,
+        sessionCount,
+        collapsed,
+        onToggle,
+        onNewSessionInDirectory,
+        isNewSessionPending = false,
+        t
+    } = props
     const FolderIcon = collapsed ? Folder : FolderOpen
     const actionLabel = collapsed
         ? t('recentCodex.directory.expand', { directory: label })
         : t('recentCodex.directory.collapse', { directory: label })
+    const canCreateSession = Boolean(directory && onNewSessionInDirectory)
 
     return (
-        <button
-            type="button"
-            onClick={onToggle}
-            className="group/project flex min-h-12 w-full min-w-0 cursor-pointer select-none items-center gap-2 rounded-2xl px-2.5 py-2.5 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation"
-            title={directory ?? undefined}
-            aria-label={actionLabel}
-            aria-expanded={!collapsed}
-            data-directory-toggle={getDirectoryKey(directory)}
-        >
-            <FolderIcon className="h-[22px] w-[22px] shrink-0 text-[var(--app-fg)]" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate text-base font-semibold leading-5 text-[var(--app-fg)]">
-                {label}
-            </span>
-            <span className="shrink-0 text-[11px] font-medium tabular-nums text-[var(--app-hint)]">
-                {sessionCount}
-            </span>
-            <ChevronDown
-                className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`}
-                aria-hidden="true"
-            />
-        </button>
+        <div className="group/project flex min-h-12 w-full min-w-0 items-center gap-1 rounded-2xl px-2.5 py-0.5 transition-colors hover:bg-[var(--app-subtle-bg)]">
+            <button
+                type="button"
+                onClick={onToggle}
+                className="flex min-h-11 min-w-0 flex-1 cursor-pointer select-none items-center gap-2 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation"
+                title={directory ?? undefined}
+                aria-label={actionLabel}
+                aria-expanded={!collapsed}
+                data-directory-toggle={getDirectoryKey(directory)}
+            >
+                <FolderIcon className="h-[22px] w-[22px] shrink-0 text-[var(--app-fg)]" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate text-base font-semibold leading-5 text-[var(--app-fg)]">
+                    {label}
+                </span>
+                <span className="shrink-0 text-[11px] font-medium tabular-nums text-[var(--app-hint)]">
+                    {sessionCount}
+                </span>
+                <ChevronDown
+                    className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`}
+                    aria-hidden="true"
+                />
+            </button>
+            {canCreateSession ? (
+                <button
+                    type="button"
+                    onClick={() => onNewSessionInDirectory?.(directory!)}
+                    disabled={isNewSessionPending}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation disabled:cursor-not-allowed disabled:opacity-45"
+                    title={t('sessions.group.new')}
+                    aria-label={t('sessions.group.new')}
+                    aria-busy={isNewSessionPending || undefined}
+                >
+                    {isNewSessionPending ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                        <Plus className="h-5 w-5" aria-hidden="true" />
+                    )}
+                </button>
+            ) : null}
+        </div>
     )
 }
 
@@ -319,6 +350,10 @@ export function RecentCodexSessions(props: {
     realtimeAvailable?: boolean
     /** Optional empty-state copy for filtered views such as running. */
     emptyMessage?: string
+    /** Create a fresh HAPI session using a known session directory. */
+    onNewSessionInDirectory?: (directory: string) => void
+    /** Disable directory creation actions while a session is being created. */
+    isNewSessionPending?: boolean
 }) {
     const { t } = useTranslation()
     const nativeRealtime = useNativeCodexRealtime()
@@ -606,6 +641,8 @@ export function RecentCodexSessions(props: {
                                     sessionCount={group.sessions.length}
                                     collapsed={collapsed}
                                     onToggle={() => toggleDirectory(group.directory)}
+                                    onNewSessionInDirectory={props.onNewSessionInDirectory}
+                                    isNewSessionPending={props.isNewSessionPending}
                                     t={t}
                                 />
                                 {!collapsed ? (
@@ -653,6 +690,8 @@ export function RecentCodexSessions(props: {
                                     sessionCount={group.sessions.length}
                                     collapsed={collapsed}
                                     onToggle={() => toggleDirectory(group.directory)}
+                                    onNewSessionInDirectory={props.onNewSessionInDirectory}
+                                    isNewSessionPending={props.isNewSessionPending}
                                     t={t}
                                 />
                                 {!collapsed ? (

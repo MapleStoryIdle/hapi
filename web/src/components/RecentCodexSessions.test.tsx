@@ -194,6 +194,54 @@ describe('RecentCodexSessions', () => {
         expect(api.forkCodexSession).not.toHaveBeenCalled()
     })
 
+    it('creates a new session in the directory without toggling the group', async () => {
+        const api = createApi()
+        const onNewSessionInDirectory = vi.fn()
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    onOpen={vi.fn()}
+                    onNewSessionInDirectory={onNewSessionInDirectory}
+                />
+            </I18nProvider>
+        )
+
+        await screen.findByText('Recent Codex task')
+        fireEvent.click(screen.getByRole('button', { name: 'New session in this directory' }))
+
+        expect(onNewSessionInDirectory).toHaveBeenCalledWith('/workspace/project')
+        expect(screen.getByRole('button', { name: 'Collapse project' })).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('does not offer quick creation for sessions without a directory', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({
+            success: true as const,
+            sessions: [{
+                id: 'codex-thread-no-directory',
+                title: 'No directory task',
+                cwd: null,
+                file: '/tmp/rollout.jsonl',
+                modifiedAt: Date.now()
+            }]
+        }))
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    onOpen={vi.fn()}
+                    onNewSessionInDirectory={vi.fn()}
+                />
+            </I18nProvider>
+        )
+
+        await screen.findByText('No directory task')
+        expect(screen.queryByRole('button', { name: 'New session in this directory' })).toBeNull()
+    })
+
     it('refreshes the matching runner list from a native transcript invalidation', async () => {
         const api = createApi()
         render(

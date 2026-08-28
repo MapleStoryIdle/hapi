@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
     loadPreferredAgent,
+    loadDefaultNewSessionAgentConfig,
     loadPreferredModel,
     loadPreferredReasoningEffort,
     loadPreferredYoloMode,
@@ -54,6 +55,28 @@ describe('NewSession preferences', () => {
         expect(localStorage.getItem('hapi:newSession:model:codex')).toBe('gpt-5.5')
         expect(localStorage.getItem('hapi:newSession:reasoningEffort:codex')).toBe('high')
         expect(localStorage.getItem('hapi:newSession:yolo')).toBe('true')
+    })
+
+    it('loads the default agent configuration for quick session creation', () => {
+        localStorage.setItem('hapi:newSession:model:codex', 'gpt-5.5')
+        localStorage.setItem('hapi:newSession:reasoningEffort:codex', 'xhigh')
+        localStorage.setItem('hapi:newSession:yolo', 'true')
+
+        expect(loadDefaultNewSessionAgentConfig()).toEqual({
+            agent: 'codex',
+            model: 'gpt-5.5',
+            modelReasoningEffort: 'xhigh',
+            yolo: true
+        })
+    })
+
+    it('omits automatic model settings from the quick session configuration', () => {
+        expect(loadDefaultNewSessionAgentConfig()).toEqual({
+            agent: 'codex',
+            model: undefined,
+            modelReasoningEffort: undefined,
+            yolo: false
+        })
     })
 
     it('ignores an unknown cached reasoning effort for the selected agent', () => {

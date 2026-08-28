@@ -363,6 +363,8 @@ export default {
   'newSession.yolo.short': 'Enable',
   'newSession.create': 'Create',
   'newSession.creating': 'Creating…',
+  'newSession.quickCreate.failed.title': 'Could not create session',
+  'newSession.quickCreate.failed.body': 'Could not create a session in this directory.',
 
   'session.directoryMissingSimple': 'Directory does not exist. Creating the session will create it automatically.',
   'session.directoryMissingSimpleConfirm': 'Directory does not exist. Click again to create it automatically.',

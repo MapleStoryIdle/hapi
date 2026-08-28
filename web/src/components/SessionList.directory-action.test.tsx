@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
+import type { ApiClient } from '@/api/client'
 import { I18nProvider } from '@/lib/i18n-context'
 import { SessionList } from './SessionList'
 
@@ -98,6 +99,69 @@ describe('SessionList directory action', () => {
         )
 
         expect(screen.queryByRole('button', { name: 'New session in this directory' })).toBeNull()
+    })
+
+    it('shows a fetched Git branch below the larger project name', async () => {
+        const getGitStatus = vi.fn(async () => ({
+            success: true,
+            stdout: '# branch.oid abc123\n# branch.head feature/list-branch\n',
+            stderr: '',
+            exitCode: 0
+        }))
+        const session = makeSession({
+            id: 'session-git',
+            active: true,
+            metadata: { path: '/work/hapi', name: 'List task', flavor: 'codex' }
+        })
+
+        renderWithProviders(
+            <SessionList
+                sessions={[session]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={{ getGitStatus } as unknown as ApiClient}
+            />
+        )
+
+        const projectName = screen.getByTestId('session-project-name')
+        expect(projectName).toHaveTextContent('hapi')
+        expect(projectName).toHaveClass('text-[17px]')
+        expect(await screen.findByTestId('session-project-branch')).toHaveTextContent('feature/list-branch')
+        expect(getGitStatus).toHaveBeenCalledWith('session-git')
+    })
+
+    it('does not add a branch subtitle when the directory is not a Git project', async () => {
+        const getGitStatus = vi.fn(async () => ({
+            success: false,
+            error: 'not a git repository',
+            stderr: 'not a git repository',
+            exitCode: 128
+        }))
+        const session = makeSession({
+            id: 'session-not-git',
+            active: true,
+            metadata: { path: '/work/plain-directory', name: 'Plain task', flavor: 'codex' }
+        })
+
+        renderWithProviders(
+            <SessionList
+                sessions={[session]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={{ getGitStatus } as unknown as ApiClient}
+            />
+        )
+
+        await waitFor(() => expect(getGitStatus).toHaveBeenCalledWith('session-not-git'))
+        expect(screen.queryByTestId('session-project-branch')).toBeNull()
     })
 })
 

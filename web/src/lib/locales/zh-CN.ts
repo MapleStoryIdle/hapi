@@ -367,6 +367,8 @@ export default {
   'newSession.yolo.short': '启用',
   'newSession.create': '创建',
   'newSession.creating': '创建中…',
+  'newSession.quickCreate.failed.title': '无法创建会话',
+  'newSession.quickCreate.failed.body': '无法在此目录创建会话。',
 
   'session.directoryMissingSimple': '目录不存在，创建会话时将自动创建。',
   'session.directoryMissingSimpleConfirm': '目录不存在。再次点击按钮将自动新建该目录。',

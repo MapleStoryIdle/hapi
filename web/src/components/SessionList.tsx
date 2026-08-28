@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { GitBranch } from 'lucide-react'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -21,6 +22,8 @@ import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds 
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
 import { formatReopenError } from '@/lib/reopenError'
 import { formatRelativeTime } from '@/lib/relativeTime'
+import { getDetachedBranchLabel } from '@/lib/files-i18n'
+import { useGitBranch } from '@/hooks/queries/useGitBranch'
 
 type SessionGroup = {
     key: string
@@ -402,6 +405,47 @@ function groupByMachine(
         if (a.hasActiveSession !== b.hasActiveSession) return a.hasActiveSession ? -1 : 1
         return b.latestUpdatedAt - a.latestUpdatedAt
     })
+}
+
+function getProjectGitSessionId(group: SessionGroup): string | null {
+    if (group.directory === 'Other') {
+        return null
+    }
+
+    // The group is already ordered with a live session first. Git RPCs are
+    // session-scoped, so use the first row that has a concrete runner path.
+    return group.sessions.find((session) => Boolean(session.metadata?.path?.trim()))?.id ?? null
+}
+
+function ProjectGroupHeading(props: {
+    name: string
+    sessionId: string | null
+    api: ApiClient | null
+}) {
+    const { t } = useTranslation()
+    const { branch } = useGitBranch(props.api, props.sessionId)
+    const branchLabel = branch ? getDetachedBranchLabel(branch, t) : null
+
+    return (
+        <span className="min-w-0 flex-1">
+            <span
+                data-testid="session-project-name"
+                className="block truncate text-[17px] font-semibold leading-6 text-[var(--app-fg)]"
+            >
+                {props.name}
+            </span>
+            {branchLabel ? (
+                <span
+                    data-testid="session-project-branch"
+                    className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] leading-4 text-[var(--app-hint)]"
+                    title={branchLabel}
+                >
+                    <GitBranch className="h-3 w-3 shrink-0" strokeWidth={1.8} aria-hidden="true" />
+                    <span className="truncate">{branchLabel}</span>
+                </span>
+            ) : null}
+        </span>
+    )
 }
 
 function CopyPathButton({ path, className }: { path: string; className?: string }) {
@@ -1209,6 +1253,7 @@ export const SessionList = memo(function SessionList(props: {
                                     {mg.projectGroups.map((group) => {
                                         const isCollapsed = isGroupCollapsed(group)
                                         const canStartInGroupDirectory = group.directory !== 'Other'
+                                        const gitSessionId = getProjectGitSessionId(group)
                                         return (
                                             <section key={group.key} className="min-w-0 py-1">
                                                 <div
@@ -1217,11 +1262,11 @@ export const SessionList = memo(function SessionList(props: {
                                                     title={group.directory}
                                                 >
                                                     <FolderIcon open={!isCollapsed} className="h-5 w-5 shrink-0 text-[var(--app-fg)]" />
-                                                    <span className="min-w-0 flex-1">
-                                                        <span className="block truncate text-[15px] font-semibold leading-5 text-[var(--app-fg)]">
-                                                            {group.displayName}
-                                                        </span>
-                                                    </span>
+                                                    <ProjectGroupHeading
+                                                        name={group.displayName}
+                                                        sessionId={gitSessionId}
+                                                        api={api}
+                                                    />
                                                     <span className="shrink-0 text-[11px] font-medium tabular-nums text-[var(--app-hint)]">
                                                         {group.sessions.length}
                                                     </span>

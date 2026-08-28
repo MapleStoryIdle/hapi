@@ -24,6 +24,7 @@ import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
 import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
+import { useRecentPaths } from '@/hooks/useRecentPaths'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useSession } from '@/hooks/queries/useSession'
@@ -31,6 +32,7 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
 import { useSendMessage, type SendErrorInfo } from '@/hooks/mutations/useSendMessage'
+import { useSpawnSession } from '@/hooks/mutations/useSpawnSession'
 import { ApiError } from '@/api/client'
 import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
@@ -45,6 +47,7 @@ import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
 import { presentMachineHealth, formatMachineUptimeSeconds } from '@/lib/machineHealth'
 import { getLanNetworkInterfaces } from '@/lib/networkInterfaces'
+import { loadDefaultNewSessionAgentConfig } from '@/components/NewSession/preferences'
 
 const SessionChat = lazy(() => import('@/components/SessionChat').then((module) => ({ default: module.SessionChat })))
 const NewSession = lazy(() => import('@/components/NewSession').then((module) => ({ default: module.NewSession })))
@@ -499,6 +502,8 @@ function SessionsPage() {
     const { t } = useTranslation()
     const { addToast } = useToast()
     const { sessions, isLoading, error, refetch } = useSessions(api)
+    const { spawnSession, isPending: isQuickSessionPending } = useSpawnSession(api)
+    const { addRecentPath, setLastUsedMachineId } = useRecentPaths()
     const { machines } = useMachines(api, true)
     const [isSyncingCodexSession, setIsSyncingCodexSession] = useState(false)
     const [codexSessions, setCodexSessions] = useState<CodexLocalSessionSummary[]>([])
@@ -623,6 +628,37 @@ function SessionsPage() {
             search: selectedRunnerMachine ? { machineId: selectedRunnerMachine.id } : {}
         })
     }, [navigate, selectedRunnerMachine])
+
+    const createSessionInDirectory = useCallback(async (directory: string) => {
+        if (!selectedRunnerMachine || isQuickSessionPending) return
+
+        try {
+            const result = await spawnSession({
+                machineId: selectedRunnerMachine.id,
+                directory,
+                ...loadDefaultNewSessionAgentConfig()
+            })
+            if (result.type !== 'success') {
+                throw new Error(result.message)
+            }
+
+            setLastUsedMachineId(selectedRunnerMachine.id)
+            addRecentPath(selectedRunnerMachine.id, directory)
+            navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId: result.sessionId }
+            })
+        } catch (error) {
+            addToast({
+                title: t('newSession.quickCreate.failed.title'),
+                body: error instanceof Error && error.message
+                    ? error.message
+                    : t('newSession.quickCreate.failed.body'),
+                sessionId: '',
+                url: ''
+            })
+        }
+    }, [addRecentPath, addToast, isQuickSessionPending, navigate, selectedRunnerMachine, setLastUsedMachineId, spawnSession, t])
 
     // Top-edge controls use the touch-safe activation path shared by the
     // session header. WebKit can otherwise drop a compatibility click while
@@ -1075,6 +1111,8 @@ function SessionsPage() {
                             hideHeader
                             recentOnly
                             limit={100}
+                            onNewSessionInDirectory={selectedRunnerMachine ? createSessionInDirectory : undefined}
+                            isNewSessionPending={isQuickSessionPending}
                             realtimeAvailable={selectedRunnerMachine?.active === true
                                 && selectedRunnerMachine.metadata?.nativeCodexRealtime === true}
                         />

@@ -1,5 +1,6 @@
 import {
     CODEX_REASONING_EFFORT_OPTIONS,
+    DEFAULT_NEW_SESSION_AGENT,
     NEW_SESSION_AGENT_OPTIONS,
     OPENCODE_REASONING_EFFORT_OPTIONS,
     type AgentType,
@@ -10,6 +11,13 @@ const AGENT_STORAGE_KEY = 'hapi:newSession:agent'
 const YOLO_STORAGE_KEY = 'hapi:newSession:yolo'
 const MODEL_STORAGE_PREFIX = 'hapi:newSession:model:'
 const REASONING_EFFORT_STORAGE_PREFIX = 'hapi:newSession:reasoningEffort:'
+
+export type DefaultNewSessionAgentConfig = {
+    agent: AgentType
+    model?: string
+    modelReasoningEffort?: NewSessionReasoningEffort
+    yolo: boolean
+}
 
 // New-session picker intentionally exposes only the primary local coding agents.
 const VALID_AGENTS = NEW_SESSION_AGENT_OPTIONS
@@ -106,5 +114,22 @@ export function savePreferredYoloMode(enabled: boolean): void {
         localStorage.setItem(YOLO_STORAGE_KEY, enabled ? 'true' : 'false')
     } catch {
         // Ignore storage errors
+    }
+}
+
+/**
+ * Settings used by a one-tap session creation. Keep this aligned with the
+ * default agent selected by the full new-session form.
+ */
+export function loadDefaultNewSessionAgentConfig(): DefaultNewSessionAgentConfig {
+    const agent = DEFAULT_NEW_SESSION_AGENT
+    const model = loadPreferredModel(agent)
+    const modelReasoningEffort = loadPreferredReasoningEffort(agent)
+
+    return {
+        agent,
+        model: model === 'auto' ? undefined : model,
+        modelReasoningEffort: modelReasoningEffort === 'default' ? undefined : modelReasoningEffort,
+        yolo: loadPreferredYoloMode()
     }
 }

@@ -31,6 +31,7 @@ import {
 } from './newSessionFormDraft'
 import {
     CODEX_REASONING_EFFORT_OPTIONS,
+    DEFAULT_NEW_SESSION_AGENT,
     type AgentType,
     type ClaudeEffort,
     type NewSessionReasoningEffort,
@@ -72,7 +73,7 @@ export function NewSession(props: {
     const { sessions } = useSessions(props.api)
     const isFormDisabled = Boolean(isPending || props.isLoading)
     const { getRecentPaths, addRecentPath, getLastUsedMachineId, setLastUsedMachineId } = useRecentPaths()
-    const initialAgent = 'codex' satisfies AgentType
+    const initialAgent = DEFAULT_NEW_SESSION_AGENT
 
     const [machineId, setMachineId] = useState<string | null>(props.initialMachineId ?? null)
     const [directory, setDirectory] = useState(props.initialDirectory ?? '')
