@@ -231,7 +231,11 @@ export class NativeCodexSessionDirectSender {
     ): SendCodexLocalSessionMessageRpcResponse {
         const startedAt = this.now()
 
-        const args = ['exec', 'resume', '--json', sessionId, message]
+        // A native transcript may live outside a Git repository. We already
+        // verify that its original workspace exists above, so do not let
+        // Codex's interactive-project guard turn a valid direct message into
+        // a child-process failure.
+        const args = ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, message]
         let child: NativeCodexChildProcess
         try {
             child = this.spawnProcess(args, cwd)

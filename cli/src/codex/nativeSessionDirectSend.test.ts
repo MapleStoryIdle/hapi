@@ -59,7 +59,7 @@ describe('NativeCodexSessionDirectSender', () => {
                 startedAt: 123
             })
             expect(spawn).toHaveBeenCalledWith(
-                ['exec', 'resume', '--json', sessionId, 'Continue this work'],
+                ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, 'Continue this work'],
                 cwd
             )
             expect(sender.getStatus(sessionId)).toEqual({
@@ -106,7 +106,7 @@ describe('NativeCodexSessionDirectSender', () => {
                 status: 'processing'
             })
             expect(spawn).toHaveBeenCalledWith(
-                ['exec', 'resume', '--json', sessionId, 'do not use the global queue'],
+                ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, 'do not use the global queue'],
                 cwd
             )
             child.emit('exit', 0, null)
@@ -177,7 +177,7 @@ describe('NativeCodexSessionDirectSender', () => {
 
             await new Promise((resolve) => setTimeout(resolve, 20))
             expect(spawn).toHaveBeenCalledWith(
-                ['exec', 'resume', '--json', sessionId, 'release as soon as idle'],
+                ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, 'release as soon as idle'],
                 cwd
             )
             child.emit('exit', 0, null)
@@ -269,7 +269,7 @@ describe('NativeCodexSessionDirectSender', () => {
             await new Promise((resolve) => setTimeout(resolve, 40))
 
             expect(spawn).toHaveBeenCalledTimes(1)
-            expect(spawn).toHaveBeenNthCalledWith(1, ['exec', 'resume', '--json', sessionId, 'first'], cwd)
+            expect(spawn).toHaveBeenNthCalledWith(1, ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, 'first'], cwd)
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
                 status: 'processing',
@@ -281,7 +281,7 @@ describe('NativeCodexSessionDirectSender', () => {
             await new Promise((resolve) => setTimeout(resolve, 40))
 
             expect(spawn).toHaveBeenCalledTimes(2)
-            expect(spawn).toHaveBeenNthCalledWith(2, ['exec', 'resume', '--json', sessionId, 'second'], cwd)
+            expect(spawn).toHaveBeenNthCalledWith(2, ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, 'second'], cwd)
             expect(sender.getStatus(sessionId)).toMatchObject({ success: true, status: 'processing', queuedMessages: [] })
             secondChild.emit('exit', 0, null)
         } finally {
