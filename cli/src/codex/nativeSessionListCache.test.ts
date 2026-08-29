@@ -98,4 +98,27 @@ describe('NativeCodexSessionListCache', () => {
         // Existing rows stay parsed; only the new transcript needs a read.
         expect(readSummary).toHaveBeenCalledTimes(2)
     })
+
+    it('uses a resolved Codex thread title without reparsing the transcript', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-native-codex-list-cache-'))
+        cleanupPaths.push(root)
+        const sessionId = '55555555-5555-4555-8555-555555555555'
+        const file = join(root, `rollout-${sessionId}.jsonl`)
+        writeFileSync(file, '{"type":"session_meta"}\n', 'utf8')
+        const resolveTitles = vi.fn(() => new Map([[sessionId, 'Codex own title']]))
+        const cache = new NativeCodexSessionListCache({
+            listFiles: () => [candidate(file)],
+            readSummary: (filePath, modifiedAt) => ({
+                id: sessionId,
+                title: 'Transcript fallback title',
+                cwd: '/work/project',
+                file: filePath,
+                modifiedAt: modifiedAt ?? 0
+            }),
+            resolveTitles
+        })
+
+        expect(cache.list(1)).toMatchObject([{ id: sessionId, title: 'Codex own title' }])
+        expect(resolveTitles).toHaveBeenCalledWith([sessionId], { forceRefresh: undefined })
+    })
 })

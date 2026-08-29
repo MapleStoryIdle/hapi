@@ -17,6 +17,7 @@ type CachedSummary = {
 export type NativeCodexSessionListCacheOptions = {
     listFiles?: () => CodexTranscriptFileCandidate[]
     readSummary?: (filePath: string, modifiedAt?: number, size?: number) => CodexLocalSessionSummary | null
+    resolveTitles?: (sessionIds: readonly string[], options: { forceRefresh?: boolean }) => ReadonlyMap<string, string>
 }
 
 /**
@@ -53,7 +54,7 @@ export class NativeCodexSessionListCache {
             sessions.push(session)
             if (sessions.length >= limit) break
         }
-        return sessions
+        return this.applyCodexTitles(sessions, cacheOptions.forceRefresh)
     }
 
     /** Apply one watcher invalidation without rereading unrelated transcripts. */
@@ -81,7 +82,7 @@ export class NativeCodexSessionListCache {
             size: candidate.size,
             session
         })
-        return session
+        return session ? this.applyCodexTitles([session])[0] ?? session : null
     }
 
     private ensureInitialized(): void {
@@ -126,6 +127,22 @@ export class NativeCodexSessionListCache {
             candidate.modifiedAt,
             candidate.size
         )
+    }
+
+    private applyCodexTitles(
+        sessions: CodexLocalSessionSummary[],
+        forceRefresh?: boolean
+    ): CodexLocalSessionSummary[] {
+        const titles = this.options.resolveTitles?.(
+            sessions.map((session) => session.id),
+            { forceRefresh }
+        )
+        if (!titles?.size) return sessions
+
+        return sessions.map((session) => {
+            const title = titles.get(session.id)
+            return title && title !== session.title ? { ...session, title } : session
+        })
     }
 
     private getListFiles(): CodexTranscriptFileCandidate[] {

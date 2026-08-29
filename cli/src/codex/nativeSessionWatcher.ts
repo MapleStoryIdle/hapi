@@ -1,8 +1,10 @@
 import { readdirSync, statSync, type Dirent } from 'node:fs'
-import { homedir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { startFileWatcher as defaultStartFileWatcher } from '@/modules/watcher/startFileWatcher'
 import { logger } from '@/ui/logger'
+import { getCodexHomePath } from './codexHome'
+
+export { getCodexHomePath } from './codexHome'
 
 const DEFAULT_DISCOVERY_INTERVAL_MS = 5_000
 const DEFAULT_DEBOUNCE_MS = 120
@@ -47,16 +49,6 @@ type PendingChange = {
     filePath: string
     modifiedAt: number
     timer: ReturnType<typeof setTimeout>
-}
-
-function resolveLocalPath(pathValue: string): string {
-    return isAbsolute(pathValue) ? pathValue : resolve(process.cwd(), pathValue)
-}
-
-export function getCodexHomePath(): string {
-    const configured = process.env.CODEX_HOME?.trim()
-    if (!configured) return join(homedir(), '.codex')
-    return resolveLocalPath(configured.replace(/^~(?=$|[\\/])/, homedir()))
 }
 
 export function getCodexSessionIdFromTranscriptPath(filePath: string): string | null {

@@ -23,6 +23,7 @@ import {
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import { NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
 import { NativeCodexSessionListCache } from '@/codex/nativeSessionListCache'
+import { NativeCodexSessionTitleCache } from '@/codex/nativeSessionTitleCache'
 import { NativeCodexTranscriptCache, type NativeCodexTranscriptRead } from '@/codex/nativeTranscriptCache'
 import { NativeCodexSessionWatcher } from '@/codex/nativeSessionWatcher'
 import type { RunnerState, Machine, MachineMetadata } from './types'
@@ -198,8 +199,11 @@ export class ApiMachineClient {
     private keepAliveInterval: NodeJS.Timeout | null = null
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
     private rpcHandlerManager: RpcHandlerManager
+    private readonly nativeCodexSessionTitleCache = new NativeCodexSessionTitleCache()
     private readonly nativeCodexTranscriptCache = new NativeCodexTranscriptCache()
-    private readonly nativeCodexSessionListCache = new NativeCodexSessionListCache()
+    private readonly nativeCodexSessionListCache = new NativeCodexSessionListCache({
+        resolveTitles: (sessionIds, options) => this.nativeCodexSessionTitleCache.resolve(sessionIds, options)
+    })
     private readonly nativeCodexSessionDirectSender: NativeCodexSessionDirectSender
     private readonly nativeCodexSessionWatcher = new NativeCodexSessionWatcher({
         onChange: ({ codexSessionId, filePath, modifiedAt }) => {
@@ -281,7 +285,8 @@ export class ApiMachineClient {
                 if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100)) {
                     return { success: false, error: 'limit must be an integer between 1 and 100' }
                 }
-                const read = this.nativeCodexTranscriptCache.read(sessionId, { before, limit })
+                const cachedRead = this.nativeCodexTranscriptCache.read(sessionId, { before, limit })
+                const read = cachedRead ? this.withNativeCodexTitle(cachedRead) : null
                 if (read) {
                     this.observeNativeCodexSession(sessionId)
                 }
@@ -307,7 +312,8 @@ export class ApiMachineClient {
                     return { success: false, error: 'limit must be an integer between 1 and 100' }
                 }
 
-                const read = this.nativeCodexTranscriptCache.read(sessionId, { before, limit })
+                const cachedRead = this.nativeCodexTranscriptCache.read(sessionId, { before, limit })
+                const read = cachedRead ? this.withNativeCodexTitle(cachedRead) : null
                 if (!read) {
                     return { success: false, error: 'Codex session not found' }
                 }
@@ -679,7 +685,8 @@ export class ApiMachineClient {
         if (!socket) {
             return false
         }
-        const read = transcriptRead ?? this.nativeCodexTranscriptCache.readCached(codexSessionId, { limit: 50 })
+        const cachedRead = transcriptRead ?? this.nativeCodexTranscriptCache.readCached(codexSessionId, { limit: 50 })
+        const read = cachedRead ? this.withNativeCodexTitle(cachedRead) : null
         // The watcher also monitors recently active local transcripts that no
         // browser has opened. Do not turn those lightweight invalidations
         // into a full cross-directory session lookup merely to construct a
@@ -704,6 +711,22 @@ export class ApiMachineClient {
             ...(snapshot === undefined ? {} : { snapshot })
         })
         return true
+    }
+
+    private withNativeCodexTitle(read: NativeCodexTranscriptRead): NativeCodexTranscriptRead {
+        const title = this.nativeCodexSessionTitleCache.resolve([read.data.session.id]).get(read.data.session.id)
+        if (!title || title === read.data.session.title) return read
+
+        return {
+            ...read,
+            data: {
+                ...read.data,
+                session: {
+                    ...read.data.session,
+                    title
+                }
+            }
+        }
     }
 
     connect(): void {

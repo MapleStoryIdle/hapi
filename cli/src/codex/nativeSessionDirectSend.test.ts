@@ -202,7 +202,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('keeps native messages visible until the owner can deliver them after idle', async () => {
+    it('hands messages to the app-server immediately while the native turn is running', async () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-direct-owner-queue-'))
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-owner-workspace-'))
         const sessionId = '72345678-1234-4234-8234-123456789012'
@@ -216,27 +216,20 @@ describe('NativeCodexSessionDirectSender', () => {
         const sender = new NativeCodexSessionDirectSender(spawn, () => 789, 1, () => true)
 
         try {
-            expect(sender.send(sessionId, 'first')).toMatchObject({
+            expect(sender.send(sessionId, 'first')).toEqual({
                 success: true,
-                status: 'queued',
-                queuePosition: 1,
-                queuedMessages: [{ text: 'first' }]
+                status: 'processing',
+                startedAt: 789
             })
             expect(sender.send(sessionId, 'second')).toMatchObject({
                 success: true,
                 status: 'queued',
-                queuePosition: 2,
-                queuedMessages: [{ text: 'first' }, { text: 'second' }]
+                queuePosition: 1,
+                queuedMessages: [{ text: 'second' }]
             })
 
-            // A running native turn must leave both prompts in the visible
-            // FIFO; the app-server command is not issued early.
-            await new Promise((resolve) => setTimeout(resolve, 20))
-            expect(spawn).not.toHaveBeenCalled()
-
-            // Once the transcript closes the native turn, the owner receives
-            // the first prompt and the second one remains visible until then.
-            writeTranscript({ codexHome, sessionId, cwd, events: ['task_started', 'task_complete'] })
+            // The native turn is still processing, but its app-server owns
+            // the writer lock and accepts the first prompt straight away.
             await new Promise((resolve) => setTimeout(resolve, 20))
             expect(spawn).toHaveBeenNthCalledWith(
                 1,
@@ -249,6 +242,8 @@ describe('NativeCodexSessionDirectSender', () => {
                 queuedMessages: [{ text: 'second' }]
             })
 
+            // Once the short queue command acknowledges, the runner releases
+            // the next local FIFO item without waiting for task_complete.
             firstChild.emit('exit', 0, null)
             await new Promise((resolve) => setTimeout(resolve, 20))
             expect(spawn).toHaveBeenNthCalledWith(

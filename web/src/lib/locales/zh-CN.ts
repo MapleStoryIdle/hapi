@@ -140,7 +140,7 @@ export default {
   'recentCodex.fork.failed': 'Fork Codex 会话失败',
   'recentCodex.runnerRequired': '请先选择在线 runner。',
   'recentCodex.direct.checking': '正在确认原生会话状态…',
-  'recentCodex.direct.processing': '原生 Codex 正在运行；现在发送会进入队列，空闲后自动投递。',
+  'recentCodex.direct.processing': '原生 Codex 正在运行；新消息已安全排队。',
   'recentCodex.direct.unknown': '无法确认原生会话是否空闲，已锁定直发。',
   'recentCodex.direct.statusFailed': '无法获取原生会话状态，已锁定直发。',
   'recentCodex.direct.error.queueFull': '原生会话队列已满，请等当前处理完成后再试。',

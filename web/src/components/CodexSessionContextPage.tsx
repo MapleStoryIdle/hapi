@@ -32,6 +32,13 @@ import { reduceChatBlocks } from '@/chat/reducer'
 import { buildSessionDetailTimeline } from '@/chat/sessionDetailTimeline'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
 import { makeClientSideId } from '@/lib/messages'
+import {
+    getNativeCodexDirectMessageScopeKey,
+    readNativeCodexDirectMessageEchoes,
+    updateNativeCodexDirectMessageEchoes,
+    type NativeCodexDirectMessageEcho,
+    type NativeCodexDirectMessageScope
+} from '@/lib/native-codex-direct-messages'
 import { queryKeys } from '@/lib/query-keys'
 import { useTranslation } from '@/lib/use-translation'
 import {
@@ -279,17 +286,7 @@ export function mergeCodexContextMessages(
  * no HAPI message row or localId for the transcript to echo back. Keep a
  * small client-side copy until a *new* matching transcript record arrives.
  */
-export type NativeDirectMessageEcho = {
-    id: string
-    text: string
-    createdAt: number
-    status: 'sending' | 'queued'
-    queueId: string | null
-    /** Transcript records present when this prompt was submitted. */
-    observedTranscriptMessageIds: readonly string[]
-    /** Highest transcript position present when this prompt was submitted. */
-    observedThroughPosition: number | null
-}
+export type NativeDirectMessageEcho = NativeCodexDirectMessageEcho
 
 function getNativeUserMessageText(message: CodexLocalSessionContextMessage): string | null {
     if (message.content.role !== 'user') return null
@@ -423,8 +420,8 @@ function NativeCodexThread(props: {
         session: nativeSession,
         blocks,
         // Processing a native turn does not disable the composer: the runner
-        // accepts the prompt into its FIFO queue. Only status uncertainty or
-        // an in-flight HTTP request is represented by composerDisabled.
+        // accepts the prompt into its FIFO queue. Only an unavailable or
+        // unknown native session state disables sending.
         isSending: props.composerDisabled,
         // This is a read-only transcript adapter. A native turn is owned by
         // the external Codex process, so exposing assistant-ui's cancel/stop
@@ -561,9 +558,9 @@ function NativeCodexThread(props: {
 
 /**
  * Renders a local Codex CLI transcript through the normal session thread.
- * Text is delivered to the original native thread. When its lifecycle is
- * processing, the runner keeps the prompt in a FIFO queue; Fork remains
- * available in the header once the native thread is idle.
+ * Text is delivered to the original native thread. Its owning app-server
+ * accepts prompts while a turn is running; HAPI keeps only a small FIFO for
+ * the hand-off command and retains the visible receipt across page exits.
  */
 export function CodexSessionContextPage(props: {
     api: ApiClient
@@ -631,12 +628,23 @@ export function CodexSessionContextPage(props: {
         isFetching: contextQuery.isFetching,
         refetch: contextQuery.refetch
     }
+    const pageScope = `${props.machineId ?? ''}:${props.sessionId}`
+    const nativeDirectMessageScope = useMemo<NativeCodexDirectMessageScope>(() => ({
+        machineId: props.machineId ?? '',
+        sessionId: props.sessionId
+    }), [props.machineId, props.sessionId])
+    const nativeDirectMessageScopeKey = getNativeCodexDirectMessageScopeKey(nativeDirectMessageScope)
     const [olderPages, setOlderPages] = useState<CodexLocalSessionContextResponse[]>([])
     const [isLoadingMore, setIsLoadingMore] = useState(false)
-    const [isSendingDirect, setIsSendingDirect] = useState(false)
+    const [pendingDirectSendCount, setPendingDirectSendCount] = useState(0)
     const [isRecoveringConnection, setIsRecoveringConnection] = useState(false)
     const [nativeQueuedMessages, setNativeQueuedMessages] = useState<CodexLocalSessionQueuedMessage[]>([])
-    const [nativeDirectMessageEchoes, setNativeDirectMessageEchoes] = useState<NativeDirectMessageEcho[]>([])
+    const [nativeDirectMessageEchoScopeKey, setNativeDirectMessageEchoScopeKey] = useState(nativeDirectMessageScopeKey)
+    const [nativeDirectMessageEchoes, setNativeDirectMessageEchoes] = useState<NativeDirectMessageEcho[]>(() => (
+        nativeDirectMessageScope.machineId
+            ? readNativeCodexDirectMessageEchoes(nativeDirectMessageScope)
+            : []
+    ))
     const [nativeForceScrollToken, setNativeForceScrollToken] = useState(0)
     const [directSendError, setDirectSendError] = useState<ComposerSendError | null>(null)
     const [dismissedRunnerError, setDismissedRunnerError] = useState<string | null>(null)
@@ -644,21 +652,51 @@ export function CodexSessionContextPage(props: {
     const [outlineOpen, setOutlineOpen] = useState(false)
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState({ x: 0, y: 0 })
-    const pageScope = `${props.machineId ?? ''}:${props.sessionId}`
     const pageScopeRef = useRef(pageScope)
+    const nativeDirectMessageScopeKeyRef = useRef(nativeDirectMessageScopeKey)
+    const nativeDirectMessagePageMountedRef = useRef(true)
     const connectionRecoveryTokenRef = useRef(0)
     const foregroundRefreshAtRef = useRef(0)
     const nativeEventRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
     const menuId = useId()
     pageScopeRef.current = pageScope
+    nativeDirectMessageScopeKeyRef.current = nativeDirectMessageScopeKey
+
+    useEffect(() => {
+        nativeDirectMessagePageMountedRef.current = true
+        return () => {
+            nativeDirectMessagePageMountedRef.current = false
+        }
+    }, [])
+
+    const updateNativeDirectMessageEchoes = useCallback((
+        scope: NativeCodexDirectMessageScope,
+        updater: (messages: NativeDirectMessageEcho[]) => readonly NativeDirectMessageEcho[]
+    ): NativeDirectMessageEcho[] => {
+        if (!scope.machineId) return []
+        const next = updateNativeCodexDirectMessageEchoes(scope, updater)
+        const scopeKey = getNativeCodexDirectMessageScopeKey(scope)
+        if (
+            nativeDirectMessagePageMountedRef.current
+            && nativeDirectMessageScopeKeyRef.current === scopeKey
+        ) {
+            setNativeDirectMessageEchoScopeKey(scopeKey)
+            setNativeDirectMessageEchoes(next)
+        }
+        return next
+    }, [])
 
     useEffect(() => {
         setOlderPages([])
         setIsLoadingMore(false)
-        setIsSendingDirect(false)
+        setPendingDirectSendCount(0)
         setNativeQueuedMessages([])
-        setNativeDirectMessageEchoes([])
+        const restoredEchoes = nativeDirectMessageScope.machineId
+            ? readNativeCodexDirectMessageEchoes(nativeDirectMessageScope)
+            : []
+        setNativeDirectMessageEchoScopeKey(nativeDirectMessageScopeKey)
+        setNativeDirectMessageEchoes(restoredEchoes)
         setNativeForceScrollToken(0)
         setIsRecoveringConnection(false)
         setDirectSendError(null)
@@ -668,7 +706,7 @@ export function CodexSessionContextPage(props: {
         setOutlineOpen(false)
         setMenuOpen(false)
         connectionRecoveryTokenRef.current += 1
-    }, [props.machineId, props.sessionId])
+    }, [nativeDirectMessageScope, nativeDirectMessageScopeKey, props.machineId, props.sessionId])
 
     useEffect(() => {
         const response = statusQuery.data
@@ -683,7 +721,7 @@ export function CodexSessionContextPage(props: {
                 ? current
                 : response.queuedMessages!)
             const queuedMessageIds = new Set(response.queuedMessages.map((message) => message.id))
-            setNativeDirectMessageEchoes((current) => {
+            updateNativeDirectMessageEchoes(nativeDirectMessageScope, (current) => {
                 let changed = false
                 const next = current.map((echo) => {
                     if (echo.status !== 'queued' || !echo.queueId || queuedMessageIds.has(echo.queueId)) {
@@ -695,7 +733,7 @@ export function CodexSessionContextPage(props: {
                 return changed ? next : current
             })
         }
-    }, [statusQuery.data])
+    }, [nativeDirectMessageScope, statusQuery.data, updateNativeDirectMessageEchoes])
 
     const messages = useMemo(
         () => mergeCodexContextMessages([
@@ -704,19 +742,22 @@ export function CodexSessionContextPage(props: {
         ]),
         [contextQuery.data, olderPages]
     )
+    const currentNativeDirectMessageEchoes = nativeDirectMessageEchoScopeKey === nativeDirectMessageScopeKey
+        ? nativeDirectMessageEchoes
+        : []
     const visibleNativeDirectMessageEchoes = useMemo(
-        () => getVisibleNativeDirectMessageEchoes(nativeDirectMessageEchoes, messages),
-        [messages, nativeDirectMessageEchoes]
+        () => getVisibleNativeDirectMessageEchoes(currentNativeDirectMessageEchoes, messages),
+        [currentNativeDirectMessageEchoes, messages]
     )
     // Once a local echo has been reconciled, actually remove it from state.
     // Otherwise it could reappear after its transcript row eventually rolls
     // out of the latest 50-message context page.
     useEffect(() => {
-        setNativeDirectMessageEchoes((current) => {
+        updateNativeDirectMessageEchoes(nativeDirectMessageScope, (current) => {
             const next = getVisibleNativeDirectMessageEchoes(current, messages)
             return next.length === current.length ? current : next
         })
-    }, [messages])
+    }, [messages, nativeDirectMessageScope, updateNativeDirectMessageEchoes])
     const oldestPage = olderPages[0] ?? contextQuery.data
     const hasMoreMessages = oldestPage?.page.hasMore ?? false
     const loadMore = useCallback(async () => {
@@ -948,6 +989,7 @@ export function CodexSessionContextPage(props: {
         lastUpdatedAt: contextQuery.dataUpdatedAt || null
     }), [contextQuery.dataUpdatedAt, nativeConnectionHealth, recoverNativeConnection])
     const hasNativeQueuedMessages = nativeQueuedMessages.length > 0
+    const isSendingDirect = pendingDirectSendCount > 0
     const isNativeProcessing = isSendingDirect || directStatus === 'processing'
     // A runner can briefly report idle between the native turn ending and the
     // queue pump starting its next child. Treat that window as non-idle so
@@ -956,7 +998,6 @@ export function CodexSessionContextPage(props: {
     const isNativeIdle = !isSendingDirect && directStatus === 'idle' && !hasNativeQueuedMessages
     const canFork = Boolean(props.machineId) && !isForking && isNativeIdle
     const composerDisabled = !props.machineId
-        || isSendingDirect
         || statusQuery.isLoading
         || statusQuery.isError
         || directStatus === null
@@ -1023,10 +1064,11 @@ export function CodexSessionContextPage(props: {
     }, [canFork, props.api, props.machineId, props.onForked, props.sessionId, t])
 
     const sendDirectMessage = useCallback((text: string) => {
-        if (!props.machineId || isSendingDirect || directStatus === null || directStatus === 'unknown') {
+        if (!props.machineId || directStatus === null || directStatus === 'unknown') {
             return
         }
         const requestScope = pageScope
+        const requestNativeDirectMessageScope = nativeDirectMessageScope
         const echoId = makeClientSideId('native')
         const echo: NativeDirectMessageEcho = {
             id: echoId,
@@ -1044,9 +1086,9 @@ export function CodexSessionContextPage(props: {
         // Show the person's words before the hub/runner round trip completes.
         // This makes a slow native process feel like an acknowledged action,
         // rather than a button press that appears to have done nothing.
-        setNativeDirectMessageEchoes((current) => [...current, echo])
+        updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => [...current, echo])
         setNativeForceScrollToken((token) => token + 1)
-        setIsSendingDirect(true)
+        setPendingDirectSendCount((count) => count + 1)
         setDirectSendError(null)
         setDismissedRunnerError(null)
         void (async () => {
@@ -1058,18 +1100,22 @@ export function CodexSessionContextPage(props: {
                 if (response.success !== true) {
                     throw new ApiError(response.error, 409, response.code)
                 }
-                if (pageScopeRef.current !== requestScope) {
-                    return
-                }
-                setNativeDirectMessageEchoes((current) => current.map((message) => (
+                updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
                     message.id !== echoId
                         ? message
                         : {
                             ...message,
-                            status: response.status === 'queued' ? 'queued' : 'sending',
+                            // The HTTP 202 is the runner's acceptance receipt.
+                            // Stop showing a network spinner once it has
+                            // accepted the prompt; the clock remains until the
+                            // native transcript echoes it back.
+                            status: 'queued' as const,
                             queueId: response.queueId ?? null
                         }
                 )))
+                if (pageScopeRef.current !== requestScope) {
+                    return
+                }
                 if (Array.isArray(response.queuedMessages) && response.queuedMessages.length > 0) {
                     setNativeQueuedMessages(response.queuedMessages)
                 } else if (response.status === 'queued' && response.queueId && response.queuedAt !== undefined) {
@@ -1080,16 +1126,18 @@ export function CodexSessionContextPage(props: {
                 }
                 // The accepted post already tells us whether it is running or
                 // queued. Let the push update/background read reconcile the
-                // transcript without keeping the composer locked.
+                // transcript without blocking another message from being sent.
                 void refetchNativeSnapshot()
             } catch (error) {
+                // Keep an explicit failure receipt even if the person already
+                // left this page. It is removed if a late runner write proves
+                // the prompt did reach the native transcript after all.
+                updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
+                    message.id === echoId ? { ...message, status: 'failed' as const } : message
+                )))
                 if (pageScopeRef.current !== requestScope) {
                     return
                 }
-                // Match normal HAPI text sends: a rejected post returns the
-                // text to the composer, so do not leave a second failed bubble
-                // that could be mistaken for a delivered native prompt.
-                setNativeDirectMessageEchoes((current) => current.filter((message) => message.id !== echoId))
                 setDirectSendError({
                     id: Date.now(),
                     text,
@@ -1098,11 +1146,22 @@ export function CodexSessionContextPage(props: {
                 })
             } finally {
                 if (pageScopeRef.current === requestScope) {
-                    setIsSendingDirect(false)
+                    setPendingDirectSendCount((count) => Math.max(0, count - 1))
                 }
             }
         })()
-    }, [directStatus, isSendingDirect, messages, pageScope, props.api, props.machineId, props.sessionId, refetchNativeSnapshot, t])
+    }, [
+        directStatus,
+        messages,
+        nativeDirectMessageScope,
+        pageScope,
+        props.api,
+        props.machineId,
+        props.sessionId,
+        refetchNativeSnapshot,
+        t,
+        updateNativeDirectMessageEchoes
+    ])
 
     return (
         <SessionConnectionProvider value={nativeConnectionContext}>

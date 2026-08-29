@@ -23,6 +23,8 @@ export type NativeCodexSessionLookup = {
 type ActiveSend = {
     startedAt: number
     child: NativeCodexChildProcess
+    /** `codex queue` is only a short hand-off to the owning app-server. */
+    usesControlSocket: boolean
 }
 
 type RecentFailure = {
@@ -178,25 +180,26 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
-        // A prompt sent while the native turn is running must remain visible
-        // in HAPI's queue until that turn is idle. The app-server control
-        // socket is still used for the eventual delivery, but it must not
-        // bypass the queue here (otherwise the first queued prompt is hidden
-        // from the web client).
         const controlSocketAvailable = this.hasControlSocket()
+        // The app-server is the one writer for this native thread. Its
+        // `codex queue` command accepts a new prompt while a turn is running,
+        // so waiting for the transcript to turn idle only adds the duration of
+        // the whole current turn to every web send. Keep a tiny local FIFO
+        // only while a previous *handoff command* is still returning, which
+        // preserves message order without delaying for model work.
+        if (controlSocketAvailable) {
+            if (this.activeSends.has(sessionId) || (this.queues.get(sessionId)?.length ?? 0) > 0) {
+                return this.enqueue(sessionId, message)
+            }
+            return this.start(sessionId, message, cwd, true)
+        }
+
         // Once a queue exists, preserve FIFO order even if the transcript has
         // already become idle but the pump has not run its next tick yet.
         if (status.status === 'processing' || (this.queues.get(sessionId)?.length ?? 0) > 0) {
             return this.enqueue(sessionId, message)
         }
         if (status.status === 'unknown') {
-            // An app-server control socket can serialize a prompt even when
-            // older transcript formats do not expose lifecycle markers. There
-            // is no trustworthy local waiting state in this case, so let the
-            // owner accept it directly rather than blocking forever.
-            if (controlSocketAvailable) {
-                return this.start(sessionId, message, cwd, true)
-            }
             return {
                 success: false,
                 code: 'session_status_unknown',
@@ -204,7 +207,7 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
-        return this.start(sessionId, message, cwd, controlSocketAvailable)
+        return this.start(sessionId, message, cwd, false)
     }
 
     private enqueue(sessionId: string, message: string): SendCodexLocalSessionMessageRpcResponse {
@@ -264,7 +267,7 @@ export class NativeCodexSessionDirectSender {
         }
 
         this.recentFailures.delete(sessionId)
-        this.activeSends.set(sessionId, { startedAt, child })
+        this.activeSends.set(sessionId, { startedAt, child, usesControlSocket: useControlSocket })
         this.watch(sessionId, child)
         this.notifyStateChange(sessionId)
         return { success: true, status: 'processing', startedAt }
@@ -283,7 +286,15 @@ export class NativeCodexSessionDirectSender {
         if (this.queues.get(sessionId)?.length) {
             this.scheduleQueuePump(
                 sessionId,
-                failure ? NATIVE_QUEUE_RETRY_INTERVAL_MS : this.queuePollIntervalMs
+                failure
+                    ? NATIVE_QUEUE_RETRY_INTERVAL_MS
+                    // A control-socket send is already queued in Codex; the
+                    // next HAPI FIFO item need only wait for this short CLI
+                    // acknowledgement, not for the native turn to finish.
+                    : active.usesControlSocket
+                        ? 0
+                        : this.queuePollIntervalMs,
+                { replacePending: active.usesControlSocket && !failure }
             )
         }
         this.notifyStateChange(sessionId)
@@ -359,16 +370,15 @@ export class NativeCodexSessionDirectSender {
             return
         }
 
-        // Keep a prompt visible in HAPI until the native transcript confirms
-        // that the current turn is idle. This is important even when the
-        // app-server control socket exists: submitting immediately would make
-        // `codex queue` consume the local item before the user can see it.
         const session = this.sessionLookup.getSummary(sessionId)
-        if (session?.runState !== 'idle') {
+        const controlSocketAvailable = this.hasControlSocket()
+        // Without the owner app-server, `codex exec resume` needs an idle
+        // transcript to avoid a second-writer conflict. With the owner alive,
+        // `codex queue` is safe immediately and must not wait for model work.
+        if (!controlSocketAvailable && session?.runState !== 'idle') {
             this.scheduleQueuePump(sessionId)
             return
         }
-        const controlSocketAvailable = this.hasControlSocket()
 
         const cwd = session?.cwd?.trim()
         if (!cwd || !this.isDirectory(cwd)) {
@@ -382,15 +392,15 @@ export class NativeCodexSessionDirectSender {
         }
 
         const item = queue[0]
-        const result = this.start(sessionId, item.text, cwd, controlSocketAvailable || undefined)
+        const result = this.start(sessionId, item.text, cwd, controlSocketAvailable)
         if (result.success) {
             queue.shift()
             if (queue.length === 0) {
                 this.queues.delete(sessionId)
             } else {
-                // The active child owns the current message. The next item is
-                // released by `watch` after this turn exits and the transcript
-                // returns to idle.
+                // The active child owns the current command. `watch` releases
+                // the next item immediately for an app-server hand-off, or
+                // after the fallback native turn becomes idle.
                 this.scheduleQueuePump(sessionId)
             }
             this.notifyStateChange(sessionId)

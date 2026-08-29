@@ -140,7 +140,7 @@ export default {
   'recentCodex.fork.failed': 'Could not fork Codex session',
   'recentCodex.runnerRequired': 'Select an online runner first.',
   'recentCodex.direct.checking': 'Checking native session status…',
-  'recentCodex.direct.processing': 'Native Codex is running. New messages will be sent when it becomes idle.',
+  'recentCodex.direct.processing': 'Native Codex is working. New messages are safely queued for it.',
   'recentCodex.direct.unknown': 'This native session state cannot be confirmed, so direct sending is locked.',
   'recentCodex.direct.statusFailed': 'Could not check native session status. Direct sending is locked.',
   'recentCodex.direct.error.queueFull': 'The native queue is full. Wait for a turn to finish, then try again.',

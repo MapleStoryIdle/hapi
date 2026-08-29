@@ -17,6 +17,7 @@ import {
 
 afterEach(() => {
     cleanup()
+    sessionStorage.clear()
     vi.restoreAllMocks()
 })
 
@@ -118,7 +119,7 @@ function renderPage(props: {
             </I18nProvider>
         </QueryClientProvider>
     )
-    render(props.realtimeConnected === undefined
+    const rendered = render(props.realtimeConnected === undefined
         ? page
         : (
             <NativeCodexRealtimeProvider value={{ connected: props.realtimeConnected }}>
@@ -126,7 +127,7 @@ function renderPage(props: {
             </NativeCodexRealtimeProvider>
         ))
 
-    return { api, onBack, onForked }
+    return { api, onBack, onForked, unmount: rendered.unmount }
 }
 
 function openNativeSessionMenu() {
@@ -499,6 +500,39 @@ describe('CodexSessionContextPage', () => {
         await act(async () => {
             resolveSend({ success: true, status: 'processing', startedAt: Date.now() })
         })
+        expect(await screen.findByRole('status', { name: 'Queued' })).toBeInTheDocument()
+    })
+
+    it('keeps a native prompt visible after leaving and reopening the session', async () => {
+        const api = createApi()
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise(() => {}))
+        const firstPage = renderPage({ api })
+
+        await screen.findByText('Original response')
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep this after leaving' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+        expect(await screen.findByText('Keep this after leaving')).toBeInTheDocument()
+        firstPage.unmount()
+
+        renderPage({ api })
+        expect(await screen.findByText('Keep this after leaving')).toBeInTheDocument()
+    })
+
+    it('accepts another native prompt while the first hand-off is pending', async () => {
+        const api = createApi()
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise(() => {}))
+        renderPage({ api })
+
+        await screen.findByText('Original response')
+        const input = screen.getByRole('textbox')
+        fireEvent.change(input, { target: { value: 'First hand-off' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+        await waitFor(() => expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1))
+
+        fireEvent.change(input, { target: { value: 'Second hand-off' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+        await waitFor(() => expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(2))
     })
 
     it('keeps direct-send available and locks only Fork while the native thread is processing', async () => {
