@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { getPermissionModesForFlavor } from '@hapi/protocol/modes'
 import {
+    expandCodexCustomPrompt,
     findCodexCustomPromptExpansion,
     findUnsupportedCodexBuiltinSlashCommand,
     getBuiltinSlashCommands,
@@ -82,6 +83,20 @@ describe('findCodexCustomPromptExpansion', () => {
         expect(findCodexCustomPromptExpansion('/compact now', commands)).toBeNull()
         expect(findCodexCustomPromptExpansion('/clear', [
             { name: 'clear', source: 'builtin' }
+        ])).toBeNull()
+    })
+})
+
+describe('expandCodexCustomPrompt', () => {
+    it('appends custom-command arguments in the same shape as HAPI Codex sessions', () => {
+        expect(expandCodexCustomPrompt('/review src/index.ts', [
+            { name: 'review', source: 'project', content: 'Review the requested code.' }
+        ])).toBe('Review the requested code.\n\nUser arguments: src/index.ts')
+    })
+
+    it('does not expand an HAPI control command for an original native thread', () => {
+        expect(expandCodexCustomPrompt('/model gpt-5.6', [
+            { name: 'model', source: 'builtin' }
         ])).toBeNull()
     })
 })

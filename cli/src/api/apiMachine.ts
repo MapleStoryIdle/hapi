@@ -12,6 +12,7 @@ import type { BinaryFileReadRequest, BinaryFileReadResponse, ClientToServerEvent
 import type { GitCommandResponse, MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
 import {
     type CodexLocalSessionListUpdate,
+    type CodexLocalSessionComposerCapabilitiesRpcResponse,
     type CodexLocalSessionDataRpcResponse,
     type CodexLocalSessionRealtimeSnapshot,
     type CodexLocalSessionSnapshotRpcResponse,
@@ -22,6 +23,7 @@ import {
 } from '@hapi/protocol/codexTranscript'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import { NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
+import { CodexAppServerClient } from '@/codex/codexAppServerClient'
 import { NativeCodexSessionListCache } from '@/codex/nativeSessionListCache'
 import { NativeCodexSessionTitleCache } from '@/codex/nativeSessionTitleCache'
 import { NativeCodexTranscriptCache, type NativeCodexTranscriptRead } from '@/codex/nativeTranscriptCache'
@@ -32,6 +34,8 @@ import { backoff } from '@/utils/time'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
+import { listSlashCommands } from '../modules/common/slashCommands'
+import { listSkills } from '../modules/common/skills'
 import { getGitBranchStatusForCwd } from '../modules/common/handlers/git'
 import {
     listOpencodeModelsForCwd,
@@ -78,9 +82,15 @@ interface GetCodexLocalSessionStatusRequest {
     sessionId?: unknown
 }
 
+interface GetCodexLocalSessionComposerCapabilitiesRequest {
+    sessionId?: unknown
+}
+
 interface SendCodexLocalSessionMessageRequest {
     sessionId?: unknown
     message?: unknown
+    displayMessage?: unknown
+    clientMessageId?: unknown
 }
 
 const MAX_NATIVE_CODEX_REALTIME_SNAPSHOT_BYTES = 96 * 1024
@@ -230,7 +240,11 @@ export class ApiMachineClient {
             undefined,
             undefined,
             undefined,
-            { getSummary: (sessionId) => this.nativeCodexTranscriptCache.getSummary(sessionId) }
+            { getSummary: (sessionId) => this.nativeCodexTranscriptCache.getSummary(sessionId) },
+            // One short-lived bridge per native hand-off. Never reuse this
+            // client across original Codex sessions: their local owner can
+            // continue editing the transcript outside HAPI.
+            () => new CodexAppServerClient()
         )
 
         this.rpcHandlerManager = new RpcHandlerManager({
@@ -345,6 +359,38 @@ export class ApiMachineClient {
             }
         )
 
+        this.rpcHandlerManager.registerHandler<
+            GetCodexLocalSessionComposerCapabilitiesRequest,
+            CodexLocalSessionComposerCapabilitiesRpcResponse
+        >(
+            RPC_METHODS.GetCodexLocalSessionComposerCapabilities,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                if (!sessionId) {
+                    return { success: false, error: 'sessionId is required' }
+                }
+
+                const summary = this.nativeCodexTranscriptCache.getSummary(sessionId)
+                if (!summary) {
+                    return { success: false, error: 'Codex session not found' }
+                }
+
+                const cwd = summary.cwd?.trim()
+                const [commands, skills] = await Promise.all([
+                    listSlashCommands('codex', cwd),
+                    listSkills(cwd, { flavor: 'codex' })
+                ])
+                return {
+                    success: true,
+                    // Native direct delivery cannot update HAPI-owned
+                    // model/plan/permission state. Only expose prompts that
+                    // expand into a normal Codex message.
+                    commands: commands.filter((command) => command.source !== 'builtin'),
+                    skills
+                }
+            }
+        )
+
         this.rpcHandlerManager.registerHandler<SendCodexLocalSessionMessageRequest, SendCodexLocalSessionMessageRpcResponse>(
             RPC_METHODS.SendCodexLocalSessionMessage,
             async (params) => {
@@ -353,7 +399,12 @@ export class ApiMachineClient {
                     return { success: false, code: 'invalid_message', error: 'sessionId is required' }
                 }
                 this.observeNativeCodexSession(sessionId)
-                return this.nativeCodexSessionDirectSender.send(sessionId, params?.message)
+                return this.nativeCodexSessionDirectSender.send(
+                    sessionId,
+                    params?.message,
+                    params?.displayMessage,
+                    params?.clientMessageId
+                )
             }
         )
 

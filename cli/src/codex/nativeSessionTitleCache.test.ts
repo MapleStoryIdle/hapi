@@ -66,4 +66,36 @@ describe('NativeCodexSessionTitleCache', () => {
         expect(cache.resolve([sessionId], { forceRefresh: true }).get(sessionId)).toBe('Renamed in Codex')
         expect(readTitles).toHaveBeenCalledTimes(2)
     })
+
+    it('retries a failed state database read instead of caching sessions as untitled', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-codex-title-'))
+        cleanupPaths.push(codexHome)
+        const sessionId = '55555555-5555-4555-8555-555555555555'
+        const databasePath = createStateDatabaseFile(codexHome)
+        let databaseAvailable = false
+        const readTitles = vi.fn((_path: string, _sessionIds: readonly string[]) => {
+            return databaseAvailable ? new Map([[sessionId, 'Recovered Codex title']]) : null
+        })
+        const cache = new NativeCodexSessionTitleCache({ getCodexHome: () => codexHome, readTitles })
+
+        expect(cache.resolve([sessionId])).toEqual(new Map())
+        expect(readTitles).toHaveBeenCalledWith(databasePath, [sessionId])
+
+        databaseAvailable = true
+        expect(cache.resolve([sessionId])).toEqual(new Map([[sessionId, 'Recovered Codex title']]))
+        expect(readTitles).toHaveBeenCalledTimes(2)
+    })
+
+    it('keeps a confirmed missing state title cached', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-codex-title-'))
+        cleanupPaths.push(codexHome)
+        const sessionId = '66666666-6666-4666-8666-666666666666'
+        createStateDatabaseFile(codexHome)
+        const readTitles = vi.fn(() => new Map<string, string>())
+        const cache = new NativeCodexSessionTitleCache({ getCodexHome: () => codexHome, readTitles })
+
+        expect(cache.resolve([sessionId])).toEqual(new Map())
+        expect(cache.resolve([sessionId])).toEqual(new Map())
+        expect(readTitles).toHaveBeenCalledTimes(1)
+    })
 })

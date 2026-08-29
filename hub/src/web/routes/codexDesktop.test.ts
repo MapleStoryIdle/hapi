@@ -812,6 +812,80 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('returns native composer custom prompts and Skills from the selected runner', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '56565656-5656-4656-8656-565656565657'
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const capabilityCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            getCodexLocalSessionComposerCapabilities: async (...args: unknown[]) => {
+                capabilityCalls.push(args)
+                return {
+                    success: true as const,
+                    commands: [{ name: 'review', source: 'project' as const, content: 'Review the requested code.' }],
+                    skills: [{ name: 'repo-rules', description: 'Repository rules', scope: 'project' as const }]
+                }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(
+                `/api/codex/sessions/${sessionId}/composer-capabilities?machineId=mac-runner`
+            )
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({
+                success: true,
+                commands: [{ name: 'review', source: 'project', content: 'Review the requested code.' }],
+                skills: [{ name: 'repo-rules', description: 'Repository rules', scope: 'project' }]
+            })
+            expect(capabilityCalls).toEqual([['mac-runner', sessionId]])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('passes an optional native display receipt separately from the delivered prompt', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '56565656-5656-4656-8656-565656565658'
+        const data = createRunnerLocalSessionData(sessionId, '/runner/.codex/worktrees/direct-thread')
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const sendCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            readCodexLocalSession: async () => ({ success: true as const, data }),
+            sendCodexLocalSessionMessage: async (...args: unknown[]) => {
+                sendCalls.push(args)
+                return { success: true as const, status: 'processing' as const }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${sessionId}/messages`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    machineId: 'mac-runner',
+                    message: 'Review the requested code.\n\nUser arguments: src/index.ts',
+                    displayMessage: '/review src/index.ts',
+                    clientMessageId: 'native:receipt-1'
+                })
+            })
+            expect(response.status).toBe(202)
+            expect(sendCalls).toEqual([[
+                'mac-runner',
+                sessionId,
+                'Review the requested code.\n\nUser arguments: src/index.ts',
+                '/review src/index.ts',
+                'native:receipt-1'
+            ]])
+        } finally {
+            store.close()
+        }
+    })
+
     it('accepts a direct message while the native thread is processing and returns its queue position', async () => {
         const store = new Store(':memory:')
         const sessionId = '57565656-5756-4756-8756-575656565656'

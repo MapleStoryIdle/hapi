@@ -70,6 +70,7 @@ import {
     type RpcOpenVikingContextReadResponse,
     type RpcOpenVikingStatusResponse,
     type RpcCursorModel,
+    type RpcCodexLocalSessionComposerCapabilitiesResponse,
     type RpcCodexLocalSessionDataResponse,
     type RpcCodexLocalSessionSnapshotResponse,
     type RpcCodexLocalSessionStatusResponse,
@@ -104,6 +105,7 @@ export type {
     RpcOpenVikingContextReadResponse,
     RpcOpenVikingStatusResponse,
     RpcCursorModel,
+    RpcCodexLocalSessionComposerCapabilitiesResponse,
     RpcCodexLocalSessionDataResponse,
     RpcCodexLocalSessionSnapshotResponse,
     RpcCodexLocalSessionStatusResponse,
@@ -2039,12 +2041,27 @@ export class SyncEngine {
         return await this.rpcGateway.getCodexLocalSessionStatus(machineId, sessionId)
     }
 
+    async getCodexLocalSessionComposerCapabilities(
+        machineId: string,
+        sessionId: string
+    ): Promise<RpcCodexLocalSessionComposerCapabilitiesResponse> {
+        return await this.rpcGateway.getCodexLocalSessionComposerCapabilities(machineId, sessionId)
+    }
+
     async sendCodexLocalSessionMessage(
         machineId: string,
         sessionId: string,
-        message: string
+        message: string,
+        displayMessage?: string,
+        clientMessageId?: string
     ): Promise<RpcSendCodexLocalSessionMessageResponse> {
-        return await this.rpcGateway.sendCodexLocalSessionMessage(machineId, sessionId, message)
+        return await this.rpcGateway.sendCodexLocalSessionMessage(
+            machineId,
+            sessionId,
+            message,
+            displayMessage,
+            clientMessageId
+        )
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {

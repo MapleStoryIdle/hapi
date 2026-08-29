@@ -16,6 +16,7 @@ import { notifyCommand } from './notify'
 import { hubCommand } from './hub'
 import { inspectPeerCommand } from './inspectPeer'
 import { pingPeerCommand } from './pingPeer'
+import { artifactCommand } from './artifact'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -52,7 +53,8 @@ const COMMANDS: CommandDefinition[] = [
     runnerCommand,
     notifyCommand,
     inspectPeerCommand,
-    pingPeerCommand
+    pingPeerCommand,
+    artifactCommand
 ]
 
 const commandMap = new Map<string, CommandDefinition>()

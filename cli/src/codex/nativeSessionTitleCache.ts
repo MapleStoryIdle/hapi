@@ -2,6 +2,7 @@ import { readdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import type { Database } from 'bun:sqlite'
+import { getCodexSessionDisplayTitle } from '@hapi/protocol/codexTranscript'
 import { getCodexHomePath } from './codexHome'
 
 const runtimeRequire = createRequire(import.meta.url)
@@ -20,7 +21,7 @@ type CodexThreadTitleRow = {
 
 export type NativeCodexSessionTitleCacheOptions = {
     getCodexHome?: () => string
-    readTitles?: (databasePath: string, sessionIds: readonly string[]) => Map<string, string>
+    readTitles?: (databasePath: string, sessionIds: readonly string[]) => Map<string, string> | null
 }
 
 export type NativeCodexSessionTitleResolveOptions = {
@@ -77,7 +78,7 @@ function normalizeTitle(value: unknown): string | null {
     return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function readCodexThreadTitles(databasePath: string, sessionIds: readonly string[]): Map<string, string> {
+function readCodexThreadTitles(databasePath: string, sessionIds: readonly string[]): Map<string, string> | null {
     if (sessionIds.length === 0) return new Map()
 
     let database: Database | null = null
@@ -104,14 +105,21 @@ function readCodexThreadTitles(databasePath: string, sessionIds: readonly string
 
         const titles = new Map<string, string>()
         for (const row of rows) {
-            const title = normalizeTitle(row.name) ?? normalizeTitle(row.title)
+            // `threads.title` is normally the full first user prompt. The
+            // optional `name` is Codex's short, generated session name. Keep
+            // that short name when it exists; otherwise compact the raw
+            // prompt so links and multi-line input never become a list label.
+            const name = normalizeTitle(row.name)
+            const rawTitle = normalizeTitle(row.title)
+            const title = name ?? (rawTitle ? getCodexSessionDisplayTitle(rawTitle) : null)
             if (title) titles.set(row.id, title)
         }
         return titles
     } catch {
-        // Native transcript metadata is the fallback if Codex's private state
-        // database is missing, busy, or changes its schema.
-        return new Map()
+        // An unavailable database is different from a successful query with
+        // no matching titles. Return null so callers retry later instead of
+        // caching every requested session as permanently untitled.
+        return null
     } finally {
         try {
             database?.close()
@@ -150,8 +158,10 @@ export class NativeCodexSessionTitleCache {
             const unresolvedIds = uniqueIds.filter((id) => !this.titles.has(id))
             if (unresolvedIds.length > 0) {
                 const resolvedTitles = (this.options.readTitles ?? readCodexThreadTitles)(databasePath, unresolvedIds)
-                for (const id of unresolvedIds) {
-                    this.titles.set(id, resolvedTitles.get(id) ?? null)
+                if (resolvedTitles !== null) {
+                    for (const id of unresolvedIds) {
+                        this.titles.set(id, resolvedTitles.get(id) ?? null)
+                    }
                 }
             }
         }

@@ -6,8 +6,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
     NativeCodexSessionDirectSender,
+    type NativeCodexAppServerClient,
     type SpawnNativeCodexProcess
 } from './nativeSessionDirectSend'
+import type { InitializeParams, ThreadResumeParams, TurnStartParams, TurnStartResponse } from './appServerTypes'
 
 const originalCodexHome = process.env.CODEX_HOME
 
@@ -25,6 +27,54 @@ class FakeChildProcess extends EventEmitter {
     })
 }
 
+class FakeAppServerClient implements NativeCodexAppServerClient {
+    notificationHandler: ((method: string, params: unknown) => void) | null = null
+    connectCalls = 0
+    initializeCalls: InitializeParams[] = []
+    resumeCalls: ThreadResumeParams[] = []
+    startTurnCalls: TurnStartParams[] = []
+    disconnectCalls = 0
+    resumeError: Error | null = null
+    startTurnError: Error | null = null
+
+    async connect(): Promise<void> {
+        this.connectCalls += 1
+    }
+
+    async initialize(params: InitializeParams): Promise<unknown> {
+        this.initializeCalls.push(params)
+        return {}
+    }
+
+    async resumeThread(params: ThreadResumeParams): Promise<unknown> {
+        this.resumeCalls.push(params)
+        if (this.resumeError) throw this.resumeError
+        return { thread: { id: params.threadId } }
+    }
+
+    async startTurn(params: TurnStartParams): Promise<TurnStartResponse> {
+        this.startTurnCalls.push(params)
+        if (this.startTurnError) throw this.startTurnError
+        return { turn: { id: 'native-turn-1' } }
+    }
+
+    async disconnect(): Promise<void> {
+        this.disconnectCalls += 1
+    }
+
+    setNotificationHandler(handler: ((method: string, params: unknown) => void) | null): void {
+        this.notificationHandler = handler
+    }
+
+    emit(method: string, params: unknown): void {
+        this.notificationHandler?.(method, params)
+    }
+}
+
+async function flushAsyncWork(): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
+
 function writeTranscript(options: {
     codexHome: string
     sessionId: string
@@ -40,6 +90,183 @@ function writeTranscript(options: {
 }
 
 describe('NativeCodexSessionDirectSender', () => {
+    it('uses one short-lived app-server bridge for an exact native thread', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-bridge-workspace-'))
+        const sessionId = '80345678-1234-4234-8234-123456789012'
+        let runState: 'idle' | 'processing' = 'idle'
+        const lookup = vi.fn(() => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState
+        }))
+        const client = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            { getSummary: lookup },
+            () => client
+        )
+
+        try {
+            expect(sender.send(sessionId, 'Continue through the bridge', undefined, 'native:bridge-1')).toEqual({
+                success: true,
+                status: 'processing',
+                startedAt: 123,
+                progress: {
+                    phase: 'matching',
+                    startedAt: 123,
+                    phaseStartedAt: 123,
+                    transport: 'app-server'
+                }
+            })
+
+            await flushAsyncWork()
+            expect(client.connectCalls).toBe(1)
+            expect(client.initializeCalls).toEqual([{
+                clientInfo: {
+                    name: 'hapi-native-session-bridge',
+                    title: 'HAPI Native Session Bridge',
+                    version: '1.0.0'
+                },
+                capabilities: { experimentalApi: true }
+            }])
+            expect(client.resumeCalls).toEqual([{ threadId: sessionId }])
+            expect(client.startTurnCalls).toEqual([{
+                threadId: sessionId,
+                input: [{ type: 'text', text: 'Continue through the bridge' }]
+            }])
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                progress: { phase: 'connected', transport: 'app-server' }
+            })
+
+            // The app-server can announce the turn a few milliseconds before
+            // the transcript watcher sees its first append. Do not dispose
+            // the bridge just because the cached transcript is still idle.
+            client.emit('turn/started', {
+                thread: { id: sessionId },
+                turn: { id: 'native-turn-1' }
+            })
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                progress: { phase: 'reasoning' }
+            })
+            expect(client.disconnectCalls).toBe(0)
+
+            runState = 'processing'
+            sender.notifyTranscriptChanged(sessionId)
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                progress: { phase: 'reasoning' }
+            })
+
+            runState = 'idle'
+            client.emit('turn/completed', {
+                thread: { id: sessionId },
+                turn: { id: 'native-turn-1' },
+                status: 'completed'
+            })
+            expect(sender.getStatus(sessionId)).toEqual({ success: true, status: 'idle', queuedMessages: [] })
+            expect(client.disconnectCalls).toBe(1)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('falls back to exact exec resume only when bridge setup fails before turn start', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-bridge-fallback-workspace-'))
+        const sessionId = '81345678-1234-4234-8234-123456789012'
+        const lookup = vi.fn(() => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'idle' as const
+        }))
+        const client = new FakeAppServerClient()
+        client.resumeError = new Error('resume unavailable')
+        const child = new FakeChildProcess()
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1_000,
+            { getSummary: lookup },
+            () => client
+        )
+
+        try {
+            expect(sender.send(sessionId, 'Fallback exactly once')).toMatchObject({
+                success: true,
+                status: 'processing',
+                progress: { transport: 'app-server', phase: 'matching' }
+            })
+            await flushAsyncWork()
+
+            expect(spawn).toHaveBeenCalledWith(
+                ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, 'Fallback exactly once'],
+                cwd
+            )
+            expect(client.disconnectCalls).toBe(1)
+            child.emit('exit', 0, null)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not fall back after turn/start could already have accepted the prompt', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-bridge-ambiguous-workspace-'))
+        const sessionId = '82345678-1234-4234-8234-123456789012'
+        const lookup = vi.fn(() => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'idle' as const
+        }))
+        const client = new FakeAppServerClient()
+        client.startTurnError = new Error('turn start response lost')
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1_000,
+            { getSummary: lookup },
+            () => client
+        )
+
+        try {
+            expect(sender.send(sessionId, 'Never duplicate this', undefined, 'native:ambiguous-1')).toMatchObject({
+                success: true,
+                status: 'processing'
+            })
+            await flushAsyncWork()
+
+            expect(spawn).not.toHaveBeenCalled()
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'idle',
+                lastError: 'turn start response lost',
+                lastErrorClientMessageId: 'native:ambiguous-1'
+            })
+            expect(client.disconnectCalls).toBe(1)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('starts codex exec resume only for a lifecycle-confirmed idle native thread', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-direct-codex-'))
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-workspace-'))
@@ -74,6 +301,41 @@ describe('NativeCodexSessionDirectSender', () => {
         } finally {
             sender.dispose()
             rmSync(codexHome, { recursive: true, force: true })
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('treats a retried browser receipt as the same native hand-off', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-idempotent-workspace-'))
+        const sessionId = '10345678-1234-4234-8234-123456789012'
+        const lookup = vi.fn(() => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 0,
+            runState: 'idle' as const
+        }))
+        const child = new FakeChildProcess()
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
+        const sender = new NativeCodexSessionDirectSender(spawn, () => 789, 1_000, { getSummary: lookup })
+
+        try {
+            expect(sender.send(sessionId, 'Continue after navigation', undefined, 'native:receipt-1')).toEqual({
+                success: true,
+                status: 'processing',
+                startedAt: 789
+            })
+            expect(sender.send(sessionId, 'Continue after navigation', undefined, 'native:receipt-1')).toEqual({
+                success: true,
+                status: 'processing',
+                startedAt: 789,
+                queuedMessages: []
+            })
+            expect(spawn).toHaveBeenCalledTimes(1)
+            child.emit('exit', 0, null)
+        } finally {
+            sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
         }
     })
@@ -287,6 +549,45 @@ describe('NativeCodexSessionDirectSender', () => {
         } finally {
             sender.dispose()
             rmSync(codexHome, { recursive: true, force: true })
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps a custom-command shorthand in the queue while delivering its expanded prompt', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-display-workspace-'))
+        const sessionId = '62345678-1234-4234-8234-123456789012'
+        let runState: 'idle' | 'processing' = 'processing'
+        const lookup = vi.fn(() => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 0,
+            runState
+        }))
+        const child = new FakeChildProcess()
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
+        const sender = new NativeCodexSessionDirectSender(spawn, Date.now, 10, { getSummary: lookup })
+
+        try {
+            const deliveryText = 'Review the requested code.\n\nUser arguments: src/index.ts'
+            expect(sender.send(sessionId, deliveryText, '/review src/index.ts')).toMatchObject({
+                success: true,
+                status: 'queued',
+                queuedMessages: [{ text: '/review src/index.ts' }]
+            })
+
+            runState = 'idle'
+            sender.notifyTranscriptChanged(sessionId)
+            await new Promise((resolve) => setTimeout(resolve, 20))
+
+            expect(spawn).toHaveBeenCalledWith(
+                ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, deliveryText],
+                cwd
+            )
+            child.emit('exit', 0, null)
+        } finally {
+            sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
         }
     })

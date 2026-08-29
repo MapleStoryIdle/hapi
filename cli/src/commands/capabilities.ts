@@ -35,6 +35,10 @@ export const HAPI_CLI_CAPABILITIES = {
             acceptsSessionCitation: true,
             rejectsCallerSession: true
         },
+        artifact: {
+            subcommands: { publish: { args: ['relativeFile'], options: ['--expires'] }, revoke: { args: ['artifactId'] } },
+            sideEffects: 'upload_selected_local_file'
+        },
         mcp: {
             tools: ['change_title', 'display_image', 'verify_ssh_server_candidate', 'list_peers', 'inspect_peer', 'ping_peer']
         }

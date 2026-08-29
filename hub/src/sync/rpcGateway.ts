@@ -1,6 +1,7 @@
 import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type {
+    CodexLocalSessionComposerCapabilitiesRpcResponse,
     CodexLocalSessionDataRpcResponse,
     CodexLocalSessionSnapshotRpcResponse,
     CodexLocalSessionStatusRpcResponse,
@@ -88,6 +89,7 @@ export type RpcOpenVikingContextListResponse = OpenVikingContextListResponse
 export type RpcOpenVikingContextReadResponse = OpenVikingContextReadResponse
 export type RpcCodexLocalSessionsResponse = CodexLocalSessionsRpcResponse
 export type RpcCodexLocalSessionDataResponse = CodexLocalSessionDataRpcResponse
+export type RpcCodexLocalSessionComposerCapabilitiesResponse = CodexLocalSessionComposerCapabilitiesRpcResponse
 export type RpcCodexLocalSessionSnapshotResponse = CodexLocalSessionSnapshotRpcResponse
 export type RpcCodexLocalSessionStatusResponse = CodexLocalSessionStatusRpcResponse
 export type RpcSendCodexLocalSessionMessageResponse = SendCodexLocalSessionMessageRpcResponse
@@ -284,14 +286,27 @@ export class RpcGateway {
         }) as RpcCodexLocalSessionStatusResponse
     }
 
+    async getCodexLocalSessionComposerCapabilities(
+        machineId: string,
+        sessionId: string
+    ): Promise<RpcCodexLocalSessionComposerCapabilitiesResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.GetCodexLocalSessionComposerCapabilities, {
+            sessionId
+        }) as RpcCodexLocalSessionComposerCapabilitiesResponse
+    }
+
     async sendCodexLocalSessionMessage(
         machineId: string,
         sessionId: string,
-        message: string
+        message: string,
+        displayMessage?: string,
+        clientMessageId?: string
     ): Promise<RpcSendCodexLocalSessionMessageResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.SendCodexLocalSessionMessage, {
             sessionId,
-            message
+            message,
+            ...(displayMessage === undefined ? {} : { displayMessage }),
+            ...(clientMessageId === undefined ? {} : { clientMessageId })
         }) as RpcSendCodexLocalSessionMessageResponse
     }
 

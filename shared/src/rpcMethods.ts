@@ -12,6 +12,7 @@ export const RPC_METHODS = {
     ReadCodexLocalSession: 'readCodexLocalSession',
     ReadCodexLocalSessionSnapshot: 'readCodexLocalSessionSnapshot',
     GetCodexLocalSessionStatus: 'getCodexLocalSessionStatus',
+    GetCodexLocalSessionComposerCapabilities: 'getCodexLocalSessionComposerCapabilities',
     SendCodexLocalSessionMessage: 'sendCodexLocalSessionMessage',
     ListMachineDirectory: 'list-directory',
     PathExists: 'path-exists',

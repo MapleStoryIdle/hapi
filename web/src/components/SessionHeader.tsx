@@ -201,9 +201,7 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
         setDetailsOpen((open) => !open)
     }, [])
 
-    const detailsActivation = useReliableTopEdgeAction(toggleDetails, {
-        activateOnTouchPointerDown: true
-    })
+    const detailsActivation = useReliableTopEdgeAction(toggleDetails)
 
     const copyDetail = async (key: string, value: string) => {
         try {
@@ -374,11 +372,7 @@ export function SessionConnectionStatusControl(props: {
         }
         void connection.recover()
     }, [connection])
-    const recoveryActivation = useReliableTopEdgeAction(recover, {
-        // This is a state-only action. Starting on touch-down keeps the
-        // recovery affordance responsive in a busy standalone WebKit view.
-        activateOnTouchPointerDown: true
-    })
+    const recoveryActivation = useReliableTopEdgeAction(recover)
 
     if (!connection || connection.health === 'connected') {
         return null

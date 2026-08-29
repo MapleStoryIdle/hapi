@@ -7,6 +7,7 @@ import type {
     SyncEvent as ProtocolSyncEvent,
     WorktreeMetadata
 } from '@hapi/protocol/types'
+import type { SlashCommand } from '@hapi/protocol/apiTypes'
 
 export type {
     CodexModelsResponse,
@@ -232,13 +233,40 @@ export type CodexLocalSessionContextResponse = {
 
 export type CodexLocalSessionRunState = 'idle' | 'processing' | 'unknown'
 
+export type CodexLocalSessionDirectSendPhase =
+    | 'launching'
+    | 'matching'
+    | 'connected'
+    | 'reasoning'
+
+export type CodexLocalSessionDirectSendProgress = {
+    phase: CodexLocalSessionDirectSendPhase
+    startedAt: number
+    phaseStartedAt: number
+    transport: 'app-server' | 'exec-resume'
+}
+
 export type CodexLocalSessionStatusResponse =
     | {
         success: true
         status: CodexLocalSessionRunState
         startedAt?: number
+        progress?: CodexLocalSessionDirectSendProgress
         lastError?: string
+        lastErrorAt?: number
+        lastErrorClientMessageId?: string
         queuedMessages?: CodexLocalSessionQueuedMessage[]
+    }
+    | {
+        success: false
+        error: string
+    }
+
+export type CodexLocalSessionComposerCapabilitiesResponse =
+    | {
+        success: true
+        commands: SlashCommand[]
+        skills: SkillSummary[]
     }
     | {
         success: false
@@ -277,6 +305,7 @@ export type SendCodexLocalSessionMessageResponse =
         success: true
         status: 'processing' | 'queued'
         startedAt?: number
+        progress?: CodexLocalSessionDirectSendProgress
         queuedAt?: number
         queuePosition?: number
         queueId?: string

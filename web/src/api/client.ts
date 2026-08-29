@@ -3,6 +3,7 @@ import type {
     AuthResponse,
     CodexLocalSessionsResponse,
     CodexLocalSessionContextResponse,
+    CodexLocalSessionComposerCapabilitiesResponse,
     CodexLocalSessionSnapshotResponse,
     CodexLocalSessionStatusResponse,
     ForkCodexLocalSessionResponse,
@@ -311,9 +312,19 @@ export class ApiClient {
         )
     }
 
+    async getCodexSessionComposerCapabilities(
+        sessionId: string,
+        machineId: string
+    ): Promise<CodexLocalSessionComposerCapabilitiesResponse> {
+        const queryParams = new URLSearchParams({ machineId })
+        return await this.request<CodexLocalSessionComposerCapabilitiesResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/composer-capabilities?${queryParams.toString()}`
+        )
+    }
+
     async sendCodexSessionMessage(
         sessionId: string,
-        payload: { machineId: string; message: string }
+        payload: { machineId: string; message: string; displayMessage?: string; clientMessageId?: string }
     ): Promise<SendCodexLocalSessionMessageResponse> {
         return await this.request<SendCodexLocalSessionMessageResponse>(
             `/api/codex/sessions/${encodeURIComponent(sessionId)}/messages`,

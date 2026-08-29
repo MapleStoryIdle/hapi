@@ -214,6 +214,38 @@ describe('SessionHeader back action', () => {
         expect(onBack).toHaveBeenCalledTimes(1)
     })
 
+    it('keeps the click fallback available after a cancelled standalone touch', () => {
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const onBack = vi.fn()
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={createSession()}
+                            api={null}
+                            onBack={onBack}
+                            floating
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const backButton = screen.getByTestId('session-header-back')
+        fireWebKitTouchPointerDown(backButton)
+        fireEvent.pointerCancel(backButton)
+        fireEvent.click(backButton, { detail: 1 })
+
+        expect(onBack).toHaveBeenCalledTimes(1)
+    })
+
     it('uses touch-end when a busy standalone WebKit view loses pointer-up', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
@@ -367,6 +399,21 @@ describe('SessionHeader back action', () => {
         expect(screen.queryByText('/workspace/old')).not.toBeInTheDocument()
     })
 
+    it('opens title details after a cancelled touch falls back to click', () => {
+        render(
+            <I18nProvider>
+                <SessionTitleDetails title="hapi" sessionId="cancelled-title-touch" />
+            </I18nProvider>
+        )
+
+        const titleButton = screen.getByRole('button', { name: 'hapi' })
+        fireWebKitTouchPointerDown(titleButton)
+        fireEvent.pointerCancel(titleButton)
+        fireEvent.click(titleButton, { detail: 1 })
+
+        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+    })
+
     it('does not re-render the title control for an unrelated streaming refresh', () => {
         let detailReads = 0
         const detailsRef = {
@@ -403,7 +450,7 @@ describe('SessionHeader back action', () => {
         expect(detailReads).toBe(readsAfterMount)
     })
 
-    it('opens title details on touch pointer-down without closing it again on the follow-up click', () => {
+    it('opens title details on one touch without closing it again on the follow-up click', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },

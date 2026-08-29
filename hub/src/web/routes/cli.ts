@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { basename } from 'node:path'
 import { z } from 'zod'
 import {
     CreateOrLoadMachineRequestSchema,
@@ -11,8 +12,53 @@ import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
+import { ArtifactService, MAX_ARTIFACT_BYTES } from '../../artifacts/service'
+import type { Store } from '../../store'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
+
+const MAX_ARTIFACT_FILENAME_BYTES = 255
+
+export function decodeArtifactFilename(raw: string | undefined): string | null {
+    if (!raw || !/^[A-Za-z0-9_-]+$/.test(raw)) return null
+    try {
+        const bytes = Buffer.from(raw, 'base64url')
+        if (bytes.length === 0 || bytes.length > MAX_ARTIFACT_FILENAME_BYTES || bytes.toString('base64url') !== raw) return null
+        const filename = new TextDecoder('utf-8', { fatal: true }).decode(bytes).normalize('NFC')
+        if (filename !== basename(filename) || filename === '.' || filename === '..' || /[\/\\\u0000-\u001f\u007f]/.test(filename)) return null
+        return filename
+    } catch {
+        return null
+    }
+}
+
+export async function readArtifactBody(body: ReadableStream<Uint8Array> | null): Promise<Uint8Array | null> {
+    if (!body) return new Uint8Array()
+    const reader = body.getReader()
+    const chunks: Uint8Array[] = []
+    let length = 0
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            length += value.byteLength
+            if (length > MAX_ARTIFACT_BYTES) {
+                await reader.cancel()
+                return null
+            }
+            chunks.push(value)
+        }
+    } finally {
+        reader.releaseLock()
+    }
+    const bytes = new Uint8Array(length)
+    let offset = 0
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset)
+        offset += chunk.byteLength
+    }
+    return bytes
+}
 
 const getMessagesQuerySchema = z.object({
     afterSeq: z.coerce.number().int().min(0),
@@ -56,7 +102,8 @@ function resolveMachineForNamespace(
     return { ok: false, status: 404, error: 'Machine not found' }
 }
 
-export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<CliEnv> {
+export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: Store): Hono<CliEnv> {
+    const artifacts = store ? new ArtifactService(store, getConfiguration().dataDir) : null
     const app = new Hono<CliEnv>()
 
     app.use('*', async (c, next) => {
@@ -81,6 +128,30 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
 
         c.set('namespace', parsedToken.namespace)
         return await next()
+    })
+
+    app.post('/artifacts', async (c) => {
+        if (!artifacts) return c.json({ error: 'Not ready' }, 503)
+        const filename = decodeArtifactFilename(c.req.header('x-hapi-artifact-filename'))
+        const expires = Number(c.req.header('x-hapi-artifact-expires'))
+        const length = Number(c.req.header('content-length'))
+        if (!filename || !Number.isInteger(expires) || expires < 300 || expires > 604800 || (!Number.isNaN(length) && (length < 0 || length > MAX_ARTIFACT_BYTES))) {
+            return c.json({ error: 'Invalid artifact upload' }, 400)
+        }
+        const bytes = await readArtifactBody(c.req.raw.body)
+        if (!bytes) return c.json({ error: 'Artifact exceeds 10 MiB' }, 413)
+        try {
+            const published = artifacts.publish({ namespace: c.get('namespace'), filename, expiresSeconds: expires, bytes })
+            const base = getConfiguration().publicUrl.replace(/\/+$/, '')
+            return c.json({ id: published.artifact.id, expiresAt: published.artifact.expiresAt, url: `${base}/a/${published.token}` }, 201)
+        } catch {
+            return c.json({ error: 'Could not store artifact' }, 500)
+        }
+    })
+
+    app.delete('/artifacts/:id', (c) => {
+        if (!artifacts) return c.json({ error: 'Not ready' }, 503)
+        return artifacts.revoke(c.req.param('id'), c.get('namespace')) ? c.json({ ok: true }) : c.json({ error: 'Artifact not found' }, 404)
     })
 
     app.post('/sessions', async (c) => {

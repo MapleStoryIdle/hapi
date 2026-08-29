@@ -11,6 +11,7 @@ import {
     normalizeCodexCustomToolName,
     normalizeCodexCustomToolOutput,
     readLocalCodexSessionSummary,
+    type CodexLocalSessionComposerCapabilitiesRpcResponse,
     type CodexLocalSessionData as RunnerCodexLocalSessionData,
     type CodexLocalSessionReadTiming,
     type CodexLocalSessionStatusRpcResponse,
@@ -1068,13 +1069,25 @@ function parseForkCodexLocalSessionRequest(value: unknown): { machineId: string 
     return { machineId: machineId.trim() }
 }
 
-function parseSendCodexLocalSessionMessageRequest(value: unknown): { machineId: string; message: string } | null {
+function parseSendCodexLocalSessionMessageRequest(value: unknown): {
+    machineId: string
+    message: string
+    displayMessage?: string
+    clientMessageId?: string
+} | null {
     const record = asRecord(value)
     if (!record) return null
     const machineId = typeof record.machineId === 'string' ? record.machineId.trim() : ''
     const message = typeof record.message === 'string' ? record.message.trim() : ''
     if (!machineId || !message) return null
-    return { machineId, message }
+    const displayMessage = typeof record.displayMessage === 'string' ? record.displayMessage.trim() : ''
+    const clientMessageId = typeof record.clientMessageId === 'string' ? record.clientMessageId.trim() : ''
+    return {
+        machineId,
+        message,
+        ...(displayMessage ? { displayMessage } : {}),
+        ...(clientMessageId ? { clientMessageId } : {})
+    }
 }
 
 function getOnlineCodexRunner(engine: SyncEngine, namespace: string, machineId: string): Machine | null {
@@ -2296,6 +2309,36 @@ export function createCodexDesktopRoutes(options: {
         }
     })
 
+    app.get('/codex/sessions/:id/composer-capabilities', async (c) => {
+        const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
+        if (!machineId) {
+            return c.json({ success: false, error: 'machineId is required' }, 400)
+        }
+
+        const engine = options.getSyncEngine()
+        const target = resolveDirectCodexLocalSessionTarget({
+            engine,
+            namespace: c.get('namespace'),
+            machineId
+        })
+        if (target.type === 'error') {
+            return c.json({ success: false, error: target.message }, target.status)
+        }
+
+        try {
+            const result = await engine!.getCodexLocalSessionComposerCapabilities(target.machine.id, c.req.param('id'))
+            if (result.success !== true) {
+                return c.json(result, 404)
+            }
+            return c.json(result satisfies CodexLocalSessionComposerCapabilitiesRpcResponse)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to read native Codex composer capabilities'
+            }, 502)
+        }
+    })
+
     app.get('/codex/sessions/:id/snapshot', async (c) => {
         const limit = parseCodexContextPageLimit(c.req.query('limit'))
         if (limit === null) {
@@ -2386,15 +2429,23 @@ export function createCodexDesktopRoutes(options: {
                 } satisfies SendCodexLocalSessionMessageRpcResponse, 202)
             }
 
-            const result = await engine!.sendCodexLocalSessionMessage(
-                target.machine.id,
-                c.req.param('id'),
-                request.message
-            )
+            const result = request.displayMessage === undefined && request.clientMessageId === undefined
+                ? await engine!.sendCodexLocalSessionMessage(
+                    target.machine.id,
+                    c.req.param('id'),
+                    request.message
+                )
+                : await engine!.sendCodexLocalSessionMessage(
+                    target.machine.id,
+                    c.req.param('id'),
+                    request.message,
+                    request.displayMessage,
+                    request.clientMessageId
+                )
             if (result.success === true) {
                 return c.json(result satisfies SendCodexLocalSessionMessageRpcResponse, 202)
             }
-            const status = result.code === 'invalid_message'
+            const status = result.code === 'invalid_message' || result.code === 'invalid_client_message_id'
                 ? 400
                 : result.code === 'session_not_found'
                     ? 404

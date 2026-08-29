@@ -10,6 +10,8 @@ import {
     buildReadOnlyCodexBlocks,
     CodexSessionContextPage,
     deriveNativeSessionConnectionHealth,
+    hasNativeCodexAgentReply,
+    getNativeCodexDirectSendPhase,
     getNativeContextRefreshInterval,
     getVisibleNativeDirectMessageEchoes,
     mergeCodexContextMessages
@@ -18,6 +20,7 @@ import {
 afterEach(() => {
     cleanup()
     sessionStorage.clear()
+    localStorage.clear()
     vi.restoreAllMocks()
 })
 
@@ -59,6 +62,11 @@ function createApi() {
     return {
         getCodexSessionContext,
         getCodexSessionStatus,
+        getCodexSessionComposerCapabilities: vi.fn(async () => ({
+            success: true as const,
+            commands: [],
+            skills: []
+        })),
         getCodexSessionSnapshot: vi.fn(async (sessionId: string, machineId: string, options: { before?: number; limit?: number }) => ({
             ...(await getCodexSessionContext(sessionId, machineId, options)),
             status: await getCodexSessionStatus(sessionId, machineId),
@@ -140,6 +148,78 @@ describe('CodexSessionContextPage', () => {
         expect(getNativeContextRefreshInterval({ success: true, status: 'idle' })).toBe(5_000)
     })
 
+    it('describes each native direct-send hand-off phase', () => {
+        const echo = {
+            id: 'native-local-1',
+            text: 'Continue',
+            createdAt: 1,
+            status: 'sending' as const,
+            deliveryPhase: 'launching' as const,
+            phaseStartedAt: 1,
+            queueId: null,
+            observedTranscriptMessageIds: [],
+            observedThroughPosition: null
+        }
+
+        expect(getNativeCodexDirectSendPhase({
+            pendingDirectSendCount: 1,
+            queuedMessages: [],
+            directMessageEchoes: [echo],
+            runState: 'idle'
+        })).toBe('launching')
+        expect(getNativeCodexDirectSendPhase({
+            pendingDirectSendCount: 0,
+            queuedMessages: [],
+            directMessageEchoes: [{ ...echo, status: 'queued', deliveryPhase: 'matching' }],
+            runState: 'processing',
+            progress: { phase: 'matching', startedAt: 1, phaseStartedAt: 2, transport: 'app-server' }
+        })).toBe('matching')
+        expect(getNativeCodexDirectSendPhase({
+            pendingDirectSendCount: 0,
+            queuedMessages: [],
+            directMessageEchoes: [{ ...echo, status: 'queued', deliveryPhase: 'connected' }],
+            runState: 'processing',
+            progress: { phase: 'connected', startedAt: 1, phaseStartedAt: 3, transport: 'app-server' }
+        })).toBe('connected')
+        expect(getNativeCodexDirectSendPhase({
+            pendingDirectSendCount: 0,
+            queuedMessages: [{ id: 'queue-1', text: 'Continue', queuedAt: 1 }],
+            directMessageEchoes: [{ ...echo, status: 'queued', deliveryPhase: 'queued', queueId: 'queue-1' }],
+            runState: 'processing'
+        })).toBe('queued')
+        expect(getNativeCodexDirectSendPhase({
+            pendingDirectSendCount: 0,
+            queuedMessages: [],
+            directMessageEchoes: [],
+            runState: 'processing'
+        })).toBe('reasoning')
+        expect(getNativeCodexDirectSendPhase({
+            pendingDirectSendCount: 0,
+            queuedMessages: [],
+            directMessageEchoes: [],
+            runState: 'processing',
+            hasAgentReply: true
+        })).toBeNull()
+    })
+
+    it('recognizes an agent reply only after the newest native prompt', () => {
+        const userMessage = (id: string, position: number): CodexLocalSessionContextMessage => ({
+            id,
+            position,
+            createdAt: position,
+            content: { role: 'user', content: { type: 'text', text: 'Prompt' } }
+        })
+        const agentMessage = (id: string, position: number): CodexLocalSessionContextMessage => ({
+            id,
+            position,
+            createdAt: position,
+            content: { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'Reply' } } }
+        })
+
+        expect(hasNativeCodexAgentReply([userMessage('user-1', 1), agentMessage('agent-1', 2)])).toBe(true)
+        expect(hasNativeCodexAgentReply([agentMessage('agent-1', 1), userMessage('user-2', 2)])).toBe(false)
+    })
+
     it('merges overlapping native context pages in transcript order', () => {
         const page = (messages: CodexLocalSessionContextMessage[]): CodexLocalSessionContextResponse => ({
             success: true,
@@ -181,6 +261,8 @@ describe('CodexSessionContextPage', () => {
             text: 'Continue',
             createdAt: 2,
             status: 'sending' as const,
+            deliveryPhase: 'launching' as const,
+            phaseStartedAt: 2,
             queueId: null,
             observedTranscriptMessageIds: ['old-continue'],
             observedThroughPosition: 3
@@ -191,6 +273,31 @@ describe('CodexSessionContextPage', () => {
         expect(getVisibleNativeDirectMessageEchoes([echo], [
             userMessage('old-continue', 2, 'Continue'),
             userMessage('new-continue', 4, 'Continue')
+        ])).toEqual([])
+    })
+
+    it('reconciles a native custom-command receipt against its expanded transcript prompt', () => {
+        const userMessage = (id: string, position: number, text: string): CodexLocalSessionContextMessage => ({
+            id,
+            createdAt: 1,
+            position,
+            content: { role: 'user', content: { type: 'text', text } }
+        })
+        const echo = {
+            id: 'native-local-custom-command',
+            text: '/review src/index.ts',
+            deliveryText: 'Review the requested code.\n\nUser arguments: src/index.ts',
+            createdAt: 2,
+            status: 'sending' as const,
+            deliveryPhase: 'launching' as const,
+            phaseStartedAt: 2,
+            queueId: null,
+            observedTranscriptMessageIds: [],
+            observedThroughPosition: 3
+        }
+
+        expect(getVisibleNativeDirectMessageEchoes([echo], [
+            userMessage('expanded-review', 4, echo.deliveryText)
         ])).toEqual([])
     })
 
@@ -472,10 +579,44 @@ describe('CodexSessionContextPage', () => {
         await waitFor(() => {
             expect(api.sendCodexSessionMessage).toHaveBeenCalledWith('codex-thread-1', {
                 machineId: 'machine-1',
-                message: 'Continue the original thread'
+                message: 'Continue the original thread',
+                clientMessageId: expect.any(String)
             })
         })
         expect(api.forkCodexSession).not.toHaveBeenCalled()
+    })
+
+    it('expands a native custom command but keeps the typed command as its display receipt', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionComposerCapabilities as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            commands: [{
+                name: 'review',
+                source: 'project',
+                description: 'Review selected files',
+                content: 'Review the requested code.'
+            }],
+            skills: []
+        })
+        renderPage({ api })
+
+        await screen.findByText('Original response')
+        await waitFor(() => expect(api.getCodexSessionComposerCapabilities).toHaveBeenCalledWith(
+            'codex-thread-1',
+            'machine-1'
+        ))
+        const input = screen.getByRole('textbox')
+        fireEvent.change(input, { target: { value: '/review src/index.ts' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+        await waitFor(() => {
+            expect(api.sendCodexSessionMessage).toHaveBeenCalledWith('codex-thread-1', {
+                machineId: 'machine-1',
+                message: 'Review the requested code.\n\nUser arguments: src/index.ts',
+                displayMessage: '/review src/index.ts',
+                clientMessageId: expect.any(String)
+            })
+        })
     })
 
     it('shows the native prompt immediately while the direct request is still in flight', async () => {
@@ -496,11 +637,12 @@ describe('CodexSessionContextPage', () => {
         })
         expect(await screen.findByText('Show this right away')).toBeInTheDocument()
         expect(screen.getByRole('status', { name: 'Sending' })).toBeInTheDocument()
+        expect(screen.getByTestId('codex-direct-send-phase-launching')).toBeInTheDocument()
 
         await act(async () => {
             resolveSend({ success: true, status: 'processing', startedAt: Date.now() })
         })
-        expect(await screen.findByRole('status', { name: 'Queued' })).toBeInTheDocument()
+        expect(await screen.findByTestId('codex-direct-send-phase-matching')).toBeInTheDocument()
     })
 
     it('keeps a native prompt visible after leaving and reopening the session', async () => {
@@ -517,6 +659,14 @@ describe('CodexSessionContextPage', () => {
 
         renderPage({ api })
         expect(await screen.findByText('Keep this after leaving')).toBeInTheDocument()
+        await waitFor(() => expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(2))
+        const firstPayload = (api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]
+        const retryPayload = (api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mock.calls[1]?.[1]
+        expect(retryPayload).toMatchObject({
+            machineId: 'machine-1',
+            message: 'Keep this after leaving',
+            clientMessageId: firstPayload?.clientMessageId
+        })
     })
 
     it('accepts another native prompt while the first hand-off is pending', async () => {
@@ -535,7 +685,7 @@ describe('CodexSessionContextPage', () => {
         await waitFor(() => expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(2))
     })
 
-    it('keeps direct-send available and locks only Fork while the native thread is processing', async () => {
+    it('hides reasoning after the agent reply while keeping direct-send available', async () => {
         const api = createApi()
         ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
             success: true,
@@ -546,11 +696,10 @@ describe('CodexSessionContextPage', () => {
         await screen.findByText('Original response')
         openNativeSessionMenu()
         await waitFor(() => {
-            expect(screen.getByRole('textbox')).not.toBeDisabled()
+        expect(screen.getByRole('textbox')).not.toBeDisabled()
             expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeDisabled()
         })
-        expect(screen.queryByText('Native Codex is running')).toBeNull()
-        expect(screen.queryByTestId('codex-status-processing')).toBeNull()
+        expect(screen.queryByTestId('codex-direct-send-phase-reasoning')).not.toBeInTheDocument()
     })
 
     it('sends a prompt while processing so the runner can queue it', async () => {
@@ -577,10 +726,12 @@ describe('CodexSessionContextPage', () => {
         await waitFor(() => {
             expect(api.sendCodexSessionMessage).toHaveBeenCalledWith('codex-thread-1', {
                 machineId: 'machine-1',
-                message: 'Queue this prompt'
+                message: 'Queue this prompt',
+                clientMessageId: expect.any(String)
             })
         })
         expect(await screen.findByRole('button', { name: 'Open 1 queued messages' })).toBeInTheDocument()
+        expect(screen.getByTestId('codex-direct-send-phase-queued')).toBeInTheDocument()
     })
 
     it('keeps a confirmed queue visible while a status refresh has not published it yet', async () => {
@@ -670,6 +821,18 @@ describe('CodexSessionContextPage', () => {
         })
     })
 
+    it('opens the native header menu after a cancelled touch falls back to click', async () => {
+        renderPage()
+
+        await screen.findByText('Original response')
+        const trigger = screen.getByTestId('codex-native-session-menu-trigger')
+        fireEvent.pointerDown(trigger, { pointerType: 'touch', pointerId: 1, clientX: 0, clientY: 0 })
+        fireEvent.pointerCancel(trigger)
+        fireEvent.click(trigger, { detail: 1 })
+
+        expect(await screen.findByRole('menu')).toBeInTheDocument()
+    })
+
     it('shows the native runner Codex quota in the header', async () => {
         const { api } = renderPage()
 
@@ -755,6 +918,11 @@ describe('CodexSessionContextPage', () => {
                     }
             )),
             getCodexSessionStatus: vi.fn(async () => ({ success: true as const, status: 'idle' as const })),
+            getCodexSessionComposerCapabilities: vi.fn(async () => ({
+                success: true as const,
+                commands: [],
+                skills: []
+            })),
             getCodexSessionSnapshot: vi.fn(async (sessionId: string, machineId: string, options: { before?: number; limit?: number }) => ({
                 ...await api.getCodexSessionContext(sessionId, machineId, options),
                 status: await api.getCodexSessionStatus(sessionId, machineId),

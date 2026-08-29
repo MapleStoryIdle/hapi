@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+    getCodexSessionDisplayTitle,
     getLocalCodexSessionData,
     getLocalCodexSessionRunState,
     listLocalCodexSessions,
@@ -18,6 +19,19 @@ afterEach(() => {
     } else {
         process.env.CODEX_HOME = originalCodexHome
     }
+})
+
+describe('getCodexSessionDisplayTitle', () => {
+    it('uses the first meaningful prompt line instead of a standalone URL', () => {
+        expect(getCodexSessionDisplayTitle([
+            '[https://github.com/tiann/hapi](https://github.com/tiann/hapi)',
+            '这里有什么新功能适合我当前改造后的版本'
+        ].join('\n'))).toBe('这里有什么新功能适合我当前改造后的版本')
+    })
+
+    it('keeps a compact single-line title for ordinary multi-line prompts', () => {
+        expect(getCodexSessionDisplayTitle('第一行任务\n第二行补充')).toBe('第一行任务')
+    })
 })
 
 describe('getLocalCodexSessionData', () => {

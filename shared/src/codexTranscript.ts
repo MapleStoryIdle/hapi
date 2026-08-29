@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { parseAutomationHeartbeatMessageContent } from './messages'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
+import type { SlashCommand } from './apiTypes'
 
 export type CodexLocalSessionSummary = {
     id: string
@@ -124,15 +125,60 @@ export type CodexLocalSessionDataRpcResponse = {
  */
 export type CodexLocalSessionRunState = 'idle' | 'processing' | 'unknown'
 
+/**
+ * Runner-owned progress for a prompt sent into an original native Codex
+ * thread. The stages deliberately describe the hand-off, not model output.
+ */
+export type CodexLocalSessionDirectSendPhase =
+    | 'launching'
+    | 'matching'
+    | 'connected'
+    | 'reasoning'
+
+export type CodexLocalSessionDirectSendProgress = {
+    phase: CodexLocalSessionDirectSendPhase
+    /** One stable clock for the whole hand-off, including fallback transport. */
+    startedAt: number
+    /** Lets clients show the duration of the currently visible stage. */
+    phaseStartedAt: number
+    transport: 'app-server' | 'exec-resume'
+}
+
 export type CodexLocalSessionStatusRpcResponse = {
     success: true
     status: CodexLocalSessionRunState
     /** Present while the runner owns a direct native send for this thread. */
     startedAt?: number
+    /** Present while the runner can describe its native direct-send hand-off. */
+    progress?: CodexLocalSessionDirectSendProgress
     /** Short runner-side launch/exit failure, if the most recent send failed. */
     lastError?: string
+    /** Runner timestamp for `lastError`, used to associate a browser receipt safely. */
+    lastErrorAt?: number
+    /** Browser receipt that caused `lastError`, when the runner knows it. */
+    lastErrorClientMessageId?: string
     /** Messages waiting for the native thread to become idle. */
     queuedMessages?: CodexLocalSessionQueuedMessage[]
+} | {
+    success: false
+    error: string
+}
+
+/** Capabilities that can safely be presented in an original native thread. */
+export type CodexLocalSessionComposerCapabilities = {
+    /** Custom prompts only. HAPI-owned control commands cannot alter a native thread. */
+    commands: SlashCommand[]
+    skills: Array<{
+        name: string
+        description?: string
+        scope: 'project' | 'user' | 'plugin' | 'system' | 'admin'
+    }>
+}
+
+export type CodexLocalSessionComposerCapabilitiesRpcResponse = {
+    success: true
+    commands: CodexLocalSessionComposerCapabilities['commands']
+    skills: CodexLocalSessionComposerCapabilities['skills']
 } | {
     success: false
     error: string
@@ -181,6 +227,8 @@ export type SendCodexLocalSessionMessageRpcResponse = {
     status: 'processing' | 'queued'
     /** Present when the request started a Codex child immediately. */
     startedAt?: number
+    /** Present when the runner started a direct native app-server bridge. */
+    progress?: CodexLocalSessionDirectSendProgress
     /** Present when the request waits behind an existing native turn. */
     queuedAt?: number
     queuePosition?: number
@@ -189,7 +237,7 @@ export type SendCodexLocalSessionMessageRpcResponse = {
 } | {
     success: false
     error: string
-    code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'launch_failed' | 'queue_full' | 'not_native_session'
+    code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'invalid_client_message_id' | 'launch_failed' | 'queue_full' | 'not_native_session'
 }
 
 export type CodexTranscriptFileCandidate = {
@@ -278,6 +326,28 @@ function extractCodexText(value: unknown): string {
 
 function truncateText(value: string, maxLength: number): string {
     return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
+}
+
+function isStandaloneUrlReference(value: string): boolean {
+    const line = value.trim()
+    if (/^<?https?:\/\/\S+>?$/i.test(line)) return true
+
+    const markdownLink = /^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/i.exec(line)
+    return markdownLink !== null && /^https?:\/\//i.test(markdownLink[1].trim())
+}
+
+/**
+ * Turn a raw Codex thread title (normally its first user prompt) into the
+ * compact, human-readable label used by a session list. A standalone URL is
+ * context, not a useful session name, so prefer the following text line.
+ */
+export function getCodexSessionDisplayTitle(value: string, maxLength = 80): string {
+    const lines = value
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+    const preferred = lines.find((line) => !isStandaloneUrlReference(line)) ?? lines[0] ?? ''
+    return truncateText(preferred.replace(/\s+/g, ' '), maxLength)
 }
 
 function getCodexRolloutTimestampKey(value: string | null): string | null {
@@ -558,8 +628,8 @@ function getCodexSessionTitle(
     changedTitle: string | null,
     firstUserMessage: string | null
 ): string {
-    if (changedTitle) return truncateText(changedTitle, 80)
-    if (firstUserMessage) return truncateText(firstUserMessage, 80)
+    if (changedTitle) return getCodexSessionDisplayTitle(changedTitle)
+    if (firstUserMessage) return getCodexSessionDisplayTitle(firstUserMessage)
     if (cwd) {
         const parts = cwd.split(/[\\/]+/).filter(Boolean)
         if (parts.length > 0) return parts[parts.length - 1]

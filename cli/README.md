@@ -89,6 +89,8 @@ See `src/ui/doctor.ts`.
 
 - `hapi mcp` - Start MCP stdio bridge. See `src/codex/happyMcpStdioBridge.ts`.
 - `hapi hub` - Start the bundled hub (single binary workflow).
+- `hapi artifact publish <relative-file> [--expires <seconds>]` - Upload one local file as an expiring public artifact (5 minutes–7 days; default 24h).
+- `hapi artifact revoke <artifact-id>` - Revoke an artifact. Public links are bearer links; redact `/a/*` paths in reverse-proxy logs.
 - `hapi server` - Alias for `hapi hub`.
 
 ## Configuration

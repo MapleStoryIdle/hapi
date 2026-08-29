@@ -16,6 +16,8 @@ function makeEcho(id: string) {
         text: `Message ${id}`,
         createdAt: Date.now(),
         status: 'sending' as const,
+        deliveryPhase: 'launching' as const,
+        phaseStartedAt: Date.now(),
         queueId: null,
         observedTranscriptMessageIds: ['old-message'],
         observedThroughPosition: 4
@@ -25,6 +27,7 @@ function makeEcho(id: string) {
 describe('native Codex direct-message receipts', () => {
     beforeEach(() => {
         sessionStorage.clear()
+        localStorage.clear()
     })
 
     it('keeps an optimistic receipt when the native session page remounts', () => {
@@ -32,6 +35,7 @@ describe('native Codex direct-message receipts', () => {
         updateNativeCodexDirectMessageEchoes(scope, () => [echo])
 
         expect(readNativeCodexDirectMessageEchoes(scope)).toEqual([echo])
+        expect(localStorage.length).toBe(1)
     })
 
     it('keeps receipts isolated by runner and native thread', () => {
@@ -47,5 +51,16 @@ describe('native Codex direct-message receipts', () => {
         updateNativeCodexDirectMessageEchoes(scope, () => [])
 
         expect(readNativeCodexDirectMessageEchoes(scope)).toEqual([])
+    })
+
+    it('preserves an expanded delivery text for native transcript reconciliation', () => {
+        const echo = {
+            ...makeEcho('local-expanded'),
+            text: '/review src/index.ts',
+            deliveryText: 'Review the requested code.\n\nUser arguments: src/index.ts'
+        }
+        updateNativeCodexDirectMessageEchoes(scope, () => [echo])
+
+        expect(readNativeCodexDirectMessageEchoes(scope)).toEqual([echo])
     })
 })

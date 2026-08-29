@@ -119,3 +119,15 @@ export type VersionedUpdateResult<T> =
     | { result: 'success'; version: number; value: T }
     | { result: 'version-mismatch'; version: number; value: T }
     | { result: 'error' }
+
+export type StoredArtifact = {
+    id: string
+    namespace: string
+    tokenHash: string
+    filename: string
+    size: number
+    sha256: string
+    createdAt: number
+    expiresAt: number
+    revokedAt: number | null
+}

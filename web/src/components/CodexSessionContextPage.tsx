@@ -5,12 +5,15 @@ import { ApiError, type ApiClient } from '@/api/client'
 import type {
     CodexLocalSessionContextMessage,
     CodexLocalSessionContextResponse,
+    CodexLocalSessionDirectSendProgress,
     CodexLocalSessionQueuedMessage,
+    CodexLocalSessionRunState,
     CodexLocalSessionRealtimeSnapshot,
     CodexLocalSessionSnapshotResponse,
     CodexLocalSessionStatusResponse,
     DecryptedMessage,
-    SessionMetadataSummary
+    SessionMetadataSummary,
+    SkillSummary
 } from '@/types/api'
 import {
     buildSessionHeaderDetails,
@@ -40,6 +43,7 @@ import {
     type NativeCodexDirectMessageScope
 } from '@/lib/native-codex-direct-messages'
 import { queryKeys } from '@/lib/query-keys'
+import { expandCodexCustomPrompt } from '@/lib/codexSlashCommands'
 import { useTranslation } from '@/lib/use-translation'
 import {
     SessionConnectionProvider,
@@ -53,6 +57,8 @@ import {
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
 import { useCodexSubscriptionLimits } from '@/hooks/queries/useCodexSubscriptionLimits'
+import { useNativeCodexSessionComposerCapabilities } from '@/hooks/queries/useNativeCodexSessionComposerCapabilities'
+import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { SessionDetailContent, SessionDetailSurface } from '@/components/SessionDetailSurface'
 import { SessionDetailStatusNotice } from '@/components/SessionDetailStatusNotice'
 import {
@@ -69,6 +75,86 @@ const NATIVE_CONTEXT_REFRESH_INTERVAL_MS = 5_000
 const NATIVE_CONTEXT_ACTIVE_REFRESH_INTERVAL_MS = 1_000
 const NATIVE_CONTEXT_STALE_AFTER_MS = 12_000
 const NATIVE_STATUS_STALE_AFTER_MS = 6_000
+
+export type NativeCodexDirectSendPhase = CodexLocalSessionDirectSendProgress['phase'] | 'queued'
+
+/**
+ * Native Codex has a real hand-off gap between runner acceptance and the
+ * transcript write. Surface that gap instead of leaving a generic spinner.
+ */
+export function getNativeCodexDirectSendPhase(input: {
+    pendingDirectSendCount: number
+    queuedMessages: readonly CodexLocalSessionQueuedMessage[]
+    directMessageEchoes: readonly NativeDirectMessageEcho[]
+    runState: CodexLocalSessionRunState | null
+    progress?: CodexLocalSessionDirectSendProgress | null
+    hasAgentReply?: boolean
+}): NativeCodexDirectSendPhase | null {
+    const activeEchoes = input.directMessageEchoes.filter((echo) => echo.status !== 'failed')
+    if (input.pendingDirectSendCount > 0 || activeEchoes.some((echo) => echo.deliveryPhase === 'launching')) {
+        return 'launching'
+    }
+    if (input.queuedMessages.length > 0 || activeEchoes.some((echo) => echo.deliveryPhase === 'queued')) {
+        return 'queued'
+    }
+    if (input.progress) {
+        if (input.progress.phase === 'reasoning' && input.hasAgentReply && activeEchoes.length === 0) {
+            return null
+        }
+        return input.progress.phase
+    }
+    if (input.runState === 'processing') {
+        if (input.hasAgentReply && activeEchoes.length === 0) {
+            return null
+        }
+        return 'reasoning'
+    }
+    return [...activeEchoes]
+        .reverse()
+        .find((echo) => echo.deliveryPhase !== 'queued')
+        ?.deliveryPhase ?? null
+}
+
+function isNativeCodexAgentReply(message: CodexLocalSessionContextMessage): boolean {
+    if (message.content.role !== 'agent') return false
+    const content = message.content.content
+    if (!content || typeof content !== 'object' || Array.isArray(content)) return false
+    const envelope = content as { type?: unknown; data?: unknown }
+    if (envelope.type !== 'codex' || !envelope.data || typeof envelope.data !== 'object' || Array.isArray(envelope.data)) {
+        return false
+    }
+    const data = envelope.data as { type?: unknown; message?: unknown }
+    return data.type === 'message'
+        && typeof data.message === 'string'
+        && data.message.trim().length > 0
+}
+
+/** An agent text response belongs to the newest native prompt in the transcript. */
+export function hasNativeCodexAgentReply(messages: readonly CodexLocalSessionContextMessage[]): boolean {
+    let latestUserMessageIndex = -1
+    let latestAgentReplyIndex = -1
+    messages.forEach((message, index) => {
+        if (message.content.role === 'user') {
+            latestUserMessageIndex = index
+        } else if (isNativeCodexAgentReply(message)) {
+            latestAgentReplyIndex = index
+        }
+    })
+    return latestAgentReplyIndex > latestUserMessageIndex
+}
+
+function getNativeCodexDirectSendPhaseStartedAt(input: {
+    phase: NativeCodexDirectSendPhase | null
+    progress?: CodexLocalSessionDirectSendProgress | null
+    directMessageEchoes: readonly NativeDirectMessageEcho[]
+}): number | null {
+    if (!input.phase) return null
+    if (input.progress?.phase === input.phase) return input.progress.phaseStartedAt
+    const matchingEcho = [...input.directMessageEchoes]
+        .reverse()
+        .find((echo) => echo.status !== 'failed' && echo.deliveryPhase === input.phase)
+    return matchingEcho?.phaseStartedAt ?? null
+}
 
 export function buildNativeRealtimeContextResponse(
     snapshot: CodexLocalSessionRealtimeSnapshot
@@ -323,7 +409,10 @@ export function getVisibleNativeDirectMessageEchoes(
                 ? !observedIds.has(message.id)
                 : typeof message.position === 'number' && message.position > echo.observedThroughPosition)
             && !matchedTranscriptIds.has(message.id)
-            && getNativeUserMessageText(message) === echo.text
+            && (() => {
+                const messageText = getNativeUserMessageText(message)
+                return messageText === echo.text || messageText === echo.deliveryText
+            })()
         ))
         if (!match) return true
         matchedTranscriptIds.add(match.id)
@@ -386,6 +475,10 @@ function NativeCodexThread(props: {
     composerDisabled: boolean
     composerNotice: string | null
     sendError: ComposerSendError | null
+    autocompleteSuggestions: (query: string) => Promise<Suggestion[]>
+    skills: SkillSummary[]
+    skillsLoading: boolean
+    skillsError: string | null
     onClearSendError: () => void
     onSendMessage: (text: string) => void
     onRefresh: () => void
@@ -533,6 +626,11 @@ function NativeCodexThread(props: {
                                 showStatusBar={false}
                                 allowAttachments={false}
                                 inactiveNotice={props.composerNotice}
+                                autocompletePrefixes={['/', '$']}
+                                autocompleteSuggestions={props.autocompleteSuggestions}
+                                skills={props.skills}
+                                skillsLoading={props.skillsLoading}
+                                skillsError={props.skillsError}
                                 sendError={props.sendError}
                                 onClearSendError={props.onClearSendError}
                             />
@@ -630,6 +728,11 @@ export function CodexSessionContextPage(props: {
         isFetching: contextQuery.isFetching,
         refetch: contextQuery.refetch
     }
+    const nativeComposerCapabilities = useNativeCodexSessionComposerCapabilities(
+        props.api,
+        props.machineId,
+        props.sessionId
+    )
     const pageScope = `${props.machineId ?? ''}:${props.sessionId}`
     const nativeDirectMessageScope = useMemo<NativeCodexDirectMessageScope>(() => ({
         machineId: props.machineId ?? '',
@@ -657,6 +760,7 @@ export function CodexSessionContextPage(props: {
     const pageScopeRef = useRef(pageScope)
     const nativeDirectMessageScopeKeyRef = useRef(nativeDirectMessageScopeKey)
     const nativeDirectMessagePageMountedRef = useRef(true)
+    const attemptedNativeDirectMessageIdsRef = useRef(new Set<string>())
     const connectionRecoveryTokenRef = useRef(0)
     const foregroundRefreshAtRef = useRef(0)
     const nativeEventRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -704,6 +808,7 @@ export function CodexSessionContextPage(props: {
         setDirectSendError(null)
         setDismissedRunnerError(null)
         setConnectionNow(Date.now())
+        attemptedNativeDirectMessageIdsRef.current.clear()
         foregroundRefreshAtRef.current = 0
         setOutlineOpen(false)
         setMenuOpen(false)
@@ -712,25 +817,74 @@ export function CodexSessionContextPage(props: {
 
     useEffect(() => {
         const response = statusQuery.data
-        if (response?.success === true && Array.isArray(response.queuedMessages)) {
+        if (response?.success === true) {
+            const queuedMessages = Array.isArray(response.queuedMessages) ? response.queuedMessages : null
             // Do not clear a locally confirmed queue from a response produced
             // by an older runner (or from the short processing window before
             // the runner has published its queue). Once the native turn is
             // idle, an explicit empty array is authoritative and clears it.
-            setNativeQueuedMessages((current) => response.queuedMessages!.length === 0
-                && current.length > 0
-                && response.status !== 'idle'
-                ? current
-                : response.queuedMessages!)
-            const queuedMessageIds = new Set(response.queuedMessages.map((message) => message.id))
+            if (queuedMessages) {
+                setNativeQueuedMessages((current) => queuedMessages.length === 0
+                    && current.length > 0
+                    && response.status !== 'idle'
+                    ? current
+                    : queuedMessages)
+            }
+            const queuedMessageIds = new Set(queuedMessages?.map((message) => message.id) ?? [])
             updateNativeDirectMessageEchoes(nativeDirectMessageScope, (current) => {
                 let changed = false
-                const next = current.map((echo) => {
-                    if (echo.status !== 'queued' || !echo.queueId || queuedMessageIds.has(echo.queueId)) {
-                        return echo
+                const failedEchoIndex = response.lastError && (
+                    response.lastErrorClientMessageId !== undefined || response.lastErrorAt !== undefined
+                )
+                    ? current.reduce((latest, echo, index) => (
+                        (response.lastErrorClientMessageId !== undefined
+                            ? echo.id === response.lastErrorClientMessageId
+                            : echo.createdAt <= response.lastErrorAt!)
+                        && echo.status !== 'failed'
+                        && echo.deliveryPhase !== 'queued'
+                            ? index
+                            : latest
+                    ), -1)
+                    : -1
+                const activeEchoIndex = response.progress
+                    ? current.reduce((latest, echo, index) => (
+                        echo.status !== 'failed' && echo.deliveryPhase !== 'queued' ? index : latest
+                    ), -1)
+                    : -1
+                const next = current.map((echo, index) => {
+                    if (index === failedEchoIndex) {
+                        changed = true
+                        return { ...echo, status: 'failed' as const }
                     }
-                    changed = true
-                    return { ...echo, status: 'sending' as const }
+                    if (
+                        queuedMessages
+                        && echo.deliveryPhase === 'queued'
+                        && echo.queueId
+                        && !queuedMessageIds.has(echo.queueId)
+                    ) {
+                        changed = true
+                        return {
+                            ...echo,
+                            status: 'sending' as const,
+                            deliveryPhase: 'matching' as const,
+                            phaseStartedAt: Date.now()
+                        }
+                    }
+                    if (response.progress && index === activeEchoIndex) {
+                        if (
+                            echo.deliveryPhase === response.progress.phase
+                            && echo.phaseStartedAt === response.progress.phaseStartedAt
+                        ) {
+                            return echo
+                        }
+                        changed = true
+                        return {
+                            ...echo,
+                            deliveryPhase: response.progress.phase,
+                            phaseStartedAt: response.progress.phaseStartedAt
+                        }
+                    }
+                    return echo
                 })
                 return changed ? next : current
             })
@@ -992,7 +1146,25 @@ export function CodexSessionContextPage(props: {
     }), [contextQuery.dataUpdatedAt, nativeConnectionHealth, recoverNativeConnection])
     const hasNativeQueuedMessages = nativeQueuedMessages.length > 0
     const isSendingDirect = pendingDirectSendCount > 0
-    const isNativeProcessing = isSendingDirect || directStatus === 'processing'
+    const directSendPhase = getNativeCodexDirectSendPhase({
+        pendingDirectSendCount,
+        queuedMessages: nativeQueuedMessages,
+        directMessageEchoes: visibleNativeDirectMessageEchoes,
+        runState: directStatus,
+        progress: statusQuery.data?.success === true ? statusQuery.data.progress ?? null : null,
+        hasAgentReply: hasNativeCodexAgentReply(messages)
+    })
+    const directSendPhaseStartedAt = getNativeCodexDirectSendPhaseStartedAt({
+        phase: directSendPhase,
+        progress: statusQuery.data?.success === true ? statusQuery.data.progress ?? null : null,
+        directMessageEchoes: visibleNativeDirectMessageEchoes
+    })
+    const directSendPhaseElapsedSeconds = directSendPhaseStartedAt === null
+        ? null
+        : Math.max(0, Math.floor((connectionNow - directSendPhaseStartedAt) / 1_000))
+    const isNativeProcessing = isSendingDirect
+        || directStatus === 'processing'
+        || (directSendPhase !== null && directSendPhase !== 'queued')
     // A runner can briefly report idle between the native turn ending and the
     // queue pump starting its next child. Treat that window as non-idle so
     // Fork cannot race a prompt that is already waiting for delivery.
@@ -1031,7 +1203,7 @@ export function CodexSessionContextPage(props: {
         ? 'bg-[#FF3B30]'
         : nativeConnectionHealth === 'degraded' || nativeConnectionHealth === 'recovering'
             ? 'bg-[#FF9500] animate-pulse'
-            : directStatus === 'processing'
+            : isNativeProcessing
                 ? 'bg-[#007AFF] animate-pulse'
                 : 'bg-[#34C759]'
 
@@ -1069,14 +1241,19 @@ export function CodexSessionContextPage(props: {
         if (!props.machineId || directStatus === null || directStatus === 'unknown') {
             return
         }
+        const deliveryText = expandCodexCustomPrompt(text, nativeComposerCapabilities.commands) ?? text
         const requestScope = pageScope
         const requestNativeDirectMessageScope = nativeDirectMessageScope
         const echoId = makeClientSideId('native')
+        const createdAt = Date.now()
         const echo: NativeDirectMessageEcho = {
             id: echoId,
             text,
-            createdAt: Date.now(),
+            ...(deliveryText !== text ? { deliveryText } : {}),
+            createdAt,
             status: 'sending',
+            deliveryPhase: 'launching',
+            phaseStartedAt: createdAt,
             queueId: null,
             observedTranscriptMessageIds: messages.map((message) => message.id),
             observedThroughPosition: messages.reduce<number | null>((latest, message) => (
@@ -1090,6 +1267,7 @@ export function CodexSessionContextPage(props: {
         // rather than a button press that appears to have done nothing.
         updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => [...current, echo])
         setNativeForceScrollToken((token) => token + 1)
+        attemptedNativeDirectMessageIdsRef.current.add(echoId)
         setPendingDirectSendCount((count) => count + 1)
         setDirectSendError(null)
         setDismissedRunnerError(null)
@@ -1097,7 +1275,9 @@ export function CodexSessionContextPage(props: {
             try {
                 const response = await props.api.sendCodexSessionMessage(props.sessionId, {
                     machineId: props.machineId!,
-                    message: text
+                    message: deliveryText,
+                    ...(deliveryText === text ? {} : { displayMessage: text }),
+                    clientMessageId: echoId
                 })
                 if (response.success !== true) {
                     throw new ApiError(response.error, 409, response.code)
@@ -1112,6 +1292,12 @@ export function CodexSessionContextPage(props: {
                             // accepted the prompt; the clock remains until the
                             // native transcript echoes it back.
                             status: 'queued' as const,
+                            deliveryPhase: response.status === 'queued'
+                                ? 'queued' as const
+                                : response.progress?.phase ?? 'matching' as const,
+                            phaseStartedAt: response.status === 'queued'
+                                ? Date.now()
+                                : response.progress?.phaseStartedAt ?? Date.now(),
                             queueId: response.queueId ?? null
                         }
                 )))
@@ -1155,6 +1341,91 @@ export function CodexSessionContextPage(props: {
     }, [
         directStatus,
         messages,
+        nativeComposerCapabilities.commands,
+        nativeDirectMessageScope,
+        pageScope,
+        props.api,
+        props.machineId,
+        props.sessionId,
+        refetchNativeSnapshot,
+        t,
+        updateNativeDirectMessageEchoes
+    ])
+
+    // A route change, backgrounded PWA, or browser reload can interrupt the
+    // HTTP response after the browser has created the local receipt. Re-submit
+    // that exact receipt when the thread is opened again. Its id travels all
+    // the way to the runner, where active/queued sends are deduplicated.
+    useEffect(() => {
+        if (!props.machineId || directStatus === null || directStatus === 'unknown') {
+            return
+        }
+
+        const retryable = currentNativeDirectMessageEchoes.filter((echo) => (
+            (echo.status === 'sending' || echo.status === 'failed')
+            && !attemptedNativeDirectMessageIdsRef.current.has(echo.id)
+        ))
+        for (const echo of retryable) {
+            attemptedNativeDirectMessageIdsRef.current.add(echo.id)
+            const requestScope = pageScope
+            const requestNativeDirectMessageScope = nativeDirectMessageScope
+            const deliveryText = echo.deliveryText ?? echo.text
+            void (async () => {
+                try {
+                    const response = await props.api.sendCodexSessionMessage(props.sessionId, {
+                        machineId: props.machineId!,
+                        message: deliveryText,
+                        ...(deliveryText === echo.text ? {} : { displayMessage: echo.text }),
+                        clientMessageId: echo.id
+                    })
+                    if (response.success !== true) {
+                        throw new ApiError(response.error, 409, response.code)
+                    }
+                    updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
+                        message.id !== echo.id
+                            ? message
+                            : {
+                                ...message,
+                                status: 'queued' as const,
+                                deliveryPhase: response.status === 'queued'
+                                    ? 'queued' as const
+                                    : response.progress?.phase ?? 'matching' as const,
+                                phaseStartedAt: response.status === 'queued'
+                                    ? Date.now()
+                                    : response.progress?.phaseStartedAt ?? Date.now(),
+                                queueId: response.queueId ?? null
+                            }
+                    )))
+                    if (pageScopeRef.current !== requestScope || !nativeDirectMessagePageMountedRef.current) {
+                        return
+                    }
+                    if (Array.isArray(response.queuedMessages) && response.queuedMessages.length > 0) {
+                        setNativeQueuedMessages(response.queuedMessages)
+                    } else if (response.status === 'queued' && response.queueId && response.queuedAt !== undefined) {
+                        setNativeQueuedMessages((messages) => [
+                            ...messages,
+                            { id: response.queueId!, text: echo.text, queuedAt: response.queuedAt! }
+                        ])
+                    }
+                    void refetchNativeSnapshot()
+                } catch (error) {
+                    updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
+                        message.id === echo.id ? { ...message, status: 'failed' as const } : message
+                    )))
+                    if (pageScopeRef.current === requestScope && nativeDirectMessagePageMountedRef.current) {
+                        setDirectSendError({
+                            id: Date.now(),
+                            text: echo.text,
+                            message: formatDirectSendError(error, t),
+                            scheduledAt: null
+                        })
+                    }
+                }
+            })()
+        }
+    }, [
+        currentNativeDirectMessageEchoes,
+        directStatus,
         nativeDirectMessageScope,
         pageScope,
         props.api,
@@ -1277,6 +1548,10 @@ export function CodexSessionContextPage(props: {
                             composerDisabled={composerDisabled}
                             composerNotice={composerNotice}
                             sendError={composerSendError}
+                            autocompleteSuggestions={nativeComposerCapabilities.getSuggestions}
+                            skills={nativeComposerCapabilities.skills}
+                            skillsLoading={nativeComposerCapabilities.isLoading}
+                            skillsError={nativeComposerCapabilities.error}
                             onClearSendError={() => {
                                 setDirectSendError(null)
                                 if (directStatusError) {
@@ -1312,13 +1587,18 @@ export function CodexSessionContextPage(props: {
                             testId="codex-fork-error"
                         />
                     </div>
-                ) : isNativeQueueWaiting ? (
+                ) : directSendPhase ? (
                     <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
                         <SessionDetailStatusNotice
                             tone="processing"
-                            title={t('recentCodex.status.queued')}
-                            compact
-                            testId="codex-status-queued"
+                            title={t(`recentCodex.direct.phase.${directSendPhase}.title`)}
+                            detail={[
+                                t(`recentCodex.direct.phase.${directSendPhase}.detail`),
+                                directSendPhaseElapsedSeconds === null
+                                    ? null
+                                    : t('recentCodex.direct.phase.elapsed', { seconds: directSendPhaseElapsedSeconds })
+                            ].filter(Boolean).join(' · ')}
+                            testId={`codex-direct-send-phase-${directSendPhase}`}
                         />
                     </div>
                 ) : directStatus === 'unknown' || statusQuery.isError ? (

@@ -8,8 +8,10 @@ import { PushStore } from './pushStore'
 import { RemoteServerStore } from './remoteServerStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
+import { ArtifactStore } from './artifacts'
 
 export type {
+    StoredArtifact,
     StoredMachine,
     StoredMessage,
     StoredPushSubscription,
@@ -28,8 +30,9 @@ export { PushStore } from './pushStore'
 export { RemoteServerStore } from './remoteServerStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
+export { ArtifactStore } from './artifacts'
 
-const SCHEMA_VERSION: number = 13
+const SCHEMA_VERSION: number = 14
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -39,7 +42,8 @@ const REQUIRED_TABLES = [
     'remote_servers',
     'remote_server_connections',
     'remote_server_candidates',
-    'remote_server_candidate_connections'
+    'remote_server_candidate_connections',
+    'artifacts'
 ] as const
 
 export class Store {
@@ -53,6 +57,7 @@ export class Store {
     readonly users: UserStore
     readonly push: PushStore
     readonly remoteServers: RemoteServerStore
+    readonly artifacts: ArtifactStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -104,6 +109,7 @@ export class Store {
         this.users = new UserStore(this.db)
         this.push = new PushStore(this.db)
         this.remoteServers = new RemoteServerStore(this.db)
+        this.artifacts = new ArtifactStore(this.db)
     }
 
     close(): void {
@@ -139,6 +145,7 @@ export class Store {
             10: () => this.migrateFromV10ToV11(),
             11: () => this.migrateFromV11ToV12(),
             12: () => this.migrateFromV12ToV13(),
+            13: () => this.migrateFromV13ToV14(),
         })
 
         if (currentVersion === 0) {
@@ -348,6 +355,13 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_remote_server_candidate_connections_candidate
                 ON remote_server_candidate_connections(candidate_id, last_verified_at DESC);
+
+            CREATE TABLE IF NOT EXISTS artifacts (
+                id TEXT PRIMARY KEY, namespace TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+                filename TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
+                created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_artifacts_namespace ON artifacts(namespace, created_at DESC);
         `)
     }
 
@@ -654,6 +668,10 @@ export class Store {
     private getColumnNames(table: string): Set<string> {
         const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
         return new Set(rows.map((row) => row.name))
+    }
+
+    private migrateFromV13ToV14(): void {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, namespace TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, filename TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER); CREATE INDEX IF NOT EXISTS idx_artifacts_namespace ON artifacts(namespace, created_at DESC);`)
     }
 
     private getUserVersion(): number {
