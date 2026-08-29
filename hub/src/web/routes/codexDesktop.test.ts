@@ -885,6 +885,48 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('routes a stale native-list HAPI session through its existing HAPI transport', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '59575757-5757-4757-8757-575656565656'
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const normalSendCalls: unknown[][] = []
+        const nativeSendCalls: unknown[][] = []
+        const managedSession = {
+            id: sessionId,
+            active: true,
+            metadata: { machineId: 'mac-runner' }
+        }
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            getSessionsByNamespace: () => [managedSession],
+            sendMessage: async (...args: unknown[]) => {
+                normalSendCalls.push(args)
+            },
+            sendCodexLocalSessionMessage: async (...args: unknown[]) => {
+                nativeSendCalls.push(args)
+                return { success: true as const, status: 'processing' as const }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${sessionId}/messages`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ machineId: 'mac-runner', message: 'Use the connected HAPI session' })
+            })
+            expect(response.status).toBe(202)
+            expect(await response.json()).toMatchObject({ success: true, status: 'processing' })
+            expect(normalSendCalls).toEqual([[
+                sessionId,
+                { text: 'Use the connected HAPI session', sentFrom: 'webapp' }
+            ]])
+            expect(nativeSendCalls).toEqual([])
+        } finally {
+            store.close()
+        }
+    })
+
     it('asks the selected runner to exclude HAPI-initiated Codex threads', async () => {
         const store = new Store(':memory:')
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
@@ -899,11 +941,20 @@ describe('Codex Desktop import routes', () => {
             id: 'external-thread',
             originator: 'codex-tui'
         }
+        const legacyHapiSession = {
+            ...createRunnerLocalSessionData('legacy-hapi-thread').session,
+            id: 'legacy-hapi-thread',
+            originator: 'Codex Desktop'
+        }
         const engine = {
             ...createImportSyncEngine(store, [machine]),
+            getSessionsByNamespace: () => [{
+                id: 'legacy-hapi-thread',
+                metadata: { machineId: 'mac-runner' }
+            }],
             listCodexLocalSessions: async (...args: unknown[]) => {
                 listCalls.push(args)
-                return { success: true as const, sessions: [hapiSession, externalSession] }
+                return { success: true as const, sessions: [hapiSession, legacyHapiSession, externalSession] }
             }
         } as unknown as SyncEngine
         const app = createRoutesAppWithEngine('default', store, engine)

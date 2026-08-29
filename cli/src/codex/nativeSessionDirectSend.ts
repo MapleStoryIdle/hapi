@@ -10,7 +10,6 @@ import {
     type CodexLocalSessionStatusRpcResponse,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
-import { hasCodexAppServerControlSocket } from './codexControlSocket'
 
 type NativeCodexChildProcess = Pick<ChildProcess, 'once' | 'stderr'>
 
@@ -23,8 +22,6 @@ export type NativeCodexSessionLookup = {
 type ActiveSend = {
     startedAt: number
     child: NativeCodexChildProcess
-    /** `codex queue` is only a short hand-off to the owning app-server. */
-    usesControlSocket: boolean
 }
 
 type RecentFailure = {
@@ -63,12 +60,14 @@ function defaultSpawnNativeCodexProcess(args: string[], cwd: string): NativeCode
 }
 
 /**
- * Delivers a prompt to the original native Codex thread. When a long-lived
- * app-server is present, delivery uses `codex queue`; otherwise it falls back
- * to `codex exec resume` after a lifecycle-confirmed idle check.
+ * Delivers a prompt to the original native Codex thread with `codex exec
+ * resume` after a lifecycle-confirmed idle check.
  *
- * This controller does not create a HAPI Session or an app-server thread. Its
- * fallback path keeps a runner-local mutex plus a small per-thread FIFO queue.
+ * A machine can have a global Codex app-server control socket even when it
+ * does not own this particular thread. Sending `codex queue` through that
+ * socket acknowledges a message but can leave it in an unrelated daemon's
+ * durable queue forever. Keep a runner-local FIFO instead of treating that
+ * global socket as thread ownership.
  */
 export class NativeCodexSessionDirectSender {
     private readonly activeSends = new Map<string, ActiveSend>()
@@ -81,7 +80,6 @@ export class NativeCodexSessionDirectSender {
         private readonly spawnProcess: SpawnNativeCodexProcess = defaultSpawnNativeCodexProcess,
         private readonly now: () => number = Date.now,
         private readonly queuePollIntervalMs: number = NATIVE_QUEUE_POLL_INTERVAL_MS,
-        private readonly hasControlSocket: () => boolean = hasCodexAppServerControlSocket,
         private readonly sessionLookup: NativeCodexSessionLookup = defaultSessionLookup
     ) {
     }
@@ -180,20 +178,6 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
-        const controlSocketAvailable = this.hasControlSocket()
-        // The app-server is the one writer for this native thread. Its
-        // `codex queue` command accepts a new prompt while a turn is running,
-        // so waiting for the transcript to turn idle only adds the duration of
-        // the whole current turn to every web send. Keep a tiny local FIFO
-        // only while a previous *handoff command* is still returning, which
-        // preserves message order without delaying for model work.
-        if (controlSocketAvailable) {
-            if (this.activeSends.has(sessionId) || (this.queues.get(sessionId)?.length ?? 0) > 0) {
-                return this.enqueue(sessionId, message)
-            }
-            return this.start(sessionId, message, cwd, true)
-        }
-
         // Once a queue exists, preserve FIFO order even if the transcript has
         // already become idle but the pump has not run its next tick yet.
         if (status.status === 'processing' || (this.queues.get(sessionId)?.length ?? 0) > 0) {
@@ -207,7 +191,7 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
-        return this.start(sessionId, message, cwd, false)
+        return this.start(sessionId, message, cwd)
     }
 
     private enqueue(sessionId: string, message: string): SendCodexLocalSessionMessageRpcResponse {
@@ -243,19 +227,11 @@ export class NativeCodexSessionDirectSender {
     private start(
         sessionId: string,
         message: string,
-        cwd: string,
-        useControlSocket = this.hasControlSocket()
+        cwd: string
     ): SendCodexLocalSessionMessageRpcResponse {
         const startedAt = this.now()
 
-        // When the native desktop/TUI app-server is alive it owns the thread
-        // writer lock. `codex exec resume` would open a second writer and fail
-        // with `thread-store conflict`. The official `codex queue` command
-        // submits through that existing writer and is safe for both idle and
-        // running threads.
-        const args = useControlSocket
-            ? ['queue', '--thread', sessionId, '--message', message]
-            : ['exec', 'resume', '--json', sessionId, message]
+        const args = ['exec', 'resume', '--json', sessionId, message]
         let child: NativeCodexChildProcess
         try {
             child = this.spawnProcess(args, cwd)
@@ -267,7 +243,7 @@ export class NativeCodexSessionDirectSender {
         }
 
         this.recentFailures.delete(sessionId)
-        this.activeSends.set(sessionId, { startedAt, child, usesControlSocket: useControlSocket })
+        this.activeSends.set(sessionId, { startedAt, child })
         this.watch(sessionId, child)
         this.notifyStateChange(sessionId)
         return { success: true, status: 'processing', startedAt }
@@ -288,13 +264,7 @@ export class NativeCodexSessionDirectSender {
                 sessionId,
                 failure
                     ? NATIVE_QUEUE_RETRY_INTERVAL_MS
-                    // A control-socket send is already queued in Codex; the
-                    // next HAPI FIFO item need only wait for this short CLI
-                    // acknowledgement, not for the native turn to finish.
-                    : active.usesControlSocket
-                        ? 0
-                        : this.queuePollIntervalMs,
-                { replacePending: active.usesControlSocket && !failure }
+                    : this.queuePollIntervalMs
             )
         }
         this.notifyStateChange(sessionId)
@@ -371,11 +341,10 @@ export class NativeCodexSessionDirectSender {
         }
 
         const session = this.sessionLookup.getSummary(sessionId)
-        const controlSocketAvailable = this.hasControlSocket()
-        // Without the owner app-server, `codex exec resume` needs an idle
-        // transcript to avoid a second-writer conflict. With the owner alive,
-        // `codex queue` is safe immediately and must not wait for model work.
-        if (!controlSocketAvailable && session?.runState !== 'idle') {
+        // `codex exec resume` needs an idle transcript to avoid a second
+        // writer. Do not infer ownership from a machine-global control socket:
+        // it may belong to a different native Codex thread.
+        if (session?.runState !== 'idle') {
             this.scheduleQueuePump(sessionId)
             return
         }
@@ -392,15 +361,14 @@ export class NativeCodexSessionDirectSender {
         }
 
         const item = queue[0]
-        const result = this.start(sessionId, item.text, cwd, controlSocketAvailable)
+        const result = this.start(sessionId, item.text, cwd)
         if (result.success) {
             queue.shift()
             if (queue.length === 0) {
                 this.queues.delete(sessionId)
             } else {
                 // The active child owns the current command. `watch` releases
-                // the next item immediately for an app-server hand-off, or
-                // after the fallback native turn becomes idle.
+                // the next item after its native turn becomes idle.
                 this.scheduleQueuePump(sessionId)
             }
             this.notifyStateChange(sessionId)

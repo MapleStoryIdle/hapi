@@ -200,6 +200,8 @@ function formatDirectSendError(error: unknown, t: Translator): string {
                 return t('recentCodex.direct.error.workspaceUnavailable')
             case 'session_not_found':
                 return t('recentCodex.direct.error.sessionMissing')
+            case 'not_native_session':
+                return t('recentCodex.direct.error.hapiManaged')
         }
         if (error.code === 'session_busy' || error.status === 409) {
             return t('recentCodex.direct.error.conflict')

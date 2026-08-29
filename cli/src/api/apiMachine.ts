@@ -230,7 +230,6 @@ export class ApiMachineClient {
             undefined,
             undefined,
             undefined,
-            undefined,
             { getSummary: (sessionId) => this.nativeCodexTranscriptCache.getSummary(sessionId) }
         )
 

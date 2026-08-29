@@ -147,6 +147,7 @@ export default {
   'recentCodex.direct.error.statusUnknown': 'The native session state is unknown. Refresh status, then try again.',
   'recentCodex.direct.error.workspaceUnavailable': 'The original workspace is unavailable, so this message cannot be queued.',
   'recentCodex.direct.error.sessionMissing': 'This native Codex session is no longer available on the runner.',
+  'recentCodex.direct.error.hapiManaged': 'This is a HAPI-managed session. Open it from the HAPI session list to send a message.',
   'recentCodex.direct.error.runnerUnavailable': 'The runner could not accept this message. Reconnect it, then try again.',
   'recentCodex.direct.error.conflict': 'The native session changed state. Refresh its status, then try again.',
   'recentCodex.direct.error.timeout': 'The runner took too long to respond. Check the connection, then try again.',

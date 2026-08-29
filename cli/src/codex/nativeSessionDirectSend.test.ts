@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -77,6 +78,46 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
+    it('does not send through an unrelated machine-global app-server socket', async () => {
+        // Windows does not expose Unix socket paths through this test harness.
+        if (process.platform === 'win32') return
+
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-direct-global-socket-'))
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-global-socket-workspace-'))
+        const sessionId = '13345678-1234-4234-8234-123456789012'
+        const socketDir = join(codexHome, 'app-server-control')
+        const socketPath = join(socketDir, 'app-server-control.sock')
+        mkdirSync(socketDir, { recursive: true })
+        process.env.CODEX_HOME = codexHome
+        writeTranscript({ codexHome, sessionId, cwd, events: ['task_started', 'task_complete'] })
+
+        const controlServer = createServer()
+        await new Promise<void>((resolve, reject) => {
+            controlServer.once('error', reject)
+            controlServer.listen(socketPath, resolve)
+        })
+        const child = new FakeChildProcess()
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
+        const sender = new NativeCodexSessionDirectSender(spawn, () => 456)
+
+        try {
+            expect(sender.send(sessionId, 'do not use the global queue')).toMatchObject({
+                success: true,
+                status: 'processing'
+            })
+            expect(spawn).toHaveBeenCalledWith(
+                ['exec', 'resume', '--json', sessionId, 'do not use the global queue'],
+                cwd
+            )
+            child.emit('exit', 0, null)
+        } finally {
+            sender.dispose()
+            await new Promise<void>((resolve) => controlServer.close(() => resolve()))
+            rmSync(codexHome, { recursive: true, force: true })
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('uses one cached lookup and lets only original native threads receive direct prompts', () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-cache-workspace-'))
         const sessionId = '11345678-1234-4234-8234-123456789012'
@@ -90,7 +131,7 @@ describe('NativeCodexSessionDirectSender', () => {
             runState: 'idle' as const
         }))
         const spawn = vi.fn<SpawnNativeCodexProcess>()
-        const sender = new NativeCodexSessionDirectSender(spawn, Date.now, 1_000, () => false, {
+        const sender = new NativeCodexSessionDirectSender(spawn, Date.now, 1_000, {
             getSummary: lookup
         })
 
@@ -122,7 +163,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }))
         const child = new FakeChildProcess()
         const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
-        const sender = new NativeCodexSessionDirectSender(spawn, () => 321, 1_000, () => false, {
+        const sender = new NativeCodexSessionDirectSender(spawn, () => 321, 1_000, {
             getSummary: lookup
         })
 
@@ -164,94 +205,6 @@ describe('NativeCodexSessionDirectSender', () => {
 
             expect(onStateChange).toHaveBeenNthCalledWith(1, sessionId)
             expect(onStateChange).toHaveBeenNthCalledWith(2, sessionId)
-        } finally {
-            sender.dispose()
-            rmSync(codexHome, { recursive: true, force: true })
-            rmSync(cwd, { recursive: true, force: true })
-        }
-    })
-
-    it('uses the native Codex queue when an app-server owns the thread lock', () => {
-        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-direct-queue-command-'))
-        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-queue-workspace-'))
-        const sessionId = '62345678-1234-4234-8234-123456789012'
-        process.env.CODEX_HOME = codexHome
-        // No lifecycle marker: the transcript alone cannot prove idle, but
-        // the owner app-server can serialize this request safely.
-        writeTranscript({ codexHome, sessionId, cwd, events: [] })
-
-        const child = new FakeChildProcess()
-        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
-        const sender = new NativeCodexSessionDirectSender(spawn, () => 456, 1, () => true)
-
-        try {
-            expect(sender.send(sessionId, 'send through the owner')).toEqual({
-                success: true,
-                status: 'processing',
-                startedAt: 456
-            })
-            expect(spawn).toHaveBeenCalledWith(
-                ['queue', '--thread', sessionId, '--message', 'send through the owner'],
-                cwd
-            )
-            child.emit('exit', 0, null)
-        } finally {
-            sender.dispose()
-            rmSync(codexHome, { recursive: true, force: true })
-            rmSync(cwd, { recursive: true, force: true })
-        }
-    })
-
-    it('hands messages to the app-server immediately while the native turn is running', async () => {
-        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-direct-owner-queue-'))
-        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-owner-workspace-'))
-        const sessionId = '72345678-1234-4234-8234-123456789012'
-        process.env.CODEX_HOME = codexHome
-        writeTranscript({ codexHome, sessionId, cwd, events: ['task_started'] })
-
-        const firstChild = new FakeChildProcess()
-        const secondChild = new FakeChildProcess()
-        const children = [firstChild, secondChild]
-        const spawn = vi.fn<SpawnNativeCodexProcess>(() => children.shift() as never)
-        const sender = new NativeCodexSessionDirectSender(spawn, () => 789, 1, () => true)
-
-        try {
-            expect(sender.send(sessionId, 'first')).toEqual({
-                success: true,
-                status: 'processing',
-                startedAt: 789
-            })
-            expect(sender.send(sessionId, 'second')).toMatchObject({
-                success: true,
-                status: 'queued',
-                queuePosition: 1,
-                queuedMessages: [{ text: 'second' }]
-            })
-
-            // The native turn is still processing, but its app-server owns
-            // the writer lock and accepts the first prompt straight away.
-            await new Promise((resolve) => setTimeout(resolve, 20))
-            expect(spawn).toHaveBeenNthCalledWith(
-                1,
-                ['queue', '--thread', sessionId, '--message', 'first'],
-                cwd
-            )
-            expect(sender.getStatus(sessionId)).toMatchObject({
-                success: true,
-                status: 'processing',
-                queuedMessages: [{ text: 'second' }]
-            })
-
-            // Once the short queue command acknowledges, the runner releases
-            // the next local FIFO item without waiting for task_complete.
-            firstChild.emit('exit', 0, null)
-            await new Promise((resolve) => setTimeout(resolve, 20))
-            expect(spawn).toHaveBeenNthCalledWith(
-                2,
-                ['queue', '--thread', sessionId, '--message', 'second'],
-                cwd
-            )
-            secondChild.emit('exit', 0, null)
         } finally {
             sender.dispose()
             rmSync(codexHome, { recursive: true, force: true })

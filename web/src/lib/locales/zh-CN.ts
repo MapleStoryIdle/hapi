@@ -147,6 +147,7 @@ export default {
   'recentCodex.direct.error.statusUnknown': '无法确认原生会话状态，请刷新状态后再试。',
   'recentCodex.direct.error.workspaceUnavailable': '原始工作区不可用，这条消息无法排队。',
   'recentCodex.direct.error.sessionMissing': 'runner 上已找不到这个原生 Codex 会话。',
+  'recentCodex.direct.error.hapiManaged': '这是 HAPI 管理的会话，请从 HAPI 会话列表打开后再发送消息。',
   'recentCodex.direct.error.runnerUnavailable': 'runner 暂时无法接收消息，请重新连接后再试。',
   'recentCodex.direct.error.conflict': '原生会话状态刚刚发生变化，请刷新状态后再试。',
   'recentCodex.direct.error.timeout': 'runner 响应超时，请检查连接后再试。',

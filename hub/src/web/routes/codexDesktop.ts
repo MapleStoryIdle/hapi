@@ -2177,9 +2177,18 @@ export function createCodexDesktopRoutes(options: {
             }
             // The runner normally filters before applying its limit. Filter a
             // second time at the hub boundary so a rolling upgrade cannot leak
-            // a HAPI-created thread from an older runner implementation.
+            // a HAPI-created thread from an older runner implementation. Some
+            // older HAPI Codex launches used Codex's desktop originator, so
+            // originator alone is not enough to keep a regular HAPI session
+            // out of this native-session list.
+            const managedHapiSessionIds = new Set(engine.getSessionsByNamespace(c.get('namespace'))
+                .filter((session) => session.metadata?.machineId === machineId)
+                .map((session) => session.id))
             const sessions = excludeHapiInitiated
-                ? result.sessions.filter((session) => !isHapiInitiatedCodexSession(session))
+                ? result.sessions.filter((session) => (
+                    !isHapiInitiatedCodexSession(session)
+                    && !managedHapiSessionIds.has(session.id)
+                ))
                 : result.sessions
             return c.json({ success: true, sessions } satisfies CodexLocalSessionsResponse)
         } catch (error) {
@@ -2349,6 +2358,34 @@ export function createCodexDesktopRoutes(options: {
         }
 
         try {
+            // A HAPI session from an older runner can have a Codex Desktop
+            // originator and therefore appear in the native transcript list.
+            // Its app-server is already connected to HAPI; sending through
+            // `codex queue` would acknowledge into an unrelated global Codex
+            // queue instead of reaching that session. Route the stale native
+            // page to its actual HAPI session transport.
+            const managedSession = engine!.getSessionsByNamespace(c.get('namespace')).find((session) => (
+                session.id === c.req.param('id')
+                && session.metadata?.machineId === target.machine.id
+            ))
+            if (managedSession) {
+                if (!managedSession.active) {
+                    return c.json({
+                        success: false,
+                        code: 'not_native_session',
+                        error: 'This Codex session is managed by HAPI. Open it from the HAPI session list before sending a message.'
+                    } satisfies SendCodexLocalSessionMessageRpcResponse, 409)
+                }
+                await engine!.sendMessage(managedSession.id, {
+                    text: request.message,
+                    sentFrom: 'webapp'
+                })
+                return c.json({
+                    success: true,
+                    status: 'processing'
+                } satisfies SendCodexLocalSessionMessageRpcResponse, 202)
+            }
+
             const result = await engine!.sendCodexLocalSessionMessage(
                 target.machine.id,
                 c.req.param('id'),
