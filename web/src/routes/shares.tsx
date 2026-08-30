@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { domAnimation, LazyMotion, MotionConfig } from 'motion/react'
+import {
+    article as MotionArticle,
+    div as MotionDiv,
+    p as MotionParagraph,
+} from 'motion/react-m'
 import { CheckIcon, CopyIcon, ShareIcon } from '@/components/icons'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -64,7 +70,12 @@ export function ShareCard(props: {
     }
 }) {
     return (
-        <article className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+        <MotionArticle
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.16, ease: 'easeOut' }}
+            className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)]"
+        >
             <div className="flex min-w-0 items-start gap-3">
                 <button
                     type="button"
@@ -104,7 +115,7 @@ export function ShareCard(props: {
                     {props.labels.revoke}
                 </button>
             </div>
-        </article>
+        </MotionArticle>
     )
 }
 
@@ -146,65 +157,83 @@ export function ShareDetailsDialog(props: {
     }, [props.api, props.share.id])
 
     return (
-        <Dialog open onOpenChange={(open) => !open && props.onClose()}>
-            <DialogContent className="max-w-md">
-                <DialogHeader>
-                    <DialogTitle>{props.labels.title}</DialogTitle>
-                    <DialogDescription className="mt-2 break-all">{props.share.filename}</DialogDescription>
-                </DialogHeader>
+        <LazyMotion features={domAnimation} strict>
+            <MotionConfig reducedMotion="user">
+                <Dialog open onOpenChange={(open) => !open && props.onClose()}>
+                    <DialogContent className="max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>{props.labels.title}</DialogTitle>
+                            <DialogDescription className="mt-2 break-all">{props.share.filename}</DialogDescription>
+                        </DialogHeader>
 
-                {error ? (
-                    <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/25 dark:text-red-300">
-                        {error}
-                    </div>
-                ) : null}
+                        {error ? (
+                            <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/25 dark:text-red-300">
+                                {error}
+                            </div>
+                        ) : null}
 
-                {!details && !error ? <p className="mt-4 text-sm text-[var(--app-hint)]">{props.labels.loading}</p> : null}
+                        {!details && !error ? (
+                            <MotionParagraph
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.14, ease: 'easeOut' }}
+                                className="mt-4 text-sm text-[var(--app-hint)]"
+                            >
+                                {props.labels.loading}
+                            </MotionParagraph>
+                        ) : null}
 
-                {details ? (
-                    <div className="mt-4 space-y-4">
-                        <dl className="grid gap-3 text-sm sm:grid-cols-2">
-                            <div>
-                                <dt className="text-xs text-[var(--app-hint)]">{props.labels.size}</dt>
-                                <dd className="mt-1 text-[var(--app-fg)]">{formatBytes(details.size)}</dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs text-[var(--app-hint)]">{props.labels.createdAt}</dt>
-                                <dd className="mt-1 text-[var(--app-fg)]">{formatTimestamp(details.createdAt, props.locale)}</dd>
-                            </div>
-                            <div className="sm:col-span-2">
-                                <dt className="text-xs text-[var(--app-hint)]">{props.labels.expiresAt}</dt>
-                                <dd className="mt-1 text-[var(--app-fg)]">{formatTimestamp(details.expiresAt, props.locale)}</dd>
-                            </div>
-                        </dl>
+                        {details ? (
+                            <MotionDiv
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.16, ease: 'easeOut' }}
+                                className="mt-4 space-y-4"
+                            >
+                                <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                                    <div>
+                                        <dt className="text-xs text-[var(--app-hint)]">{props.labels.size}</dt>
+                                        <dd className="mt-1 text-[var(--app-fg)]">{formatBytes(details.size)}</dd>
+                                    </div>
+                                    <div>
+                                        <dt className="text-xs text-[var(--app-hint)]">{props.labels.createdAt}</dt>
+                                        <dd className="mt-1 text-[var(--app-fg)]">{formatTimestamp(details.createdAt, props.locale)}</dd>
+                                    </div>
+                                    <div className="sm:col-span-2">
+                                        <dt className="text-xs text-[var(--app-hint)]">{props.labels.expiresAt}</dt>
+                                        <dd className="mt-1 text-[var(--app-fg)]">{formatTimestamp(details.expiresAt, props.locale)}</dd>
+                                    </div>
+                                </dl>
 
-                        {details.url ? (
-                            <div>
-                                <div className="text-xs text-[var(--app-hint)]">{props.labels.link}</div>
-                                <div className="mt-1.5 flex gap-2">
-                                    <code className="min-w-0 flex-1 break-all rounded-lg bg-[var(--app-subtle-bg)] px-2.5 py-2 text-xs leading-5 text-[var(--app-fg)]">
-                                        {details.url}
-                                    </code>
-                                    <button
-                                        type="button"
-                                        onClick={() => { void copy(details.url!) }}
-                                        aria-label={props.labels.copy}
-                                        className="flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--app-border)] px-3 text-xs font-semibold text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                    >
-                                        {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
-                                        {copied ? props.labels.copied : props.labels.copy}
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            <p className="rounded-xl bg-[var(--app-subtle-bg)] px-3 py-2.5 text-sm leading-5 text-[var(--app-hint)]">
-                                {props.labels.unavailable}
-                            </p>
-                        )}
-                    </div>
-                ) : null}
-            </DialogContent>
-        </Dialog>
+                                {details.url ? (
+                                    <div>
+                                        <div className="text-xs text-[var(--app-hint)]">{props.labels.link}</div>
+                                        <div className="mt-1.5 flex gap-2">
+                                            <code className="min-w-0 flex-1 break-all rounded-lg bg-[var(--app-subtle-bg)] px-2.5 py-2 text-xs leading-5 text-[var(--app-fg)]">
+                                                {details.url}
+                                            </code>
+                                            <button
+                                                type="button"
+                                                onClick={() => { void copy(details.url!) }}
+                                                aria-label={props.labels.copy}
+                                                className="flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--app-border)] px-3 text-xs font-semibold text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                            >
+                                                {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
+                                                {copied ? props.labels.copied : props.labels.copy}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <p className="rounded-xl bg-[var(--app-subtle-bg)] px-3 py-2.5 text-sm leading-5 text-[var(--app-hint)]">
+                                        {props.labels.unavailable}
+                                    </p>
+                                )}
+                            </MotionDiv>
+                        ) : null}
+                    </DialogContent>
+                </Dialog>
+            </MotionConfig>
+        </LazyMotion>
     )
 }
 
@@ -259,43 +288,56 @@ export default function SharesPage() {
                 </div>
             </header>
 
-            <main className="app-scroll-y flex-1 p-3">
-                <div className="mx-auto max-w-[680px] space-y-3">
-                    <p className="px-1 text-sm leading-5 text-[var(--app-hint)]">{t('shares.hint')}</p>
+            <LazyMotion features={domAnimation} strict>
+                <MotionConfig reducedMotion="user">
+                    <main className="app-scroll-y flex-1 p-3">
+                        <div className="mx-auto max-w-[680px] space-y-3">
+                            <p className="px-1 text-sm leading-5 text-[var(--app-hint)]">{t('shares.hint')}</p>
 
-                    {error ? (
-                        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/25 dark:text-red-300">
-                            {error instanceof Error ? error.message : String(error)}
+                            {error ? (
+                                <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/25 dark:text-red-300">
+                                    {error instanceof Error ? error.message : String(error)}
+                                </div>
+                            ) : null}
+
+                            {isLoading ? (
+                                <MotionDiv
+                                    initial={{ opacity: 0, y: 6 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ duration: 0.14, ease: 'easeOut' }}
+                                    className="px-1 text-sm text-[var(--app-hint)]"
+                                >
+                                    {t('shares.loading')}
+                                </MotionDiv>
+                            ) : null}
+
+                            {!isLoading && !error && shares.length === 0 ? (
+                                <div className="rounded-2xl border border-dashed border-[var(--app-border)] p-6 text-center text-sm leading-6 text-[var(--app-hint)]">
+                                    {t('shares.empty')}
+                                </div>
+                            ) : null}
+
+                            {shares.map((share) => (
+                                <ShareCard
+                                    key={share.id}
+                                    share={share}
+                                    locale={dateLocale}
+                                    busy={pendingShareId !== null}
+                                    onDetails={setDetailShare}
+                                    onRevoke={setSelectedShare}
+                                    labels={{
+                                        createdAt: t('shares.createdAt'),
+                                        expiresAt: t('shares.expiresAt'),
+                                        revoke: t('shares.revoke'),
+                                        revokeLabel: t('shares.revoke'),
+                                        detailsLabel: t('shares.details.open')
+                                    }}
+                                />
+                            ))}
                         </div>
-                    ) : null}
-
-                    {isLoading ? <div className="px-1 text-sm text-[var(--app-hint)]">{t('shares.loading')}</div> : null}
-
-                    {!isLoading && !error && shares.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-[var(--app-border)] p-6 text-center text-sm leading-6 text-[var(--app-hint)]">
-                            {t('shares.empty')}
-                        </div>
-                    ) : null}
-
-                    {shares.map((share) => (
-                        <ShareCard
-                            key={share.id}
-                            share={share}
-                            locale={dateLocale}
-                            busy={pendingShareId !== null}
-                            onDetails={setDetailShare}
-                            onRevoke={setSelectedShare}
-                            labels={{
-                                createdAt: t('shares.createdAt'),
-                                expiresAt: t('shares.expiresAt'),
-                                revoke: t('shares.revoke'),
-                                revokeLabel: t('shares.revoke'),
-                                detailsLabel: t('shares.details.open')
-                            }}
-                        />
-                    ))}
-                </div>
-            </main>
+                    </main>
+                </MotionConfig>
+            </LazyMotion>
 
             <ConfirmDialog
                 isOpen={selectedShare !== null}

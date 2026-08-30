@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { ApiClient } from '@/api/client'
 import { ShareCard, ShareDetailsDialog } from './shares'
@@ -34,20 +35,24 @@ describe('ShareCard', () => {
     it('opens details when the file card is clicked', () => {
         const onDetails = vi.fn()
         render(
-            <ShareCard
-                share={share}
-                locale="en-US"
-                busy={false}
-                onDetails={onDetails}
-                onRevoke={vi.fn()}
-                labels={{
-                    createdAt: 'Created',
-                    expiresAt: 'Expires',
-                    revoke: 'Revoke',
-                    revokeLabel: 'Revoke',
-                    detailsLabel: 'View details'
-                }}
-            />
+            <LazyMotion features={domAnimation} strict>
+                <MotionConfig reducedMotion="user">
+                    <ShareCard
+                        share={share}
+                        locale="en-US"
+                        busy={false}
+                        onDetails={onDetails}
+                        onRevoke={vi.fn()}
+                        labels={{
+                            createdAt: 'Created',
+                            expiresAt: 'Expires',
+                            revoke: 'Revoke',
+                            revokeLabel: 'Revoke',
+                            detailsLabel: 'View details'
+                        }}
+                    />
+                </MotionConfig>
+            </LazyMotion>
         )
 
         fireEvent.click(screen.getByRole('button', { name: 'View details: note.md' }))
@@ -98,5 +103,27 @@ describe('ShareDetailsDialog', () => {
 
         expect(await screen.findByText(detailLabels.unavailable)).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'Copy link' })).toBeNull()
+    })
+
+    it('closes when Escape is pressed', async () => {
+        const onClose = vi.fn()
+        const getShare = vi.fn().mockResolvedValue({ share: { ...share, url: null } })
+
+        render(
+            <I18nProvider>
+                <ShareDetailsDialog
+                    api={{ getShare } as unknown as ApiClient}
+                    share={share}
+                    locale="en-US"
+                    onClose={onClose}
+                    labels={detailLabels}
+                />
+            </I18nProvider>
+        )
+
+        await screen.findByRole('dialog')
+        fireEvent.keyDown(document, { key: 'Escape' })
+
+        expect(onClose).toHaveBeenCalledTimes(1)
     })
 })
