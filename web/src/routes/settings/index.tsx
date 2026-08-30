@@ -705,9 +705,9 @@ export default function SettingsPage() {
             </div>
 
             <div className="app-scroll-y flex-1 min-h-0">
-                <div className="mx-auto w-full max-w-content">
+                <div className="mx-auto w-full max-w-content space-y-4 px-3 py-4">
                     {/* Language section */}
-                    <div className="border-b border-[var(--app-divider)]">
+                    <div className="relative rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
                             {t('settings.language.title')}
                         </div>
@@ -762,7 +762,7 @@ export default function SettingsPage() {
                     </div>
 
                     {/* Display section */}
-                    <div className="border-b border-[var(--app-divider)]">
+                    <div className="relative rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
                             {t('settings.display.title')}
                         </div>
@@ -997,7 +997,7 @@ export default function SettingsPage() {
                     </div>
 
                     {/* Chat section */}
-                    <div className="border-b border-[var(--app-divider)]">
+                    <div className="relative rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
                             {t('settings.chat.title')}
                         </div>
@@ -1114,7 +1114,7 @@ export default function SettingsPage() {
                     </div>
 
                     {/* Voice Assistant section */}
-                    <div className="border-b border-[var(--app-divider)]">
+                    <div className="relative rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
                             {t('settings.voice.title')}
                         </div>
@@ -1283,7 +1283,7 @@ export default function SettingsPage() {
                     </div>
 
                     {/* About section */}
-                    <div className="border-b border-[var(--app-divider)]">
+                    <div className="relative rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
                             {t('settings.about.title')}
                         </div>
