@@ -1,7 +1,8 @@
 import type { CSSProperties } from 'react'
+import { Check as CheckIconNode, Copy as CopyIconNode } from 'lucide'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useShikiHighlighter } from '@/lib/shiki'
-import { CopyIcon, CheckIcon } from '@/components/icons'
+import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { useTranslation } from '@/lib/use-translation'
 
 const DEFAULT_COLLAPSE_LINE_THRESHOLD = 18
@@ -85,7 +86,12 @@ export function CodeBlock(props: {
                         className="shrink-0 rounded-md p-1 text-[var(--app-hint)] opacity-75 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)] hover:opacity-100"
                         title={t('code.copy')}
                     >
-                        {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
+                        <MotionIcon
+                            icon={toMotionIcon(copied ? CheckIconNode : CopyIconNode)}
+                            className="h-4 w-4"
+                            data-motion-icon={copied ? 'check' : 'copy'}
+                            aria-hidden="true"
+                        />
                     </button>
                 ) : null}
             </div>

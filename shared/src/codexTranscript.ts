@@ -133,6 +133,8 @@ export type CodexLocalSessionDirectSendPhase =
     | 'launching'
     | 'matching'
     | 'connected'
+    /** The primary bridge failed before delivery, so HAPI is trying its exact-thread fallback. */
+    | 'retrying'
     | 'reasoning'
 
 export type CodexLocalSessionDirectSendProgress = {
@@ -142,11 +144,26 @@ export type CodexLocalSessionDirectSendProgress = {
     /** Lets clients show the duration of the currently visible stage. */
     phaseStartedAt: number
     transport: 'app-server' | 'exec-resume'
+    /** Present after HAPI switches from the primary bridge to its safe fallback. */
+    attempt?: number
 }
+
+/** Why a saved native prompt needs explicit recovery instead of a silent replay. */
+export type CodexLocalSessionDirectSendRecoveryReason =
+    | 'codex_timeout'
+    | 'session_status_unknown'
+    | 'launch_failed'
+    | 'runner_restarted'
 
 export type CodexLocalSessionStatusRpcResponse = {
     success: true
     status: CodexLocalSessionRunState
+    /**
+     * The native transcript still says a turn is running but has not changed
+     * for a long time. This is only a recovery hint: HAPI never retries a
+     * prompt until the person explicitly asks it to.
+     */
+    stalledSince?: number
     /** Present while the runner owns a direct native send for this thread. */
     startedAt?: number
     /** Present while the runner can describe its native direct-send hand-off. */
@@ -157,6 +174,8 @@ export type CodexLocalSessionStatusRpcResponse = {
     lastErrorAt?: number
     /** Browser receipt that caused `lastError`, when the runner knows it. */
     lastErrorClientMessageId?: string
+    /** Stable UI-safe category for the latest native delivery failure. */
+    lastErrorCode?: CodexLocalSessionDirectSendRecoveryReason
     /** Messages waiting for the native thread to become idle. */
     queuedMessages?: CodexLocalSessionQueuedMessage[]
 } | {
@@ -220,6 +239,14 @@ export type CodexLocalSessionQueuedMessage = {
     id: string
     text: string
     queuedAt: number
+    /**
+     * A prior runner stopped after accepting this prompt and before it could
+     * prove delivery. Keep it visible, but require an explicit retry because
+     * the original Codex turn may already have received it.
+     */
+    recoveryRequired?: boolean
+    /** Why this saved prompt cannot be replayed silently. */
+    recoveryReason?: CodexLocalSessionDirectSendRecoveryReason
 }
 
 export type SendCodexLocalSessionMessageRpcResponse = {
@@ -254,6 +281,10 @@ const MAX_CODEX_CONTEXT_MESSAGE_CHARS = 24_000
 // render a row in the native-session list.
 const CODEX_SESSION_SUMMARY_FULL_READ_MAX_BYTES = 512 * 1024
 const CODEX_SESSION_SUMMARY_WINDOW_BYTES = 64 * 1024
+// Codex writes its injected environment before the first real prompt. That
+// preamble is often larger than the regular list-summary header, so allow a
+// bounded second header read solely to recover the thread title.
+const CODEX_SESSION_TITLE_HEAD_MAX_BYTES = 256 * 1024
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -724,8 +755,12 @@ function readCodexTranscriptRange(filePath: string, offset: number, length: numb
     }
 }
 
-function getCodexSummaryHeadLines(filePath: string, size: number): string[] | null {
-    const bytes = readCodexTranscriptRange(filePath, 0, Math.min(size, CODEX_SESSION_SUMMARY_WINDOW_BYTES))
+function getCodexSummaryHeadLines(
+    filePath: string,
+    size: number,
+    maxBytes = CODEX_SESSION_SUMMARY_WINDOW_BYTES
+): string[] | null {
+    const bytes = readCodexTranscriptRange(filePath, 0, Math.min(size, maxBytes))
     return bytes === null ? null : bytes.toString('utf8').split(/\r?\n/).filter(Boolean)
 }
 
@@ -824,7 +859,19 @@ export function readLocalCodexSessionSummary(
     if (headLines === null || tailLines === null) return null
 
     const tail = getCodexTranscriptTailSummary(tailLines)
-    return buildCodexLocalSessionSummary(filePath, resolvedModifiedAt, getCodexSessionHeader(headLines), {
+    let header = getCodexSessionHeader(headLines)
+    if (!tail.title && !header.isSubagent && !header.firstUserMessage && resolvedSize > CODEX_SESSION_SUMMARY_WINDOW_BYTES) {
+        const titleHeadLines = getCodexSummaryHeadLines(
+            filePath,
+            resolvedSize,
+            CODEX_SESSION_TITLE_HEAD_MAX_BYTES
+        )
+        if (titleHeadLines !== null) {
+            header = getCodexSessionHeader(titleHeadLines)
+        }
+    }
+
+    return buildCodexLocalSessionSummary(filePath, resolvedModifiedAt, header, {
         changedTitle: tail.title ?? null,
         lastUserMessage: tail.lastUserMessage ?? null,
         config: {
@@ -1015,6 +1062,9 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
         if (eventType === 'token_count') {
             const info = asRecord(payload.info)
             return info ? buildImportedAgentMessage({ type: 'token_count', info, id: randomUUID() }, createdAt) : null
+        }
+        if (eventType === 'context_compacted') {
+            return buildImportedAgentMessage({ type: 'context_compacted', id: randomUUID() }, createdAt)
         }
         return null
     }

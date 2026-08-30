@@ -35,8 +35,8 @@ export const HAPI_CLI_CAPABILITIES = {
             acceptsSessionCitation: true,
             rejectsCallerSession: true
         },
-        artifact: {
-            subcommands: { publish: { args: ['relativeFile'], options: ['--expires'] }, revoke: { args: ['artifactId'] } },
+        share: {
+            subcommands: { publish: { args: ['relativeFile'], options: ['--expires'] }, revoke: { args: ['shareId'] } },
             sideEffects: 'upload_selected_local_file'
         },
         mcp: {

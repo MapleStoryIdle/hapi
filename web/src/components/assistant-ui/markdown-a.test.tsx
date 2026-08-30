@@ -14,7 +14,8 @@ import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-libra
 import React from 'react'
 import { defaultComponents, classifyScheme, denyOnlyTransform, UriConfirmProvider } from '@/components/assistant-ui/markdown-text'
 import { I18nProvider } from '@/lib/i18n-context'
-import { HappyChatProvider } from '@/components/AssistantChat/context'
+import { HappyChatProvider, type HappyChatFileLinkTarget } from '@/components/AssistantChat/context'
+import { encodeBase64 } from '@/lib/utils'
 
 const routerMocks = vi.hoisted(() => ({
     navigate: vi.fn(),
@@ -43,7 +44,10 @@ function renderA(props: React.ComponentPropsWithoutRef<'a'>) {
     )
 }
 
-function renderAInChat(props: React.ComponentPropsWithoutRef<'a'>) {
+function renderAInChat(
+    props: React.ComponentPropsWithoutRef<'a'>,
+    options?: { fileLinkTarget?: HappyChatFileLinkTarget }
+) {
     return render(
         <I18nProvider>
             <HappyChatProvider value={{
@@ -56,6 +60,7 @@ function renderAInChat(props: React.ComponentPropsWithoutRef<'a'>) {
                 hasMoreMessages: false,
                 isLoadingMoreMessages: false,
                 loadOlderMessagesPreservingScroll: vi.fn(async () => false),
+                ...(options?.fileLinkTarget ? { fileLinkTarget: options.fileLinkTarget } : {}),
             }}>
                 <UriConfirmProvider>
                     <AnchorComponent {...props} />
@@ -339,6 +344,40 @@ describe('markdown <A> component — file path links', () => {
         expect(target.searchParams.get('from')).toBe('session')
         expect(target.searchParams.get('line')).toBe('42')
         expect(target.searchParams.get('column')).toBe('7')
+    })
+
+    it('routes native Codex file paths through the owning runner', () => {
+        const href = `hapi-file:${encodeURIComponent('web/src/router.tsx')}?line=42&column=7`
+        renderAInChat(
+            { href, children: 'web/src/router.tsx:42:7' },
+            {
+                fileLinkTarget: {
+                    type: 'native-codex',
+                    sessionId: 'codex-thread-1',
+                    machineId: 'machine-1'
+                }
+            }
+        )
+
+        const link = screen.getByRole('link')
+        const target = new URL(link.getAttribute('href')!, 'http://127.0.0.1')
+        expect(target.pathname).toBe('/sessions/codex/codex-thread-1/file')
+        expect(target.searchParams.get('machineId')).toBe('machine-1')
+        expect(target.searchParams.get('path')).toBe(encodeBase64('web/src/router.tsx'))
+        expect(target.searchParams.get('line')).toBe('42')
+        expect(target.searchParams.get('column')).toBe('7')
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).toHaveBeenCalledWith({
+            to: '/sessions/codex/$codexSessionId/file',
+            params: { codexSessionId: 'codex-thread-1' },
+            search: {
+                machineId: 'machine-1',
+                path: encodeBase64('web/src/router.tsx'),
+                line: 42,
+                column: 7
+            }
+        })
     })
 })
 

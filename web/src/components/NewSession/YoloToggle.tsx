@@ -17,7 +17,7 @@ export function YoloToggle(props: {
         <div
             role="radiogroup"
             aria-label={t('newSession.yolo')}
-            className="inline-flex h-11 w-full min-w-[8.5rem] items-center rounded-2xl border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-0.5"
+            className="inline-flex h-11 w-full min-w-0 items-center rounded-2xl border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-0.5"
         >
             {YOLO_OPTIONS.map((option) => {
                 const checked = props.yoloMode === option.value
@@ -54,6 +54,11 @@ export function YoloToggle(props: {
                     {t('newSession.yolo')}
                 </label>
                 {segmentedToggle}
+                {props.yoloMode ? (
+                    <span className="text-[11px] leading-4 text-amber-700 dark:text-amber-400">
+                        {t('newSession.yolo.desc')}
+                    </span>
+                ) : null}
             </div>
         )
     }

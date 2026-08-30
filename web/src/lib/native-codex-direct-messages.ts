@@ -12,6 +12,7 @@ export type NativeCodexDirectMessageDeliveryPhase =
     | 'launching'
     | 'matching'
     | 'connected'
+    | 'retrying'
     | 'reasoning'
     | 'queued'
 
@@ -70,6 +71,7 @@ function isDeliveryPhase(value: unknown): value is NativeCodexDirectMessageDeliv
     return value === 'launching'
         || value === 'matching'
         || value === 'connected'
+        || value === 'retrying'
         || value === 'reasoning'
         || value === 'queued'
 }

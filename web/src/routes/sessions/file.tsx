@@ -378,11 +378,14 @@ export default function FilePage() {
     const imageBlobError = imageBlobQuery.error
         ? (imageBlobQuery.error instanceof Error ? imageBlobQuery.error.message : String(imageBlobQuery.error))
         : null
+    const fileQueryError = fileQuery.error
+        ? (fileQuery.error instanceof Error ? fileQuery.error.message : String(fileQuery.error))
+        : null
     const fileError = imageMimeType
         ? imageBlobError
         : fileContentResult && !fileContentResult.success
             ? (fileContentResult.error ?? 'Failed to read file')
-            : null
+            : fileQueryError
     const missingPath = !filePath
     const diffErrorMessage = diffError ? formatDiffError(diffError, t) : null
     const fileErrorMessage = fileError ? formatReadFileError(fileError, t) : null

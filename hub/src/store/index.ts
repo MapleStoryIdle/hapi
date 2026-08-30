@@ -32,7 +32,7 @@ export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { ArtifactStore } from './artifacts'
 
-const SCHEMA_VERSION: number = 14
+const SCHEMA_VERSION: number = 15
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -146,6 +146,7 @@ export class Store {
             11: () => this.migrateFromV11ToV12(),
             12: () => this.migrateFromV12ToV13(),
             13: () => this.migrateFromV13ToV14(),
+            14: () => this.migrateFromV14ToV15(),
         })
 
         if (currentVersion === 0) {
@@ -358,7 +359,7 @@ export class Store {
 
             CREATE TABLE IF NOT EXISTS artifacts (
                 id TEXT PRIMARY KEY, namespace TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
-                filename TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
+                public_url TEXT, filename TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
                 created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_artifacts_namespace ON artifacts(namespace, created_at DESC);
@@ -672,6 +673,13 @@ export class Store {
 
     private migrateFromV13ToV14(): void {
         this.db.exec(`CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, namespace TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, filename TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER); CREATE INDEX IF NOT EXISTS idx_artifacts_namespace ON artifacts(namespace, created_at DESC);`)
+    }
+
+    private migrateFromV14ToV15(): void {
+        const columns = this.getColumnNames('artifacts')
+        if (columns.size !== 0 && !columns.has('public_url')) {
+            this.db.exec('ALTER TABLE artifacts ADD COLUMN public_url TEXT')
+        }
     }
 
     private getUserVersion(): number {

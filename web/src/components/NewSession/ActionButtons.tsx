@@ -14,15 +14,15 @@ export function ActionButtons(props: {
 
     return (
         <div
-            className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--app-border)] bg-[var(--app-bg)] px-3 pb-[calc(var(--app-safe-area-bottom)+0.75rem)] pt-3"
+            className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--app-border)] bg-[var(--app-bg)] px-4 pb-[calc(var(--app-safe-area-bottom)+0.75rem)] pt-3 sm:px-6"
             data-testid="new-session-actions"
         >
-            <div className="mx-auto flex w-full max-w-2xl gap-2">
+            <div className="mx-auto flex w-full max-w-2xl gap-3">
                 <Button
-                    variant="secondary"
+                    variant="outline"
                     onClick={props.onCancel}
                     disabled={props.isDisabled}
-                    className="h-12 min-w-0 flex-1 rounded-2xl px-4 text-base"
+                    className="h-12 shrink-0 rounded-2xl px-4 text-sm"
                 >
                     {t('button.cancel')}
                 </Button>

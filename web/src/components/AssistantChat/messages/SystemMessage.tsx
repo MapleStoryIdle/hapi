@@ -1,5 +1,5 @@
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
-import { Activity, AlertTriangle, Archive, Clock, ExternalLink, RefreshCw, type LucideIcon } from 'lucide-react'
+import { Activity, AlertTriangle, Archive, Clock, ExternalLink, Layers2, RefreshCw, type LucideIcon } from 'lucide-react'
 import { getEventPresentation } from '@/chat/presentation'
 import type { AgentEvent } from '@/chat/types'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
@@ -9,6 +9,7 @@ import { MessageTimestamp } from '@/components/AssistantChat/messages/MessageTim
 
 type TaskStatusEvent = Extract<AgentEvent, { type: 'task-status' }>
 type AutomationHeartbeatEvent = Extract<AgentEvent, { type: 'automation-heartbeat' }>
+type CompactEvent = Extract<AgentEvent, { type: 'compact' }>
 
 function isTaskStatusEvent(event: AgentEvent | undefined): event is TaskStatusEvent {
     return event?.type === 'task-status'
@@ -16,6 +17,10 @@ function isTaskStatusEvent(event: AgentEvent | undefined): event is TaskStatusEv
 
 function isAutomationHeartbeatEvent(event: AgentEvent | undefined): event is AutomationHeartbeatEvent {
     return event?.type === 'automation-heartbeat'
+}
+
+function isCompactEvent(event: AgentEvent | undefined): event is CompactEvent {
+    return event?.type === 'compact'
 }
 
 function taskStatusAttempt(event: TaskStatusEvent): string | null {
@@ -186,6 +191,33 @@ function TaskStatusCard(props: { event: TaskStatusEvent; messageId: string }) {
     )
 }
 
+function ContextCompactedDivider(props: { messageId: string }) {
+    const { t } = useTranslation()
+    const title = t('contextCompacted.title')
+    const detail = t('contextCompacted.detail')
+
+    return (
+        <MessagePrimitive.Root id={getConversationMessageAnchorId(props.messageId)} className="scroll-mt-4 py-2">
+            <div
+                className="mx-auto flex w-full max-w-[min(92%,42rem)] items-center gap-2 px-2"
+                data-testid="context-compacted-event"
+                data-event-style="divider"
+                role="status"
+                aria-label={`${title}. ${detail}`}
+            >
+                <span className="h-px min-w-3 flex-1 bg-[color-mix(in_srgb,var(--app-border)_72%,transparent)]" aria-hidden="true" />
+                <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-[var(--app-hint)]" title={detail}>
+                    <Layers2 className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-300" aria-hidden="true" />
+                    <span className="font-medium text-[var(--app-fg)]">{title}</span>
+                    <span aria-hidden="true">·</span>
+                    <MessageTimestamp className="text-[10px]" />
+                </span>
+                <span className="h-px min-w-3 flex-1 bg-[color-mix(in_srgb,var(--app-border)_72%,transparent)]" aria-hidden="true" />
+            </div>
+        </MessagePrimitive.Root>
+    )
+}
+
 export function HappySystemMessage() {
     const role = useAssistantState(({ message }) => message.role)
     const messageId = useAssistantState(({ message }) => message.id)
@@ -213,6 +245,10 @@ export function HappySystemMessage() {
 
     if (isAutomationHeartbeatEvent(event)) {
         return <AutomationHeartbeatCard event={event} messageId={messageId} />
+    }
+
+    if (isCompactEvent(event)) {
+        return <ContextCompactedDivider messageId={messageId} />
     }
 
     return (

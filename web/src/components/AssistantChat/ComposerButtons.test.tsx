@@ -15,7 +15,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
     }
 })
 
-import { ComposerButtons, UnifiedButton, computeToolbarMenuPlacement, getComposerOptionalControlsVisibility, getRemoteServerButtonAlias } from './ComposerButtons'
+import { ComposerButtons, ContextUsageProgressRail, UnifiedButton, computeToolbarMenuPlacement, getComposerOptionalControlsVisibility, getRemoteServerButtonAlias } from './ComposerButtons'
 
 function renderInProviders(ui: ReactElement) {
     return render(<I18nProvider>{ui}</I18nProvider>)
@@ -121,6 +121,36 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
         fireEvent.click(btn)
 
         expect(onVoiceToggle).not.toHaveBeenCalled()
+    })
+
+    it('morphs the active voice control from microphone to stop', () => {
+        const view = renderInProviders(
+            <UnifiedButton
+                canSend={false}
+                voiceStatus="connecting"
+                voiceEnabled
+                controlsDisabled={false}
+                onSend={noop}
+                onVoiceToggle={noop}
+            />,
+        )
+
+        expect(view.container.querySelector('[data-motion-icon="mic"]')).not.toBeNull()
+
+        view.rerender(
+            <I18nProvider>
+                <UnifiedButton
+                    canSend={false}
+                    voiceStatus="connected"
+                    voiceEnabled
+                    controlsDisabled={false}
+                    onSend={noop}
+                    onVoiceToggle={noop}
+                />
+            </I18nProvider>,
+        )
+
+        expect(view.container.querySelector('[data-motion-icon="square"]')).not.toBeNull()
     })
 
     it('shows Send and sends a draft instead of aborting a running session', () => {
@@ -259,71 +289,59 @@ describe('getComposerOptionalControlsVisibility', () => {
      */
     it('shows optional controls before the toolbar is measured', () => {
         expect(getComposerOptionalControlsVisibility(null, 160)).toEqual({
-            permission: true,
-            contextUsage: true
+            permission: true
         })
     })
 
     /**
      * Optional composer controls are gated by measured toolbar width, not a
      * viewport breakpoint. Permission appears first because it directly changes
-     * execution risk; context usage can fall back to the grouped tools menu.
+     * execution risk; context usage lives in the bottom progress rail.
      */
     it('hides optional controls only when measured toolbar width is too tight', () => {
         expect(getComposerOptionalControlsVisibility(260, 160)).toEqual({
-            permission: false,
-            contextUsage: false
+            permission: false
         })
         expect(getComposerOptionalControlsVisibility(280, 160)).toEqual({
-            permission: true,
-            contextUsage: false
+            permission: true
         })
         expect(getComposerOptionalControlsVisibility(330, 160)).toEqual({
-            permission: true,
-            contextUsage: true
+            permission: true
         })
         expect(getComposerOptionalControlsVisibility(330, 160, 40)).toEqual({
-            permission: true,
-            contextUsage: false
+            permission: true
         })
     })
 
     /**
-     * When context usage is unavailable, permission should take the first
-     * optional slot. Otherwise the row can show a wide blank middle while the
-     * permission icon waits for space for a non-rendered context icon.
+     * Permission remains in the first optional slot when no skill picker is
+     * available.
      */
-    it('lets permission use the first optional slot when context usage is absent', () => {
+    it('lets permission use the first optional slot when skills are absent', () => {
         expect(getComposerOptionalControlsVisibility(260, 160, 0, false)).toEqual({
-            permission: false,
-            contextUsage: false
+            permission: false
         })
         expect(getComposerOptionalControlsVisibility(280, 160, 0, false)).toEqual({
-            permission: true,
-            contextUsage: false
+            permission: true
         })
     })
 
     /**
-     * Skill is lower priority than permission and higher priority than
-     * context usage. On tight widths it should be the control that falls
-     * back into the "+" menu before permission, while context remains last.
+     * Skill is lower priority than permission. On tight widths it falls back
+     * into the "+" menu before permission.
      */
-    it('places skill between permission and context usage in the optional priority order', () => {
+    it('places skill after permission in the optional priority order', () => {
         expect(getComposerOptionalControlsVisibility(280, 160, 0, true, true)).toEqual({
             permission: true,
-            skill: false,
-            contextUsage: false
+            skill: false
         })
         expect(getComposerOptionalControlsVisibility(330, 160, 0, true, true)).toEqual({
             permission: true,
-            skill: true,
-            contextUsage: false
+            skill: true
         })
         expect(getComposerOptionalControlsVisibility(380, 160, 0, true, true)).toEqual({
             permission: true,
-            skill: true,
-            contextUsage: true
+            skill: true
         })
     })
 
@@ -334,12 +352,10 @@ describe('getComposerOptionalControlsVisibility', () => {
      */
     it('uses measured status width when deciding which optional icons fit', () => {
         expect(getComposerOptionalControlsVisibility(330, 160, 12)).toEqual({
-            permission: true,
-            contextUsage: true
+            permission: true
         })
         expect(getComposerOptionalControlsVisibility(330, 160, 72)).toEqual({
-            permission: false,
-            contextUsage: false
+            permission: false
         })
     })
 })
@@ -635,14 +651,13 @@ describe('ComposerButtons — context usage popover', () => {
         cleanup()
     })
 
-    it('opens the context usage popover from the hollow ring indicator', () => {
+    it('opens the context usage popover from the grouped tools menu', () => {
         renderInProviders(
             <ComposerButtons
                 canSend={false}
                 controlsDisabled={false}
                 showSettingsButton={false}
                 onSettingsToggle={noop}
-                contextUsagePercent={4}
                 contextUsageLabel="ctx 10.2K/258.4K (96% left)"
                 contextUsageDetails={{
                     usedTokens: 10_200,
@@ -674,12 +689,12 @@ describe('ComposerButtons — context usage popover', () => {
             />
         )
 
-        const trigger = screen.getByRole('button', { name: /ctx 10\.2K\/258\.4K/ })
-        expect(trigger).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByRole('button', { name: /ctx 10\.2K\/258\.4K/ })).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'More tools' }))
 
+        const trigger = screen.getByRole('button', { name: /ctx 10\.2K\/258\.4K/ })
         fireEvent.click(trigger)
 
-        expect(trigger).toHaveAttribute('aria-expanded', 'true')
         expect(screen.getByText('Context')).toBeInTheDocument()
         expect(screen.getByText('Model window · 258.4K')).toBeInTheDocument()
         expect(screen.getByText('10.2K')).toBeInTheDocument()
@@ -687,5 +702,32 @@ describe('ComposerButtons — context usage popover', () => {
         expect(screen.getByText('258.4K')).toBeInTheDocument()
         expect(screen.getByText('96% remaining')).toBeInTheDocument()
         expect(screen.getByText('Cached 12.4K')).toBeInTheDocument()
+    })
+})
+
+describe('ContextUsageProgressRail', () => {
+    afterEach(() => {
+        cleanup()
+    })
+
+    it('renders an inset semantic progress rail with the used-context percentage', () => {
+        render(
+            <ContextUsageProgressRail
+                percentage={78.4}
+                label="ctx 202.6K/258.4K (22% left)"
+            />
+        )
+
+        const rail = screen.getByRole('progressbar', { name: /ctx 202\.6K\/258\.4K/ })
+        expect(rail).toHaveAttribute('aria-valuenow', '78')
+        expect(rail).toHaveClass('inset-x-3', 'bottom-0', 'h-[3px]')
+        expect(rail.firstElementChild).toHaveStyle({ width: '78.4%' })
+        expect(rail.firstElementChild?.className).toContain('bg-amber-500')
+    })
+
+    it('hides when no percentage can be calculated', () => {
+        render(<ContextUsageProgressRail percentage={null} />)
+
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
     })
 })

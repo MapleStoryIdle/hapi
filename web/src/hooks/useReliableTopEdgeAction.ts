@@ -7,10 +7,10 @@ import {
 } from 'react'
 import { markUserInteraction } from '@/lib/interaction-priority'
 
-// A standalone WebKit view can still dispatch a delayed compatibility click
-// after the touch action has already run. Keep keyboard clicks (detail === 0)
-// untouched, and clear this guard as soon as the next real press begins.
-const COMPATIBILITY_CLICK_GUARD_MS = 2_000
+// A standalone WebKit view can dispatch one compatibility click after the
+// touch action has already run. Consume only that next click, rather than
+// imposing a time-based cooldown on a later real tap. Keyboard clicks
+// (detail === 0) remain untouched.
 const TOUCH_TAP_SLOP_PX = 10
 
 type TouchGesture = {
@@ -18,6 +18,19 @@ type TouchGesture = {
     clientX: number
     clientY: number
     moved: boolean
+}
+
+type ReliableTopEdgeActionOptions = {
+    /**
+     * Opt in only for a reversible, local UI toggle. It lets a small popover
+     * react on touch-down, while the normal top-edge controls still wait for
+     * a completed tap before navigating or starting work.
+     */
+    activateOnTouchPointerDown?: boolean
+    /** Runs immediately before the speculative touch-down action. */
+    onTouchActivationStart?: () => void
+    /** Restores that local UI state if the gesture becomes a scroll. */
+    onTouchActivationCancelled?: () => void
 }
 
 /**
@@ -30,7 +43,10 @@ type TouchGesture = {
  * touch became a scroll; the touch-end fallback covers a dropped pointer-up
  * without taking that decision away from the browser.
  */
-export function useReliableTopEdgeAction(action: () => void): {
+export function useReliableTopEdgeAction(
+    action: () => void,
+    options: ReliableTopEdgeActionOptions = {}
+): {
     onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void
     onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void
     onPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void
@@ -39,30 +55,42 @@ export function useReliableTopEdgeAction(action: () => void): {
     onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void
 } {
     const actionRef = useRef(action)
-    const compatibilityClickUntilRef = useRef(0)
+    const compatibilityClickPendingRef = useRef(false)
     const touchGestureRef = useRef<TouchGesture | null>(null)
+    // This is deliberately separate from the gesture: after rolling a
+    // speculative action back for a scroll, the terminal pointer/click must
+    // still be consumed instead of firing the action a second time.
+    const touchActionHandledRef = useRef(false)
+    const touchActivationActiveRef = useRef(false)
+    const touchActivationStartRef = useRef(options.onTouchActivationStart)
+    const touchActivationCancelledRef = useRef(options.onTouchActivationCancelled)
+    const activateOnTouchPointerDown = options.activateOnTouchPointerDown === true
     actionRef.current = action
+    touchActivationStartRef.current = options.onTouchActivationStart
+    touchActivationCancelledRef.current = options.onTouchActivationCancelled
 
-    const clearCompatibilityClickGuard = useCallback(() => {
-        compatibilityClickUntilRef.current = 0
+    const clearCompatibilityClickPending = useCallback(() => {
+        compatibilityClickPendingRef.current = false
     }, [])
 
-    const armCompatibilityClickGuard = useCallback(() => {
-        compatibilityClickUntilRef.current = Date.now() + COMPATIBILITY_CLICK_GUARD_MS
+    const consumeNextCompatibilityClick = useCallback(() => {
+        compatibilityClickPendingRef.current = true
     }, [])
 
     const activateTouchAction = useCallback(() => {
-        armCompatibilityClickGuard()
+        consumeNextCompatibilityClick()
         actionRef.current()
-    }, [armCompatibilityClickGuard])
+    }, [consumeNextCompatibilityClick])
 
     const onPointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
         markUserInteraction()
         // Mouse presses and a fresh touch must always be allowed to start a
-        // new action; neither should inherit an old compatibility-click lock.
-        clearCompatibilityClickGuard()
+        // new action; neither should inherit an old compatibility-click state.
+        clearCompatibilityClickPending()
         if (event.pointerType === 'mouse') {
             touchGestureRef.current = null
+            touchActionHandledRef.current = false
+            touchActivationActiveRef.current = false
             return
         }
 
@@ -72,7 +100,15 @@ export function useReliableTopEdgeAction(action: () => void): {
             clientY: event.clientY,
             moved: false
         }
-    }, [clearCompatibilityClickGuard])
+        touchActionHandledRef.current = false
+        touchActivationActiveRef.current = false
+        if (activateOnTouchPointerDown) {
+            touchActivationStartRef.current?.()
+            touchActionHandledRef.current = true
+            touchActivationActiveRef.current = true
+            activateTouchAction()
+        }
+    }, [activateOnTouchPointerDown, activateTouchAction, clearCompatibilityClickPending])
 
     const onPointerMove = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
         if (event.pointerType === 'mouse') {
@@ -86,6 +122,10 @@ export function useReliableTopEdgeAction(action: () => void): {
 
         gesture.moved = Math.abs(event.clientX - gesture.clientX) > TOUCH_TAP_SLOP_PX
             || Math.abs(event.clientY - gesture.clientY) > TOUCH_TAP_SLOP_PX
+        if (gesture.moved && touchActivationActiveRef.current) {
+            touchActivationActiveRef.current = false
+            touchActivationCancelledRef.current?.()
+        }
     }, [])
 
     const onPointerUp = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -103,25 +143,37 @@ export function useReliableTopEdgeAction(action: () => void): {
         if (gesture?.moved) {
             // A touch that became a scroll must not later reappear as a
             // compatibility click on this fixed header control.
-            armCompatibilityClickGuard()
+            consumeNextCompatibilityClick()
+            touchActionHandledRef.current = false
+            touchActivationActiveRef.current = false
             return
         }
 
         event.preventDefault()
+        if (touchActionHandledRef.current) {
+            touchActionHandledRef.current = false
+            touchActivationActiveRef.current = false
+            return
+        }
         activateTouchAction()
-    }, [activateTouchAction, armCompatibilityClickGuard])
+    }, [activateTouchAction, consumeNextCompatibilityClick])
 
     const onPointerCancel = useCallback(() => {
         const wasScrolling = touchGestureRef.current?.moved === true
+        const hadSpeculativeActivation = touchActionHandledRef.current
         touchGestureRef.current = null
+        touchActionHandledRef.current = false
+        touchActivationActiveRef.current = false
         // A plain cancellation can happen while WebKit repaints. Leave the
         // click fallback available in that case instead of locking the button.
-        if (wasScrolling) {
-            armCompatibilityClickGuard()
+        // The exception is a popover already toggled on touch-down: its
+        // follow-up compatibility click must not toggle it back immediately.
+        if (wasScrolling || hadSpeculativeActivation) {
+            consumeNextCompatibilityClick()
         } else {
-            clearCompatibilityClickGuard()
+            clearCompatibilityClickPending()
         }
-    }, [armCompatibilityClickGuard, clearCompatibilityClickGuard])
+    }, [clearCompatibilityClickPending, consumeNextCompatibilityClick])
 
     const onTouchEnd = useCallback((event: ReactTouchEvent<HTMLButtonElement>) => {
         const gesture = touchGestureRef.current
@@ -132,26 +184,34 @@ export function useReliableTopEdgeAction(action: () => void): {
         markUserInteraction()
         touchGestureRef.current = null
         if (gesture.moved) {
-            armCompatibilityClickGuard()
+            consumeNextCompatibilityClick()
+            touchActionHandledRef.current = false
+            touchActivationActiveRef.current = false
             return
         }
 
         // Fallback only: when pointer-up already ran it cleared the gesture,
         // so this path cannot double-trigger the action.
         event.preventDefault()
+        if (touchActionHandledRef.current) {
+            touchActionHandledRef.current = false
+            touchActivationActiveRef.current = false
+            return
+        }
         activateTouchAction()
-    }, [activateTouchAction, armCompatibilityClickGuard])
+    }, [activateTouchAction, consumeNextCompatibilityClick])
 
     const onClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
         touchGestureRef.current = null
-        const isCompatibilityClick = event.detail !== 0
-            && compatibilityClickUntilRef.current > Date.now()
-        clearCompatibilityClickGuard()
+        touchActionHandledRef.current = false
+        touchActivationActiveRef.current = false
+        const isCompatibilityClick = event.detail !== 0 && compatibilityClickPendingRef.current
+        clearCompatibilityClickPending()
         if (isCompatibilityClick) {
             return
         }
         actionRef.current()
-    }, [clearCompatibilityClickGuard])
+    }, [clearCompatibilityClickPending])
 
     return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onTouchEnd, onClick }
 }

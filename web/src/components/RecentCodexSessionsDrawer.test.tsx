@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { ApiClient } from '@/api/client'
 import { RecentCodexSessionsDrawer } from './RecentCodexSessionsDrawer'
@@ -18,6 +19,12 @@ function createApi(): ApiClient {
                 file: '/tmp/rollout.jsonl',
                 modifiedAt: Date.now()
             }]
+        })),
+        getMachineGitBranch: vi.fn(async () => ({
+            success: true as const,
+            stdout: '# branch.head main\n',
+            stderr: '',
+            exitCode: 0
         }))
     } as unknown as ApiClient
 }
@@ -25,16 +32,21 @@ function createApi(): ApiClient {
 describe('RecentCodexSessionsDrawer', () => {
     it('opens as a compact left drawer and closes through its header control', async () => {
         const onOpenChange = vi.fn()
+        const queryClient = new QueryClient({
+            defaultOptions: { queries: { retry: false } }
+        })
         render(
-            <I18nProvider>
-                <RecentCodexSessionsDrawer
-                    api={createApi()}
-                    machineId="machine-1"
-                    open
-                    onOpenChange={onOpenChange}
-                    onOpenSession={vi.fn()}
-                />
-            </I18nProvider>
+            <QueryClientProvider client={queryClient}>
+                <I18nProvider>
+                    <RecentCodexSessionsDrawer
+                        api={createApi()}
+                        machineId="machine-1"
+                        open
+                        onOpenChange={onOpenChange}
+                        onOpenSession={vi.fn()}
+                    />
+                </I18nProvider>
+            </QueryClientProvider>
         )
 
         expect(await screen.findByText('Recent Codex task')).toBeInTheDocument()

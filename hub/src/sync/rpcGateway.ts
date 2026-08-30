@@ -21,6 +21,7 @@ import type {
     DirectoryEntry,
     FileReadResponse,
     GeneratedImageResponse,
+    GitBranchResponse,
     LocalPreviewHttpRequest,
     LocalPreviewHttpResponse,
     LocalPreviewProbeRequest,
@@ -67,6 +68,7 @@ export class RpcTargetMissingError extends Error {
 }
 
 export type RpcCommandResponse = CommandResponse
+export type RpcGitBranchResponse = GitBranchResponse
 export type RpcReadFileResponse = FileReadResponse
 export type RpcGeneratedImageResponse = GeneratedImageResponse
 export type RpcUploadFileResponse = UploadFileResponse
@@ -300,13 +302,15 @@ export class RpcGateway {
         sessionId: string,
         message: string,
         displayMessage?: string,
-        clientMessageId?: string
+        clientMessageId?: string,
+        forceRecovery?: boolean
     ): Promise<RpcSendCodexLocalSessionMessageResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.SendCodexLocalSessionMessage, {
             sessionId,
             message,
             ...(displayMessage === undefined ? {} : { displayMessage }),
-            ...(clientMessageId === undefined ? {} : { clientMessageId })
+            ...(clientMessageId === undefined ? {} : { clientMessageId }),
+            ...(forceRecovery === true ? { forceRecovery: true } : {})
         }) as RpcSendCodexLocalSessionMessageResponse
     }
 
@@ -328,8 +332,20 @@ export class RpcGateway {
         return exists
     }
 
-    async getMachineGitBranch(machineId: string, cwd: string): Promise<RpcCommandResponse> {
-        return await this.machineRpc(machineId, RPC_METHODS.GetMachineGitBranch, { cwd }) as RpcCommandResponse
+    async getMachineGitBranch(machineId: string, cwd: string): Promise<RpcGitBranchResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.GetMachineGitBranch, { cwd }) as RpcGitBranchResponse
+    }
+
+    async readMachineFile(machineId: string, cwd: string, path: string): Promise<RpcReadFileResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ReadMachineFile, { cwd, path }) as RpcReadFileResponse
+    }
+
+    async readMachineFileBytes(machineId: string, cwd: string, path: string): Promise<RpcFileBytesResponse> {
+        return await this.binaryFileCallForMachine(machineId, `${machineId}:${RPC_METHODS.ReadMachineFile}`, {
+            type: 'machine-file',
+            cwd,
+            path
+        })
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {

@@ -18,5 +18,13 @@ describe('HAPI CLI machine-readable capabilities', () => {
             sideEffects: 'resume_target_and_send_message',
             rejectsCallerSession: true
         })
+        expect(HAPI_CLI_CAPABILITIES.commands.share).toMatchObject({
+            subcommands: {
+                publish: { args: ['relativeFile'], options: ['--expires'] },
+                revoke: { args: ['shareId'] }
+            },
+            sideEffects: 'upload_selected_local_file'
+        })
+        expect(HAPI_CLI_CAPABILITIES.commands).not.toHaveProperty('artifact')
     })
 })

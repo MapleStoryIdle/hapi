@@ -21,12 +21,12 @@ export function ModelSelector(props: {
 
     return (
         <div className={props.inline
-            ? 'flex min-w-0 flex-col gap-1.5'
+            ? 'col-span-2 flex min-w-0 flex-col gap-1.5 sm:col-span-1'
             : 'flex flex-col gap-1.5 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-[0_1px_4px_rgba(0,0,0,0.03)]'}
         >
             <label className="text-xs font-medium text-[var(--app-hint)]">
                 {props.label ?? t('newSession.model')}{' '}
-                {!props.label ? (
+                {!props.inline && !props.label ? (
                     <span className="font-normal">({t('newSession.model.optional')})</span>
                 ) : null}
             </label>

@@ -1,19 +1,23 @@
 import type { ChildProcess } from 'node:child_process'
 import spawnChildProcess from 'cross-spawn'
 import { randomUUID } from 'node:crypto'
-import { existsSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 import type { InitializeParams, ThreadResumeParams, TurnStartParams, TurnStartResponse } from './appServerTypes'
 import {
     findLocalCodexSession,
     isHapiInitiatedCodexSession,
     type CodexLocalSessionDirectSendProgress,
+    type CodexLocalSessionDirectSendRecoveryReason,
     type CodexLocalSessionQueuedMessage,
     type CodexLocalSessionStatusRpcResponse,
     type CodexLocalSessionSummary,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 
-type NativeCodexChildProcess = Pick<ChildProcess, 'once' | 'stderr'>
+type NativeCodexChildProcess = Pick<ChildProcess, 'once' | 'stderr'> & {
+    kill?: ChildProcess['kill']
+}
 
 export type SpawnNativeCodexProcess = (args: string[], cwd: string) => NativeCodexChildProcess
 
@@ -33,6 +37,96 @@ export type NativeCodexSessionLookup = {
     getSummary: (sessionId: string) => CodexLocalSessionSummary | null
 }
 
+export type NativeCodexSessionDirectSendStoredItem = {
+    sessionId: string
+    id: string
+    text: string
+    deliveryText: string
+    queuedAt: number
+    recoveryRequired: boolean
+    recoveryReason?: CodexLocalSessionDirectSendRecoveryReason
+}
+
+/**
+ * Runner-local outbox for original Codex threads. A queue is deliberately
+ * saved outside the browser so a runner handoff cannot silently drop it.
+ */
+export type NativeCodexSessionDirectSendStore = {
+    load: () => NativeCodexSessionDirectSendStoredItem[]
+    save: (items: readonly NativeCodexSessionDirectSendStoredItem[]) => void
+}
+
+type NativeCodexSessionDirectSendStoreFile = {
+    version: 1
+    items: NativeCodexSessionDirectSendStoredItem[]
+}
+
+function parseStoredItem(value: unknown): NativeCodexSessionDirectSendStoredItem | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const record = value as Record<string, unknown>
+    const sessionId = typeof record.sessionId === 'string' ? record.sessionId.trim() : ''
+    const id = typeof record.id === 'string' ? record.id.trim() : ''
+    const text = typeof record.text === 'string' ? record.text : ''
+    const deliveryText = typeof record.deliveryText === 'string' ? record.deliveryText : ''
+    const queuedAt = typeof record.queuedAt === 'number' ? record.queuedAt : Number.NaN
+    const recoveryReason = parseRecoveryReason(record.recoveryReason)
+    if (
+        !sessionId
+        || !id
+        || id.length > MAX_CLIENT_MESSAGE_ID_LENGTH
+        || !text.trim()
+        || !deliveryText.trim()
+        || !Number.isFinite(queuedAt)
+        || queuedAt < 0
+    ) {
+        return null
+    }
+    const recoveryRequired = record.recoveryRequired === true
+    return {
+        sessionId,
+        id,
+        text,
+        deliveryText,
+        queuedAt,
+        recoveryRequired,
+        ...(recoveryRequired && recoveryReason ? { recoveryReason } : {})
+    }
+}
+
+/**
+ * Small, atomic JSON store with owner-only permissions. It contains pending
+ * prompt text, which already lives in Codex's local transcript; do not put it
+ * in the hub or any remote store.
+ */
+export class FileNativeCodexSessionDirectSendStore implements NativeCodexSessionDirectSendStore {
+    constructor(private readonly filePath: string) {}
+
+    load(): NativeCodexSessionDirectSendStoredItem[] {
+        try {
+            const parsed = JSON.parse(readFileSync(this.filePath, 'utf8')) as Partial<NativeCodexSessionDirectSendStoreFile>
+            if (parsed.version !== 1 || !Array.isArray(parsed.items)) return []
+            return parsed.items
+                .map(parseStoredItem)
+                .filter((item): item is NativeCodexSessionDirectSendStoredItem => item !== null)
+        } catch {
+            return []
+        }
+    }
+
+    save(items: readonly NativeCodexSessionDirectSendStoredItem[]): void {
+        const directory = dirname(this.filePath)
+        mkdirSync(directory, { recursive: true })
+        const temporaryPath = `${this.filePath}.${process.pid}.tmp`
+        const payload: NativeCodexSessionDirectSendStoreFile = {
+            version: 1,
+            items: [...items]
+        }
+        writeFileSync(temporaryPath, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 })
+        renameSync(temporaryPath, this.filePath)
+        chmodSync(this.filePath, 0o600)
+    }
+}
+
 type ActiveSendBase = {
     startedAt: number
     /** Browser-generated id; makes a resend after navigation idempotent. */
@@ -46,6 +140,8 @@ type ActiveSendBase = {
 type ActiveExecSend = ActiveSendBase & {
     kind: 'exec-resume'
     child: NativeCodexChildProcess
+    progress: CodexLocalSessionDirectSendProgress
+    lifecycleTimer: ReturnType<typeof setTimeout> | null
 }
 
 type ActiveAppServerSend = ActiveSendBase & {
@@ -75,11 +171,15 @@ type RecentFailure = {
     message: string
     occurredAt: number
     clientMessageId: string | null
+    code: CodexLocalSessionDirectSendRecoveryReason
 }
 
 type QueuedSend = CodexLocalSessionQueuedMessage & {
     /** Actual prompt delivered to Codex; UI may retain the original shorthand. */
     deliveryText: string
+    /** A prior runner could not prove delivery; never retry this automatically. */
+    recoveryRequired: boolean
+    recoveryReason?: CodexLocalSessionDirectSendRecoveryReason
 }
 
 const RECENT_FAILURE_TTL_MS = 60_000
@@ -93,6 +193,9 @@ const NATIVE_BRIDGE_SETUP_TIMEOUT_MS = 15_000
 const NATIVE_BRIDGE_TURN_START_TIMEOUT_MS = 15_000
 const NATIVE_BRIDGE_IDLE_OBSERVATION_GRACE_MS = 1_500
 const NATIVE_BRIDGE_IDLE_TIMEOUT_MS = 20_000
+const NATIVE_BRIDGE_UNKNOWN_TIMEOUT_MS = 20_000
+const NATIVE_EXEC_EVIDENCE_TIMEOUT_MS = 20_000
+const NATIVE_PROCESSING_STALE_AFTER_MS = 5 * 60 * 1_000
 
 const defaultSessionLookup: NativeCodexSessionLookup = {
     getSummary: findLocalCodexSession
@@ -104,6 +207,15 @@ function trimFailureMessage(value: string): string {
     return trimmed.length > MAX_FAILURE_MESSAGE_LENGTH
         ? `${trimmed.slice(0, MAX_FAILURE_MESSAGE_LENGTH - 1)}…`
         : trimmed
+}
+
+function parseRecoveryReason(value: unknown): CodexLocalSessionDirectSendRecoveryReason | null {
+    return value === 'codex_timeout'
+        || value === 'session_status_unknown'
+        || value === 'launch_failed'
+        || value === 'runner_restarted'
+        ? value
+        : null
 }
 
 function normalizeClientMessageId(value: unknown): string | null | 'invalid' {
@@ -192,8 +304,120 @@ export class NativeCodexSessionDirectSender {
         private readonly now: () => number = Date.now,
         private readonly queuePollIntervalMs: number = NATIVE_QUEUE_POLL_INTERVAL_MS,
         private readonly sessionLookup: NativeCodexSessionLookup = defaultSessionLookup,
-        private readonly createAppServerClient: CreateNativeCodexAppServerClient | null = null
-    ) {}
+        private readonly createAppServerClient: CreateNativeCodexAppServerClient | null = null,
+        private readonly store: NativeCodexSessionDirectSendStore | null = null
+    ) {
+        this.restorePersistedQueues()
+        for (const sessionId of this.queues.keys()) {
+            // Safe queued receipts should continue without requiring a browser
+            // to reopen the thread after a runner handoff. Recovery-required
+            // entries are filtered by scheduleQueuePump and stay explicit.
+            this.scheduleQueuePump(sessionId, 0)
+        }
+    }
+
+    private restorePersistedQueues(): void {
+        const restored = this.store?.load() ?? []
+        for (const item of restored) {
+            const queue = this.queues.get(item.sessionId) ?? []
+            if (queue.length >= MAX_NATIVE_QUEUE_LENGTH || queue.some((queued) => queued.id === item.id)) {
+                continue
+            }
+            queue.push({
+                id: item.id,
+                text: item.text,
+                deliveryText: item.deliveryText,
+                queuedAt: item.queuedAt,
+                recoveryRequired: item.recoveryRequired,
+                ...(item.recoveryReason ? { recoveryReason: item.recoveryReason } : {})
+            })
+            this.queues.set(item.sessionId, queue)
+        }
+    }
+
+    private getActiveReceiptId(sessionId: string, active: ActiveSend): string {
+        return active.clientMessageId ?? `native-active:${sessionId}:${active.startedAt}`
+    }
+
+    private preserveFailedActive(
+        sessionId: string,
+        active: ActiveSend,
+        recoveryReason: CodexLocalSessionDirectSendRecoveryReason
+    ): void {
+        this.preserveFailedReceipt(sessionId, {
+            id: this.getActiveReceiptId(sessionId, active),
+            text: active.displayText,
+            deliveryText: active.deliveryText,
+            queuedAt: active.startedAt
+        }, recoveryReason)
+    }
+
+    private preserveFailedReceipt(
+        sessionId: string,
+        receipt: Pick<NativeCodexSessionDirectSendStoredItem, 'id' | 'text' | 'deliveryText' | 'queuedAt'>,
+        recoveryReason: CodexLocalSessionDirectSendRecoveryReason
+    ): void {
+        const queue = this.queues.get(sessionId) ?? []
+        if (queue.some((item) => item.id === receipt.id)) return
+        // The child or app-server may have received the prompt before its
+        // failure response. Keep this receipt ahead of later FIFO items, but
+        // never replay it without a person explicitly confirming the risk.
+        queue.unshift({
+            ...receipt,
+            recoveryRequired: true,
+            recoveryReason
+        })
+        this.queues.set(sessionId, queue)
+    }
+
+    private getPersistedItems(extra: readonly NativeCodexSessionDirectSendStoredItem[] = []): NativeCodexSessionDirectSendStoredItem[] {
+        const items: NativeCodexSessionDirectSendStoredItem[] = []
+        for (const [sessionId, active] of this.activeSends) {
+            items.push({
+                sessionId,
+                id: this.getActiveReceiptId(sessionId, active),
+                text: active.displayText,
+                deliveryText: active.deliveryText,
+                queuedAt: active.startedAt,
+                // After a process handoff we cannot prove whether a started
+                // child received the prompt. Surface it for manual retry.
+                recoveryRequired: true,
+                recoveryReason: 'runner_restarted'
+            })
+        }
+        for (const [sessionId, queue] of this.queues) {
+            for (const item of queue) {
+                items.push({
+                    sessionId,
+                    id: item.id,
+                    text: item.text,
+                    deliveryText: item.deliveryText,
+                    queuedAt: item.queuedAt,
+                    recoveryRequired: item.recoveryRequired,
+                    ...(item.recoveryReason ? { recoveryReason: item.recoveryReason } : {})
+                })
+            }
+        }
+        return [...extra, ...items]
+    }
+
+    private persistOutbox(extra: readonly NativeCodexSessionDirectSendStoredItem[] = []): boolean {
+        if (!this.store) return true
+        try {
+            this.store.save(this.getPersistedItems(extra))
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private persistenceFailure(): Extract<SendCodexLocalSessionMessageRpcResponse, { success: false }> {
+        return {
+            success: false,
+            code: 'launch_failed',
+            error: 'Could not safely save this native message for recovery'
+        }
+    }
 
     /** Notify the runner when queue/launch state changes for another web client. */
     setStateChangeListener(listener: ((sessionId: string) => void) | null): void {
@@ -210,8 +434,13 @@ export class NativeCodexSessionDirectSender {
         for (const active of this.activeSends.values()) {
             if (active.kind === 'app-server') {
                 this.disposeBridge(active)
+            } else {
+                this.disposeExec(active)
             }
         }
+        // Keep the already-persisted active entries as recovery-required
+        // receipts for the replacement runner. Do not silently retry them.
+        this.persistOutbox()
         this.activeSends.clear()
     }
 
@@ -238,8 +467,9 @@ export class NativeCodexSessionDirectSender {
     ): CodexLocalSessionStatusRpcResponse {
         this.reconcileActiveWithTranscript(sessionId, session)
         const active = this.activeSends.get(sessionId)
+        const stalledSince = this.getStalledSince(session)
         const queuedMessages = this.getQueuedMessages(sessionId)
-        if (queuedMessages.length > 0) {
+        if (queuedMessages.length > 0 && !queuedMessages[0]?.recoveryRequired) {
             this.scheduleQueuePump(sessionId)
         }
         if (active) {
@@ -247,7 +477,8 @@ export class NativeCodexSessionDirectSender {
                 success: true,
                 status: 'processing',
                 startedAt: active.startedAt,
-                ...(active.kind === 'app-server' ? { progress: { ...active.progress } } : {}),
+                progress: { ...active.progress },
+                ...(stalledSince === null ? {} : { stalledSince }),
                 queuedMessages
             }
         }
@@ -263,10 +494,12 @@ export class NativeCodexSessionDirectSender {
         return {
             success: true,
             status: session.runState ?? 'unknown',
+            ...(stalledSince === null ? {} : { stalledSince }),
             ...(recentFailure
                 ? {
                     lastError: recentFailure.message,
                     lastErrorAt: recentFailure.occurredAt,
+                    lastErrorCode: recentFailure.code,
                     ...(recentFailure.clientMessageId
                         ? { lastErrorClientMessageId: recentFailure.clientMessageId }
                         : {})
@@ -276,26 +509,34 @@ export class NativeCodexSessionDirectSender {
         }
     }
 
+    private getStalledSince(session: CodexLocalSessionSummary | null): number | null {
+        if (!session || session.runState !== 'processing') return null
+        const elapsed = this.now() - session.modifiedAt
+        return elapsed >= NATIVE_PROCESSING_STALE_AFTER_MS ? session.modifiedAt : null
+    }
+
     send(
         sessionId: string,
         rawMessage: unknown,
         rawDisplayMessage?: unknown,
-        rawClientMessageId?: unknown
+        rawClientMessageId?: unknown,
+        rawForceRecovery?: unknown
     ): SendCodexLocalSessionMessageRpcResponse {
         const message = typeof rawMessage === 'string' ? rawMessage.trim() : ''
-        if (!message) {
-            return {
-                success: false,
-                code: 'invalid_message',
-                error: 'Message is required'
-            }
-        }
+        const forceRecovery = rawForceRecovery === true
         const clientMessageId = normalizeClientMessageId(rawClientMessageId)
         if (clientMessageId === 'invalid') {
             return {
                 success: false,
                 code: 'invalid_client_message_id',
                 error: 'clientMessageId is invalid'
+            }
+        }
+        if (!forceRecovery && !message) {
+            return {
+                success: false,
+                code: 'invalid_message',
+                error: 'Message is required'
             }
         }
         const displayMessage =
@@ -325,6 +566,17 @@ export class NativeCodexSessionDirectSender {
         }
 
         const previous = clientMessageId ? this.getExistingAcceptance(sessionId, clientMessageId) : null
+        if (forceRecovery) {
+            if (previous?.success === true && previous.status === 'processing') return previous
+            return this.recoverMessage(
+                sessionId,
+                session,
+                cwd,
+                clientMessageId,
+                message,
+                displayMessage
+            )
+        }
         if (previous) {
             return previous
         }
@@ -343,6 +595,108 @@ export class NativeCodexSessionDirectSender {
         }
 
         return this.start(sessionId, message, displayMessage, cwd, session.modifiedAt, clientMessageId)
+    }
+
+    /**
+     * A person explicitly confirmed this retry from the UI. This is the only
+     * path allowed to bypass a stale `task_started` marker or resend a prompt
+     * whose prior runner stopped before it could prove delivery.
+     */
+    private recoverMessage(
+        sessionId: string,
+        session: CodexLocalSessionSummary,
+        cwd: string,
+        clientMessageId: string | null,
+        deliveryText: string,
+        displayText: string
+    ): SendCodexLocalSessionMessageRpcResponse {
+        if (!clientMessageId) {
+            return {
+                success: false,
+                code: 'invalid_client_message_id',
+                error: 'clientMessageId is required for native recovery'
+            }
+        }
+
+        // A confirmation is never permission to overlap a hand-off that this
+        // runner still owns. The matching-id case was returned by `send`
+        // above; any other active send must settle first.
+        if (this.activeSends.has(sessionId)) {
+            return {
+                success: false,
+                code: 'session_busy',
+                error: 'A native message is already being delivered'
+            }
+        }
+
+        const stale = this.getStalledSince(session) !== null
+        const queue = this.queues.get(sessionId) ?? []
+        const queueIndex = queue.findIndex((item) => item.id === clientMessageId)
+        if (queueIndex > 0) {
+            return {
+                success: false,
+                code: 'session_busy',
+                error: 'An earlier native message must be recovered first'
+            }
+        }
+
+        const queued = queueIndex === 0 ? queue[0] : null
+        const requiresConfirmation = queued?.recoveryRequired === true
+        if (!queued && !deliveryText) {
+            return {
+                success: false,
+                code: 'invalid_message',
+                error: 'Message is required for native recovery'
+            }
+        }
+        if (!requiresConfirmation && !stale && queued) {
+            return {
+                success: false,
+                code: 'session_busy',
+                error: 'This native message is already waiting for a confirmed idle turn'
+            }
+        }
+        if (session.runState === 'unknown') {
+            return {
+                success: false,
+                code: 'session_status_unknown',
+                error: 'Cannot confirm whether this native Codex session is idle'
+            }
+        }
+        if (session.runState === 'processing' && !stale) {
+            return {
+                success: false,
+                code: 'session_busy',
+                error: 'The native Codex turn is still active'
+            }
+        }
+
+        if (queued) {
+            queue.shift()
+            if (queue.length === 0) {
+                this.queues.delete(sessionId)
+            } else {
+                this.queues.set(sessionId, queue)
+            }
+            const result = this.startExecResume(
+                sessionId,
+                queued.deliveryText,
+                queued.text,
+                cwd,
+                queued.id
+            )
+            if (result.success) return result
+
+            queue.unshift(queued)
+            this.queues.set(sessionId, queue)
+            this.persistOutbox()
+            return result
+        }
+
+        // A browser can retain a receipt from a runner that restarted before
+        // this outbox existed. Retrying it remains explicit and therefore
+        // avoids a hidden duplicate even though no local queue item survived.
+        return this.startExecResume(sessionId, deliveryText, displayText || deliveryText, cwd, clientMessageId)
     }
 
     private enqueue(
@@ -365,10 +719,18 @@ export class NativeCodexSessionDirectSender {
             id: clientMessageId ?? randomUUID(),
             text: displayText,
             deliveryText,
-            queuedAt
+            queuedAt,
+            recoveryRequired: false
         }
         queue.push(item)
         this.queues.set(sessionId, queue)
+        if (!this.persistOutbox()) {
+            queue.pop()
+            if (queue.length === 0) {
+                this.queues.delete(sessionId)
+            }
+            return this.persistenceFailure()
+        }
         this.scheduleQueuePump(sessionId)
         this.notifyStateChange(sessionId)
         return {
@@ -417,7 +779,7 @@ export class NativeCodexSessionDirectSender {
         } catch {
             // A factory failure has not touched the native thread. Use the
             // legacy exact-thread path instead of rejecting a valid message.
-            return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, startedAt)
+            return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, startedAt, 2)
         }
 
         const active: ActiveAppServerSend = {
@@ -443,6 +805,11 @@ export class NativeCodexSessionDirectSender {
         }
         this.recentFailures.delete(sessionId)
         this.activeSends.set(sessionId, active)
+        if (!this.persistOutbox()) {
+            this.activeSends.delete(sessionId)
+            this.disposeBridge(active)
+            return this.persistenceFailure()
+        }
         try {
             client.setNotificationHandler((method, params) => {
                 this.handleBridgeNotification(sessionId, active, method, params)
@@ -450,7 +817,8 @@ export class NativeCodexSessionDirectSender {
         } catch {
             this.activeSends.delete(sessionId)
             this.disposeBridge(active)
-            return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, startedAt)
+            this.persistOutbox()
+            return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, startedAt, 2)
         }
         this.scheduleBridgeLifecycleCheck(sessionId, active)
         this.notifyStateChange(sessionId)
@@ -464,22 +832,38 @@ export class NativeCodexSessionDirectSender {
         displayText: string,
         cwd: string,
         clientMessageId: string | null = null,
-        startedAt = this.now()
+        startedAt = this.now(),
+        attempt = 1
     ): SendCodexLocalSessionMessageRpcResponse {
         // A native transcript may live outside a Git repository. We already
         // verify that its original workspace exists above, so do not let
         // Codex's interactive-project guard turn a valid direct message into
         // a child-process failure.
+        const recoveryReceipt: NativeCodexSessionDirectSendStoredItem = {
+            sessionId,
+            id: clientMessageId ?? `native-active:${sessionId}:${startedAt}`,
+            text: displayText,
+            deliveryText,
+            queuedAt: startedAt,
+            recoveryRequired: true,
+            recoveryReason: 'runner_restarted'
+        }
+        if (!this.persistOutbox([recoveryReceipt])) {
+            return this.persistenceFailure()
+        }
         const args = ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, deliveryText]
         let child: NativeCodexChildProcess
         try {
             child = this.spawnProcess(args, cwd)
         } catch (error) {
             const failure = trimFailureMessage(error instanceof Error ? error.message : String(error))
+            this.preserveFailedReceipt(sessionId, recoveryReceipt, 'launch_failed')
+            this.persistOutbox()
             this.recentFailures.set(sessionId, {
                 message: failure,
                 occurredAt: startedAt,
-                clientMessageId
+                clientMessageId,
+                code: 'launch_failed'
             })
             this.notifyStateChange(sessionId)
             return { success: false, code: 'launch_failed', error: failure }
@@ -491,11 +875,23 @@ export class NativeCodexSessionDirectSender {
             child,
             clientMessageId,
             deliveryText,
-            displayText
+            displayText,
+            progress: {
+                phase: attempt > 1 ? 'retrying' : 'launching',
+                startedAt,
+                phaseStartedAt: startedAt,
+                transport: 'exec-resume',
+                ...(attempt > 1 ? { attempt } : {})
+            },
+            lifecycleTimer: null
         }
         this.recentFailures.delete(sessionId)
         this.activeSends.set(sessionId, active)
+        // The reservation above contains the same receipt. Write the active
+        // map once more so a future format change cannot leave two variants.
+        this.persistOutbox()
         this.watch(sessionId, child)
+        this.scheduleExecLifecycleCheck(sessionId, active)
         this.notifyStateChange(sessionId)
         return this.getProcessingAcceptance(active)
     }
@@ -562,7 +958,11 @@ export class NativeCodexSessionDirectSender {
                 this.fallbackAfterBridgeSetupFailure(sessionId, active, cwd, failure)
                 return
             }
-            this.finish(sessionId, active, failure)
+            // turn/start may have reached Codex even when its response did
+            // not make it back. Keep the prompt as an explicit recovery
+            // receipt instead of describing this ambiguous edge as a simple
+            // launch failure.
+            this.finish(sessionId, active, failure, 'session_status_unknown')
         }
     }
 
@@ -584,7 +984,7 @@ export class NativeCodexSessionDirectSender {
             if (!active.turnStartAttempted) {
                 this.fallbackAfterBridgeSetupFailure(sessionId, active, active.cwd, failure)
             } else {
-                this.finish(sessionId, active, failure)
+                this.finish(sessionId, active, failure, 'session_status_unknown')
             }
             return
         }
@@ -612,7 +1012,12 @@ export class NativeCodexSessionDirectSender {
             status === 'cancelled' ||
             status === 'canceled'
         ) {
-            this.finish(sessionId, active, failure ?? `Codex native turn ${status}`)
+            this.finish(
+                sessionId,
+                active,
+                failure ?? `Codex native turn ${status}`,
+                'session_status_unknown'
+            )
             return
         }
         this.finish(sessionId, active, null)
@@ -643,19 +1048,24 @@ export class NativeCodexSessionDirectSender {
                 active.displayText,
                 cwd,
                 active.clientMessageId,
-                active.startedAt
+                active.startedAt,
+                2
             )
             if (result.success) return
+            this.recordBridgeFallbackFailure(sessionId, active, result)
             return
         }
         if (session?.runState === 'processing') {
             const queued = this.enqueue(sessionId, active.deliveryText, active.displayText, active.clientMessageId)
             if (queued.success) return
         }
+        this.preserveFailedActive(sessionId, active, 'session_status_unknown')
+        this.persistOutbox()
         this.recentFailures.set(sessionId, {
             message: `Could not set up native Codex hand-off: ${setupFailure}`,
             occurredAt: this.now(),
-            clientMessageId: active.clientMessageId
+            clientMessageId: active.clientMessageId,
+            code: 'session_status_unknown'
         })
         this.notifyStateChange(sessionId)
     }
@@ -672,27 +1082,60 @@ export class NativeCodexSessionDirectSender {
             // A stale watcher update can report idle right after the race.
             // exec resume still performs an exact-thread open, so it remains
             // the safe pre-turn fallback in this narrow case.
-            this.startExecResume(
+            const result = this.startExecResume(
                 sessionId,
                 active.deliveryText,
                 active.displayText,
                 cwd,
                 active.clientMessageId,
-                active.startedAt
+                active.startedAt,
+                2
             )
+            if (!result.success) {
+                this.recordBridgeFallbackFailure(sessionId, active, result)
+            }
             return
         }
+        this.preserveFailedActive(sessionId, active, 'session_status_unknown')
+        this.persistOutbox()
         this.recentFailures.set(sessionId, {
             message: reason,
             occurredAt: this.now(),
-            clientMessageId: active.clientMessageId
+            clientMessageId: active.clientMessageId,
+            code: 'session_status_unknown'
+        })
+        this.notifyStateChange(sessionId)
+    }
+
+    private recordBridgeFallbackFailure(
+        sessionId: string,
+        active: ActiveAppServerSend,
+        result: Extract<SendCodexLocalSessionMessageRpcResponse, { success: false }>
+    ): void {
+        // The primary bridge never reached turn/start here, so a failed
+        // fallback is a known launch problem rather than an ambiguous Codex
+        // execution. The browser still retains its local receipt.
+        this.recentFailures.set(sessionId, {
+            message: result.error,
+            occurredAt: this.now(),
+            clientMessageId: active.clientMessageId,
+            code: result.code === 'session_status_unknown' ? 'session_status_unknown' : 'launch_failed'
         })
         this.notifyStateChange(sessionId)
     }
 
     private reconcileActiveWithTranscript(sessionId: string, session: CodexLocalSessionSummary | null): void {
         const active = this.activeSends.get(sessionId)
-        if (!active || active.kind !== 'app-server' || !active.turnAcceptedAt) return
+        if (!active) return
+
+        if (active.kind === 'exec-resume') {
+            if (session?.runState === 'processing') {
+                this.setExecPhase(sessionId, active, 'reasoning')
+            }
+            return
+        }
+
+        if (active.turnAcceptedAt === null) return
 
         if (session?.runState === 'processing') {
             active.observedProcessing = true
@@ -712,6 +1155,49 @@ export class NativeCodexSessionDirectSender {
         if (elapsed >= NATIVE_BRIDGE_IDLE_OBSERVATION_GRACE_MS && session.modifiedAt > active.initialModifiedAt) {
             this.finish(sessionId, active, null)
         }
+    }
+
+    private scheduleExecLifecycleCheck(sessionId: string, active: ActiveExecSend): void {
+        if (!this.isCurrentActive(sessionId, active) || active.lifecycleTimer) return
+        const timer = setTimeout(() => {
+            active.lifecycleTimer = null
+            if (!this.isCurrentActive(sessionId, active)) return
+
+            const session = this.sessionLookup.getSummary(sessionId)
+            this.reconcileActiveWithTranscript(sessionId, session)
+            if (!this.isCurrentActive(sessionId, active)) return
+
+            const elapsed = this.now() - active.startedAt
+            if ((session === null || session.runState === 'unknown') && elapsed >= NATIVE_EXEC_EVIDENCE_TIMEOUT_MS) {
+                this.expireExec(sessionId, active, 'Codex did not report whether it received the fallback turn', 'session_status_unknown')
+                return
+            }
+            if (session?.runState === 'idle' && elapsed >= NATIVE_EXEC_EVIDENCE_TIMEOUT_MS) {
+                this.expireExec(sessionId, active, 'Codex did not update its native transcript after fallback delivery', 'codex_timeout')
+                return
+            }
+            if (this.getStalledSince(session) !== null) {
+                this.expireExec(sessionId, active, 'Codex stopped reporting native activity', 'codex_timeout')
+                return
+            }
+            this.scheduleExecLifecycleCheck(sessionId, active)
+        }, NATIVE_BRIDGE_LIFECYCLE_POLL_INTERVAL_MS)
+        timer.unref?.()
+        active.lifecycleTimer = timer
+    }
+
+    private expireExec(
+        sessionId: string,
+        active: ActiveExecSend,
+        message: string,
+        code: CodexLocalSessionDirectSendRecoveryReason
+    ): void {
+        try {
+            active.child.kill?.('SIGTERM')
+        } catch {
+            // The child may already have exited; either way this hand-off is no longer trusted.
+        }
+        this.finish(sessionId, active, message, code)
     }
 
     private scheduleBridgeLifecycleCheck(sessionId: string, active: ActiveAppServerSend): void {
@@ -734,17 +1220,39 @@ export class NativeCodexSessionDirectSender {
                 )
                 return
             }
-            if (active.turnStartAttempted && !active.turnAcceptedAt && elapsed >= NATIVE_BRIDGE_TURN_START_TIMEOUT_MS) {
-                this.finish(sessionId, active, 'Timed out while starting the native Codex turn')
+            if (
+                active.turnStartAttempted
+                && active.turnAcceptedAt === null
+                && elapsed >= NATIVE_BRIDGE_TURN_START_TIMEOUT_MS
+            ) {
+                this.finish(sessionId, active, 'Timed out while starting the native Codex turn', 'codex_timeout')
+                return
+            }
+            const acceptedElapsed = active.turnAcceptedAt === null ? null : this.now() - active.turnAcceptedAt
+            if (
+                acceptedElapsed !== null
+                && (session === null || session.runState === 'unknown')
+                && acceptedElapsed >= NATIVE_BRIDGE_UNKNOWN_TIMEOUT_MS
+            ) {
+                this.finish(
+                    sessionId,
+                    active,
+                    'Codex did not report whether it received the native turn',
+                    'session_status_unknown'
+                )
+                return
+            }
+            if (active.turnAcceptedAt !== null && this.getStalledSince(session) !== null) {
+                this.finish(sessionId, active, 'Codex stopped reporting native activity', 'codex_timeout')
                 return
             }
             if (
-                active.turnAcceptedAt &&
-                !active.observedProcessing &&
+                active.turnAcceptedAt !== null &&
                 session?.runState === 'idle' &&
-                this.now() - active.turnAcceptedAt >= NATIVE_BRIDGE_IDLE_TIMEOUT_MS
+                acceptedElapsed !== null &&
+                acceptedElapsed >= NATIVE_BRIDGE_IDLE_TIMEOUT_MS
             ) {
-                this.finish(sessionId, active, 'Codex accepted the turn but did not update its native transcript')
+                this.finish(sessionId, active, 'Codex accepted the turn but did not update its native transcript', 'codex_timeout')
                 return
             }
             this.scheduleBridgeLifecycleCheck(sessionId, active)
@@ -767,29 +1275,53 @@ export class NativeCodexSessionDirectSender {
         this.notifyStateChange(sessionId)
     }
 
+    private setExecPhase(
+        sessionId: string,
+        active: ActiveExecSend,
+        phase: CodexLocalSessionDirectSendProgress['phase']
+    ): void {
+        if (!this.isCurrentActive(sessionId, active) || active.progress.phase === phase) return
+        active.progress = {
+            ...active.progress,
+            phase,
+            phaseStartedAt: this.now()
+        }
+        this.notifyStateChange(sessionId)
+    }
+
     private getProcessingAcceptance(active: ActiveSend): ProcessingAcceptance {
         return {
             success: true,
             status: 'processing',
             startedAt: active.startedAt,
-            ...(active.kind === 'app-server' ? { progress: { ...active.progress } } : {})
+            progress: { ...active.progress }
         }
     }
 
-    private finish(sessionId: string, active: ActiveSend, failure: string | null): void {
+    private finish(
+        sessionId: string,
+        active: ActiveSend,
+        failure: string | null,
+        failureCode: CodexLocalSessionDirectSendRecoveryReason = 'launch_failed'
+    ): void {
         if (!this.isCurrentActive(sessionId, active)) return
         this.activeSends.delete(sessionId)
         if (active.kind === 'app-server') {
             this.disposeBridge(active)
+        } else {
+            this.disposeExec(active)
         }
         if (failure) {
             this.recentFailures.set(sessionId, {
                 message: failure,
                 occurredAt: this.now(),
-                clientMessageId: active.clientMessageId
+                clientMessageId: active.clientMessageId,
+                code: failureCode
             })
+            this.preserveFailedActive(sessionId, active, failureCode)
         }
-        if (this.queues.get(sessionId)?.length) {
+        this.persistOutbox()
+        if (this.queues.get(sessionId)?.length && !this.queues.get(sessionId)?.[0]?.recoveryRequired) {
             this.scheduleQueuePump(sessionId, failure ? NATIVE_QUEUE_RETRY_INTERVAL_MS : this.queuePollIntervalMs)
         }
         this.notifyStateChange(sessionId)
@@ -799,6 +1331,7 @@ export class NativeCodexSessionDirectSender {
         if (!this.isCurrentActive(sessionId, active)) return
         this.activeSends.delete(sessionId)
         this.disposeBridge(active)
+        this.persistOutbox()
     }
 
     private disposeBridge(active: ActiveAppServerSend): void {
@@ -812,6 +1345,13 @@ export class NativeCodexSessionDirectSender {
             // Disconnection is best effort; the client has no more state owner.
         }
         void active.client.disconnect().catch(() => {})
+    }
+
+    private disposeExec(active: ActiveExecSend): void {
+        if (active.lifecycleTimer) {
+            clearTimeout(active.lifecycleTimer)
+            active.lifecycleTimer = null
+        }
     }
 
     private isCurrentActive(sessionId: string, active: ActiveSend): boolean {
@@ -828,12 +1368,15 @@ export class NativeCodexSessionDirectSender {
         })
 
         let finished = false
-        const finish = (failure: string | null) => {
+        const finish = (
+            failure: string | null,
+            failureCode: CodexLocalSessionDirectSendRecoveryReason = 'session_status_unknown'
+        ) => {
             if (finished) return
             finished = true
             const active = this.activeSends.get(sessionId)
             if (active?.kind === 'exec-resume' && active.child === child) {
-                this.finish(sessionId, active, failure ? trimFailureMessage(failure) : null)
+                this.finish(sessionId, active, failure ? trimFailureMessage(failure) : null, failureCode)
             }
         }
 
@@ -851,10 +1394,12 @@ export class NativeCodexSessionDirectSender {
     }
 
     private getQueuedMessages(sessionId: string): CodexLocalSessionQueuedMessage[] {
-        return (this.queues.get(sessionId) ?? []).map(({ id, text, queuedAt }) => ({
+        return (this.queues.get(sessionId) ?? []).map(({ id, text, queuedAt, recoveryRequired, recoveryReason }) => ({
             id,
             text,
-            queuedAt
+            queuedAt,
+            ...(recoveryRequired ? { recoveryRequired: true } : {}),
+            ...(recoveryReason ? { recoveryReason } : {})
         }))
     }
 
@@ -899,7 +1444,8 @@ export class NativeCodexSessionDirectSender {
             clearTimeout(existing)
             this.queueTimers.delete(sessionId)
         }
-        if (this.queueTimers.has(sessionId) || !this.queues.get(sessionId)?.length) {
+        const queue = this.queues.get(sessionId)
+        if (this.queueTimers.has(sessionId) || !queue?.length || queue[0]?.recoveryRequired) {
             return
         }
         const timer = setTimeout(() => {
@@ -916,6 +1462,10 @@ export class NativeCodexSessionDirectSender {
         const queue = this.queues.get(sessionId)
         if (!queue || queue.length === 0) {
             this.queues.delete(sessionId)
+            this.persistOutbox()
+            return
+        }
+        if (queue[0]?.recoveryRequired) {
             return
         }
         if (this.activeSends.has(sessionId)) {
@@ -937,20 +1487,21 @@ export class NativeCodexSessionDirectSender {
             this.recentFailures.set(sessionId, {
                 message: 'The original Codex workspace is no longer available',
                 occurredAt: this.now(),
-                clientMessageId: queue[0]?.id ?? null
+                clientMessageId: queue[0]?.id ?? null,
+                code: 'launch_failed'
             })
             this.scheduleQueuePump(sessionId, NATIVE_QUEUE_RETRY_INTERVAL_MS)
             this.notifyStateChange(sessionId)
             return
         }
 
-        const item = queue[0]
+        const item = queue.shift()!
+        if (queue.length === 0) {
+            this.queues.delete(sessionId)
+        }
         const result = this.start(sessionId, item.deliveryText, item.text, cwd, session.modifiedAt, item.id)
         if (result.success) {
-            queue.shift()
-            if (queue.length === 0) {
-                this.queues.delete(sessionId)
-            } else {
+            if (queue.length > 0) {
                 // The active bridge owns the current command. Its completion
                 // releases the next item after the native turn becomes idle.
                 this.scheduleQueuePump(sessionId)
@@ -959,6 +1510,9 @@ export class NativeCodexSessionDirectSender {
             return
         }
 
+        queue.unshift(item)
+        this.queues.set(sessionId, queue)
+        this.persistOutbox()
         // Keep the item intact on a launch race/failure. The next attempt is
         // delayed so a broken Codex binary does not create a hot loop.
         this.scheduleQueuePump(sessionId, NATIVE_QUEUE_RETRY_INTERVAL_MS)

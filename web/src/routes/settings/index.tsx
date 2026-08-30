@@ -1,4 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
+import {
+    Monitor as MonitorIconNode,
+    Moon as MoonIconNode,
+    Sun as SunIconNode,
+} from 'lucide'
 import { RefreshCw } from 'lucide-react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
@@ -39,6 +44,7 @@ import {
 } from '@/hooks/useChatSurfaceColors'
 import { useAppearance, getAppearanceOptions, type AppearancePreference } from '@/hooks/useTheme'
 import { useThemeColors, type ThemeColorKeyId } from '@/hooks/useThemeColors'
+import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 import { VoiceRespondsControls, VoiceSoundsControls, VoicePersonaControls, VoiceDiagnosticsControls } from '@/components/settings/VoiceAdvancedControls'
 
@@ -449,6 +455,16 @@ export default function SettingsPage() {
     const appearanceOptions = getAppearanceOptions()
     const currentLocale = locales.find((loc) => loc.value === locale)
     const currentAppearanceLabel = appearanceOptions.find((opt) => opt.value === appearance)?.labelKey ?? 'settings.display.appearance.system'
+    const appearanceIcon = appearance === 'system'
+        ? MonitorIconNode
+        : appearance === 'light'
+            ? SunIconNode
+            : MoonIconNode
+    const appearanceIconState = appearance === 'system'
+        ? 'monitor'
+        : appearance === 'light'
+            ? 'sun'
+            : 'moon'
     const currentFontScaleLabel = fontScaleOptions.find((opt) => opt.value === fontScale)?.label ?? '100%'
     const currentTerminalFontSizeLabel = terminalFontSizeOptions.find((opt) => opt.value === terminalFontSize)?.label ?? '13px'
     const currentComposerEnterBehaviorLabel = composerEnterBehaviorOptions.find((opt) => opt.value === composerEnterBehavior)?.labelKey ?? 'settings.chat.enterBehavior.send'
@@ -760,6 +776,12 @@ export default function SettingsPage() {
                             >
                                 <span className="text-[var(--app-fg)]">{t('settings.display.appearance')}</span>
                                 <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                    <MotionIcon
+                                        icon={toMotionIcon(appearanceIcon)}
+                                        className="h-4 w-4"
+                                        data-motion-icon={appearanceIconState}
+                                        aria-hidden="true"
+                                    />
                                     <span>{t(currentAppearanceLabel)}</span>
                                     <ChevronDownIcon className={`transition-transform ${isAppearanceOpen ? 'rotate-180' : ''}`} />
                                 </span>

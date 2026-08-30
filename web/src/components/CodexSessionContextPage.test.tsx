@@ -183,6 +183,19 @@ describe('CodexSessionContextPage', () => {
         })).toBe('connected')
         expect(getNativeCodexDirectSendPhase({
             pendingDirectSendCount: 0,
+            queuedMessages: [],
+            directMessageEchoes: [{ ...echo, status: 'queued', deliveryPhase: 'retrying' }],
+            runState: 'processing',
+            progress: {
+                phase: 'retrying',
+                startedAt: 1,
+                phaseStartedAt: 4,
+                transport: 'exec-resume',
+                attempt: 2
+            }
+        })).toBe('retrying')
+        expect(getNativeCodexDirectSendPhase({
+            pendingDirectSendCount: 0,
             queuedMessages: [{ id: 'queue-1', text: 'Continue', queuedAt: 1 }],
             directMessageEchoes: [{ ...echo, status: 'queued', deliveryPhase: 'queued', queueId: 'queue-1' }],
             runState: 'processing'
@@ -400,6 +413,35 @@ describe('CodexSessionContextPage', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Back to sessions' }))
         expect(onBack).toHaveBeenCalledTimes(1)
+    })
+
+    it('renders native context compaction as a timeline divider', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionContext as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            session: {
+                id: 'codex-thread-1',
+                title: 'Recent Codex task',
+                cwd: '/workspace/project',
+                modifiedAt: Date.now(),
+                model: 'gpt-5.6-terra',
+                modelReasoningEffort: 'high'
+            },
+            page: { limit: 50, nextBefore: null, hasMore: false },
+            messages: [
+                {
+                    id: 'codex-local:codex-thread-1:0',
+                    createdAt: 1,
+                    content: { role: 'agent', content: { type: 'codex', data: { type: 'context_compacted' } } }
+                }
+            ]
+        })
+        renderPage({ api })
+
+        const event = await screen.findByTestId('context-compacted-event')
+        expect(event).toHaveAttribute('data-event-style', 'divider')
+        expect(event).toHaveTextContent('Context compacted')
+        expect(event).not.toHaveTextContent('Earlier messages were saved as a summary')
     })
 
     it('refreshes the open native transcript when its runner publishes an invalidation', async () => {
@@ -637,12 +679,52 @@ describe('CodexSessionContextPage', () => {
         })
         expect(await screen.findByText('Show this right away')).toBeInTheDocument()
         expect(screen.getByRole('status', { name: 'Sending' })).toBeInTheDocument()
-        expect(screen.getByTestId('codex-direct-send-phase-launching')).toBeInTheDocument()
+        expect(screen.getByTestId('codex-direct-send-phase-launching').querySelector('[data-motion-icon="native-direct-launching"]')).not.toBeNull()
 
         await act(async () => {
             resolveSend({ success: true, status: 'processing', startedAt: Date.now() })
         })
-        expect(await screen.findByTestId('codex-direct-send-phase-matching')).toBeInTheDocument()
+        expect((await screen.findByTestId('codex-direct-send-phase-matching')).querySelector('[data-motion-icon="native-direct-matching"]')).not.toBeNull()
+    })
+
+    it('shows fallback delivery retry progress from the runner', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            progress: {
+                phase: 'retrying',
+                startedAt: 1,
+                phaseStartedAt: 2,
+                transport: 'exec-resume',
+                attempt: 2
+            }
+        })
+        renderPage({ api })
+
+        const notice = await screen.findByTestId('codex-direct-send-phase-retrying')
+        expect(notice).toHaveTextContent('Retrying delivery')
+        expect(notice).toHaveTextContent('switching to the fallback')
+        expect(notice.querySelector('[data-motion-icon="native-direct-retrying"]')).not.toBeNull()
+    })
+
+    it('keeps a transport-timed-out prompt pending while it verifies delivery', async () => {
+        const api = createApi()
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockRejectedValue(
+            new ApiError('Request timed out', 408, 'request_timeout')
+        )
+        renderPage({ api })
+
+        await screen.findByText('Original response')
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Verify this before retrying' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+        expect(await screen.findByText('The connection timed out. Checking whether this message was delivered.')).toBeInTheDocument()
+        expect(screen.getAllByText('Verify this before retrying')).not.toHaveLength(0)
+        expect(screen.getByRole('status', { name: 'Sending' })).toBeInTheDocument()
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1)
+        })
     })
 
     it('keeps a native prompt visible after leaving and reopening the session', async () => {
@@ -783,6 +865,129 @@ describe('CodexSessionContextPage', () => {
         expect(drawer).toHaveTextContent('Wait for the current turn')
     })
 
+    it('asks for confirmation before recovering a stale native queue', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            stalledSince: Date.now() - 10_000,
+            queuedMessages: [{ id: 'queued-stalled', text: 'Recover this saved prompt', queuedAt: 123 }]
+        })
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            startedAt: Date.now()
+        })
+        renderPage({ api })
+
+        expect(await screen.findByTestId('codex-native-recovery')).toHaveTextContent('This native session may be stuck')
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm and retry' }))
+
+        await waitFor(() => {
+            expect(api.sendCodexSessionMessage).toHaveBeenCalledWith('codex-thread-1', {
+                machineId: 'machine-1',
+                message: 'Recover this saved prompt',
+                clientMessageId: 'queued-stalled',
+                forceRecovery: true
+            })
+        })
+    })
+
+    it('explains a Codex timeout before allowing a saved prompt to be retried', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'idle',
+            lastError: 'Codex stopped reporting activity',
+            lastErrorAt: Date.now(),
+            lastErrorClientMessageId: 'timed-out-prompt',
+            lastErrorCode: 'codex_timeout',
+            queuedMessages: [{
+                id: 'timed-out-prompt',
+                text: 'Retry after Codex timeout',
+                queuedAt: 123,
+                recoveryRequired: true,
+                recoveryReason: 'codex_timeout'
+            }]
+        })
+        renderPage({ api })
+
+        const recovery = await screen.findByTestId('codex-native-recovery')
+        expect(recovery).toHaveTextContent('Codex has not reported new activity for a while')
+        expect(screen.getByRole('button', { name: 'Confirm and retry' })).toBeInTheDocument()
+    })
+
+    it('recovers a browser receipt left behind by a runner restart only after confirmation', async () => {
+        const createdAt = Date.now() - 20_000
+        localStorage.setItem('hapi:native-codex-direct-messages:v1', JSON.stringify({
+            [JSON.stringify(['machine-1', 'codex-thread-1'])]: [{
+                id: 'native:lost-after-restart',
+                text: 'Retry the lost receipt',
+                deliveryText: 'Expanded retry the lost receipt',
+                createdAt,
+                status: 'queued',
+                deliveryPhase: 'queued',
+                phaseStartedAt: createdAt,
+                queueId: 'runner-queue-that-restarted',
+                observedTranscriptMessageIds: [],
+                observedThroughPosition: null
+            }]
+        }))
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'idle',
+            queuedMessages: []
+        })
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            startedAt: Date.now()
+        })
+        renderPage({ api })
+
+        expect(await screen.findByText('Retry the lost receipt')).toBeInTheDocument()
+        expect(await screen.findByTestId('codex-native-recovery')).toHaveTextContent('Retrying may run the message twice')
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm and retry' }))
+
+        await waitFor(() => {
+            expect(api.sendCodexSessionMessage).toHaveBeenCalledWith('codex-thread-1', {
+                machineId: 'machine-1',
+                message: 'Expanded retry the lost receipt',
+                displayMessage: 'Retry the lost receipt',
+                clientMessageId: 'native:lost-after-restart',
+                forceRecovery: true
+            })
+        })
+    })
+
+    it('does not silently retry an old unconfirmed native receipt', async () => {
+        const createdAt = Date.now() - 30_000
+        localStorage.setItem('hapi:native-codex-direct-messages:v1', JSON.stringify({
+            [JSON.stringify(['machine-1', 'codex-thread-1'])]: [{
+                id: 'native:unconfirmed-old-receipt',
+                text: 'Do not retry by itself',
+                createdAt,
+                status: 'sending',
+                deliveryPhase: 'matching',
+                phaseStartedAt: createdAt,
+                queueId: null,
+                observedTranscriptMessageIds: [],
+                observedThroughPosition: null
+            }]
+        }))
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'idle',
+            queuedMessages: []
+        })
+        renderPage({ api })
+
+        expect(await screen.findByTestId('codex-native-recovery')).toHaveTextContent('Retrying may run the message twice')
+        expect(api.sendCodexSessionMessage).not.toHaveBeenCalled()
+    })
+
     it('uses the normal session title details popover', async () => {
         renderPage()
 
@@ -847,7 +1052,7 @@ describe('CodexSessionContextPage', () => {
     })
 
 
-    it('shows native context loading as an inline refreshing chat bubble', () => {
+    it('matches the HAPI conversation skeleton while native context loads', () => {
         const api = createApi()
         let resolveContext: (() => void) | undefined
         const getContext = api.getCodexSessionContext as ReturnType<typeof vi.fn>
@@ -863,15 +1068,12 @@ describe('CodexSessionContextPage', () => {
         renderPage({ api })
 
         const loading = screen.getByTestId('codex-session-context-loading')
-        expect(loading).toHaveClass('items-end')
         expect(loading).toHaveAttribute('aria-busy', 'true')
         expect(screen.getByRole('status', { name: 'Loading context…' })).toBe(loading)
-        const bubble = screen.getByTestId('codex-session-context-typing')
-        expect(bubble).toHaveClass('animate-bounce-in')
-        expect(bubble.querySelectorAll('[data-loading-line]')).toHaveLength(2)
-        expect(bubble.querySelectorAll('[class*="animate-pulse"]')).toHaveLength(2)
-        expect(screen.queryByTestId('codex-session-context-loading-status')).toBeNull()
-        expect(loading.querySelector('.animate-spin')).toBeNull()
+        expect(screen.getAllByTestId('session-entry-message-skeleton')).toHaveLength(3)
+        expect(screen.getByTestId('codex-session-context-composer-skeleton')).toBeInTheDocument()
+        expect(loading.querySelector('.animate-spin')).not.toBeNull()
+        expect(loading.querySelector('[title="Codex"]')).toBeNull()
         resolveContext?.()
     })
 
@@ -1049,6 +1251,24 @@ describe('CodexSessionContextPage', () => {
             { kind: 'agent-reasoning', text: 'Inspecting the file' }
         ])
         expect(blocks).toHaveLength(3)
+    })
+
+    it('keeps native context compaction as an independent event block', () => {
+        const blocks = buildReadOnlyCodexBlocks([
+            {
+                id: 'codex-local:1:0',
+                createdAt: 1,
+                content: {
+                    role: 'agent',
+                    content: { type: 'codex', data: { type: 'context_compacted' } }
+                }
+            }
+        ])
+
+        expect(blocks).toMatchObject([{
+            kind: 'agent-event',
+            event: { type: 'compact', trigger: 'auto', preTokens: 0 }
+        }])
     })
 
     it('renders local automation heartbeats as status events', () => {

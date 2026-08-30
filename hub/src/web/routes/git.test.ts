@@ -85,6 +85,44 @@ describe('git branch route', () => {
     })
 })
 
+describe('session file route', () => {
+    it('uses the runner-scoped file RPC for a completed HAPI session', async () => {
+        const session = {
+            id: 'session-1',
+            namespace: 'default',
+            active: false,
+            metadata: { path: '/work/project', machineId: 'machine-1' }
+        } as unknown as Session
+        let machineCalls = 0
+        let sessionCalls = 0
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            getMachine: () => ({ id: 'machine-1', namespace: 'default' }),
+            readMachineFile: async (machineId: string, cwd: string, path: string) => {
+                machineCalls += 1
+                expect(machineId).toBe('machine-1')
+                expect(cwd).toBe('/work/project')
+                expect(path).toBe('src/example.ts')
+                return { success: true, content: 'ZXhwb3J0IGNvbnN0IGZpbGUgPSB0cnVlCg==' }
+            },
+            readSessionFile: async () => {
+                sessionCalls += 1
+                return { success: false, error: 'inactive session' }
+            }
+        } as unknown as Partial<SyncEngine>
+
+        const response = await buildApp(engine).request('/api/sessions/session-1/file?path=src%2Fexample.ts')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            success: true,
+            content: 'ZXhwb3J0IGNvbnN0IGZpbGUgPSB0cnVlCg=='
+        })
+        expect(machineCalls).toBe(1)
+        expect(sessionCalls).toBe(0)
+    })
+})
+
 describe('generated images route', () => {
     it('serves generated images with an immutable cache header instead of no-store', async () => {
         const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -154,5 +192,45 @@ describe('session file blob route', () => {
         expect(response.status).toBe(200)
         expect(response.headers.get('content-type')).toContain('image/png')
         expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(pngBytes))
+    })
+
+    it('uses the runner-scoped byte reader for a completed HAPI session', async () => {
+        const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+        const session = {
+            id: 'session-1',
+            namespace: 'default',
+            active: false,
+            metadata: { path: '/work/project', machineId: 'machine-1' }
+        } as unknown as Session
+        let machineCalls = 0
+        let sessionCalls = 0
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            getMachine: () => ({ id: 'machine-1', namespace: 'default' }),
+            readMachineFileBytes: async (machineId: string, cwd: string, path: string) => {
+                machineCalls += 1
+                expect(machineId).toBe('machine-1')
+                expect(cwd).toBe('/work/project')
+                expect(path).toBe('images/shot.png')
+                return {
+                    success: true,
+                    bytes: pngBytes,
+                    mimeType: 'image/png',
+                    fileName: 'shot.png'
+                }
+            },
+            readSessionFileBytes: async () => {
+                sessionCalls += 1
+                return { success: false, error: 'inactive session' }
+            }
+        } as unknown as Partial<SyncEngine>
+
+        const response = await buildApp(engine).request('/api/sessions/session-1/file-blob?path=images%2Fshot.png')
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toContain('image/png')
+        expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(pngBytes))
+        expect(machineCalls).toBe(1)
+        expect(sessionCalls).toBe(0)
     })
 })

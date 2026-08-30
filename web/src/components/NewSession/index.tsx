@@ -628,12 +628,111 @@ export function NewSession(props: {
     const canCreate = Boolean(machineId && trimmedDirectory && !isFormDisabled && !missingWorktreeDirectory)
 
     return (
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-3 pb-[calc(var(--app-safe-area-bottom)+6rem)] pt-3">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[calc(var(--app-safe-area-bottom)+6rem)] pt-4 sm:px-6">
             <AgentSelector
                 agent={agent}
                 isDisabled={isFormDisabled}
                 onAgentChange={handleAgentChange}
-            />
+            >
+                {agent === 'opencode' ? (
+                    <OpencodeModelSelector
+                        cwd={deferredDirectory}
+                        machineId={machineId}
+                        isLoading={opencodeModelsState.isLoading}
+                        error={opencodeModelsState.error}
+                        availableModels={opencodeModelsState.availableModels}
+                        currentModelId={opencodeModelsState.currentModelId}
+                        selectedModel={opencodeSelectedModel}
+                        inline
+                        onModelChange={setOpencodeSelectedModel}
+                        onRetry={opencodeModelsState.refetch}
+                    />
+                ) : (
+                    agent === 'cursor' ? (
+                        <>
+                            <ModelSelector
+                                agent={agent}
+                                model={cursorPicker.mode === 'dual' ? cursorBaseSelectValue : model}
+                                options={cursorPicker.modelOptions}
+                                isDisabled={cursorModelPickersDisabled}
+                                isLoading={cursorModelsState.isLoading}
+                                error={cursorModelsState.error
+                                    ? `${t('newSession.model.loadFailed')}: ${cursorModelsState.error}`
+                                    : null}
+                                inline
+                                onModelChange={(value) => {
+                                    if (cursorPicker.mode === 'dual') {
+                                        handleCursorBaseChange(value)
+                                        return
+                                    }
+                                    setModel(value)
+                                    setCursorSelectedBase(
+                                        value === 'auto' ? 'auto' : resolveCursorBaseFromWire(value, cursorPicker.catalog)
+                                    )
+                                }}
+                            />
+                            {showCursorVariantPicker ? (
+                                <ModelSelector
+                                    agent={agent}
+                                    model={cursorEffortSelectValue}
+                                    label={t('misc.variant')}
+                                    options={cursorVariantSelectOptions}
+                                    isDisabled={cursorModelPickersDisabled}
+                                    isLoading={cursorModelsState.isLoading}
+                                    inline
+                                    onModelChange={handleCursorEffortChange}
+                                />
+                            ) : null}
+                        </>
+                    ) : (
+                        <ModelSelector
+                            agent={agent}
+                            model={model}
+                            options={
+                                agent === 'codex'
+                                    ? codexModelOptions
+                                    : undefined
+                            }
+                            isDisabled={
+                                isFormDisabled
+                                || (agent === 'codex' && Boolean(codexModelsState.error))
+                            }
+                            isLoading={agent === 'codex' && codexModelsState.isLoading}
+                            error={agent === 'codex' && codexModelsState.error
+                                ? `${t('newSession.model.loadFailed')}: ${codexModelsState.error}`
+                                : null}
+                            inline
+                            onModelChange={setModel}
+                        />
+                    )
+                )}
+                <ClaudeEffortSelector
+                    agent={agent}
+                    effort={effort}
+                    isDisabled={isFormDisabled}
+                    inline
+                    onEffortChange={setEffort}
+                />
+                <ReasoningEffortSelector
+                    agent={agent}
+                    value={modelReasoningEffort}
+                    codexOptions={codexReasoningEffortOptions}
+                    isDisabled={isFormDisabled}
+                    inline
+                    onChange={setModelReasoningEffort}
+                />
+                <YoloToggle
+                    yoloMode={yoloMode}
+                    isDisabled={isFormDisabled}
+                    inline
+                    onToggle={setYoloMode}
+                />
+                {cursorModelsUnavailable ? (
+                    <div className="col-span-2 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)] sm:col-span-3">
+                        {t('newSession.model.cursorUnavailable')}
+                    </div>
+                ) : null}
+            </AgentSelector>
             {runnerSpawnError ? (
                 <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-500/30 dark:bg-red-900/20 dark:text-red-400">
                     Runner last spawn error: {runnerSpawnError}
@@ -660,111 +759,6 @@ export function NewSession(props: {
                 onWorktreeNameChange={setWorktreeName}
                 onChooseFolder={props.onChooseFolder ? handleChooseFolderClick : undefined}
             />
-            <div className="rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-[0_1px_4px_rgba(0,0,0,0.03)]">
-                <div className="mb-3 text-xs font-medium text-[var(--app-hint)]">
-                    {t('newSession.runConfig')}
-                </div>
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(8.5rem,11rem)_8.5rem] sm:items-end">
-                    {agent === 'opencode' ? (
-                        <OpencodeModelSelector
-                            cwd={deferredDirectory}
-                            machineId={machineId}
-                            isLoading={opencodeModelsState.isLoading}
-                            error={opencodeModelsState.error}
-                            availableModels={opencodeModelsState.availableModels}
-                            currentModelId={opencodeModelsState.currentModelId}
-                            selectedModel={opencodeSelectedModel}
-                            inline
-                            onModelChange={setOpencodeSelectedModel}
-                            onRetry={opencodeModelsState.refetch}
-                        />
-                    ) : (
-                        agent === 'cursor' ? (
-                            <>
-                                <ModelSelector
-                                    agent={agent}
-                                    model={cursorPicker.mode === 'dual' ? cursorBaseSelectValue : model}
-                                    options={cursorPicker.modelOptions}
-                                    isDisabled={cursorModelPickersDisabled}
-                                    isLoading={cursorModelsState.isLoading}
-                                    error={cursorModelsState.error
-                                        ? `${t('newSession.model.loadFailed')}: ${cursorModelsState.error}`
-                                        : null}
-                                    inline
-                                    onModelChange={(value) => {
-                                        if (cursorPicker.mode === 'dual') {
-                                            handleCursorBaseChange(value)
-                                            return
-                                        }
-                                        setModel(value)
-                                        setCursorSelectedBase(
-                                            value === 'auto' ? 'auto' : resolveCursorBaseFromWire(value, cursorPicker.catalog)
-                                        )
-                                    }}
-                                />
-                                {showCursorVariantPicker ? (
-                                    <ModelSelector
-                                        agent={agent}
-                                        model={cursorEffortSelectValue}
-                                        label={t('misc.variant')}
-                                        options={cursorVariantSelectOptions}
-                                        isDisabled={cursorModelPickersDisabled}
-                                        isLoading={cursorModelsState.isLoading}
-                                        inline
-                                        onModelChange={handleCursorEffortChange}
-                                    />
-                                ) : null}
-                            </>
-                        ) : (
-                            <ModelSelector
-                                agent={agent}
-                                model={model}
-                                options={
-                                    agent === 'codex'
-                                        ? codexModelOptions
-                                        : undefined
-                                }
-                                isDisabled={
-                                    isFormDisabled
-                                    || (agent === 'codex' && Boolean(codexModelsState.error))
-                                }
-                                isLoading={agent === 'codex' && codexModelsState.isLoading}
-                                error={agent === 'codex' && codexModelsState.error
-                                    ? `${t('newSession.model.loadFailed')}: ${codexModelsState.error}`
-                                    : null}
-                                inline
-                                onModelChange={setModel}
-                            />
-                        )
-                    )}
-                    <ClaudeEffortSelector
-                        agent={agent}
-                        effort={effort}
-                        isDisabled={isFormDisabled}
-                        inline
-                        onEffortChange={setEffort}
-                    />
-                    <ReasoningEffortSelector
-                        agent={agent}
-                        value={modelReasoningEffort}
-                        codexOptions={codexReasoningEffortOptions}
-                        isDisabled={isFormDisabled}
-                        inline
-                        onChange={setModelReasoningEffort}
-                    />
-                    <YoloToggle
-                        yoloMode={yoloMode}
-                        isDisabled={isFormDisabled}
-                        inline
-                        onToggle={setYoloMode}
-                    />
-                </div>
-                {cursorModelsUnavailable ? (
-                    <div className="mt-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
-                        {t('newSession.model.cursorUnavailable')}
-                    </div>
-                ) : null}
-            </div>
 
             {(error ?? spawnError) ? (
                 <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-900/20 dark:text-red-400">

@@ -102,4 +102,76 @@ describe('ApiClient error mapping', () => {
         await timeoutExpectation
         vi.useRealTimers()
     })
+
+    it('uses the authenticated share-management endpoints', async () => {
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                shares: [{ id: 'share-1', filename: 'note.md', size: 4, createdAt: 1, expiresAt: 2 }]
+            })))
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                share: { id: 'share-1', filename: 'note.md', size: 4, createdAt: 1, expiresAt: 2, url: 'https://example.test/s/token' }
+            })))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, cleanupPending: true }), { status: 202 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getShares()).resolves.toEqual({
+            shares: [{ id: 'share-1', filename: 'note.md', size: 4, createdAt: 1, expiresAt: 2 }]
+        })
+        await expect(api.getShare('share / one')).resolves.toEqual({
+            share: { id: 'share-1', filename: 'note.md', size: 4, createdAt: 1, expiresAt: 2, url: 'https://example.test/s/token' }
+        })
+        await expect(api.revokeShare('share / one')).resolves.toEqual({ ok: true, cleanupPending: true })
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/shares')
+        expect((fetchMock.mock.calls[0]?.[1] as RequestInit).headers).toBeInstanceOf(Headers)
+        expect(((fetchMock.mock.calls[0]?.[1] as RequestInit).headers as Headers).get('authorization')).toBe('Bearer test-token')
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/shares/share%20%2F%20one')
+        expect((fetchMock.mock.calls[1]?.[1] as RequestInit).method ?? 'GET').toBe('GET')
+        expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/shares/share%20%2F%20one')
+        expect((fetchMock.mock.calls[2]?.[1] as RequestInit).method).toBe('DELETE')
+    })
+
+    it('requests a runner directory Git branch with encoded identifiers', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+            success: true,
+            stdout: '# branch.head feature/list\n',
+            stderr: '',
+            exitCode: 0,
+            isWorktree: true
+        })))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getMachineGitBranch('machine / one', '/work/project name')).resolves.toEqual({
+            success: true,
+            stdout: '# branch.head feature/list\n',
+            stderr: '',
+            exitCode: 0,
+            isWorktree: true
+        })
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe(
+            '/api/machines/machine%20%2F%20one/git-branch?cwd=%2Fwork%2Fproject%20name'
+        )
+    })
+
+    it('reads a native Codex file through its owning runner with encoded identifiers', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+            success: true,
+            content: 'Y29uc3QgbmF0aXZlID0gdHJ1ZQo='
+        })))
+
+        const api = new ApiClient('test-token')
+        await expect(api.readCodexSessionFile(
+            'thread / one',
+            'machine / one',
+            'web/src/my file.tsx'
+        )).resolves.toEqual({
+            success: true,
+            content: 'Y29uc3QgbmF0aXZlID0gdHJ1ZQo='
+        })
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe(
+            '/api/codex/sessions/thread%20%2F%20one/file?machineId=machine+%2F+one&path=web%2Fsrc%2Fmy+file.tsx'
+        )
+    })
 })

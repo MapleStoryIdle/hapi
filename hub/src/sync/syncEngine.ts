@@ -58,6 +58,7 @@ import {
     type RpcFileBytesResponse,
     type RpcGeneratedImageFileReference,
     type RpcGeneratedImageResponse,
+    type RpcGitBranchResponse,
     type RpcGetCodexSubscriptionLimitsResponse,
     type RpcListDirectoryResponse,
     type RpcListCodexModelsResponse,
@@ -93,6 +94,7 @@ export type {
     RpcFileBytesResponse,
     RpcGeneratedImageFileReference,
     RpcGeneratedImageResponse,
+    RpcGitBranchResponse,
     RpcGetCodexSubscriptionLimitsResponse,
     RpcListDirectoryResponse,
     RpcListCodexModelsResponse,
@@ -2006,8 +2008,16 @@ export class SyncEngine {
         return await this.rpcGateway.listMachineDirectory(machineId, path)
     }
 
-    async getMachineGitBranch(machineId: string, cwd: string): Promise<RpcCommandResponse> {
+    async getMachineGitBranch(machineId: string, cwd: string): Promise<RpcGitBranchResponse> {
         return await this.rpcGateway.getMachineGitBranch(machineId, cwd)
+    }
+
+    async readMachineFile(machineId: string, cwd: string, path: string): Promise<RpcReadFileResponse> {
+        return await this.rpcGateway.readMachineFile(machineId, cwd, path)
+    }
+
+    async readMachineFileBytes(machineId: string, cwd: string, path: string): Promise<RpcFileBytesResponse> {
+        return await this.rpcGateway.readMachineFileBytes(machineId, cwd, path)
     }
 
     async listCodexLocalSessions(
@@ -2053,14 +2063,16 @@ export class SyncEngine {
         sessionId: string,
         message: string,
         displayMessage?: string,
-        clientMessageId?: string
+        clientMessageId?: string,
+        forceRecovery?: boolean
     ): Promise<RpcSendCodexLocalSessionMessageResponse> {
         return await this.rpcGateway.sendCodexLocalSessionMessage(
             machineId,
             sessionId,
             message,
             displayMessage,
-            clientMessageId
+            clientMessageId,
+            forceRecovery
         )
     }
 

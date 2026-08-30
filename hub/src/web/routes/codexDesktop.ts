@@ -790,6 +790,10 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
             return info ? buildImportedAgentMessage({ type: 'token_count', info, id: randomUUID() }, createdAt) : null
         }
 
+        if (eventType === 'context_compacted') {
+            return buildImportedAgentMessage({ type: 'context_compacted', id: randomUUID() }, createdAt)
+        }
+
         return null
     }
 
@@ -1074,6 +1078,7 @@ function parseSendCodexLocalSessionMessageRequest(value: unknown): {
     message: string
     displayMessage?: string
     clientMessageId?: string
+    forceRecovery?: boolean
 } | null {
     const record = asRecord(value)
     if (!record) return null
@@ -1082,11 +1087,13 @@ function parseSendCodexLocalSessionMessageRequest(value: unknown): {
     if (!machineId || !message) return null
     const displayMessage = typeof record.displayMessage === 'string' ? record.displayMessage.trim() : ''
     const clientMessageId = typeof record.clientMessageId === 'string' ? record.clientMessageId.trim() : ''
+    if (record.forceRecovery !== undefined && typeof record.forceRecovery !== 'boolean') return null
     return {
         machineId,
         message,
         ...(displayMessage ? { displayMessage } : {}),
-        ...(clientMessageId ? { clientMessageId } : {})
+        ...(clientMessageId ? { clientMessageId } : {}),
+        ...(record.forceRecovery === true ? { forceRecovery: true } : {})
     }
 }
 
@@ -2279,6 +2286,52 @@ export function createCodexDesktopRoutes(options: {
         }
     })
 
+    app.get('/codex/sessions/:id/file', async (c) => {
+        const filePath = c.req.query('path')?.trim()
+        if (!filePath) {
+            return c.json({ success: false, error: 'path is required' }, 400)
+        }
+
+        const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
+        if (!machineId) {
+            return c.json({ success: false, error: 'machineId is required' }, 400)
+        }
+
+        const engine = options.getSyncEngine()
+        const target = resolveDirectCodexLocalSessionTarget({
+            engine,
+            namespace: c.get('namespace'),
+            machineId
+        })
+        if (target.type === 'error') {
+            return c.json({ success: false, error: target.message }, target.status)
+        }
+
+        try {
+            // Resolve cwd from the runner-owned native transcript instead of
+            // accepting it from the browser. The runner then applies its
+            // normal relative-path containment check before reading the file.
+            const nativeSession = await engine!.readCodexLocalSession(target.machine.id, c.req.param('id'), { limit: 1 })
+            if (nativeSession.success !== true) {
+                return c.json({ success: false, error: nativeSession.error || 'Codex session not found' }, 404)
+            }
+            const cwd = typeof nativeSession.data.session.cwd === 'string'
+                ? nativeSession.data.session.cwd.trim()
+                : ''
+            if (!cwd) {
+                return c.json({ success: false, error: 'Codex session path is unavailable' })
+            }
+
+            const result = await engine!.readMachineFile(target.machine.id, cwd, filePath)
+            return c.json(result)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to read Codex session file'
+            }, 502)
+        }
+    })
+
     app.get('/codex/sessions/:id/status', async (c) => {
         const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
         if (!machineId) {
@@ -2429,7 +2482,7 @@ export function createCodexDesktopRoutes(options: {
                 } satisfies SendCodexLocalSessionMessageRpcResponse, 202)
             }
 
-            const result = request.displayMessage === undefined && request.clientMessageId === undefined
+            const result = request.displayMessage === undefined && request.clientMessageId === undefined && request.forceRecovery === undefined
                 ? await engine!.sendCodexLocalSessionMessage(
                     target.machine.id,
                     c.req.param('id'),
@@ -2440,7 +2493,8 @@ export function createCodexDesktopRoutes(options: {
                     c.req.param('id'),
                     request.message,
                     request.displayMessage,
-                    request.clientMessageId
+                    request.clientMessageId,
+                    request.forceRecovery
                 )
             if (result.success === true) {
                 return c.json(result satisfies SendCodexLocalSessionMessageRpcResponse, 202)

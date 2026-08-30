@@ -61,4 +61,23 @@ describe('AgentSelector', () => {
 
         expect(onAgentChange).toHaveBeenCalledWith('codex')
     })
+
+    it('keeps model and permission controls in the selected agent section', () => {
+        render(
+            <AgentSelector agent={'codex' as AgentType} isDisabled={false} onAgentChange={() => {}}>
+                <label>
+                    Model
+                    <select aria-label="Model">
+                        <option>Default</option>
+                    </select>
+                </label>
+                <button type="button">Standard permissions</button>
+            </AgentSelector>
+        )
+
+        const settings = screen.getByTestId('new-session-agent-settings')
+        expect(settings).toContainElement(screen.getByRole('combobox', { name: 'Model' }))
+        expect(settings).toContainElement(screen.getByRole('button', { name: 'Standard permissions' }))
+        expect(settings.className).toContain('border-t')
+    })
 })

@@ -239,6 +239,7 @@ describe('SettingsPage', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getAllByText('Appearance').length).toBeGreaterThanOrEqual(1)
         expect(screen.getAllByText('Follow System').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getByRole('button', { name: /Appearance.*Follow System/ }).querySelector('[data-motion-icon="monitor"]')).not.toBeNull()
     })
 
     it('uses correct i18n keys for Appearance setting', () => {

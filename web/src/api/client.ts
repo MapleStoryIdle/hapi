@@ -28,6 +28,9 @@ import type {
     RemoteServerCandidatesResponse,
     RemoteServerResponse,
     RemoteServersResponse,
+    RevokeShareResponse,
+    ShareResponse,
+    SharesResponse,
     SlashCommandsResponse,
     SkillsResponse,
     SpawnResponse,
@@ -44,6 +47,7 @@ import type {
     CursorModelsResponse,
     DeleteUploadResponse,
     FileReadResponse,
+    GitBranchResponse,
     GitCommandResponse,
     ListDirectoryResponse,
     MachineListDirectoryResponse,
@@ -289,6 +293,13 @@ export class ApiClient {
         )
     }
 
+    async readCodexSessionFile(sessionId: string, machineId: string, path: string): Promise<FileReadResponse> {
+        const queryParams = new URLSearchParams({ machineId, path })
+        return await this.request<FileReadResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/file?${queryParams.toString()}`
+        )
+    }
+
     async getCodexSessionSnapshot(
         sessionId: string,
         machineId: string,
@@ -324,7 +335,14 @@ export class ApiClient {
 
     async sendCodexSessionMessage(
         sessionId: string,
-        payload: { machineId: string; message: string; displayMessage?: string; clientMessageId?: string }
+        payload: {
+            machineId: string
+            message: string
+            displayMessage?: string
+            clientMessageId?: string
+            /** Explicit user-confirmed retry after a stale/uncertain native hand-off. */
+            forceRecovery?: boolean
+        }
     ): Promise<SendCodexLocalSessionMessageResponse> {
         return await this.request<SendCodexLocalSessionMessageResponse>(
             `/api/codex/sessions/${encodeURIComponent(sessionId)}/messages`,
@@ -591,6 +609,20 @@ export class ApiClient {
 
     async getRemoteServers(): Promise<RemoteServersResponse> {
         return await this.request<RemoteServersResponse>('/api/remote-servers')
+    }
+
+    async getShares(): Promise<SharesResponse> {
+        return await this.request<SharesResponse>('/api/shares')
+    }
+
+    async getShare(shareId: string): Promise<ShareResponse> {
+        return await this.request<ShareResponse>(`/api/shares/${encodeURIComponent(shareId)}`)
+    }
+
+    async revokeShare(shareId: string): Promise<RevokeShareResponse> {
+        return await this.request<RevokeShareResponse>(`/api/shares/${encodeURIComponent(shareId)}`, {
+            method: 'DELETE'
+        })
     }
 
     async getRemoteServerCandidates(): Promise<RemoteServerCandidatesResponse> {
@@ -941,6 +973,12 @@ export class ApiClient {
     async getMachineOpencodeModelsForCwd(machineId: string, cwd: string): Promise<OpencodeModelsResponse> {
         return await this.request<OpencodeModelsResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/opencode-models?cwd=${encodeURIComponent(cwd)}`
+        )
+    }
+
+    async getMachineGitBranch(machineId: string, cwd: string): Promise<GitBranchResponse> {
+        return await this.request<GitBranchResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/git-branch?cwd=${encodeURIComponent(cwd)}`
         )
     }
 

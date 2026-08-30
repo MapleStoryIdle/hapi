@@ -1,6 +1,7 @@
 import { execFile, type ExecFileOptions } from 'child_process'
+import { isAbsolute, resolve } from 'node:path'
 import { promisify } from 'util'
-import type { CommandResponse } from '@hapi/protocol/apiTypes'
+import type { CommandResponse, GitBranchResponse } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { validatePath } from '../pathSecurity'
@@ -96,19 +97,48 @@ export async function getGitStatusForCwd(cwd: string, timeout?: number): Promise
 }
 
 /**
+ * `git rev-parse --git-dir --git-common-dir` uses different directories for
+ * a linked worktree. The primary checkout reports the same directory twice.
+ */
+export function isLinkedGitWorktree(gitDirectoriesOutput: string, cwd: string): boolean {
+    const [rawGitDir = '', rawCommonDir = ''] = gitDirectoriesOutput
+        .split(/\r?\n/)
+        .map((value) => value.trim())
+    if (!rawGitDir || !rawCommonDir) {
+        return false
+    }
+
+    const normalize = (path: string) => {
+        const resolved = isAbsolute(path) ? path : resolve(cwd, path)
+        return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+    }
+    return normalize(rawGitDir) !== normalize(rawCommonDir)
+}
+
+/**
  * Read just the checked-out branch for a project-list subtitle. `git status`
  * refreshes the worktree index, which is unnecessary and costly when several
  * project groups render at once. Keep the familiar porcelain header shape so
  * callers can share the existing branch parser.
  */
-export async function getGitBranchStatusForCwd(cwd: string, timeout?: number): Promise<GitCommandResponse> {
-    const result = await runGitCommand(['branch', '--show-current'], cwd, timeout)
+export async function getGitBranchStatusForCwd(cwd: string, timeout?: number): Promise<GitBranchResponse> {
+    // One lightweight Git process returns everything the directory header
+    // needs. Avoid `git status`: it refreshes the index for no visual gain.
+    const result = await runGitCommand(
+        ['rev-parse', '--abbrev-ref', 'HEAD', '--git-dir', '--git-common-dir'],
+        cwd,
+        timeout
+    )
     if (!result.success) return result
 
-    const branch = result.stdout?.trim() ?? ''
+    const [rawBranch = '', ...gitDirectories] = (result.stdout ?? '')
+        .split(/\r?\n/)
+        .map((value) => value.trim())
+    const branch = rawBranch === 'HEAD' ? '' : rawBranch
     return {
         ...result,
-        stdout: `# branch.head ${branch || '(detached)'}\n`
+        stdout: `# branch.head ${branch || '(detached)'}\n`,
+        isWorktree: isLinkedGitWorktree(gitDirectories.join('\n'), cwd)
     }
 }
 

@@ -4,7 +4,7 @@ import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
 import type { ConversationOutlineItem } from '@/chat/outline'
 import { getConversationMessageAnchorId } from '@/chat/outline'
-import { HappyChatProvider } from '@/components/AssistantChat/context'
+import { HappyChatProvider, type HappyChatFileLinkTarget } from '@/components/AssistantChat/context'
 import { HappyAssistantMessage } from '@/components/AssistantChat/messages/AssistantMessage'
 import { HappyUserMessage } from '@/components/AssistantChat/messages/UserMessage'
 import { HappySystemMessage } from '@/components/AssistantChat/messages/SystemMessage'
@@ -439,14 +439,17 @@ function MessageSkeleton() {
     ]
 
     return (
-        <div role="status" aria-live="polite">
-            <span className="sr-only">{t('misc.loadingMessages')}</span>
+        <div role="status" aria-live="polite" aria-busy="true">
             <div className="space-y-3 animate-pulse">
                 {rows.map((row, index) => (
                     <div key={`skeleton-${index}`} className={row.align === 'end' ? 'flex justify-end' : 'flex justify-start'}>
                         <div className={`${row.height} ${row.width} rounded-xl bg-[var(--app-subtle-bg)]`} />
                     </div>
                 ))}
+            </div>
+            <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
+                <Spinner size="sm" label={null} />
+                <span>{t('misc.loadingMessages')}</span>
             </div>
         </div>
     )
@@ -597,6 +600,7 @@ export function HappyThread(props: {
     api: ApiClient
     sessionId: string
     metadata: SessionMetadataSummary | null
+    fileLinkTarget?: HappyChatFileLinkTarget
     disabled: boolean
     onRefresh: () => void
     onRetryMessage?: (localId: string) => void
@@ -1434,7 +1438,8 @@ export function HappyThread(props: {
             loadOlderMessagesPreservingScroll: loadOlderPreservingScroll,
             toolGroupExpansionStates,
             setToolGroupExpansionState,
-            toolGroupRunActive: props.toolGroupRunActive
+            toolGroupRunActive: props.toolGroupRunActive,
+            fileLinkTarget: props.fileLinkTarget
         }}>
             <ThreadPrimitive.Root
                 className="relative flex min-h-0 flex-1 flex-col"

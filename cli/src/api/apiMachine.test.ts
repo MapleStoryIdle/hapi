@@ -163,6 +163,84 @@ describe('ApiMachineClient listOpencodeModelsForCwd handler', () => {
     })
 })
 
+describe('ApiMachineClient native file handler', () => {
+    let workspaceRoot: string
+
+    beforeEach(() => {
+        ioMock.mockReset()
+        workspaceRoot = mkdtempSync(join(tmpdir(), 'hapi-machine-ws-'))
+    })
+
+    afterEach(() => {
+        rmSync(workspaceRoot, { recursive: true, force: true })
+    })
+
+    it('reads only files contained by the native Codex working directory', async () => {
+        const machine = makeMachine('machine-native-file')
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+        const nativeCwd = mkdtempSync(join(tmpdir(), 'hapi-native-codex-file-'))
+        const sourceDir = join(nativeCwd, 'src')
+        mkdirSync(sourceDir)
+        writeFileSync(join(sourceDir, 'example.ts'), 'export const native = true\n')
+
+        try {
+            const result = await callMachineRpc(client, machine.id, 'readMachineFile', {
+                cwd: nativeCwd,
+                path: 'src/example.ts'
+            }) as { success: boolean; content?: string }
+            expect(result).toEqual({
+                success: true,
+                content: Buffer.from('export const native = true\n').toString('base64')
+            })
+
+            const traversal = await callMachineRpc(client, machine.id, 'readMachineFile', {
+                cwd: nativeCwd,
+                path: '../outside.ts'
+            }) as { success: boolean; error?: string }
+            expect(traversal.success).toBe(false)
+            expect(traversal.error).toContain('outside the working directory')
+        } finally {
+            rmSync(nativeCwd, { recursive: true, force: true })
+            client.shutdown()
+        }
+    })
+
+    it('serves runner-owned file bytes for historical HAPI sessions', async () => {
+        const machine = makeMachine('machine-native-file-bytes')
+        const nativeCwd = mkdtempSync(join(tmpdir(), 'hapi-native-codex-file-bytes-'))
+        const sourceDir = join(nativeCwd, 'src')
+        mkdirSync(sourceDir)
+        writeFileSync(join(sourceDir, 'example.ts'), 'export const bytes = true\n')
+        const listeners = new Map<string, (...args: unknown[]) => void>()
+        const socket = {
+            on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+                listeners.set(event, listener)
+            }),
+            emit: vi.fn(),
+            close: vi.fn()
+        }
+        ioMock.mockReturnValue(socket)
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+        client.connect()
+
+        try {
+            const listener = listeners.get('file:read-bytes')
+            expect(listener).toBeDefined()
+            const response = await new Promise<unknown>((resolve) => {
+                listener?.({ type: 'machine-file', cwd: nativeCwd, path: 'src/example.ts' }, resolve)
+            }) as { success: boolean; bytes?: Uint8Array; fileName?: string; mimeType?: string | null }
+
+            expect(response.success).toBe(true)
+            expect(response.fileName).toBe('example.ts')
+            expect(response.mimeType).toBeNull()
+            expect(response.bytes).toEqual(Buffer.from('export const bytes = true\n'))
+        } finally {
+            rmSync(nativeCwd, { recursive: true, force: true })
+            client.shutdown()
+        }
+    })
+})
+
 describe('ApiMachineClient session spawning', () => {
     let workspaceRoot: string
 

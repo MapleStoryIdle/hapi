@@ -17,6 +17,7 @@ export const RPC_METHODS = {
     ListMachineDirectory: 'list-directory',
     PathExists: 'path-exists',
     GetMachineGitBranch: 'get-machine-git-branch',
+    ReadMachineFile: 'readMachineFile',
     GitStatus: 'git-status',
     GitDiffNumstat: 'git-diff-numstat',
     GitDiffFile: 'git-diff-file',

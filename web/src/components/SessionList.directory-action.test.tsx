@@ -47,6 +47,32 @@ function renderWithProviders(children: ReactNode) {
 }
 
 describe('SessionList directory action', () => {
+    it('adds a breathing status dot to an active session', () => {
+        const session = makeSession({
+            id: 'session-active',
+            active: true,
+            metadata: { path: '/work/hapi', name: 'Running task', flavor: 'codex' }
+        })
+
+        renderWithProviders(
+            <SessionList
+                sessions={[session]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        const row = screen.getByText('Running task').closest('button')
+        const statusDot = row?.querySelector('span.absolute')
+
+        expect(statusDot?.className).toContain('motion-safe:animate-pulse')
+    })
+
     it('starts a new session with the project machine and directory', () => {
         const onNewSessionInDirectory = vi.fn()
         const session = makeSession({
@@ -102,7 +128,7 @@ describe('SessionList directory action', () => {
     })
 
     it('shows a fetched Git branch below the larger project name', async () => {
-        const getGitBranch = vi.fn(async () => ({
+        const getMachineGitBranch = vi.fn(async () => ({
             success: true,
             stdout: '# branch.oid abc123\n# branch.head feature/list-branch\n',
             stderr: '',
@@ -111,7 +137,7 @@ describe('SessionList directory action', () => {
         const session = makeSession({
             id: 'session-git',
             active: true,
-            metadata: { path: '/work/hapi', name: 'List task', flavor: 'codex' }
+            metadata: { path: '/work/hapi', machineId: 'machine-1', name: 'List task', flavor: 'codex' }
         })
 
         renderWithProviders(
@@ -123,19 +149,22 @@ describe('SessionList directory action', () => {
                 onRefresh={vi.fn()}
                 isLoading={false}
                 renderHeader={false}
-                api={{ getGitBranch } as unknown as ApiClient}
+                api={{ getMachineGitBranch } as unknown as ApiClient}
             />
         )
 
         const projectName = screen.getByTestId('session-project-name')
         expect(projectName).toHaveTextContent('hapi')
         expect(projectName).toHaveClass('text-[17px]')
+        expect(screen.getByTitle('/work/hapi').querySelector('svg')).toHaveClass('h-[25px]', 'w-[25px]')
         expect(await screen.findByTestId('session-project-branch')).toHaveTextContent('feature/list-branch')
-        expect(getGitBranch).toHaveBeenCalledWith('session-git')
+        expect(screen.getByTestId('session-project-branch')).toHaveAttribute('data-git-kind', 'branch')
+        expect(screen.getByTestId('session-project-branch').querySelector('[data-motion-icon="branch"]')).not.toBeNull()
+        expect(getMachineGitBranch).toHaveBeenCalledWith('machine-1', '/work/hapi')
     })
 
     it('does not add a branch subtitle when the directory is not a Git project', async () => {
-        const getGitBranch = vi.fn(async () => ({
+        const getMachineGitBranch = vi.fn(async () => ({
             success: false,
             error: 'not a git repository',
             stderr: 'not a git repository',
@@ -144,7 +173,7 @@ describe('SessionList directory action', () => {
         const session = makeSession({
             id: 'session-not-git',
             active: true,
-            metadata: { path: '/work/plain-directory', name: 'Plain task', flavor: 'codex' }
+            metadata: { path: '/work/plain-directory', machineId: 'machine-1', name: 'Plain task', flavor: 'codex' }
         })
 
         renderWithProviders(
@@ -156,11 +185,11 @@ describe('SessionList directory action', () => {
                 onRefresh={vi.fn()}
                 isLoading={false}
                 renderHeader={false}
-                api={{ getGitBranch } as unknown as ApiClient}
+                api={{ getMachineGitBranch } as unknown as ApiClient}
             />
         )
 
-        await waitFor(() => expect(getGitBranch).toHaveBeenCalledWith('session-not-git'))
+        await waitFor(() => expect(getMachineGitBranch).toHaveBeenCalledWith('machine-1', '/work/plain-directory'))
         expect(screen.queryByTestId('session-project-branch')).toBeNull()
     })
 })

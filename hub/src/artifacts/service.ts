@@ -5,6 +5,11 @@ import type { StoredArtifact, Store } from '../store'
 
 export const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024
 const TEXT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'csv', 'yaml', 'yml'])
+
+export type RevokeShareResult =
+    | { type: 'not-found' }
+    | { type: 'revoked'; cleanupPending: boolean }
+
 export function sha256(value: Uint8Array | string): string { return createHash('sha256').update(value).digest('hex') }
 export function artifactContentType(filename: string, bytes: Uint8Array): { type: string; inline: boolean } {
     const jpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
@@ -20,15 +25,56 @@ export class ArtifactService {
     private readonly dir: string
     constructor(private readonly store: Store, dataDir: string) { this.dir = join(dataDir, 'artifacts'); mkdirSync(this.dir, { recursive: true, mode: 0o700 }); try { chmodSync(this.dir, 0o700) } catch {} }
     private path(id: string): string { return join(this.dir, `${id}.blob`) }
-    publish(input: { namespace: string; filename: string; expiresSeconds: number; bytes: Uint8Array }): { artifact: StoredArtifact; token: string } {
-        if (input.bytes.length > MAX_ARTIFACT_BYTES) throw new Error('Artifact exceeds 10 MiB')
+    publish(input: {
+        namespace: string
+        filename: string
+        expiresSeconds: number
+        bytes: Uint8Array
+        makePublicUrl?: (token: string) => string
+    }): { artifact: StoredArtifact; token: string } {
+        if (input.bytes.length > MAX_ARTIFACT_BYTES) throw new Error('Share exceeds 10 MiB')
         const token = randomBytes(32).toString('base64url'); const tokenHash = sha256(token)
-        const artifact = { namespace: input.namespace, tokenHash, filename: input.filename, size: input.bytes.length, sha256: sha256(input.bytes), expiresAt: Date.now() + input.expiresSeconds * 1000 }
+        const artifact = {
+            namespace: input.namespace,
+            tokenHash,
+            publicUrl: input.makePublicUrl?.(token) ?? null,
+            filename: input.filename,
+            size: input.bytes.length,
+            sha256: sha256(input.bytes),
+            expiresAt: Date.now() + input.expiresSeconds * 1000
+        }
         const id = randomBytes(16).toString('hex'); const temp = join(this.dir, `.${id}.${randomBytes(8).toString('hex')}.tmp`); const target = this.path(id)
         writeFileSync(temp, input.bytes, { mode: 0o600, flag: 'wx' }); try { chmodSync(temp, 0o600) } catch {}; renameSync(temp, target)
         try { return { artifact: this.store.artifacts.create({ ...artifact, id }), token } } catch (error) { try { rmSync(target, { force: true }) } catch {}; throw error }
     }
-    revoke(id: string, namespace: string): boolean { const artifact = this.store.artifacts.revoke(id, namespace); if (!artifact) return false; try { rmSync(this.path(id), { force: true }) } catch {}; return true }
+    revoke(id: string, namespace: string, now = Date.now()): RevokeShareResult {
+        const artifact = this.store.artifacts.revokeActive(id, namespace, now)
+        if (!artifact) return { type: 'not-found' }
+
+        try {
+            rmSync(this.path(artifact.id), { force: true })
+            return { type: 'revoked', cleanupPending: false }
+        } catch {
+            // The database revocation has already blocked the public bearer URL.
+            // Keep its tombstone so the periodic cleanup can retry the blob removal.
+            console.warn('[Artifacts] Failed to clean revoked share blob')
+            return { type: 'revoked', cleanupPending: true }
+        }
+    }
+
+    cleanupExpired(now = Date.now()): number {
+        let cleaned = 0
+        for (const artifact of this.store.artifacts.listCleanupCandidates(now)) {
+            try {
+                rmSync(this.path(artifact.id), { force: true })
+            } catch {
+                console.warn('[Artifacts] Failed to clean share blob')
+                continue
+            }
+            if (this.store.artifacts.deleteCleanupCandidate(artifact.id, now)) cleaned++
+        }
+        return cleaned
+    }
     readPublic(token: string): { artifact: StoredArtifact; bytes: Uint8Array } | null {
         if (!/^[A-Za-z0-9_-]{43,}$/.test(token)) return null
         const artifact = this.store.artifacts.findPublic(sha256(token)); if (!artifact) return null

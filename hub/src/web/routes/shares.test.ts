@@ -4,16 +4,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../../store'
 import { ArtifactService } from '../../artifacts/service'
-import { createPublicArtifactRoutes } from './artifacts'
+import { createLegacyPublicShareTombstoneRoutes, createPublicShareRoutes } from './shares'
 
 const dirs: string[] = []
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))) })
 async function setup() {
-    const dir = await mkdtemp(join(tmpdir(), 'hapi-artifact-route-')); dirs.push(dir)
+    const dir = await mkdtemp(join(tmpdir(), 'hapi-share-route-')); dirs.push(dir)
     const store = new Store(':memory:'); const service = new ArtifactService(store, dir)
-    return { store, service, app: createPublicArtifactRoutes(store, service) }
+    return { store, service, app: createPublicShareRoutes(store, service) }
 }
-describe('public artifact route', () => {
+describe('public share route', () => {
     test('serves GET and HEAD with private safe headers and no CORS', async () => {
         const { app, service, store } = await setup()
         const made = service.publish({ namespace: 'one', filename: 'note.md', expiresSeconds: 300, bytes: new TextEncoder().encode('# safe') })
@@ -31,7 +31,7 @@ describe('public artifact route', () => {
     test('uses identical 404 for invalid, revoked, and expired tokens', async () => {
         const { app, service, store } = await setup()
         const made = service.publish({ namespace: 'one', filename: 'a.bin', expiresSeconds: 300, bytes: new Uint8Array([1]) })
-        expect(service.revoke(made.artifact.id, 'one')).toBe(true)
+        expect(service.revoke(made.artifact.id, 'one')).toEqual({ type: 'revoked', cleanupPending: false })
         const revoked = await app.request(`http://hub/${made.token}`); const invalid = await app.request('http://hub/not-a-valid-token')
         const invalidBody = await invalid.text()
         expect(revoked.status).toBe(404); expect(invalid.status).toBe(404); expect(await revoked.text()).toBe(invalidBody)
@@ -40,8 +40,16 @@ describe('public artifact route', () => {
         const expiredResponse = await app.request(`http://hub/${expired.token}`)
         expect(expiredResponse.status).toBe(404); expect(await expiredResponse.text()).toBe(invalidBody)
         expect((await app.request('http://hub/')).status).toBe(404)
-        expect((await app.request('http://hub/a/b')).status).toBe(404)
+        expect((await app.request('http://hub/s/b')).status).toBe(404)
         expect((await app.request(`http://hub/${expired.token}`, { method: 'POST' })).status).toBe(404)
         store.close()
+    })
+
+    test('returns a private 404 for legacy public-link paths', async () => {
+        const app = createLegacyPublicShareTombstoneRoutes()
+        const response = await app.request('http://hub/old-token')
+        expect(response.status).toBe(404)
+        expect(response.headers.get('cache-control')).toBe('no-store')
+        expect(response.headers.get('referrer-policy')).toBe('no-referrer')
     })
 })

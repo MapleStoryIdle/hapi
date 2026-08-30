@@ -16,7 +16,7 @@ import { notifyCommand } from './notify'
 import { hubCommand } from './hub'
 import { inspectPeerCommand } from './inspectPeer'
 import { pingPeerCommand } from './pingPeer'
-import { artifactCommand } from './artifact'
+import { shareCommand } from './share'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -31,6 +31,19 @@ const removedGeminiCommand: CommandDefinition = {
             chalk.red('Error:'),
             'Gemini CLI is no longer supported and cannot be launched (Google sunset the consumer Gemini CLI on 2026-06-18). Existing Gemini sessions remain viewable in the web UI.'
         )
+        process.exit(1)
+    }
+}
+
+// `artifact` is deliberately a tombstone rather than an alias: public file
+// links are now named `share` so they do not collide with Codex Artifacts.
+// Keeping the tombstone prevents an old command from accidentally becoming a
+// Claude prompt through the default-command fallback below.
+const removedArtifactCommand: CommandDefinition = {
+    name: 'artifact',
+    requiresRuntimeAssets: false,
+    run: async () => {
+        console.error(chalk.red('Error:'), 'hapi artifact was replaced by hapi share. Use `hapi share publish <relative-file>` instead.')
         process.exit(1)
     }
 }
@@ -54,7 +67,8 @@ const COMMANDS: CommandDefinition[] = [
     notifyCommand,
     inspectPeerCommand,
     pingPeerCommand,
-    artifactCommand
+    removedArtifactCommand,
+    shareCommand
 ]
 
 const commandMap = new Map<string, CommandDefinition>()

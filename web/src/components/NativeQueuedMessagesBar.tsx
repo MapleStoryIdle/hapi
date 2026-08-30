@@ -106,7 +106,9 @@ export function NativeQueuedMessagesBar(props: {
                                         <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
                                             <span className="inline-flex items-center gap-1 rounded-full bg-[var(--app-subtle-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--app-hint)]">
                                                 <QueueIcon className="h-3 w-3" />
-                                                {t('queuedMessages.afterCurrentRun')}
+                                                {message.recoveryRequired
+                                                    ? t('recentCodex.queue.recoveryRequired')
+                                                    : t('queuedMessages.afterCurrentRun')}
                                             </span>
                                         </div>
                                         <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-5 text-[var(--app-fg)]">

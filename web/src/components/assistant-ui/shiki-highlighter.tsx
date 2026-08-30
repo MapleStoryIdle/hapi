@@ -1,8 +1,9 @@
 import type { SyntaxHighlighterProps } from '@assistant-ui/react-markdown'
 import type { CSSProperties } from 'react'
+import { Check as CheckIconNode, Copy as CopyIconNode } from 'lucide'
 import { useShikiHighlighter } from '@/lib/shiki'
 import { GitCodeBlockCard, parseGitCodeBlock } from '@/components/assistant-ui/git-codeblock'
-import { CopyIcon, CheckIcon } from '@/components/icons'
+import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 
 const PLAIN_TEXT_LANGUAGES = new Set(['', 'unknown', 'text', 'txt', 'plain', 'plaintext'])
@@ -61,7 +62,12 @@ function PlainTextCodeBlock(props: SyntaxHighlighterProps) {
                 className={`absolute right-2.5 top-2.5 ${CODE_BLOCK_COPY_BUTTON_CLASS}`}
                 title="Copy"
             >
-                {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
+                <MotionIcon
+                    icon={toMotionIcon(copied ? CheckIconNode : CopyIconNode)}
+                    className="h-4 w-4"
+                    data-motion-icon={copied ? 'check' : 'copy'}
+                    aria-hidden="true"
+                />
             </button>
             <div className="mr-12 min-w-0 overflow-x-auto">
                 <pre className={`m-0 w-max min-w-full whitespace-pre py-2.5 pl-3.5 pr-0 ${CODE_BLOCK_MONO_CLASS} text-[var(--app-fg)]`}>

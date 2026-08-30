@@ -5,6 +5,12 @@ import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode
 import type { SessionMetadataSummary } from '@/types/api'
 import type { ToolGroupExpansionState, ToolGroupExpansionStates } from '@/components/ToolCard/toolGroupExpansion'
 
+export type HappyChatFileLinkTarget = {
+    type: 'native-codex'
+    sessionId: string
+    machineId: string
+}
+
 export type HappyChatContextValue = {
     api: ApiClient
     sessionId: string
@@ -21,6 +27,8 @@ export type HappyChatContextValue = {
     setToolGroupExpansionState?: (key: string, state: ToolGroupExpansionState) => void
     /** True from turn start until the current turn receives a completion event. */
     toolGroupRunActive?: boolean
+    /** Route message file links through a non-HAPI-session file source. */
+    fileLinkTarget?: HappyChatFileLinkTarget
 }
 
 const HappyChatContext = createContext<HappyChatContextValue | null>(null)

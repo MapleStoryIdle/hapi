@@ -63,4 +63,14 @@ describe('native Codex direct-message receipts', () => {
 
         expect(readNativeCodexDirectMessageEchoes(scope)).toEqual([echo])
     })
+
+    it('keeps a fallback retry phase across a page reload', () => {
+        const echo = {
+            ...makeEcho('local-retrying'),
+            deliveryPhase: 'retrying' as const
+        }
+        updateNativeCodexDirectMessageEchoes(scope, () => [echo])
+
+        expect(readNativeCodexDirectMessageEchoes(scope)).toEqual([echo])
+    })
 })

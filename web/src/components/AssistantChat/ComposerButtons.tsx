@@ -1,10 +1,17 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
+import {
+    Mic as MicIconNode,
+    Square as SquareIconNode,
+    Volume2 as Volume2IconNode,
+    VolumeX as VolumeXIconNode,
+} from 'lucide'
 import { Filter, Puzzle, Search, Zap } from 'lucide-react'
 import type { PermissionMode, Session, SkillSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
 import { ScheduleIcon } from '@/components/icons'
+import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
@@ -28,48 +35,6 @@ function PlusIcon() {
             strokeLinejoin="round"
         >
             <path d="M12 5v14M5 12h14" />
-        </svg>
-    )
-}
-
-function SpeakerIcon(props: { muted?: boolean }) {
-    if (props.muted) {
-        // Speaker with X (muted)
-        return (
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            >
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                <line x1="22" y1="9" x2="16" y2="15" />
-                <line x1="16" y1="9" x2="22" y2="15" />
-            </svg>
-        )
-    }
-
-    // Speaker with sound waves
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-        >
-            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-            <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
         </svg>
     )
 }
@@ -414,38 +379,6 @@ function getPermissionCopy(mode: PermissionMode, fallbackLabel: string, t: Retur
                 description: t('permissionMode.custom.description')
             }
     }
-}
-
-function StopIcon() {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-        >
-            <rect x="6" y="6" width="12" height="12" rx="2" />
-        </svg>
-    )
-}
-
-function LoadingIcon() {
-    return (
-        <svg
-            className="animate-spin"
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-        >
-            <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-            <path d="M12 2a10 10 0 0 1 10 10" strokeOpacity="0.75" />
-        </svg>
-    )
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -793,50 +726,36 @@ function ContextUsagePanel(props: { details: ContextUsageDetails | null }) {
     )
 }
 
-function ContextUsageIndicator(props: {
+export function ContextUsageProgressRail(props: {
     percentage: number | null | undefined
     label?: string
-    details?: ContextUsageDetails | null
-    active?: boolean
-    buttonRef?: RefObject<HTMLButtonElement | null>
-    onClick?: () => void
+    className?: string
 }) {
     if (props.percentage == null) return null
 
     const percentage = Math.min(100, Math.max(0, props.percentage))
-    const radius = 8.25
-    const circumference = 2 * Math.PI * radius
-    const shade = Math.round(185 - percentage * 1.25)
-    const progressColor = `rgb(${shade}, ${shade}, ${shade})`
+    const fillClass = percentage >= 90
+        ? 'bg-red-500'
+        : percentage >= 75
+            ? 'bg-amber-500'
+            : 'bg-[var(--app-hint)]'
 
     return (
-        <button
-            ref={props.buttonRef}
-            type="button"
-            className={`flex h-[42px] w-[34px] shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--app-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
-                props.active ? 'bg-[var(--app-bg)]' : ''
-            }`}
-            aria-label={props.label}
-            title={props.label}
-            aria-expanded={props.active ? true : false}
-            onClick={props.onClick}
+        <div
+            data-testid="composer-context-usage-rail"
+            role="progressbar"
+            aria-label={props.label ?? 'Context usage'}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(percentage)}
+            aria-valuetext={props.label}
+            className={`pointer-events-none absolute inset-x-3 bottom-0 z-20 h-[3px] overflow-hidden rounded-full bg-[var(--app-border)] ${props.className ?? ''}`}
         >
-            <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-                <circle cx="11" cy="11" r={radius} fill="none" stroke="rgb(229, 231, 235)" strokeWidth="2.5" />
-                <circle
-                    cx="11"
-                    cy="11"
-                    r={radius}
-                    fill="none"
-                    stroke={progressColor}
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeDasharray={circumference}
-                    strokeDashoffset={circumference * (1 - percentage / 100)}
-                    transform="rotate(-90 11 11)"
-                />
-            </svg>
-        </button>
+            <div
+                className={`h-full rounded-full transition-[width,background-color] duration-300 ease-out motion-reduce:transition-none ${fillClass}`}
+                style={{ width: `${percentage}%` }}
+            />
+        </div>
     )
 }
 
@@ -944,11 +863,25 @@ export function UnifiedButton(props: {
         className = `bg-red-600 text-white shadow-[0_0_0_3px_rgba(239,68,68,0.12)] hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-400${props.isAborting ? '' : ' animate-stop-button-breathe'}`
         ariaLabel = t('composer.abort')
     } else if (isConnecting) {
-        icon = <LoadingIcon />
+        icon = (
+            <MotionIcon
+                icon={toMotionIcon(MicIconNode)}
+                className="h-[18px] w-[18px] motion-safe:animate-pulse"
+                data-motion-icon="mic"
+                aria-hidden="true"
+            />
+        )
         className = 'bg-black text-white'
         ariaLabel = t('voice.connecting')
     } else if (isConnected) {
-        icon = <StopIcon />
+        icon = (
+            <MotionIcon
+                icon={toMotionIcon(SquareIconNode)}
+                className="h-[18px] w-[18px]"
+                data-motion-icon="square"
+                aria-hidden="true"
+            />
+        )
         className = 'bg-black text-white'
         ariaLabel = t('composer.stop')
     } else if (routesToScratchlist) {
@@ -1008,21 +941,18 @@ export function getComposerOptionalControlsVisibility(
     toolbarWidth: number | null,
     requiredControlsWidth = 0,
     statusControlsWidth = 0,
-    hasContextUsageControl = true,
     hasSkillControl = false,
     hasPermissionControl = true
 ): {
     permission: boolean
     skill?: boolean
-    contextUsage: boolean
 } {
     // Unknown width happens before first layout/ResizeObserver tick; show by
     // default so wide toolbars do not flash as artificially collapsed.
     if (toolbarWidth === null) {
         return {
             permission: hasPermissionControl,
-            ...(hasSkillControl ? { skill: true } : {}),
-            contextUsage: hasContextUsageControl
+            ...(hasSkillControl ? { skill: true } : {})
         }
     }
 
@@ -1045,11 +975,10 @@ export function getComposerOptionalControlsVisibility(
 
     return {
         // Permission mode directly changes execution risk, so keep its icon in
-        // the first optional slot. Skill follows it; context usage remains
-        // available in the "+" menu when there is no later optional slot.
+        // the first optional slot. Skill follows it; context usage lives in
+        // the bottom progress rail and remains detailed in the "+" menu.
         permission,
-        ...(hasSkillControl ? { skill } : {}),
-        contextUsage: hasContextUsageControl && hasSlotSpace(nextSlot)
+        ...(hasSkillControl ? { skill } : {})
     }
 }
 
@@ -1064,7 +993,6 @@ export function ComposerButtons(props: {
     settingsReasoningLabel?: string | null
     fastModeActive?: boolean
     settingsOpen?: boolean
-    contextUsagePercent?: number | null
     contextUsageLabel?: string
     contextUsageDetails?: ContextUsageDetails | null
     permissionMode?: PermissionMode
@@ -1145,7 +1073,6 @@ export function ComposerButtons(props: {
     const [hideLarkSkills, setHideLarkSkills] = useState(true)
     const [permissionAnchor, setPermissionAnchor] = useState<'tools' | 'button'>('tools')
     const [skillAnchor, setSkillAnchor] = useState<'tools' | 'button'>('button')
-    const [contextUsageAnchor, setContextUsageAnchor] = useState<'tools' | 'button'>('button')
     const [toolbarWidth, setToolbarWidth] = useState<number | null>(null)
     const [requiredControlsWidth, setRequiredControlsWidth] = useState(0)
     const [statusControlsWidth, setStatusControlsWidth] = useState(0)
@@ -1155,7 +1082,6 @@ export function ComposerButtons(props: {
     const toolsButtonRef = useRef<HTMLButtonElement>(null)
     const permissionButtonRef = useRef<HTMLButtonElement>(null)
     const skillButtonRef = useRef<HTMLButtonElement>(null)
-    const contextUsageButtonRef = useRef<HTMLButtonElement>(null)
     const hasRemoteServerContext = Boolean(props.remoteServerContext)
 
     const hasSchedule = props.pendingSchedule != null
@@ -1168,7 +1094,7 @@ export function ComposerButtons(props: {
     const showRunningStopButton = props.showAbortButton && (!props.abortDisabled || props.isAborting)
     const showScratchlistStatus = Boolean(props.onScratchlistToggle && (props.scratchlistMode || scratchlistCount > 0))
     const showScheduleStatus = Boolean(hasSchedule && props.onSchedule)
-    const hasContextUsageControl = props.contextUsagePercent != null
+    const hasContextUsageControl = props.contextUsageDetails != null
     const skills = props.skills ?? []
     const hasSkillControl = Boolean(props.onSkillSelect && (skills.length > 0 || props.skillsLoading || props.skillsError))
     const showPermissionButton = Boolean(props.onPermissionModeChange && props.permissionModeOptions?.length)
@@ -1176,13 +1102,11 @@ export function ComposerButtons(props: {
         toolbarWidth,
         requiredControlsWidth,
         statusControlsWidth,
-        hasContextUsageControl,
         hasSkillControl,
         showPermissionButton
     )
     const showInlinePermissionButton = showPermissionButton && optionalControlsVisibility.permission
     const showInlineSkillButton = hasSkillControl && optionalControlsVisibility.skill === true
-    const showInlineContextUsageButton = hasContextUsageControl && optionalControlsVisibility.contextUsage
     const permissionLabel = props.permissionLabel
         ?? props.permissionModeOptions?.find((option) => option.mode === props.permissionMode)?.label
         ?? props.permissionMode
@@ -1199,7 +1123,7 @@ export function ComposerButtons(props: {
     const showSessionTools = Boolean(
         props.showTerminalButton
         || props.showSwitchButton
-        || props.contextUsagePercent != null
+        || hasContextUsageControl
     )
     const showToolsLauncher = showInputTools || showExecutionTools || showSessionTools
     const openPermissionMenuFromTools = () => {
@@ -1226,7 +1150,6 @@ export function ComposerButtons(props: {
         setShowSkillMenu(false)
         setShowRemoteServerMenu(false)
         setShowSchedulePicker(false)
-        setContextUsageAnchor('tools')
         setShowContextUsageMenu(true)
     }
     const toolsMenuContent = (
@@ -1439,7 +1362,7 @@ export function ComposerButtons(props: {
                         </button>
                     ) : null}
 
-                    {props.contextUsagePercent != null ? (
+                    {hasContextUsageControl ? (
                         <button
                             type="button"
                             aria-label={props.contextUsageLabel ?? t('contextUsage.title')}
@@ -1913,25 +1836,6 @@ export function ComposerButtons(props: {
             </div>
 
             <div className="flex shrink-0 items-center gap-0.5">
-                {showInlineContextUsageButton ? (
-                    <ContextUsageIndicator
-                        percentage={props.contextUsagePercent}
-                        label={props.contextUsageLabel}
-                        details={props.contextUsageDetails}
-                        active={showContextUsageMenu}
-                        buttonRef={contextUsageButtonRef}
-                        onClick={() => {
-                            setContextUsageAnchor('button')
-                            setShowContextUsageMenu((open) => !open)
-                            setShowToolsMenu(false)
-                            setShowPermissionMenu(false)
-                            setShowSkillMenu(false)
-                            setShowSchedulePicker(false)
-                            setShowRemoteServerMenu(false)
-                        }}
-                    />
-                ) : null}
-
                 <div ref={requiredControlsRef} className="flex shrink-0 items-center gap-0.5">
                     {props.piModelLabel ? (
                         <button
@@ -2008,7 +1912,12 @@ export function ComposerButtons(props: {
                             }`}
                             onClick={props.onVoiceMicToggle}
                         >
-                            <SpeakerIcon muted={props.voiceMicMuted} />
+                            <MotionIcon
+                                icon={toMotionIcon(props.voiceMicMuted ? VolumeXIconNode : Volume2IconNode)}
+                                className="h-[22px] w-[22px]"
+                                data-motion-icon={props.voiceMicMuted ? 'volume-x' : 'volume-2'}
+                                aria-hidden="true"
+                            />
                         </button>
                     ) : null}
 
@@ -2108,8 +2017,8 @@ export function ComposerButtons(props: {
 
             {showContextUsageMenu ? (
                 <ToolbarMenu
-                    anchorRef={contextUsageAnchor === 'button' && showInlineContextUsageButton ? contextUsageButtonRef : toolsButtonRef}
-                    align="right"
+                    anchorRef={toolsButtonRef}
+                    align="left"
                     width={292}
                     maxHeight={280}
                     showArrow

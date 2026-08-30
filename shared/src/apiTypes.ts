@@ -90,6 +90,24 @@ export type MessagesResponse = {
 
 export type MachinesResponse = { machines: Machine[] }
 
+/** Safe metadata for a currently active public share. */
+export type ShareSummary = {
+    id: string
+    filename: string
+    size: number
+    createdAt: number
+    expiresAt: number
+}
+
+/** Owner-only detail for a share. Legacy shares have no recoverable original URL. */
+export type ShareDetails = ShareSummary & {
+    url: string | null
+}
+
+export type SharesResponse = { shares: ShareSummary[] }
+export type ShareResponse = { share: ShareDetails }
+export type RevokeShareResponse = { ok: true; cleanupPending: boolean }
+
 export type RemoteServersResponse = { servers: RemoteServer[] }
 export type RemoteServerResponse = { server: RemoteServer }
 export type RemoteServerCandidatesResponse = { candidates: RemoteServerCandidate[] }
@@ -482,6 +500,12 @@ export type CommandResponse = {
 }
 
 export type GitCommandResponse = CommandResponse
+
+/** Branch probe metadata for a directory on a runner. */
+export type GitBranchResponse = GitCommandResponse & {
+    /** True only for a linked Git worktree, not the primary checkout. */
+    isWorktree?: boolean
+}
 
 export type FileReadResponse = {
     success: boolean

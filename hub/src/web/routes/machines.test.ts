@@ -247,6 +247,70 @@ describe('machines routes', () => {
         })
     })
 
+    it('forwards cwd to getMachineGitBranch', async () => {
+        const machine = createMachine()
+        const calls: Array<{ machineId: string; cwd: string }> = []
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            getMachineGitBranch: async (machineId: string, cwd: string) => {
+                calls.push({ machineId, cwd })
+                return {
+                    success: true,
+                    stdout: '# branch.oid abc123\n# branch.head feature/session-list\n',
+                    stderr: '',
+                    exitCode: 0,
+                    isWorktree: true
+                }
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request(
+            '/api/machines/machine-1/git-branch?cwd=' + encodeURIComponent('/home/user/proj')
+        )
+
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{ machineId: 'machine-1', cwd: '/home/user/proj' }])
+        expect(await response.json()).toEqual({
+            success: true,
+            stdout: '# branch.oid abc123\n# branch.head feature/session-list\n',
+            stderr: '',
+            exitCode: 0,
+            isWorktree: true
+        })
+    })
+
+    it('returns 400 when /git-branch is called without cwd', async () => {
+        const machine = createMachine()
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            getMachineGitBranch: async () => ({ success: true, stdout: '', stderr: '', exitCode: 0 })
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/git-branch')
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({
+            success: false,
+            error: 'cwd query parameter is required'
+        })
+    })
+
     it('returns 503 when cursor-models is requested without a sync engine', async () => {
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => {

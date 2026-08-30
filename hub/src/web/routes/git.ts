@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import type { SyncEngine } from '../../sync/syncEngine'
+import type { Session, SyncEngine } from '../../sync/syncEngine'
+import { RpcTargetMissingError } from '../../sync/rpcGateway'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
@@ -33,6 +34,67 @@ async function runRpc<T>(fn: () => Promise<T>): Promise<T | { success: false; er
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
+}
+
+function getOwningMachine(engine: SyncEngine, session: Session, namespace: string) {
+    const machineId = session.metadata?.machineId
+    const machine = machineId ? engine.getMachine(machineId) : null
+    return machine?.namespace === namespace ? machine : null
+}
+
+/**
+ * A finished HAPI session removes its session-scoped RPC handler, but its
+ * runner remains able to read the same project directory. Prefer that durable
+ * runner path so message links still work after a session ends. Older runners
+ * fall back to the session handler while it is still connected.
+ */
+async function readSessionFileFromAvailableTarget(
+    engine: SyncEngine,
+    sessionId: string,
+    session: Session,
+    namespace: string,
+    cwd: string,
+    path: string
+) {
+    const machine = getOwningMachine(engine, session, namespace)
+    if (machine) {
+        try {
+            return await engine.readMachineFile(machine.id, cwd, path)
+        } catch (error) {
+            if (!(error instanceof RpcTargetMissingError)) {
+                throw error
+            }
+        }
+    }
+
+    return await engine.readSessionFile(sessionId, path)
+}
+
+async function readSessionFileBytesFromAvailableTarget(
+    engine: SyncEngine,
+    sessionId: string,
+    session: Session,
+    namespace: string,
+    cwd: string,
+    path: string
+) {
+    const machine = getOwningMachine(engine, session, namespace)
+    if (machine) {
+        try {
+            const result = await engine.readMachineFileBytes(machine.id, cwd, path)
+            // Pre-upgrade runners do not know the machine-file binary request.
+            // An active session can still serve it through the old handler.
+            if (result.success || result.error !== 'Unsupported machine file read') {
+                return result
+            }
+        } catch (error) {
+            if (!(error instanceof RpcTargetMissingError)) {
+                throw error
+            }
+        }
+    }
+
+    return await engine.readSessionFileBytes(sessionId, path)
 }
 
 // Generated images are copied to durable hub storage. Keep browser caching enabled because an
@@ -183,7 +245,14 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             return c.json({ error: 'Invalid file path' }, 400)
         }
 
-        const result = await runRpc(() => engine.readSessionFile(sessionResult.sessionId, parsed.data.path))
+        const result = await runRpc(() => readSessionFileFromAvailableTarget(
+            engine,
+            sessionResult.sessionId,
+            sessionResult.session,
+            c.get('namespace'),
+            sessionPath,
+            parsed.data.path
+        ))
         return c.json(result)
     })
 
@@ -208,7 +277,14 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             return c.json({ error: 'Invalid file path' }, 400)
         }
 
-        const result = await runRpc(() => engine.readSessionFileBytes(sessionResult.sessionId, parsed.data.path))
+        const result = await runRpc(() => readSessionFileBytesFromAvailableTarget(
+            engine,
+            sessionResult.sessionId,
+            sessionResult.session,
+            c.get('namespace'),
+            sessionPath,
+            parsed.data.path
+        ))
         if (!result.success) {
             const status = /invalid/i.test(result.error) ? 400 : 404
             return c.json({ success: false, error: result.error }, status)

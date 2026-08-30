@@ -12,6 +12,7 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
+import { Check as CheckIconNode, Copy as CopyIconNode } from 'lucide'
 import remarkDisableIndentedCode from '@/lib/remark-disable-indented-code'
 import remarkRepairTables from '@/lib/remark-repair-tables'
 import { useNavigate } from '@tanstack/react-router'
@@ -23,8 +24,8 @@ import { SyntaxHighlighter, isPlainTextCodeLanguage } from '@/components/assista
 import { MermaidDiagram } from '@/components/assistant-ui/mermaid-diagram'
 import { parseGitCodeBlock } from '@/components/assistant-ui/git-codeblock'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
-import { CopyIcon, CheckIcon } from '@/components/icons'
-import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
+import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
+import { useOptionalHappyChatContext, type HappyChatFileLinkTarget } from '@/components/AssistantChat/context'
 import { decodeFilePathLinkHref, remarkFilePathLinks, type FilePathLinkTarget } from '@/lib/remark-file-path-links'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
 
@@ -388,7 +389,12 @@ function CodeHeader(props: CodeHeaderProps) {
                 className={`shrink-0 ${CODE_BLOCK_COPY_BUTTON_CLASS}`}
                 title="Copy"
             >
-                {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
+                <MotionIcon
+                    icon={toMotionIcon(copied ? CheckIconNode : CopyIconNode)}
+                    className="h-4 w-4"
+                    data-motion-icon={copied ? 'check' : 'copy'}
+                    aria-hidden="true"
+                />
             </button>
         </div>
     )
@@ -438,9 +444,13 @@ function formatFileTargetTitle(fileTarget: FilePathLinkTarget): string {
     return `${fileTarget.path}:${fileTarget.line}${fileTarget.column !== undefined ? `:${fileTarget.column}` : ''}`
 }
 
-function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { fileTarget: FilePathLinkTarget; sessionId: string }) {
+function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
+    fileTarget: FilePathLinkTarget
+    sessionId: string
+    fileLinkTarget?: HappyChatFileLinkTarget
+}) {
     const navigate = useNavigate()
-    const { fileTarget, sessionId, className, title, onClick, target, rel: propRel, ...anchorProps } = props
+    const { fileTarget, sessionId, fileLinkTarget, className, title, onClick, target, rel: propRel, ...anchorProps } = props
     const rel = target === '_blank' ? (propRel ?? 'noreferrer') : propRel
     const linkTitle = title ?? formatFileTargetTitle(fileTarget)
     const searchParams = new URLSearchParams({
@@ -454,7 +464,19 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { fileTarget: Fil
         searchParams.set('column', String(fileTarget.column))
     }
     const search = searchParams.toString()
-    const href = `/sessions/${encodeURIComponent(sessionId)}/file?${search}`
+    const nativeSearchParams = new URLSearchParams({
+        machineId: fileLinkTarget?.machineId ?? '',
+        path: encodeBase64(fileTarget.path)
+    })
+    if (fileTarget.line !== undefined) {
+        nativeSearchParams.set('line', String(fileTarget.line))
+    }
+    if (fileTarget.column !== undefined) {
+        nativeSearchParams.set('column', String(fileTarget.column))
+    }
+    const href = fileLinkTarget?.type === 'native-codex'
+        ? `/sessions/codex/${encodeURIComponent(fileLinkTarget.sessionId)}/file?${nativeSearchParams.toString()}`
+        : `/sessions/${encodeURIComponent(sessionId)}/file?${search}`
 
     const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
         onClick?.(event)
@@ -462,6 +484,19 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { fileTarget: Fil
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
 
         event.preventDefault()
+        if (fileLinkTarget?.type === 'native-codex') {
+            void navigate({
+                to: '/sessions/codex/$codexSessionId/file',
+                params: { codexSessionId: fileLinkTarget.sessionId },
+                search: {
+                    machineId: fileLinkTarget.machineId,
+                    path: encodeBase64(fileTarget.path),
+                    ...(fileTarget.line !== undefined ? { line: fileTarget.line } : {}),
+                    ...(fileTarget.column !== undefined ? { column: fileTarget.column } : {})
+                }
+            })
+            return
+        }
         void navigate({
             to: '/sessions/$sessionId/file',
             params: { sessionId },
@@ -526,7 +561,12 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
         if (!chat) {
             return <>{props.children}</>
         }
-        return <FilePathAnchor {...props} fileTarget={fileTarget} sessionId={chat.sessionId} />
+        return <FilePathAnchor
+            {...props}
+            fileTarget={fileTarget}
+            sessionId={chat.sessionId}
+            fileLinkTarget={chat.fileLinkTarget}
+        />
     }
 
     const isAllowed = ctx?.isAllowed ?? (() => false)

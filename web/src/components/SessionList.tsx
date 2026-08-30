@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { GitBranch } from 'lucide-react'
+import { GitBranch as GitBranchIconNode, TreePine as TreePineIconNode } from 'lucide'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -23,7 +23,8 @@ import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
 import { formatReopenError } from '@/lib/reopenError'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { getDetachedBranchLabel } from '@/lib/files-i18n'
-import { useGitBranch } from '@/hooks/queries/useGitBranch'
+import { useMachineGitBranch } from '@/hooks/queries/useGitBranch'
+import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 
 type SessionGroup = {
     key: string
@@ -407,24 +408,16 @@ function groupByMachine(
     })
 }
 
-function getProjectGitSessionId(group: SessionGroup): string | null {
-    if (group.directory === 'Other') {
-        return null
-    }
-
-    // The group is already ordered with a live session first. Git RPCs are
-    // session-scoped, so use the first row that has a concrete runner path.
-    return group.sessions.find((session) => Boolean(session.metadata?.path?.trim()))?.id ?? null
-}
-
 function ProjectGroupHeading(props: {
     name: string
-    sessionId: string | null
+    directory: string | null
+    machineId: string | null
     api: ApiClient | null
 }) {
     const { t } = useTranslation()
-    const { branch } = useGitBranch(props.api, props.sessionId)
+    const { branch, isWorktree } = useMachineGitBranch(props.api, props.machineId, props.directory)
     const branchLabel = branch ? getDetachedBranchLabel(branch, t) : null
+    const branchIcon = isWorktree ? TreePineIconNode : GitBranchIconNode
 
     return (
         <span className="min-w-0 flex-1">
@@ -437,10 +430,17 @@ function ProjectGroupHeading(props: {
             {branchLabel ? (
                 <span
                     data-testid="session-project-branch"
+                    data-git-kind={isWorktree ? 'worktree' : 'branch'}
                     className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] leading-4 text-[var(--app-hint)]"
-                    title={branchLabel}
+                    title={isWorktree ? `${t('session.item.worktree')} · ${branchLabel}` : branchLabel}
                 >
-                    <GitBranch className="h-3 w-3 shrink-0" strokeWidth={1.8} aria-hidden="true" />
+                    <MotionIcon
+                        icon={toMotionIcon(branchIcon)}
+                        className={`h-3 w-3 shrink-0 ${isWorktree ? 'text-[var(--app-link)]' : ''}`}
+                        data-motion-icon={isWorktree ? 'worktree' : 'branch'}
+                        strokeWidth={1.8}
+                        aria-hidden="true"
+                    />
                     <span className="truncate">{branchLabel}</span>
                 </span>
             ) : null}
@@ -780,7 +780,7 @@ const SessionItem = memo(function SessionItem(props: {
                         flavor={s.metadata?.flavor}
                         className={nested ? 'h-4 w-4' : 'h-5 w-5'}
                         showStatus={s.active}
-                        statusClassName="bg-[#34C759]"
+                        statusClassName="bg-[#34C759] motion-safe:animate-pulse"
                     />
                     <div className="min-w-0 flex-1">
                         <div className={`truncate font-medium tracking-normal text-[var(--app-fg)] ${nested ? 'text-[13px] leading-[17px]' : 'text-sm leading-5'}`}>
@@ -1253,7 +1253,6 @@ export const SessionList = memo(function SessionList(props: {
                                     {mg.projectGroups.map((group) => {
                                         const isCollapsed = isGroupCollapsed(group)
                                         const canStartInGroupDirectory = group.directory !== 'Other'
-                                        const gitSessionId = getProjectGitSessionId(group)
                                         return (
                                             <section key={group.key} className="min-w-0 py-1">
                                                 <div
@@ -1261,15 +1260,13 @@ export const SessionList = memo(function SessionList(props: {
                                                     onClick={() => toggleGroup(group.key, isCollapsed)}
                                                     title={group.directory}
                                                 >
-                                                    <FolderIcon open={!isCollapsed} className="h-5 w-5 shrink-0 text-[var(--app-fg)]" />
+                                                    <FolderIcon open={!isCollapsed} className="h-[25px] w-[25px] shrink-0 text-[var(--app-fg)]" />
                                                     <ProjectGroupHeading
                                                         name={group.displayName}
-                                                        sessionId={gitSessionId}
+                                                        directory={group.directory === 'Other' ? null : group.directory}
+                                                        machineId={group.machineId}
                                                         api={api}
                                                     />
-                                                    <span className="shrink-0 text-[11px] font-medium tabular-nums text-[var(--app-hint)]">
-                                                        {group.sessions.length}
-                                                    </span>
                                                     <ChevronIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)]" collapsed={isCollapsed} />
                                                     <CopyPathButton path={group.directory} className="hidden opacity-0 transition-opacity duration-150 group-hover/project:opacity-100 sm:flex" />
                                                     {onNewSessionInDirectory && canStartInGroupDirectory ? (

@@ -27,7 +27,9 @@ export function ReasoningEffortSelector(props: {
         >
             <label className="text-xs font-medium text-[var(--app-hint)]">
                 {t('newSession.reasoningEffort')}{' '}
-                <span className="font-normal">({t('newSession.model.optional')})</span>
+                {!props.inline ? (
+                    <span className="font-normal">({t('newSession.model.optional')})</span>
+                ) : null}
             </label>
             <select
                 value={props.value}

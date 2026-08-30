@@ -9,7 +9,6 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthSource } from '@/hooks/useAuthSource'
 import { useServerUrl } from '@/hooks/useServerUrl'
 import { useSSE } from '@/hooks/useSSE'
-import { useSyncingState } from '@/hooks/useSyncingState'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
@@ -32,7 +31,6 @@ import { LoginPrompt } from '@/components/LoginPrompt'
 import { InstallPrompt } from '@/components/InstallPrompt'
 import { OfflineBanner } from '@/components/OfflineBanner'
 import { PwaUpdateBanner } from '@/components/PwaUpdateBanner'
-import { SyncingBanner } from '@/components/SyncingBanner'
 import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
@@ -165,7 +163,6 @@ function AppInner() {
     const queryClient = useQueryClient()
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId' })
     const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
-    const { isSyncing, startSync, endSync } = useSyncingState()
     const [sseDisconnected, setSseDisconnected] = useState(false)
     const [sessionSseDisconnected, setSessionSseDisconnected] = useState(false)
     const [globalSseConnected, setGlobalSseConnected] = useState(false)
@@ -329,14 +326,12 @@ function AppInner() {
         // Increment token to track this specific connection
         const token = ++syncTokenRef.current
 
-        // Force the initial data synchronization on the first connection.
-        // Later connections still reconcile in the background without the
-        // initial loading treatment.
+        // A completed initial connection is enough to distinguish a later
+        // disconnect from the first connection attempt when deriving session
+        // connection health. Reconnect recovery itself stays silent: the
+        // session header's connection indicator is the single network cue.
         if (isFirstConnectRef.current) {
             isFirstConnectRef.current = false
-            startSync({ force: true })
-        } else {
-            startSync()
         }
         // Reconnect recovery is authoritative, but it can trigger a broad
         // cache refetch and a full chat reconciliation. Always put it on a
@@ -360,14 +355,8 @@ function AppInner() {
                 .catch((error) => {
                     console.error('Failed to invalidate queries on SSE connect:', error)
                 })
-                .finally(() => {
-                    // Only end sync if this is still the latest connection.
-                    if (syncTokenRef.current === token) {
-                        endSync()
-                    }
-                })
         })
-    }, [queryClient, reconcileSelectedSessionMessages, startSync, endSync])
+    }, [queryClient, reconcileSelectedSessionMessages])
 
     const handleSseDisconnect = useCallback(() => {
         setGlobalSseConnected(false)
@@ -757,7 +746,6 @@ function AppInner() {
                 <SessionConnectionProvider value={sessionConnectionContext}>
                     <VoiceProvider>
                         <PwaUpdateBanner />
-                        <SyncingBanner isSyncing={isSyncing} offsetFromTitleBar={Boolean(selectedSessionId)} />
                         <VoiceErrorBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
                         <OfflineBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
                         <div className="h-full min-h-0 flex flex-col">

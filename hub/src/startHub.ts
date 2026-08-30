@@ -21,6 +21,7 @@ import type { Server as BunServer } from 'bun'
 import type { WebSocketData } from '@socket.io/bun-engine'
 import { join } from 'node:path'
 import { GeneratedImageStore } from './generatedImages/store'
+import { ArtifactService } from './artifacts/service'
 
 /** Format config source for logging */
 function formatSource(source: ConfigSource | 'generated'): string {
@@ -121,6 +122,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let visibilityTracker: VisibilityTracker | null = null
     let notificationHub: NotificationHub | null = null
     let tunnelManager: TunnelManager | null = null
+    let artifactCleanupTimer: NodeJS.Timeout | null = null
 
     // Load configuration (async - loads from env/file with persistence)
     const relayApiDomain = process.env.HAPI_RELAY_API || 'relay.hapi.run'
@@ -181,6 +183,17 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
     const store = new Store(config.dbPath)
     const generatedImageStore = new GeneratedImageStore(join(config.dataDir, 'generated-images'))
+    const artifactService = new ArtifactService(store, config.dataDir)
+    const cleanupExpiredArtifacts = (): void => {
+        try {
+            artifactService.cleanupExpired()
+        } catch {
+            console.warn('[Artifacts] Failed to clean expired shares')
+        }
+    }
+    cleanupExpiredArtifacts()
+    artifactCleanupTimer = setInterval(cleanupExpiredArtifacts, 15 * 60_000)
+    artifactCleanupTimer.unref?.()
     const jwtSecret = await getOrCreateJwtSecret()
     const vapidKeys = await getOrCreateVapidKeys(config.dataDir)
     const vapidSubject = process.env.VAPID_SUBJECT ?? 'mailto:admin@hapi.run'
@@ -334,6 +347,10 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
     return {
         stop: async () => {
+            if (artifactCleanupTimer) {
+                clearInterval(artifactCleanupTimer)
+                artifactCleanupTimer = null
+            }
             await tunnelManager?.stop()
             await happyBot?.stop()
             notificationHub?.stop()

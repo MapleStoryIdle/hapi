@@ -450,7 +450,7 @@ describe('SessionHeader back action', () => {
         expect(detailReads).toBe(readsAfterMount)
     })
 
-    it('opens title details on one touch without closing it again on the follow-up click', () => {
+    it('opens title details from the touch pointer-up fallback when WebKit drops click', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -476,9 +476,50 @@ describe('SessionHeader back action', () => {
         const titleButton = screen.getByRole('button', { name: 'hapi' })
         fireWebKitTouchPointerDown(titleButton)
         fireWebKitTouchPointerUp(titleButton)
+
+        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+    })
+
+    it('does not impose a time-based lock after a title touch without a compatibility click', () => {
+        render(
+            <I18nProvider>
+                <SessionTitleDetails title="hapi" sessionId="title-without-compatibility-click" />
+            </I18nProvider>
+        )
+
+        const titleButton = screen.getByRole('button', { name: 'hapi' })
+        fireWebKitTouchPointerDown(titleButton)
+        fireWebKitTouchPointerUp(titleButton)
+
+        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+
+        // No compatibility click arrives. A new touch still toggles right
+        // away instead of waiting for the former two-second guard to expire.
+        fireWebKitTouchPointerDown(titleButton)
+        fireWebKitTouchPointerUp(titleButton)
+
+        expect(screen.queryByRole('dialog', { name: 'Session details' })).not.toBeInTheDocument()
+    })
+
+    it('consumes only the compatibility click that follows a title touch', () => {
+        render(
+            <I18nProvider>
+                <SessionTitleDetails title="hapi" sessionId="title-compatibility-click" />
+            </I18nProvider>
+        )
+
+        const titleButton = screen.getByRole('button', { name: 'hapi' })
+        fireWebKitTouchPointerDown(titleButton)
+        fireWebKitTouchPointerUp(titleButton)
+
+        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+
         fireEvent.click(titleButton, { detail: 1 })
 
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
+        fireEvent.click(titleButton, { detail: 1 })
+
+        expect(screen.queryByRole('dialog', { name: 'Session details' })).not.toBeInTheDocument()
     })
 
     it('keeps title details open while streaming session state refreshes around it', () => {
@@ -556,38 +597,6 @@ describe('SessionHeader back action', () => {
         fireEvent.click(titleButton, { detail: 1 })
 
         expect(screen.queryByRole('dialog', { name: 'Session details' })).not.toBeInTheDocument()
-    })
-
-    it('keeps title details open when a delayed compatibility click arrives after a busy frame', () => {
-        vi.useFakeTimers()
-        const queryClient = new QueryClient({
-            defaultOptions: {
-                queries: { retry: false },
-                mutations: { retry: false }
-            }
-        })
-
-        render(
-            <QueryClientProvider client={queryClient}>
-                <ToastProvider>
-                    <I18nProvider>
-                        <SessionHeader
-                            session={createSession()}
-                            api={null}
-                            onBack={() => {}}
-                            floating
-                        />
-                    </I18nProvider>
-                </ToastProvider>
-            </QueryClientProvider>
-        )
-
-        const titleButton = screen.getByRole('button', { name: 'hapi' })
-        fireWebKitTouchPointerUp(titleButton)
-        vi.advanceTimersByTime(750)
-        fireEvent.click(titleButton, { detail: 1 })
-
-        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
     })
 
     it('opens the top action menu from the touch pointer-up fallback', () => {
@@ -793,11 +802,13 @@ describe('SessionHeader connection recovery', () => {
             </QueryClientProvider>
         )
 
-        expect(screen.getByTestId('session-connection-recovery')).toBeDisabled()
+        const button = screen.getByTestId('session-connection-recovery')
+        expect(button).toBeDisabled()
+        expect(button.querySelector('[data-motion-icon="refresh"]')).not.toBeNull()
         expect(screen.getByTitle('Restoring live updates…')).toBeInTheDocument()
     })
 
-    it('uses the intermittent-contact icon for a degraded connection', () => {
+    it('uses the Wi-Fi state icon for a degraded connection', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -817,11 +828,11 @@ describe('SessionHeader connection recovery', () => {
             </QueryClientProvider>
         )
 
-        const signal = screen.getByTestId('session-connection-recovery').querySelector('svg')
-        expect(signal).toHaveClass('lucide-plug-zap', 'h-5', 'w-5')
+        const signal = screen.getByTestId('session-connection-recovery').querySelector('[data-motion-icon="wifi"]')
+        expect(signal).toHaveClass('h-5', 'w-5')
     })
 
-    it('uses the unplug icon for a disconnected connection', () => {
+    it('uses the Wi-Fi-off state icon for a disconnected connection', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -841,7 +852,7 @@ describe('SessionHeader connection recovery', () => {
             </QueryClientProvider>
         )
 
-        const icon = screen.getByTestId('session-connection-recovery').querySelector('svg')
-        expect(icon).toHaveClass('lucide-unplug', 'h-5', 'w-5')
+        const icon = screen.getByTestId('session-connection-recovery').querySelector('[data-motion-icon="wifi-off"]')
+        expect(icon).toHaveClass('h-5', 'w-5')
     })
 })

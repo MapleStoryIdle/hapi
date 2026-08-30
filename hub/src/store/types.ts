@@ -124,6 +124,11 @@ export type StoredArtifact = {
     id: string
     namespace: string
     tokenHash: string
+    /**
+     * The original public bearer URL for shares created after the share-manager
+     * copy feature was introduced. Legacy shares intentionally have null here.
+     */
+    publicUrl: string | null
     filename: string
     size: number
     sha256: string

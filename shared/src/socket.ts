@@ -102,6 +102,11 @@ export type BinaryFileReadRequest = {
     type: 'session-file'
     path: string
 } | {
+    /** Runner-owned workspace file. The hub resolves `cwd` from stored session metadata. */
+    type: 'machine-file'
+    cwd: string
+    path: string
+} | {
     type: 'generated-image'
     imageId: string
 } | {

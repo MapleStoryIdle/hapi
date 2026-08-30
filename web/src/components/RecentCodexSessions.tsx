@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, ChevronDown, Folder, FolderOpen, History, Plus, RefreshCw, Sparkles } from 'lucide-react'
+import {
+    CircleAlert,
+    CircleCheck,
+    Folder as FolderIconNode,
+    FolderOpen as FolderOpenIconNode,
+    GitBranch as GitBranchIconNode,
+    LoaderCircle,
+    Plus as PlusIconNode,
+    RefreshCw as RefreshIconNode,
+    TreePine as TreePineIconNode
+} from 'lucide'
+import { Activity, ChevronDown, History } from 'lucide-react'
 import type { ApiClient } from '@/api/client'
 import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import { formatRelativeTime } from '@/lib/relativeTime'
+import { getDetachedBranchLabel } from '@/lib/files-i18n'
+import { useMachineGitBranch } from '@/hooks/queries/useGitBranch'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
+import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { useNativeCodexRealtime } from '@/lib/native-codex-realtime-context'
 import {
     getNativeCodexSessionListUpdate,
@@ -225,16 +239,17 @@ function CodexSourceIcon(props: { source: CodexSessionSource; active?: boolean }
             title={isHapi ? t('recentCodex.source.hapi') : t('recentCodex.source.native')}
             aria-hidden="true"
             data-session-source={props.source}
+            data-session-agent="codex"
             data-session-active={props.active || undefined}
         >
-            {isHapi ? (
-                <Sparkles className="h-[18px] w-[18px] text-[var(--app-link)]" strokeWidth={1.8} />
-            ) : (
-                <AgentFlavorIcon flavor="codex" className="h-5 w-5" />
-            )}
+            <AgentFlavorIcon
+                flavor="codex"
+                className={`h-5 w-5 ${isHapi ? 'text-[#4EA1FF]' : 'text-[var(--app-fg)]'}`}
+            />
             {props.active ? (
                 <span
-                    className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--app-bg)] ${isHapi ? 'bg-[#34C759]' : 'bg-sky-500/80 motion-safe:animate-pulse'}`}
+                    data-session-running-indicator
+                    className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--app-bg)] bg-[#34C759] motion-safe:animate-pulse"
                 />
             ) : null}
         </span>
@@ -250,28 +265,79 @@ function getDirectoryKey(directory: string | null): string {
 function DirectoryGroupHeader(props: {
     directory: string | null
     label: string
-    sessionCount: number
+    machineId: string | null
+    api: ApiClient
     collapsed: boolean
     onToggle: () => void
-    onNewSessionInDirectory?: (directory: string) => void
+    onNewSessionInDirectory?: (directory: string) => Promise<boolean>
     isNewSessionPending?: boolean
     t: (key: string, params?: Record<string, string | number>) => string
 }) {
     const {
         directory,
         label,
-        sessionCount,
+        machineId,
+        api,
         collapsed,
         onToggle,
         onNewSessionInDirectory,
         isNewSessionPending = false,
         t
     } = props
-    const FolderIcon = collapsed ? Folder : FolderOpen
+    const [isCreating, setIsCreating] = useState(false)
+    const [creationSucceeded, setCreationSucceeded] = useState(false)
+    const creationFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const mountedRef = useRef(true)
+    const folderIcon = toMotionIcon(collapsed ? FolderIconNode : FolderOpenIconNode)
+    const { branch, isWorktree } = useMachineGitBranch(api, machineId, directory)
+    const branchLabel = branch ? getDetachedBranchLabel(branch, t) : null
+    const branchIcon = isWorktree ? TreePineIconNode : GitBranchIconNode
     const actionLabel = collapsed
         ? t('recentCodex.directory.expand', { directory: label })
         : t('recentCodex.directory.collapse', { directory: label })
     const canCreateSession = Boolean(directory && onNewSessionInDirectory)
+    const createPending = isCreating || isNewSessionPending
+    const creationIcon = isCreating
+        ? LoaderCircle
+        : creationSucceeded
+            ? CircleCheck
+            : PlusIconNode
+
+    useEffect(() => {
+        mountedRef.current = true
+        return () => {
+            mountedRef.current = false
+            if (creationFeedbackTimerRef.current) {
+                clearTimeout(creationFeedbackTimerRef.current)
+            }
+        }
+    }, [])
+
+    const createSession = useCallback(async () => {
+        if (!directory || !onNewSessionInDirectory || createPending) return
+        if (creationFeedbackTimerRef.current) {
+            clearTimeout(creationFeedbackTimerRef.current)
+            creationFeedbackTimerRef.current = null
+        }
+        setCreationSucceeded(false)
+        setIsCreating(true)
+
+        let created = false
+        try {
+            created = await onNewSessionInDirectory(directory)
+        } catch {
+            // The caller already surfaces the create failure as a toast.
+        }
+
+        if (!mountedRef.current) return
+        setIsCreating(false)
+        if (!created) return
+
+        setCreationSucceeded(true)
+        creationFeedbackTimerRef.current = window.setTimeout(() => {
+            if (mountedRef.current) setCreationSucceeded(false)
+        }, 720)
+    }, [createPending, directory, onNewSessionInDirectory])
 
     return (
         <div className="group/project flex min-h-12 w-full min-w-0 items-center gap-1 rounded-2xl px-2.5 py-0.5 transition-colors hover:bg-[var(--app-subtle-bg)]">
@@ -284,12 +350,35 @@ function DirectoryGroupHeader(props: {
                 aria-expanded={!collapsed}
                 data-directory-toggle={getDirectoryKey(directory)}
             >
-                <FolderIcon className="h-[22px] w-[22px] shrink-0 text-[var(--app-fg)]" aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate text-base font-semibold leading-5 text-[var(--app-fg)]">
-                    {label}
-                </span>
-                <span className="shrink-0 text-[11px] font-medium tabular-nums text-[var(--app-hint)]">
-                    {sessionCount}
+                <MotionIcon
+                    icon={folderIcon}
+                    className="h-[27.5px] w-[27.5px] shrink-0 text-[var(--app-fg)]"
+                    data-motion-icon={collapsed ? 'folder' : 'folder-open'}
+                />
+                <span className="min-w-0 flex-1">
+                    <span
+                        data-testid="recent-codex-directory-name"
+                        className="block truncate text-[17px] font-semibold leading-6 text-[var(--app-fg)]"
+                    >
+                        {label}
+                    </span>
+                    {branchLabel ? (
+                        <span
+                            data-testid="recent-codex-directory-branch"
+                            data-git-kind={isWorktree ? 'worktree' : 'branch'}
+                            className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] leading-4 text-[var(--app-hint)]"
+                            title={isWorktree ? `${t('session.item.worktree')} · ${branchLabel}` : branchLabel}
+                        >
+                            <MotionIcon
+                                icon={toMotionIcon(branchIcon)}
+                                className={`h-3 w-3 shrink-0 ${isWorktree ? 'text-[var(--app-link)]' : ''}`}
+                                data-motion-icon={isWorktree ? 'worktree' : 'branch'}
+                                strokeWidth={1.8}
+                                aria-hidden="true"
+                            />
+                            <span className="truncate">{branchLabel}</span>
+                        </span>
+                    ) : null}
                 </span>
                 <ChevronDown
                     className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`}
@@ -299,18 +388,18 @@ function DirectoryGroupHeader(props: {
             {canCreateSession ? (
                 <button
                     type="button"
-                    onClick={() => onNewSessionInDirectory?.(directory!)}
-                    disabled={isNewSessionPending}
+                    onClick={() => void createSession()}
+                    disabled={createPending}
                     className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation disabled:cursor-not-allowed disabled:opacity-45"
                     title={t('sessions.group.new')}
                     aria-label={t('sessions.group.new')}
-                    aria-busy={isNewSessionPending || undefined}
+                    aria-busy={createPending || undefined}
                 >
-                    {isNewSessionPending ? (
-                        <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    ) : (
-                        <Plus className="h-5 w-5" aria-hidden="true" />
-                    )}
+                    <MotionIcon
+                        icon={toMotionIcon(creationIcon)}
+                        className={isCreating ? 'h-4 w-4 motion-safe:animate-spin' : 'h-5 w-5'}
+                        data-motion-icon={isCreating ? 'loader' : creationSucceeded ? 'check' : 'plus'}
+                    />
                 </button>
             ) : null}
         </div>
@@ -385,7 +474,7 @@ export function RecentCodexSessions(props: {
     /** Optional empty-state copy for filtered views such as running. */
     emptyMessage?: string
     /** Create a fresh HAPI session using a known session directory. */
-    onNewSessionInDirectory?: (directory: string) => void
+    onNewSessionInDirectory?: (directory: string) => Promise<boolean>
     /** Disable directory creation actions while a session is being created. */
     isNewSessionPending?: boolean
 }) {
@@ -409,8 +498,11 @@ export function RecentCodexSessions(props: {
     const [collapsedDirectories, setCollapsedDirectories] = useState<Set<string>>(() => new Set())
     const autoExpandedSelectionRef = useRef<string | null>(null)
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const manualRefreshFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const mountedRef = useRef(true)
     const realtimeListUpdatesRef = useRef(new Map<string, { receivedAt: number; update: NativeCodexSessionListUpdate }>())
     const hasInitializedRealtimeStateRef = useRef(false)
+    const [manualRefreshFeedback, setManualRefreshFeedback] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const visibleSessions = useMemo(
         () => onlyProcessing ? sessions.filter((session) => session.runState === 'processing') : sessions,
         [onlyProcessing, sessions]
@@ -486,7 +578,7 @@ export function RecentCodexSessions(props: {
         })
     }, [directoryGroupsForDisclosure, isMerged, mergedDirectoryGroups, props.selectedSessionId])
 
-    const refresh = useCallback(async (forceRefresh = false) => {
+    const refresh = useCallback(async (forceRefresh = false): Promise<boolean> => {
         const startedAt = Date.now()
         setIsLoading(true)
         setLoadError(null)
@@ -494,7 +586,7 @@ export function RecentCodexSessions(props: {
         if (!machineId) {
             setSessions([])
             setIsLoading(false)
-            return
+            return false
         }
         try {
             const response = isMerged
@@ -519,8 +611,10 @@ export function RecentCodexSessions(props: {
                 response.sessions
             ))
             setLastUpdatedAt(Date.now())
+            return true
         } catch (error) {
             setLoadError(error instanceof Error ? error.message : String(error))
+            return false
         } finally {
             setIsLoading(false)
         }
@@ -578,13 +672,35 @@ export function RecentCodexSessions(props: {
     }, [isMerged, limit, props.machineId, refresh])
 
     useEffect(() => {
+        mountedRef.current = true
         return () => {
+            mountedRef.current = false
             if (realtimeRefreshTimerRef.current) {
                 clearTimeout(realtimeRefreshTimerRef.current)
                 realtimeRefreshTimerRef.current = null
             }
+            if (manualRefreshFeedbackTimerRef.current) {
+                clearTimeout(manualRefreshFeedbackTimerRef.current)
+                manualRefreshFeedbackTimerRef.current = null
+            }
         }
     }, [])
+
+    const handleManualRefresh = useCallback(async () => {
+        if (isLoading || !props.machineId) return
+        if (manualRefreshFeedbackTimerRef.current) {
+            clearTimeout(manualRefreshFeedbackTimerRef.current)
+            manualRefreshFeedbackTimerRef.current = null
+        }
+        setManualRefreshFeedback('loading')
+        const refreshed = await refresh(true)
+        if (!mountedRef.current) return
+
+        setManualRefreshFeedback(refreshed ? 'success' : 'error')
+        manualRefreshFeedbackTimerRef.current = window.setTimeout(() => {
+            if (mountedRef.current) setManualRefreshFeedback('idle')
+        }, 720)
+    }, [isLoading, props.machineId, refresh])
 
     // Current runners patch this list through SSE. Older runners, or a
     // temporarily disconnected event stream, retain a small polling fallback.
@@ -610,11 +726,18 @@ export function RecentCodexSessions(props: {
 
     const hasRows = isMerged ? mergedSessions.length > 0 : recentNativeSessions.length > 0
     const busy = isLoading || Boolean(props.hapiIsLoading)
+    const refreshIcon = manualRefreshFeedback === 'success'
+        ? CircleCheck
+        : manualRefreshFeedback === 'error'
+            ? CircleAlert
+            : isLoading || manualRefreshFeedback === 'loading'
+                ? LoaderCircle
+                : RefreshIconNode
 
     return (
         <section
             className={embedded
-                ? 'app-scroll-y flex min-h-0 w-full flex-1 flex-col px-0 pb-3 pt-1 [font-family:var(--app-control-font-family)]'
+                ? 'app-scroll-y flex min-h-0 w-full flex-1 flex-col px-4 pb-3 pt-1 sm:px-6 [font-family:var(--app-control-font-family)]'
                 : 'flex min-h-0 w-full flex-1 flex-col px-4 pb-4 pt-3 sm:px-6 [font-family:var(--app-control-font-family)]'}
             aria-label={title}
             aria-busy={busy || undefined}
@@ -639,13 +762,23 @@ export function RecentCodexSessions(props: {
                         ) : null}
                         <button
                             type="button"
-                            onClick={() => void refresh(true)}
+                            onClick={() => void handleManualRefresh()}
                             disabled={isLoading || !props.machineId}
                             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
                             aria-label={t('recentCodex.refresh')}
                             title={t('recentCodex.refresh')}
                         >
-                            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
+                            <MotionIcon
+                                icon={toMotionIcon(refreshIcon)}
+                                className={`h-3.5 w-3.5 ${isLoading || manualRefreshFeedback === 'loading' ? 'motion-safe:animate-spin' : ''}`}
+                                data-motion-icon={manualRefreshFeedback === 'success'
+                                    ? 'check'
+                                    : manualRefreshFeedback === 'error'
+                                        ? 'alert'
+                                        : isLoading || manualRefreshFeedback === 'loading'
+                                            ? 'loader'
+                                            : 'refresh'}
+                            />
                         </button>
                     </div>
                 </div>
@@ -661,7 +794,7 @@ export function RecentCodexSessions(props: {
                     {isDefaultNamespaceUnavailable ? null : (
                         <button
                             type="button"
-                            onClick={() => void refresh(true)}
+                            onClick={() => void handleManualRefresh()}
                             className="shrink-0 font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
                         >
                             {t('recentCodex.retry')}
@@ -695,7 +828,8 @@ export function RecentCodexSessions(props: {
                                 <DirectoryGroupHeader
                                     directory={group.directory}
                                     label={directoryLabel}
-                                    sessionCount={group.sessions.length}
+                                    machineId={props.machineId}
+                                    api={props.api}
                                     collapsed={collapsed}
                                     onToggle={() => toggleDirectory(group.directory)}
                                     onNewSessionInDirectory={props.onNewSessionInDirectory}
@@ -744,7 +878,8 @@ export function RecentCodexSessions(props: {
                                 <DirectoryGroupHeader
                                     directory={group.directory}
                                     label={directoryLabel}
-                                    sessionCount={group.sessions.length}
+                                    machineId={props.machineId}
+                                    api={props.api}
                                     collapsed={collapsed}
                                     onToggle={() => toggleDirectory(group.directory)}
                                     onNewSessionInDirectory={props.onNewSessionInDirectory}

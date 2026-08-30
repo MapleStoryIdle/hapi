@@ -2033,17 +2033,6 @@ function SessionChatInner(props: SessionChatProps) {
                         </button>
                     ) : null}
 
-                    {codexCollaborationModeSupported && codexModelsState.error ? (
-                        <div className="px-3 pb-2">
-                            <SessionDetailStatusNotice
-                                tone="error"
-                                title={t('session.codexModelsLoadFailed')}
-                                detail={codexModelsState.error}
-                                testId="session-codex-models-error"
-                            />
-                        </div>
-                    ) : null}
-
                     <SessionDetailBottomDock
                         ref={bottomOverlayRef}
                         bottom={BOTTOM_OVERLAY_INSET_PX}

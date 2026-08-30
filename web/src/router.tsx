@@ -1,4 +1,5 @@
-import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Settings as SettingsIconNode, X as CloseIconNode } from 'lucide'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -16,9 +17,12 @@ import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import { App } from '@/App'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
 import { RecentCodexSessions } from '@/components/RecentCodexSessions'
+import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { CodexSessionContextPage } from '@/components/CodexSessionContextPage'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { ShareIcon } from '@/components/icons'
 import { LoadingState } from '@/components/LoadingState'
+import { SessionEntryLoading } from '@/components/SessionEntryLoading'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -54,10 +58,12 @@ const NewSession = lazy(() => import('@/components/NewSession').then((module) =>
 const WorkspaceBrowser = lazy(() => import('@/components/WorkspaceBrowser').then((module) => ({ default: module.WorkspaceBrowser })))
 const FilesPage = lazy(() => import('@/routes/sessions/files'))
 const FilePage = lazy(() => import('@/routes/sessions/file'))
+const CodexFilePage = lazy(() => import('@/routes/sessions/codex-file'))
 const TerminalPage = lazy(() => import('@/routes/sessions/terminal'))
 const OpenVikingPage = lazy(() => import('@/routes/memory'))
 const SettingsPage = lazy(() => import('@/routes/settings'))
 const SharePage = lazy(() => import('@/routes/share'))
+const SharesPage = lazy(() => import('@/routes/shares'))
 const RemoteServersPage = lazy(() => import('@/components/RemoteServers'))
 
 type ComposerSendError = {
@@ -211,27 +217,6 @@ function MemoryIcon(props: { className?: string }) {
             <ellipse cx="12" cy="5" rx="7" ry="3" />
             <path d="M5 5v7c0 1.66 3.13 3 7 3s7-1.34 7-3V5" />
             <path d="M5 12v7c0 1.66 3.13 3 7 3s7-1.34 7-3v-7" />
-        </svg>
-    )
-}
-
-function MoreHorizontalIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <circle cx="5" cy="12" r="1" />
-            <circle cx="12" cy="12" r="1" />
-            <circle cx="19" cy="12" r="1" />
         </svg>
     )
 }
@@ -629,8 +614,8 @@ function SessionsPage() {
         })
     }, [navigate, selectedRunnerMachine])
 
-    const createSessionInDirectory = useCallback(async (directory: string) => {
-        if (!selectedRunnerMachine || isQuickSessionPending) return
+    const createSessionInDirectory = useCallback(async (directory: string): Promise<boolean> => {
+        if (!selectedRunnerMachine || isQuickSessionPending) return false
 
         try {
             const result = await spawnSession({
@@ -648,6 +633,7 @@ function SessionsPage() {
                 to: '/sessions/$sessionId',
                 params: { sessionId: result.sessionId }
             })
+            return true
         } catch (error) {
             addToast({
                 title: t('newSession.quickCreate.failed.title'),
@@ -657,6 +643,7 @@ function SessionsPage() {
                 sessionId: '',
                 url: ''
             })
+            return false
         }
     }, [addRecentPath, addToast, isQuickSessionPending, navigate, selectedRunnerMachine, setLastUsedMachineId, spawnSession, t])
 
@@ -951,10 +938,14 @@ function SessionsPage() {
                                 aria-expanded={isSessionsMenuOpen}
                                 aria-haspopup="menu"
                                 data-testid="sessions-menu-button"
-                                className={`pointer-events-auto touch-manipulation flex h-[52px] w-[52px] items-center justify-center rounded-full border text-[var(--app-fg)] shadow-[0_1px_4px_rgba(0,0,0,0.03)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${isSessionsMenuOpen ? 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]' : 'border-[var(--app-border)] bg-[var(--app-bg)] hover:bg-[var(--app-subtle-bg)]'}`}
+                                className="pointer-events-auto touch-manipulation flex h-[52px] w-[52px] items-center justify-center text-[var(--app-fg)] transition-opacity hover:opacity-70 active:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                 title={t('session.more')}
                             >
-                                <MoreHorizontalIcon className="h-7 w-7" />
+                                <MotionIcon
+                                    icon={toMotionIcon(isSessionsMenuOpen ? CloseIconNode : SettingsIconNode)}
+                                    className="h-6 w-6"
+                                    data-motion-icon={isSessionsMenuOpen ? 'close' : 'settings'}
+                                />
                             </button>
                             {isSessionsMenuOpen ? (
                                 <div
@@ -1018,6 +1009,20 @@ function SessionsPage() {
                                             <ServerIcon className="h-4 w-4" />
                                         </span>
                                         <span>{t('sessions.remoteServers')}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="menuitem"
+                                        onClick={() => {
+                                            setIsSessionsMenuOpen(false)
+                                            navigate({ to: '/shares' })
+                                        }}
+                                        className={sessionsMenuItemClass}
+                                    >
+                                        <span className={sessionsMenuIconClass}>
+                                            <ShareIcon className="h-4 w-4" />
+                                        </span>
+                                        <span>{t('shares.nav')}</span>
                                     </button>
                                     <button
                                         type="button"
@@ -1494,43 +1499,41 @@ function SessionPage() {
                 </div>
             )
         }
-        return (
-            <div className="flex-1 flex items-center justify-center p-4">
-                <LoadingState label="Loading session…" className="text-sm" />
-            </div>
-        )
+        return <SessionEntryLoading onBack={goBack} />
     }
 
     return (
-        <SessionChat
-            api={api}
-            session={session}
-            messages={messages}
-            pendingMessages={pendingMessages}
-            messagesWarning={messagesWarning}
-            hasMoreMessages={messagesHasMore}
-            isLoadingMessages={messagesLoading}
-            isLoadingMoreMessages={messagesLoadingMore}
-            isSending={isSending}
-            pendingCount={pendingCount}
-            messagesVersion={messagesVersion}
-            onBack={goBack}
-            onRefresh={refreshSelectedSession}
-            onLoadMore={loadMoreMessages}
-            onSend={sendMessage}
-            onFlushPending={flushPending}
-            onAtBottomChange={setAtBottom}
-            onRetryMessage={retryMessage}
-            autocompleteSuggestions={getAutocompleteSuggestions}
-            availableSlashCommands={slashCommands}
-            skills={skills}
-            skillsLoading={skillsLoading}
-            skillsError={skillsError}
-            sendError={sendError}
-            onClearSendError={clearSendError}
-            initialOutlineOpen={outline}
-            onInitialOutlineConsumed={handleInitialOutlineConsumed}
-        />
+        <Suspense fallback={<SessionEntryLoading onBack={goBack} />}>
+            <SessionChat
+                api={api}
+                session={session}
+                messages={messages}
+                pendingMessages={pendingMessages}
+                messagesWarning={messagesWarning}
+                hasMoreMessages={messagesHasMore}
+                isLoadingMessages={messagesLoading}
+                isLoadingMoreMessages={messagesLoadingMore}
+                isSending={isSending}
+                pendingCount={pendingCount}
+                messagesVersion={messagesVersion}
+                onBack={goBack}
+                onRefresh={refreshSelectedSession}
+                onLoadMore={loadMoreMessages}
+                onSend={sendMessage}
+                onFlushPending={flushPending}
+                onAtBottomChange={setAtBottom}
+                onRetryMessage={retryMessage}
+                autocompleteSuggestions={getAutocompleteSuggestions}
+                availableSlashCommands={slashCommands}
+                skills={skills}
+                skillsLoading={skillsLoading}
+                skillsError={skillsError}
+                sendError={sendError}
+                onClearSendError={clearSendError}
+                initialOutlineOpen={outline}
+                onInitialOutlineConsumed={handleInitialOutlineConsumed}
+            />
+        </Suspense>
     )
 }
 
@@ -1634,7 +1637,7 @@ function NewSessionPage() {
     return (
         <div className="flex h-full min-h-0 flex-col">
             <div className="bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">
-                <div className="mx-auto flex w-full max-w-2xl items-center gap-2 px-3 py-3">
+                <div className="mx-auto flex w-full max-w-2xl items-center gap-2 px-4 py-3 sm:px-6">
                     {!isTelegramApp() && (
                         <button
                             type="button"
@@ -1750,6 +1753,44 @@ const codexSessionContextRoute = createRoute({
         return machineId ? { machineId } : {}
     },
     component: CodexSessionContextRoute,
+})
+
+type CodexSessionFileSearch = {
+    machineId?: string
+    path: string
+    line?: number
+    column?: number
+}
+
+const codexSessionFileRoute = createRoute({
+    getParentRoute: () => sessionsRoute,
+    path: 'codex/$codexSessionId/file',
+    validateSearch: (search: Record<string, unknown>): CodexSessionFileSearch => {
+        const machineId = typeof search.machineId === 'string' && search.machineId.trim().length > 0
+            ? search.machineId.trim()
+            : undefined
+        const path = typeof search.path === 'string' ? search.path : ''
+        const parsePositiveInt = (value: unknown): number | undefined => {
+            const text = typeof value === 'number'
+                ? String(value)
+                : typeof value === 'string'
+                    ? value
+                    : ''
+            if (!/^\d+$/.test(text)) return undefined
+            const parsed = Number(text)
+            return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+        }
+        const line = parsePositiveInt(search.line)
+        const column = parsePositiveInt(search.column)
+
+        return {
+            ...(machineId ? { machineId } : {}),
+            path,
+            ...(line !== undefined ? { line } : {}),
+            ...(column !== undefined ? { column } : {})
+        }
+    },
+    component: CodexFilePage,
 })
 
 const sessionDetailRoute = createRoute({
@@ -1921,6 +1962,12 @@ const remoteServersRoute = createRoute({
     component: RemoteServersPage,
 })
 
+const sharesRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/shares',
+    component: SharesPage,
+})
+
 // Web Share Target landing route. Service worker (`web/src/sw.ts`)
 // intercepts the manifest's `POST /share` and 303-redirects here with an
 // IDB transfer id. `error=ingest` is set when the SW failed to write IDB.
@@ -1946,6 +1993,7 @@ export const routeTree = rootRoute.addChildren([
         sessionsIndexRoute,
         newSessionRoute,
         codexSessionContextRoute,
+        codexSessionFileRoute,
         sessionDetailRoute.addChildren([
             sessionTerminalRoute,
             sessionFilesRoute,
@@ -1955,6 +2003,7 @@ export const routeTree = rootRoute.addChildren([
     browseRoute,
     memoryRoute,
     remoteServersRoute,
+    sharesRoute,
     settingsRoute,
     shareRoute,
 ])

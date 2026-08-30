@@ -16,12 +16,12 @@ function notFound(): Response {
     return new Response('Not found', { status: 404, headers: SAFETY_HEADERS })
 }
 
-export function createPublicArtifactRoutes(store: Store, artifactService?: ArtifactService): Hono {
+export function createPublicShareRoutes(store: Store, shareService?: ArtifactService): Hono {
     const app = new Hono()
-    const artifacts = artifactService ?? new ArtifactService(store, getConfiguration().dataDir)
+    const shares = shareService ?? new ArtifactService(store, getConfiguration().dataDir)
 
     app.on(['GET', 'HEAD'], '/:token', (c) => {
-        const result = artifacts.readPublic(c.req.param('token'))
+        const result = shares.readPublic(c.req.param('token'))
         if (!result) return notFound()
 
         const content = artifactContentType(result.artifact.filename, result.bytes)
@@ -34,6 +34,12 @@ export function createPublicArtifactRoutes(store: Store, artifactService?: Artif
         return new Response(c.req.method === 'HEAD' ? null : result.bytes, { headers })
     })
 
+    app.all('*', () => notFound())
+    return app
+}
+
+export function createLegacyPublicShareTombstoneRoutes(): Hono {
+    const app = new Hono()
     app.all('*', () => notFound())
     return app
 }

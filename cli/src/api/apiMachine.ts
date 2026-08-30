@@ -9,7 +9,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath }
 import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
 import type { BinaryFileReadRequest, BinaryFileReadResponse, ClientToServerEvents, ExternalCodexRequestPayload, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
-import type { GitCommandResponse, MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
+import type { FileReadResponse, GitBranchResponse, GitCommandResponse, MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
 import {
     type CodexLocalSessionListUpdate,
     type CodexLocalSessionComposerCapabilitiesRpcResponse,
@@ -22,7 +22,7 @@ import {
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
-import { NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
+import { FileNativeCodexSessionDirectSendStore, NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
 import { CodexAppServerClient } from '@/codex/codexAppServerClient'
 import { NativeCodexSessionListCache } from '@/codex/nativeSessionListCache'
 import { NativeCodexSessionTitleCache } from '@/codex/nativeSessionTitleCache'
@@ -46,7 +46,7 @@ import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/
 import { applyVersionedAck } from './versionedUpdate'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
-import { readGeneratedImageFileBytes } from '@/modules/common/handlers/files'
+import { readGeneratedImageFileBytes, readSessionFileBytes } from '@/modules/common/handlers/files'
 
 type MachineRpcHandlers = {
     spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>
@@ -64,6 +64,11 @@ interface ListMachineDirectoryRequest {
 
 interface GetMachineGitBranchRequest {
     cwd?: unknown
+}
+
+interface ReadMachineFileRequest {
+    cwd?: unknown
+    path?: unknown
 }
 
 interface ListCodexLocalSessionsRequest {
@@ -91,6 +96,7 @@ interface SendCodexLocalSessionMessageRequest {
     message?: unknown
     displayMessage?: unknown
     clientMessageId?: unknown
+    forceRecovery?: unknown
 }
 
 const MAX_NATIVE_CODEX_REALTIME_SNAPSHOT_BYTES = 96 * 1024
@@ -244,7 +250,8 @@ export class ApiMachineClient {
             // One short-lived bridge per native hand-off. Never reuse this
             // client across original Codex sessions: their local owner can
             // continue editing the transcript outside HAPI.
-            () => new CodexAppServerClient()
+            () => new CodexAppServerClient(),
+            new FileNativeCodexSessionDirectSendStore(join(configuration.happyHomeDir, 'native-codex-direct-outbox.json'))
         )
 
         this.rpcHandlerManager = new RpcHandlerManager({
@@ -256,6 +263,26 @@ export class ApiMachineClient {
         })
 
         registerCommonHandlers(this.rpcHandlerManager, getInvokedCwd())
+
+        this.rpcHandlerManager.registerHandler<ReadMachineFileRequest, FileReadResponse>(
+            RPC_METHODS.ReadMachineFile,
+            async (params) => {
+                const cwd = typeof params?.cwd === 'string' ? params.cwd.trim() : ''
+                const path = typeof params?.path === 'string' ? params.path.trim() : ''
+                if (!cwd) {
+                    return { success: false, error: 'cwd is required' }
+                }
+                if (!path) {
+                    return { success: false, error: 'path is required' }
+                }
+
+                const result = await readSessionFileBytes(path, cwd)
+                if (!result.success) {
+                    return result
+                }
+                return { success: true, content: result.bytes.toString('base64') }
+            }
+        )
 
         this.rpcHandlerManager.registerHandler<ListCodexLocalSessionsRequest, CodexLocalSessionsRpcResponse>(
             RPC_METHODS.ListCodexLocalSessions,
@@ -398,12 +425,16 @@ export class ApiMachineClient {
                 if (!sessionId) {
                     return { success: false, code: 'invalid_message', error: 'sessionId is required' }
                 }
+                if (params?.forceRecovery !== undefined && typeof params.forceRecovery !== 'boolean') {
+                    return { success: false, code: 'invalid_message', error: 'forceRecovery must be a boolean' }
+                }
                 this.observeNativeCodexSession(sessionId)
                 return this.nativeCodexSessionDirectSender.send(
                     sessionId,
                     params?.message,
                     params?.displayMessage,
-                    params?.clientMessageId
+                    params?.clientMessageId,
+                    params?.forceRecovery
                 )
             }
         )
@@ -427,7 +458,7 @@ export class ApiMachineClient {
             return { exists }
         })
 
-        this.rpcHandlerManager.registerHandler<GetMachineGitBranchRequest, GitCommandResponse>(
+        this.rpcHandlerManager.registerHandler<GetMachineGitBranchRequest, GitBranchResponse>(
             RPC_METHODS.GetMachineGitBranch,
             async (params) => {
                 const rawCwd = typeof params?.cwd === 'string' ? params.cwd.trim() : ''
@@ -836,6 +867,22 @@ export class ApiMachineClient {
 
         this.socket.on('file:read-bytes', async (data: BinaryFileReadRequest, callback: (response: BinaryFileReadResponse) => void) => {
             try {
+                if (data.type === 'machine-file') {
+                    const cwd = typeof data.cwd === 'string' ? data.cwd.trim() : ''
+                    const path = typeof data.path === 'string' ? data.path.trim() : ''
+                    if (!cwd) {
+                        callback({ success: false, error: 'cwd is required' })
+                        return
+                    }
+                    if (!path) {
+                        callback({ success: false, error: 'path is required' })
+                        return
+                    }
+
+                    callback(await readSessionFileBytes(path, cwd))
+                    return
+                }
+
                 if (data.type !== 'generated-image-file') {
                     callback({ success: false, error: 'Unsupported machine file read' })
                     return

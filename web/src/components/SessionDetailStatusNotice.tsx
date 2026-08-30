@@ -27,6 +27,8 @@ export function SessionDetailStatusNotice(props: {
     className?: string
     testId?: string
     role?: 'status' | 'alert'
+    /** Optional stateful visual, such as a morphing transport phase icon. */
+    leadingVisual?: ReactNode
 }) {
     const isCompact = props.compact === true
     const isError = props.tone === 'error'
@@ -68,7 +70,7 @@ export function SessionDetailStatusNotice(props: {
             aria-live={isError ? 'assertive' : 'polite'}
             aria-busy={isBusy || undefined}
         >
-            {props.tone === 'processing' ? (
+            {props.leadingVisual ?? (props.tone === 'processing' ? (
                 <span
                     className={cn('h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500', isCompact ? 'motion-safe:animate-pulse' : 'mt-1.5')}
                     aria-hidden="true"
@@ -77,7 +79,7 @@ export function SessionDetailStatusNotice(props: {
                 <LoaderCircle className={cn('shrink-0 animate-spin', isCompact ? 'h-3.5 w-3.5' : 'mt-0.5 h-4 w-4', iconClass)} aria-hidden="true" />
             ) : (
                 <CircleAlert className={cn('shrink-0', isCompact ? 'h-3.5 w-3.5' : 'mt-0.5 h-4 w-4', iconClass)} aria-hidden="true" />
-            )}
+            ))}
 
             <div className={cn('min-w-0', isCompact ? 'truncate' : 'flex-1')}>
                 <div className={cn('font-medium', isCompact ? 'truncate' : 'font-semibold text-[var(--app-fg)]')}>

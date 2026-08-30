@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { PlugZap, Unplug } from 'lucide-react'
+import { RefreshCw as RefreshIconNode, Wifi as WifiIconNode, WifiOff as WifiOffIconNode } from 'lucide'
 import type { CodexSubscriptionLimits, CodexSubscriptionLimitWindow, Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -21,6 +21,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { MOBILE_LAYOUT_CONTRACT, mobileLayoutHeaderShellStyle } from '@/lib/mobileLayoutContract'
 import type { StatusBarProps } from '@/components/AssistantChat/StatusBar'
 import { CheckIcon, CopyIcon } from '@/components/icons'
+import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { SESSION_DETAIL_HEADER_ROW_CLASS, SESSION_DETAIL_HEADER_SAFE_AREA_CLASS } from '@/components/SessionDetailHeader'
 
 type Translator = (key: string, params?: Record<string, string | number>) => string
@@ -200,7 +201,6 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
     const toggleDetails = useCallback(() => {
         setDetailsOpen((open) => !open)
     }, [])
-
     const detailsActivation = useReliableTopEdgeAction(toggleDetails)
 
     const copyDetail = async (key: string, value: string) => {
@@ -316,13 +316,22 @@ export function SessionHeaderBackButton(props: { onBack: () => void; label?: str
 }
 
 function SessionConnectionIcon(props: { health: SessionConnectionHealth }) {
-    if (props.health === 'offline') {
-        return <Unplug className="h-5 w-5" strokeWidth={2.25} aria-hidden="true" />
-    }
+    const icon = props.health === 'offline'
+        ? WifiOffIconNode
+        : props.health === 'recovering'
+            ? RefreshIconNode
+            : WifiIconNode
+    const state = props.health === 'offline'
+        ? 'wifi-off'
+        : props.health === 'recovering'
+            ? 'refresh'
+            : 'wifi'
 
     return (
-        <PlugZap
-            className={props.health === 'recovering' ? 'h-5 w-5 animate-pulse' : 'h-5 w-5'}
+        <MotionIcon
+            icon={toMotionIcon(icon)}
+            className={props.health === 'recovering' ? 'h-5 w-5 motion-safe:animate-spin' : 'h-5 w-5'}
+            data-motion-icon={state}
             strokeWidth={2.25}
             aria-hidden="true"
         />

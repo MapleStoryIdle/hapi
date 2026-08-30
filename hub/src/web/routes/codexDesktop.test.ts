@@ -564,6 +564,44 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('returns native context compaction as an independent context event', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-context-compact-route-test-'))
+        const codexSessionId = '45454545-4545-4545-8545-454545454545'
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            createTranscript(codexHome, codexSessionId, '/home/user/workspace/project')
+            const transcriptPath = join(codexHome, 'sessions', '2026', '06', '04', `rollout-${codexSessionId}.jsonl`)
+            writeFileSync(transcriptPath, `${JSON.stringify({
+                timestamp: '2026-06-04T12:00:00.000Z',
+                type: 'event_msg',
+                payload: { type: 'context_compacted' }
+            })}\n`, { encoding: 'utf-8', flag: 'a' })
+
+            const app = createRoutesApp('default')
+            const response = await app.request(`/api/codex/sessions/${codexSessionId}/context?limit=1`)
+
+            expect(response.status).toBe(200)
+            expect(await response.json()).toMatchObject({
+                success: true,
+                messages: [{
+                    id: `codex-local:${codexSessionId}:2`,
+                    createdAt: Date.parse('2026-06-04T12:00:00.000Z'),
+                    position: 2,
+                    content: {
+                        role: 'agent',
+                        content: {
+                            type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                            data: { type: 'context_compacted' }
+                        }
+                    }
+                }]
+            })
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
     it('returns native custom exec calls through the host-local context route', async () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-custom-tool-route-test-'))
         const codexSessionId = '77777777-7777-4777-8777-777777777777'
@@ -716,6 +754,40 @@ describe('Codex Desktop import routes', () => {
                 ]
             })
             expect(readCalls).toEqual([['mac-runner', sessionId, { limit: 50 }]])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('reads a native transcript file through its owning runner', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '15151515-1515-4515-8515-151515151515'
+        const data = createRunnerLocalSessionData(sessionId)
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const transcriptCalls: unknown[][] = []
+        const fileCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            readCodexLocalSession: async (...args: unknown[]) => {
+                transcriptCalls.push(args)
+                return { success: true as const, data }
+            },
+            readMachineFile: async (...args: unknown[]) => {
+                fileCalls.push(args)
+                return { success: true as const, content: 'Y29uc3QgbmF0aXZlID0gdHJ1ZQo=' }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${sessionId}/file?machineId=mac-runner&path=web%2Fsrc%2Frouter.tsx`)
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({
+                success: true,
+                content: 'Y29uc3QgbmF0aXZlID0gdHJ1ZQo='
+            })
+            expect(transcriptCalls).toEqual([['mac-runner', sessionId, { limit: 1 }]])
+            expect(fileCalls).toEqual([['mac-runner', '/runner/workspace/project', 'web/src/router.tsx']])
         } finally {
             store.close()
         }
@@ -880,6 +952,47 @@ describe('Codex Desktop import routes', () => {
                 'Review the requested code.\n\nUser arguments: src/index.ts',
                 '/review src/index.ts',
                 'native:receipt-1'
+            ]])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('forwards an explicit native recovery confirmation to the selected runner', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '56565656-5656-4656-8656-565656565659'
+        const data = createRunnerLocalSessionData(sessionId, '/runner/.codex/worktrees/recovery-thread')
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const sendCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            readCodexLocalSession: async () => ({ success: true as const, data }),
+            sendCodexLocalSessionMessage: async (...args: unknown[]) => {
+                sendCalls.push(args)
+                return { success: true as const, status: 'processing' as const }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${sessionId}/messages`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    machineId: 'mac-runner',
+                    message: 'Retry this saved message',
+                    clientMessageId: 'native:recovery-1',
+                    forceRecovery: true
+                })
+            })
+            expect(response.status).toBe(202)
+            expect(sendCalls).toEqual([[
+                'mac-runner',
+                sessionId,
+                'Retry this saved message',
+                undefined,
+                'native:recovery-1',
+                true
             ]])
         } finally {
             store.close()

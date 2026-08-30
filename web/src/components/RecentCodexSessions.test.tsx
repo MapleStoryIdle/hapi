@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render as renderUi, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import { I18nProvider } from '@/lib/i18n-context'
 import { NativeCodexRealtimeProvider } from '@/lib/native-codex-realtime-context'
 import { publishNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
@@ -13,6 +15,17 @@ import {
 } from './RecentCodexSessions'
 
 afterEach(() => cleanup())
+
+function render(ui: ReactElement) {
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: { retry: false },
+            mutations: { retry: false }
+        }
+    })
+
+    return renderUi(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+}
 
 function createApi() {
     return {
@@ -43,6 +56,12 @@ function createApi() {
         forkCodexSession: vi.fn(async () => ({
             type: 'success' as const,
             sessionId: 'new-hapi-session'
+        })),
+        getMachineGitBranch: vi.fn(async () => ({
+            success: true as const,
+            stdout: '# branch.oid abc123\n# branch.head main\n',
+            stderr: '',
+            exitCode: 0
         }))
     } as unknown as ApiClient
 }
@@ -115,7 +134,7 @@ describe('RecentCodexSessions', () => {
         }))
         const hapiSession = {
             id: 'hapi-session',
-            active: false,
+            active: true,
             thinking: false,
             activeAt: Date.now(),
             updatedAt: Date.now(),
@@ -152,11 +171,20 @@ describe('RecentCodexSessions', () => {
 
         expect(await screen.findByText('Managed task')).toBeInTheDocument()
         expect(screen.getByText('Native task')).toBeInTheDocument()
-        expect(screen.getByTestId('recent-codex-sessions').querySelector('[data-session-source="native"][data-session-active="true"]')).not.toBeNull()
+        const sessionList = screen.getByTestId('recent-codex-sessions')
+        expect(sessionList).toHaveClass('px-4', 'sm:px-6')
+        expect(sessionList.querySelector('[data-session-source="native"][data-session-active="true"]')).not.toBeNull()
         expect(screen.queryByText('Running')).toBeNull()
         expect(api.getCodexSessions).toHaveBeenCalledWith({ machineId: 'machine-1', limit: 100 })
-        expect(screen.getByTestId('recent-codex-sessions').querySelector('[data-session-source="hapi"]')).not.toBeNull()
-        expect(screen.getByTestId('recent-codex-sessions').querySelector('[data-session-source="native"]')).not.toBeNull()
+        const hapiIcon = sessionList.querySelector('[data-session-source="hapi"]')
+        const nativeIcon = sessionList.querySelector('[data-session-source="native"]')
+        expect(hapiIcon).not.toBeNull()
+        expect(nativeIcon).not.toBeNull()
+        expect(hapiIcon).toHaveAttribute('data-session-agent', 'codex')
+        expect(hapiIcon?.querySelector('[title="Codex"]')).toHaveClass('text-[#4EA1FF]')
+        expect(nativeIcon?.querySelector('[title="Codex"]')).toHaveClass('text-[var(--app-fg)]')
+        expect(hapiIcon?.querySelector('[data-session-running-indicator]')).toHaveClass('bg-[#34C759]', 'motion-safe:animate-pulse')
+        expect(nativeIcon?.querySelector('[data-session-running-indicator]')).toHaveClass('bg-[#34C759]', 'motion-safe:animate-pulse')
     })
 
     it('groups sessions by directory and shows only title and activity time', async () => {
@@ -194,9 +222,55 @@ describe('RecentCodexSessions', () => {
         expect(api.forkCodexSession).not.toHaveBeenCalled()
     })
 
+    it('shows the runner Git branch below each directory name without a session count', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({
+            success: true as const,
+            sessions: [
+                {
+                    id: 'codex-thread-newer',
+                    title: 'Newer Codex task',
+                    cwd: '/workspace/project',
+                    file: '/tmp/newer-rollout.jsonl',
+                    modifiedAt: Date.now()
+                },
+                {
+                    id: 'codex-thread-older',
+                    title: 'Older Codex task',
+                    cwd: '/workspace/project',
+                    file: '/tmp/older-rollout.jsonl',
+                    modifiedAt: Date.now() - 1
+                }
+            ]
+        }))
+        api.getMachineGitBranch = vi.fn(async () => ({
+            success: true as const,
+            stdout: '# branch.oid abc123\n# branch.head feature/session-list\n',
+            stderr: '',
+            exitCode: 0,
+            isWorktree: true
+        }))
+
+        render(
+            <I18nProvider>
+                <RecentCodexSessions api={api} machineId="machine-1" onOpen={vi.fn()} />
+            </I18nProvider>
+        )
+
+        expect(await screen.findByTestId('recent-codex-directory-branch')).toHaveTextContent('feature/session-list')
+        expect(api.getMachineGitBranch).toHaveBeenCalledWith('machine-1', '/workspace/project')
+        expect(screen.getByTestId('recent-codex-directory-branch')).toHaveAttribute('data-git-kind', 'worktree')
+        expect(screen.getByTestId('recent-codex-directory-branch')).toHaveAttribute(
+            'title',
+            'worktree · feature/session-list'
+        )
+        expect(screen.getByTestId('recent-codex-directory-branch').querySelector('[data-motion-icon="worktree"]')).not.toBeNull()
+        expect(screen.getByRole('button', { name: 'Collapse project' })).not.toHaveTextContent('2')
+    })
+
     it('creates a new session in the directory without toggling the group', async () => {
         const api = createApi()
-        const onNewSessionInDirectory = vi.fn()
+        const onNewSessionInDirectory = vi.fn(async () => false)
         render(
             <I18nProvider>
                 <RecentCodexSessions
@@ -213,6 +287,31 @@ describe('RecentCodexSessions', () => {
 
         expect(onNewSessionInDirectory).toHaveBeenCalledWith('/workspace/project')
         expect(screen.getByRole('button', { name: 'Collapse project' })).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('shows a short success morph after a directory session is created', async () => {
+        const api = createApi()
+        const onNewSessionInDirectory = vi.fn(async () => true)
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    onOpen={vi.fn()}
+                    onNewSessionInDirectory={onNewSessionInDirectory}
+                />
+            </I18nProvider>
+        )
+
+        await screen.findByText('Recent Codex task')
+        const createButton = screen.getByRole('button', { name: 'New session in this directory' })
+        expect(createButton.querySelector('[data-motion-icon="plus"]')).not.toBeNull()
+
+        fireEvent.click(createButton)
+        await waitFor(() => {
+            expect(onNewSessionInDirectory).toHaveBeenCalledWith('/workspace/project')
+            expect(createButton.querySelector('[data-motion-icon="check"]')).not.toBeNull()
+        })
     })
 
     it('does not offer quick creation for sessions without a directory', async () => {
@@ -367,11 +466,14 @@ describe('RecentCodexSessions', () => {
         await screen.findByText('Recent Codex task')
         const collapseButton = screen.getByRole('button', { name: 'Collapse project' })
         expect(collapseButton).toHaveAttribute('aria-expanded', 'true')
+        expect(collapseButton.querySelector('[data-motion-icon="folder-open"]')).toHaveClass('h-[27.5px]', 'w-[27.5px]')
         expect(collapseButton.closest('[data-directory]')?.querySelector('ul.border-l')).not.toBeNull()
 
         fireEvent.click(collapseButton)
         expect(screen.queryByText('Recent Codex task')).toBeNull()
-        expect(screen.getByRole('button', { name: 'Expand project' })).toHaveAttribute('aria-expanded', 'false')
+        const expandButton = screen.getByRole('button', { name: 'Expand project' })
+        expect(expandButton).toHaveAttribute('aria-expanded', 'false')
+        expect(expandButton.querySelector('[data-motion-icon="folder"]')).not.toBeNull()
 
         fireEvent.click(screen.getByRole('button', { name: 'Expand project' }))
         expect(screen.getByText('Recent Codex task')).toBeInTheDocument()
@@ -489,6 +591,7 @@ describe('RecentCodexSessions', () => {
 
         expect(screen.getByText('Recent Codex task')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled()
+        expect(screen.getByRole('button', { name: 'Refresh' }).querySelector('[data-motion-icon="loader"]')).not.toBeNull()
 
         resolveRefresh({
             success: true,
@@ -505,6 +608,7 @@ describe('RecentCodexSessions', () => {
         await waitFor(() => {
             expect(api.getCodexSessions).toHaveBeenCalledTimes(2)
             expect(screen.getByText('Fresh Codex task')).toBeInTheDocument()
+            expect(screen.getByRole('button', { name: 'Refresh' }).querySelector('[data-motion-icon="check"]')).not.toBeNull()
         })
         expect(api.getCodexSessions).toHaveBeenLastCalledWith({
             machineId: 'machine-1',

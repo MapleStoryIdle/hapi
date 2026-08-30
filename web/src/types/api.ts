@@ -44,6 +44,11 @@ export type {
     RemoteServerCandidatesResponse,
     RemoteServerResponse,
     RemoteServersResponse,
+    RevokeShareResponse,
+    ShareDetails,
+    ShareResponse,
+    ShareSummary,
+    SharesResponse,
     SlashCommand,
     SlashCommandsResponse,
     SessionResponse,
@@ -237,6 +242,7 @@ export type CodexLocalSessionDirectSendPhase =
     | 'launching'
     | 'matching'
     | 'connected'
+    | 'retrying'
     | 'reasoning'
 
 export type CodexLocalSessionDirectSendProgress = {
@@ -244,17 +250,26 @@ export type CodexLocalSessionDirectSendProgress = {
     startedAt: number
     phaseStartedAt: number
     transport: 'app-server' | 'exec-resume'
+    attempt?: number
 }
+
+export type CodexLocalSessionDirectSendRecoveryReason =
+    | 'codex_timeout'
+    | 'session_status_unknown'
+    | 'launch_failed'
+    | 'runner_restarted'
 
 export type CodexLocalSessionStatusResponse =
     | {
         success: true
         status: CodexLocalSessionRunState
+        stalledSince?: number
         startedAt?: number
         progress?: CodexLocalSessionDirectSendProgress
         lastError?: string
         lastErrorAt?: number
         lastErrorClientMessageId?: string
+        lastErrorCode?: CodexLocalSessionDirectSendRecoveryReason
         queuedMessages?: CodexLocalSessionQueuedMessage[]
     }
     | {
@@ -321,6 +336,8 @@ export type CodexLocalSessionQueuedMessage = {
     id: string
     text: string
     queuedAt: number
+    recoveryRequired?: boolean
+    recoveryReason?: CodexLocalSessionDirectSendRecoveryReason
 }
 
 export type ForkCodexLocalSessionResponse =

@@ -29,4 +29,17 @@ describe('recent Codex session route', () => {
         expect(router.state.location.search).toEqual({ machineId: 'machine-1' })
         expect(router.state.matches.at(-1)?.routeId).toBe('/sessions/new')
     })
+
+    it('keeps the public share manager separate from the Web Share Target route', async () => {
+        const router = createAppRouter(createMemoryHistory({
+            initialEntries: ['/shares']
+        }))
+
+        await router.load()
+        expect(router.state.matches.at(-1)?.routeId).toBe('/shares')
+
+        await router.navigate({ to: '/share', search: { id: 'transfer-1' } })
+        expect(router.state.matches.at(-1)?.routeId).toBe('/share')
+        expect(router.state.location.search).toEqual({ id: 'transfer-1' })
+    })
 })

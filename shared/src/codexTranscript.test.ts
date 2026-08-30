@@ -78,6 +78,35 @@ describe('getLocalCodexSessionData', () => {
         }
     })
 
+    it('imports native context compaction as its own transcript event', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-context-compact-test-'))
+        const sessionId = '12121212-1212-4212-8212-121212121212'
+        const sessionDir = join(codexHome, 'sessions', '2026', '08', '30')
+        mkdirSync(sessionDir, { recursive: true })
+        const file = join(sessionDir, `rollout-${sessionId}.jsonl`)
+        writeFileSync(file, `${[
+            { type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } },
+            {
+                timestamp: '2026-08-30T01:02:03.000Z',
+                type: 'event_msg',
+                payload: { type: 'context_compacted' }
+            }
+        ].map((record) => JSON.stringify(record)).join('\n')}\n`, 'utf-8')
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            const data = getLocalCodexSessionData(sessionId, { limit: 20 })
+            expect(data?.importedMessages).toHaveLength(1)
+            expect(data?.importedMessages[0]).toMatchObject({
+                role: 'agent',
+                createdAt: Date.parse('2026-08-30T01:02:03.000Z'),
+                content: { data: { type: 'context_compacted' } }
+            })
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
     it('normalizes native custom exec records into timed terminal messages', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-custom-tool-test-'))
         const sessionId = '66666666-6666-4666-8666-666666666666'
@@ -293,6 +322,45 @@ describe('listLocalCodexSessions', () => {
                 cwd: '/workspace/project',
                 title: 'Tail title',
                 lastUserMessage: 'latest tail prompt',
+                runState: 'idle'
+            })
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('reads past the injected context to recover a large transcript title', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-large-title-test-'))
+        const sessionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+        const sessionDir = join(codexHome, 'sessions', '2026', '08', '30')
+        const file = join(sessionDir, `rollout-${sessionId}.jsonl`)
+        mkdirSync(sessionDir, { recursive: true })
+        writeFileSync(file, [
+            JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            JSON.stringify({ type: 'response_item', payload: {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: `# AGENTS.md instructions\n${'x'.repeat(80_000)}` }]
+            } }),
+            JSON.stringify({ type: 'response_item', payload: {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: 'Use the real first prompt as this session title' }]
+            } }),
+            JSON.stringify({ type: 'response_item', payload: {
+                type: 'message',
+                role: 'assistant',
+                content: [{ type: 'output_text', text: 'x'.repeat(600_000) }]
+            } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })
+        ].join('\n'), 'utf-8')
+
+        try {
+            expect(readLocalCodexSessionSummary(file)).toMatchObject({
+                id: sessionId,
+                title: 'Use the real first prompt as this session title',
+                cwd: '/workspace/project',
                 runState: 'idle'
             })
         } finally {

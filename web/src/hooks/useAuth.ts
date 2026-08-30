@@ -6,6 +6,13 @@ export type AuthSource =
     | { type: 'telegram'; initData: string }
     | { type: 'accessToken'; token: string }
 
+function getAuthSourceKey(authSource: AuthSource | null, baseUrl: string): string | null {
+    if (!authSource) return null
+    return authSource.type === 'telegram'
+        ? `${baseUrl}\u0000telegram\u0000${authSource.initData}`
+        : `${baseUrl}\u0000access-token\u0000${authSource.token}`
+}
+
 function decodeJwtExpMs(token: string): number | null {
     const parts = token.split('.')
     if (parts.length < 2) return null
@@ -17,8 +24,9 @@ function decodeJwtExpMs(token: string): number | null {
         .padEnd(Math.ceil(payloadBase64Url.length / 4) * 4, '=')
 
     try {
-        const decoded = globalThis.atob(payloadBase64)
-        const payload = JSON.parse(decoded) as { exp?: unknown }
+        const binary = globalThis.atob(payloadBase64)
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+        const payload = JSON.parse(new TextDecoder().decode(bytes)) as { exp?: unknown }
         if (typeof payload.exp !== 'number') return null
         return payload.exp * 1000
     } catch {
@@ -48,17 +56,26 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
 } {
     const [token, setToken] = useState<string | null>(null)
     const [user, setUser] = useState<AuthResponse['user'] | null>(null)
+    const [authenticatedSourceKey, setAuthenticatedSourceKey] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState<boolean>(false)
     const [error, setError] = useState<string | null>(null)
     const [needsBinding, setNeedsBinding] = useState<boolean>(false)
     const refreshPromiseRef = useRef<Promise<string | null> | null>(null)
     const tokenRef = useRef<string | null>(null)
     const lastRefreshAttemptRef = useRef<number>(0)
+    const authenticatedSourceKeyRef = useRef<string | null>(null)
+    const sourceKey = getAuthSourceKey(authSource, baseUrl)
+    const sourceKeyRef = useRef(sourceKey)
 
     // Stable reference for auth source to use in effects
     const authSourceRef = useRef(authSource)
     authSourceRef.current = authSource
     tokenRef.current = token
+    sourceKeyRef.current = sourceKey
+
+    const hasCurrentSourceToken = token !== null && sourceKey !== null && authenticatedSourceKey === sourceKey
+    const currentToken = hasCurrentSourceToken ? token : null
+    const currentUser = hasCurrentSourceToken ? user : null
 
     const refreshAuth = useCallback(async (options?: {
         minTtlMs?: number
@@ -67,6 +84,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
     }): Promise<string | null> => {
         const currentSource = authSourceRef.current
         const currentToken = tokenRef.current
+        const currentSourceKey = sourceKeyRef.current
         if (!currentSource) {
             return null
         }
@@ -76,10 +94,11 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         const now = Date.now()
         const ttlMs = expMs ? expMs - now : null
         const needsRefreshForTtl = ttlMs !== null && ttlMs <= minTtlMs
-        if (!options?.force && ttlMs !== null && ttlMs > minTtlMs) {
+        const tokenBelongsToCurrentSource = authenticatedSourceKeyRef.current === currentSourceKey
+        if (!options?.force && tokenBelongsToCurrentSource && ttlMs !== null && ttlMs > minTtlMs) {
             return currentToken
         }
-        if (!options?.force && !needsRefreshForTtl && now - lastRefreshAttemptRef.current < 15_000) {
+        if (!options?.force && tokenBelongsToCurrentSource && !needsRefreshForTtl && now - lastRefreshAttemptRef.current < 15_000) {
             return currentToken
         }
         if (refreshPromiseRef.current) {
@@ -92,26 +111,41 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
             try {
                 const client = new ApiClient('', { baseUrl })
                 const auth = await client.authenticate(getAuthPayload(currentSource))
+                if (sourceKeyRef.current !== currentSourceKey) {
+                    return null
+                }
                 tokenRef.current = auth.token
                 setToken(auth.token)
                 setUser(auth.user)
+                authenticatedSourceKeyRef.current = currentSourceKey
+                setAuthenticatedSourceKey(currentSourceKey)
                 setError(null)
                 setNeedsBinding(false)
                 return auth.token
             } catch (error) {
                 if (currentSource.type === 'telegram' && isNotBoundError(error)) {
+                    if (sourceKeyRef.current !== currentSourceKey) {
+                        return null
+                    }
                     tokenRef.current = null
                     setToken(null)
                     setUser(null)
+                    authenticatedSourceKeyRef.current = null
+                    setAuthenticatedSourceKey(null)
                     setError(null)
                     setNeedsBinding(true)
                     return null
                 }
                 const isExpired = expMs ? Date.now() >= expMs : false
                 if (options?.hardFail || isExpired) {
+                    if (sourceKeyRef.current !== currentSourceKey) {
+                        return null
+                    }
                     tokenRef.current = null
                     setToken(null)
                     setUser(null)
+                    authenticatedSourceKeyRef.current = null
+                    setAuthenticatedSourceKey(null)
                     const msg = currentSource.type === 'telegram'
                         ? 'Session expired. Reopen the Mini App from Telegram.'
                         : 'Session expired. Please login again.'
@@ -135,6 +169,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
 
     const bind = useCallback(async (accessToken: string) => {
         const currentSource = authSourceRef.current
+        const currentSourceKey = sourceKeyRef.current
         if (!currentSource || currentSource.type !== 'telegram') {
             setError('Binding is only supported in Telegram.')
             return
@@ -145,9 +180,14 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         try {
             const client = new ApiClient('', { baseUrl })
             const auth = await client.bind({ initData: currentSource.initData, accessToken })
+            if (sourceKeyRef.current !== currentSourceKey) {
+                return
+            }
             tokenRef.current = auth.token
             setToken(auth.token)
             setUser(auth.user)
+            authenticatedSourceKeyRef.current = currentSourceKey
+            setAuthenticatedSourceKey(currentSourceKey)
             setNeedsBinding(false)
         } catch (error) {
             setError(error instanceof Error ? error.message : 'Binding failed')
@@ -162,7 +202,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
     // changes — only when auth presence toggles (login/logout). Rebuilding on every refresh churns
     // `api`'s identity, which remounts everything keyed on it (VoiceBackendSession `[props.api]`,
     // GeneratedImageCard `[ctx.api, ...]`) and drives the remount/refetch storm. Issue #927.
-    const hasToken = token !== null
+    const hasToken = currentToken !== null
     const api = useMemo(() => (
         hasToken
             ? new ApiClient(tokenRef.current ?? '', {
@@ -179,6 +219,11 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         async function run() {
             if (!authSource) {
                 // No auth source - waiting for login
+                tokenRef.current = null
+                setToken(null)
+                setUser(null)
+                authenticatedSourceKeyRef.current = null
+                setAuthenticatedSourceKey(null)
                 setNeedsBinding(false)
                 return
             }
@@ -186,18 +231,30 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
             setIsLoading(true)
             setError(null)
             setNeedsBinding(false)
+            tokenRef.current = null
+            setToken(null)
+            setUser(null)
+            authenticatedSourceKeyRef.current = null
+            setAuthenticatedSourceKey(null)
             try {
                 const client = new ApiClient('', { baseUrl }) // temporary for auth call
                 const auth = await client.authenticate(getAuthPayload(authSource))
                 if (isCancelled) return
+                if (sourceKeyRef.current !== sourceKey) return
+                tokenRef.current = auth.token
                 setToken(auth.token)
                 setUser(auth.user)
+                authenticatedSourceKeyRef.current = sourceKey
+                setAuthenticatedSourceKey(sourceKey)
                 setNeedsBinding(false)
             } catch (e) {
                 if (isCancelled) return
                 if (authSource.type === 'telegram' && isNotBoundError(e)) {
+                    tokenRef.current = null
                     setToken(null)
                     setUser(null)
+                    authenticatedSourceKeyRef.current = null
+                    setAuthenticatedSourceKey(null)
                     setError(null)
                     setNeedsBinding(true)
                     return
@@ -216,7 +273,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         return () => {
             isCancelled = true
         }
-    }, [authSource, baseUrl])
+    }, [authSource, baseUrl, sourceKey])
 
     useEffect(() => {
         tokenRef.current = null
@@ -224,16 +281,18 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         lastRefreshAttemptRef.current = 0
         setToken(null)
         setUser(null)
+        authenticatedSourceKeyRef.current = null
+        setAuthenticatedSourceKey(null)
         setError(null)
         setNeedsBinding(false)
     }, [baseUrl])
 
     useEffect(() => {
-        if (!token || !authSource) {
+        if (!currentToken || !authSource) {
             return
         }
 
-        const expMs = decodeJwtExpMs(token)
+        const expMs = decodeJwtExpMs(currentToken)
         if (!expMs) {
             return
         }
@@ -265,7 +324,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 clearTimeout(timeout)
             }
         }
-    }, [authSource, refreshAuth, token])
+    }, [authSource, currentToken, refreshAuth])
 
     useEffect(() => {
         if (!authSource) {
@@ -291,5 +350,5 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         }
     }, [authSource, refreshAuth])
 
-    return { token, user, api, isLoading, error, needsBinding, bind }
+    return { token: currentToken, user: currentUser, api, isLoading, error, needsBinding, bind }
 }

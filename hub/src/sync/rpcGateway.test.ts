@@ -206,6 +206,48 @@ describe('RpcGateway binary session channel', () => {
         }])
     })
 
+    it('reads a completed session file through its machine socket', async () => {
+        const events: Array<{ event: string; payload: unknown }> = []
+        const socket = {
+            timeout() {
+                return {
+                    async emitWithAck(event: string, payload: unknown) {
+                        events.push({ event, payload })
+                        return {
+                            success: true,
+                            bytes: new Uint8Array([4, 5, 6]),
+                            mimeType: 'text/plain',
+                            fileName: 'example.txt'
+                        }
+                    }
+                }
+            }
+        }
+        const namespace = {
+            adapter: { rooms: new Map([['machine:machine-1', new Set(['socket-1'])]]) },
+            sockets: { get: () => socket }
+        }
+        const io = { of: () => namespace } as unknown as Server
+        const rpcRegistry = {
+            getSocketIdForMethod() { return undefined }
+        } as unknown as RpcRegistry
+        const gateway = new RpcGateway(io, rpcRegistry)
+
+        const result = await gateway.readMachineFileBytes('machine-1', '/work/project', 'src/example.txt')
+
+        expect(result.success).toBe(true)
+        if (!result.success) return
+        expect(Array.from(result.bytes)).toEqual([4, 5, 6])
+        expect(events).toEqual([{
+            event: 'file:read-bytes',
+            payload: {
+                type: 'machine-file',
+                cwd: '/work/project',
+                path: 'src/example.txt'
+            }
+        }])
+    })
+
     it('uploads file bytes through the session socket without RPC method registration', async () => {
         // Upload also uses the session-scoped binary socket event directly.
         const events: Array<{ event: string; payload: unknown }> = []
