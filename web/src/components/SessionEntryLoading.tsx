@@ -5,7 +5,6 @@ import {
 } from '@/components/SessionDetailHeader'
 import { SessionDetailContent, SessionDetailSurface } from '@/components/SessionDetailSurface'
 import { SessionDetailBottomDock, SessionDetailBottomDockComposer } from '@/components/SessionDetailBottomDock'
-import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
 import { mobileLayoutHeaderShellStyle } from '@/lib/mobileLayoutContract'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -41,18 +40,16 @@ function SessionEntryLoadingHeader(props: {
     onBack: () => void
     backLabel: string
 }) {
-    const backActivation = useReliableTopEdgeAction(props.onBack)
-
     return (
         <div
-            className={`pointer-events-auto absolute inset-x-0 top-0 z-40 isolate touch-manipulation ${SESSION_DETAIL_HEADER_SAFE_AREA_CLASS}`}
+            className={`pointer-events-none absolute inset-x-0 top-0 z-40 isolate ${SESSION_DETAIL_HEADER_SAFE_AREA_CLASS}`}
             style={mobileLayoutHeaderShellStyle}
             data-testid="session-entry-loading-header"
         >
             <div className={SESSION_DETAIL_HEADER_ROW_CLASS}>
                 <button
                     type="button"
-                    {...backActivation}
+                    onClick={props.onBack}
                     data-testid="session-entry-loading-back"
                     aria-label={props.backLabel}
                     title={props.backLabel}

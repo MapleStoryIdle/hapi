@@ -57,7 +57,6 @@ import {
     subscribeNativeCodexSessionUpdated
 } from '@/lib/native-codex-realtime-events'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
-import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
 import { useCodexSubscriptionLimits } from '@/hooks/queries/useCodexSubscriptionLimits'
 import { useNativeCodexSessionComposerCapabilities } from '@/hooks/queries/useNativeCodexSessionComposerCapabilities'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
@@ -1276,7 +1275,6 @@ export function CodexSessionContextPage(props: {
         }
         setMenuOpen((open) => !open)
     }, [menuOpen])
-    const menuActivation = useReliableTopEdgeAction(handleMenuToggle)
     const nativeConnectionContext = useMemo(() => ({
         health: nativeConnectionHealth,
         recover: recoverNativeConnection,
@@ -1709,11 +1707,8 @@ export function CodexSessionContextPage(props: {
                             />
                             <button
                                 type="button"
-                                {...menuActivation}
-                                onPointerDown={(event) => {
-                                    menuActivation.onPointerDown(event)
-                                    event.stopPropagation()
-                                }}
+                                onClick={handleMenuToggle}
+                                onPointerDown={(event) => event.stopPropagation()}
                                 ref={menuAnchorRef}
                                 data-testid="codex-native-session-menu-trigger"
                                 aria-haspopup="menu"

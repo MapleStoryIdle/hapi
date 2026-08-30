@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 顶部外层 | 透明；`backdrop-filter: none`；不得做整条毛玻璃 | `mobileLayoutContract.ts`、`SessionHeader.tsx` |
 | 顶部操作 | 操作按钮所在的小胶囊保持实色；整条标题栏背景保持透明 | `SessionHeader.tsx` |
-| 标题栏触摸层 | 浮动标题栏固定为 `z-40`，必须高于会话大纲等线程遮罩；返回与会话详情不可被覆盖层拦截 | `SessionHeader.tsx`、`HappyThread.tsx` |
+| 标题栏触摸层 | 浮动标题栏固定为 `z-40`，必须高于会话大纲等线程遮罩；透明空白区域必须让触摸穿到消息线程，返回与会话详情仅由实色操作区接收触摸 | `SessionHeader.tsx`、`HappyThread.tsx` |
 | 聊天滚动区 | 初始消息从“顶部安全区 + 实测标题栏高度”之后开始；滚动后消息可从完全透明的标题栏下方经过 | `SessionChat.tsx`、`HappyThread.tsx` |
 | iOS 顶部安全区 | standalone 模式通常最小 50px；若运行时确认顶部是 WebKit 绘制在 DOM 外的系统区，则不得再叠加这 50px，标题从可见网页视口开始 | `useViewportHeight.ts`、`index.css` |
 | iOS 底部安全区 | standalone 模式最小 34px；普通触屏最小 12px | `index.css` |
@@ -24,6 +24,8 @@
 - CSS 数值只能通过 `web/src/index.css` 中的 **Mobile layout contract** 变量维护。
 - 所有渲染组件必须使用 canonical `--app-safe-area-top/right/bottom/left`（输入框可使用由其派生的 composer token）；`env(safe-area-inset-*)` 只允许出现在 `index.css` 的变量定义和 `useViewportHeight.ts` 的浏览器探针中。这样 standalone 的 50px/34px 兜底不会被二级页面或浮层绕过。
 - 顶部外层样式只能通过 `web/src/lib/mobileLayoutContract.ts` 的 `mobileLayoutHeaderShellStyle` 进入 `SessionHeader`。
+- 浮动标题栏的全宽透明 shell 必须 `pointer-events: none`；左侧操作胶囊、右侧按钮和弹层自行显式 `pointer-events: auto`。不得用透明全宽命中层拦截消息线程的手势。
+- 非模态 Toast 不得覆盖标题栏操作区；它必须从 `--app-safe-area-top + 4.5rem` 之后出现。模态弹层仍可按预期阻断操作。
 - 消息线程必须保持 edge-to-edge；初始顶部留白只能由 `HappyThread.tsx` 的 `getThreadContentPadding` 维护。不得再给非滚动 root 加顶部 padding，否则消息无法从透明标题栏下方滚过。
 - 组件不得为了“临时修一个问题”另加平行的底部 `padding`、`margin`、`bottom` 或 `backdrop-filter` 覆盖这些规则。
 - `data-ios-system-top-chrome="unreachable"` 只能由 `useViewportHeight.ts` 在 iOS standalone、`env(safe-area-inset-top)=0` 且检测到状态栏级顶部系统区时设置；该状态下禁止重新加 50px 顶部兜底。

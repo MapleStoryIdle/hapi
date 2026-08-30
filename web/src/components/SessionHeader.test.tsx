@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nContext, I18nProvider } from '@/lib/i18n-context'
 import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
@@ -42,47 +42,6 @@ function createSession(): Session {
     }
 }
 
-function fireWebKitTouchPointerUp(target: Element) {
-    const event = createEvent.pointerUp(target, { bubbles: true, cancelable: true })
-    Object.defineProperties(event, {
-        button: { value: -1 },
-        clientX: { value: 0 },
-        clientY: { value: 0 },
-        pointerType: { value: 'touch' },
-        pointerId: { value: 1 },
-    })
-    fireEvent(target, event)
-}
-
-function fireWebKitTouchPointerDown(target: Element) {
-    const event = createEvent.pointerDown(target, { bubbles: true, cancelable: true })
-    Object.defineProperties(event, {
-        button: { value: -1 },
-        clientX: { value: 0 },
-        clientY: { value: 0 },
-        pointerType: { value: 'touch' },
-        pointerId: { value: 1 },
-    })
-    fireEvent(target, event)
-}
-
-function fireWebKitTouchPointerMove(target: Element, clientY: number) {
-    const event = createEvent.pointerMove(target, { bubbles: true, cancelable: true, clientY })
-    Object.defineProperties(event, {
-        button: { value: -1 },
-        clientX: { value: 0 },
-        clientY: { value: clientY },
-        pointerType: { value: 'touch' },
-        pointerId: { value: 1 },
-    })
-    fireEvent(target, event)
-}
-
-function fireWebKitTouchEnd(target: Element) {
-    const event = createEvent.touchEnd(target, { bubbles: true, cancelable: true })
-    fireEvent(target, event)
-}
-
 describe('mobile layout contract', () => {
     it('keeps the full title-bar shell transparent without changing the control surface', () => {
         const queryClient = new QueryClient({
@@ -111,7 +70,7 @@ describe('mobile layout contract', () => {
         expect(shell).toHaveAttribute('data-mobile-layout-contract', MOBILE_LAYOUT_CONTRACT.header.state)
         expect(shell.style.backgroundColor).toBe(`var(${MOBILE_LAYOUT_CONTRACT.header.backgroundVariable})`)
         expect(shell.style.backdropFilter).toBe(`var(${MOBILE_LAYOUT_CONTRACT.header.backdropFilterVariable})`)
-        expect(shell).toHaveClass('pointer-events-auto', 'z-40', 'isolate', 'touch-manipulation')
+        expect(shell).toHaveClass('pointer-events-none', 'z-40', 'isolate')
 
         const controls = screen.getByTestId('session-header-controls')
         expect(controls).toHaveClass('pointer-events-auto', 'h-11', 'gap-0', 'bg-[var(--app-bg)]')
@@ -147,13 +106,13 @@ describe('SessionHeader back action', () => {
 
         const backButton = screen.getByTestId('session-header-back')
         expect(backButton).toHaveClass('pointer-events-auto', 'touch-manipulation', 'h-11', 'w-11')
-        expect(screen.getByTestId(MOBILE_LAYOUT_CONTRACT.header.testId)).not.toHaveClass('pointer-events-none')
+        expect(screen.getByTestId(MOBILE_LAYOUT_CONTRACT.header.testId)).toHaveClass('pointer-events-none')
         fireEvent.click(backButton)
 
         expect(onBack).toHaveBeenCalledTimes(1)
     })
 
-    it('uses pointer-up as the iOS PWA fallback without double-navigating on its follow-up click', () => {
+    it('leaves touch arbitration to the browser instead of cancelling a slightly moved tap', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -178,170 +137,13 @@ describe('SessionHeader back action', () => {
         )
 
         const backButton = screen.getByTestId('session-header-back')
-        fireEvent.pointerUp(backButton, { button: 0, pointerType: 'touch' })
-        fireEvent.click(backButton, { detail: 1 })
-
-        expect(onBack).toHaveBeenCalledTimes(1)
-    })
-
-    it('accepts a standalone WebKit touch pointer-up without a mouse button value', () => {
-        const queryClient = new QueryClient({
-            defaultOptions: {
-                queries: { retry: false },
-                mutations: { retry: false }
-            }
-        })
-        const onBack = vi.fn()
-
-        render(
-            <QueryClientProvider client={queryClient}>
-                <ToastProvider>
-                    <I18nProvider>
-                        <SessionHeader
-                            session={createSession()}
-                            api={null}
-                            onBack={onBack}
-                            floating
-                        />
-                    </I18nProvider>
-                </ToastProvider>
-            </QueryClientProvider>
-        )
-
-        fireWebKitTouchPointerUp(screen.getByTestId('session-header-back'))
-
-        expect(onBack).toHaveBeenCalledTimes(1)
-    })
-
-    it('keeps the click fallback available after a cancelled standalone touch', () => {
-        const queryClient = new QueryClient({
-            defaultOptions: {
-                queries: { retry: false },
-                mutations: { retry: false }
-            }
-        })
-        const onBack = vi.fn()
-
-        render(
-            <QueryClientProvider client={queryClient}>
-                <ToastProvider>
-                    <I18nProvider>
-                        <SessionHeader
-                            session={createSession()}
-                            api={null}
-                            onBack={onBack}
-                            floating
-                        />
-                    </I18nProvider>
-                </ToastProvider>
-            </QueryClientProvider>
-        )
-
-        const backButton = screen.getByTestId('session-header-back')
-        fireWebKitTouchPointerDown(backButton)
-        fireEvent.pointerCancel(backButton)
-        fireEvent.click(backButton, { detail: 1 })
-
-        expect(onBack).toHaveBeenCalledTimes(1)
-    })
-
-    it('uses touch-end when a busy standalone WebKit view loses pointer-up', () => {
-        const queryClient = new QueryClient({
-            defaultOptions: {
-                queries: { retry: false },
-                mutations: { retry: false }
-            }
-        })
-        const onBack = vi.fn()
-
-        render(
-            <QueryClientProvider client={queryClient}>
-                <ToastProvider>
-                    <I18nProvider>
-                        <SessionHeader
-                            session={createSession()}
-                            api={null}
-                            onBack={onBack}
-                            floating
-                        />
-                    </I18nProvider>
-                </ToastProvider>
-            </QueryClientProvider>
-        )
-
-        const backButton = screen.getByTestId('session-header-back')
-        fireWebKitTouchPointerDown(backButton)
-        fireWebKitTouchEnd(backButton)
-        fireEvent.click(backButton, { detail: 1 })
-
-        expect(onBack).toHaveBeenCalledTimes(1)
-    })
-
-    it('runs one action when WebKit dispatches both pointer-up and touch-end', () => {
-        const queryClient = new QueryClient({
-            defaultOptions: {
-                queries: { retry: false },
-                mutations: { retry: false }
-            }
-        })
-        const onBack = vi.fn()
-
-        render(
-            <QueryClientProvider client={queryClient}>
-                <ToastProvider>
-                    <I18nProvider>
-                        <SessionHeader
-                            session={createSession()}
-                            api={null}
-                            onBack={onBack}
-                            floating
-                        />
-                    </I18nProvider>
-                </ToastProvider>
-            </QueryClientProvider>
-        )
-
-        const backButton = screen.getByTestId('session-header-back')
-        fireWebKitTouchPointerDown(backButton)
-        fireWebKitTouchPointerUp(backButton)
-        fireWebKitTouchEnd(backButton)
-        fireEvent.click(backButton, { detail: 1 })
-
-        expect(onBack).toHaveBeenCalledTimes(1)
-    })
-
-    it('does not treat a scrolling gesture as a header tap', () => {
-        const queryClient = new QueryClient({
-            defaultOptions: {
-                queries: { retry: false },
-                mutations: { retry: false }
-            }
-        })
-        const onBack = vi.fn()
-
-        render(
-            <QueryClientProvider client={queryClient}>
-                <ToastProvider>
-                    <I18nProvider>
-                        <SessionHeader
-                            session={createSession()}
-                            api={null}
-                            onBack={onBack}
-                            floating
-                        />
-                    </I18nProvider>
-                </ToastProvider>
-            </QueryClientProvider>
-        )
-
-        const backButton = screen.getByTestId('session-header-back')
-        fireWebKitTouchPointerDown(backButton)
-        fireWebKitTouchPointerMove(backButton, 16)
-        fireWebKitTouchPointerUp(backButton)
-        fireWebKitTouchEnd(backButton)
-        fireEvent.click(backButton, { detail: 1 })
-
+        fireEvent.pointerDown(backButton, { pointerType: 'touch', pointerId: 1, clientX: 0, clientY: 0 })
+        fireEvent.pointerMove(backButton, { pointerType: 'touch', pointerId: 1, clientX: 0, clientY: 16 })
+        fireEvent.pointerUp(backButton, { pointerType: 'touch', pointerId: 1, clientX: 0, clientY: 16 })
         expect(onBack).not.toHaveBeenCalled()
+
+        fireEvent.click(backButton)
+        expect(onBack).toHaveBeenCalledTimes(1)
     })
 
     it('keeps the title details control in the explicit touch hit-test layer', () => {
@@ -406,9 +208,9 @@ describe('SessionHeader back action', () => {
         )
 
         const titleButton = screen.getByRole('button', { name: 'hapi' })
-        fireWebKitTouchPointerDown(titleButton)
+        fireEvent.pointerDown(titleButton, { pointerType: 'touch', pointerId: 1 })
         fireEvent.pointerCancel(titleButton)
-        fireEvent.click(titleButton, { detail: 1 })
+        fireEvent.click(titleButton)
 
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
     })
@@ -449,78 +251,6 @@ describe('SessionHeader back action', () => {
         expect(detailReads).toBe(readsAfterMount)
     })
 
-    it('opens title details from the touch pointer-up fallback when WebKit drops click', () => {
-        const queryClient = new QueryClient({
-            defaultOptions: {
-                queries: { retry: false },
-                mutations: { retry: false }
-            }
-        })
-
-        render(
-            <QueryClientProvider client={queryClient}>
-                <ToastProvider>
-                    <I18nProvider>
-                        <SessionHeader
-                            session={createSession()}
-                            api={null}
-                            onBack={() => {}}
-                            floating
-                        />
-                    </I18nProvider>
-                </ToastProvider>
-            </QueryClientProvider>
-        )
-
-        const titleButton = screen.getByRole('button', { name: 'hapi' })
-        fireWebKitTouchPointerDown(titleButton)
-        fireWebKitTouchPointerUp(titleButton)
-
-        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
-    })
-
-    it('does not impose a time-based lock after a title touch without a compatibility click', () => {
-        render(
-            <I18nProvider>
-                <SessionTitleDetails title="hapi" sessionId="title-without-compatibility-click" />
-            </I18nProvider>
-        )
-
-        const titleButton = screen.getByRole('button', { name: 'hapi' })
-        fireWebKitTouchPointerDown(titleButton)
-        fireWebKitTouchPointerUp(titleButton)
-
-        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
-
-        // No compatibility click arrives. A new touch still toggles right
-        // away instead of waiting for the former two-second guard to expire.
-        fireWebKitTouchPointerDown(titleButton)
-        fireWebKitTouchPointerUp(titleButton)
-
-        expect(screen.queryByRole('dialog', { name: 'Session details' })).not.toBeInTheDocument()
-    })
-
-    it('consumes only the compatibility click that follows a title touch', () => {
-        render(
-            <I18nProvider>
-                <SessionTitleDetails title="hapi" sessionId="title-compatibility-click" />
-            </I18nProvider>
-        )
-
-        const titleButton = screen.getByRole('button', { name: 'hapi' })
-        fireWebKitTouchPointerDown(titleButton)
-        fireWebKitTouchPointerUp(titleButton)
-
-        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
-
-        fireEvent.click(titleButton, { detail: 1 })
-
-        expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
-        fireEvent.click(titleButton, { detail: 1 })
-
-        expect(screen.queryByRole('dialog', { name: 'Session details' })).not.toBeInTheDocument()
-    })
-
     it('keeps title details open while streaming session state refreshes around it', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
@@ -546,9 +276,7 @@ describe('SessionHeader back action', () => {
         const { rerender } = render(renderHeader(session))
 
         const titleButton = screen.getByRole('button', { name: 'hapi' })
-        fireWebKitTouchPointerDown(titleButton)
-        fireWebKitTouchPointerUp(titleButton)
-        fireEvent.click(titleButton, { detail: 1 })
+        fireEvent.click(titleButton)
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
 
         rerender(renderHeader({
@@ -562,7 +290,7 @@ describe('SessionHeader back action', () => {
         expect(screen.getByRole('button', { name: 'hapi' })).toHaveAttribute('aria-expanded', 'true')
     })
 
-    it('closes title details on a second touch of the same title button', () => {
+    it('closes title details on a second browser click', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -586,19 +314,15 @@ describe('SessionHeader back action', () => {
         )
 
         const titleButton = screen.getByRole('button', { name: 'hapi' })
-        fireWebKitTouchPointerDown(titleButton)
-        fireWebKitTouchPointerUp(titleButton)
-        fireEvent.click(titleButton, { detail: 1 })
+        fireEvent.click(titleButton)
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
 
-        fireWebKitTouchPointerDown(titleButton)
-        fireWebKitTouchPointerUp(titleButton)
-        fireEvent.click(titleButton, { detail: 1 })
+        fireEvent.click(titleButton)
 
         expect(screen.queryByRole('dialog', { name: 'Session details' })).not.toBeInTheDocument()
     })
 
-    it('opens the top action menu from the touch pointer-up fallback', () => {
+    it('opens and closes the top action menu on consecutive native tap sequences', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -621,9 +345,19 @@ describe('SessionHeader back action', () => {
             </QueryClientProvider>
         )
 
-        fireWebKitTouchPointerUp(screen.getByTitle('More actions'))
+        const trigger = screen.getByTitle('More actions')
+        fireEvent.pointerDown(trigger, { pointerType: 'touch', pointerId: 1 })
+        fireEvent.click(trigger)
 
         expect(screen.getByRole('menu')).toBeInTheDocument()
+
+        // The menu's document-level pointer-down listener closes outside
+        // clicks. The trigger must stop only that event so a second tap
+        // genuinely toggles the open menu closed rather than reopening it.
+        fireEvent.pointerDown(trigger, { pointerType: 'touch', pointerId: 2 })
+        fireEvent.click(trigger)
+
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     })
 
     it('exposes the same refresh action when the detail page supplies one', () => {

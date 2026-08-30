@@ -19,7 +19,7 @@ describe('SessionEntryLoading', () => {
 
         expect(screen.getByTestId('session-entry-loading')).toHaveAttribute('data-session-detail-source', 'hapi')
         const header = screen.getByTestId('session-entry-loading-header')
-        expect(header).toHaveClass('pointer-events-auto', 'z-40', 'isolate', 'touch-manipulation')
+        expect(header).toHaveClass('pointer-events-none', 'z-40', 'isolate')
         expect(header.style.backgroundColor).toBe(`var(${MOBILE_LAYOUT_CONTRACT.header.backgroundVariable})`)
         expect(header.style.backdropFilter).toBe(`var(${MOBILE_LAYOUT_CONTRACT.header.backdropFilterVariable})`)
         const skeleton = screen.getByRole('status', { name: 'misc.loadingMessages' })

@@ -17,7 +17,7 @@ describe('recent Codex session route', () => {
         expect(leaf?.search).toEqual({ machineId: 'machine-1' })
     })
 
-    it('resolves the new-session route used by the sessions header plus button', async () => {
+    it('resolves the new-session route used by the sessions menu', async () => {
         const router = createAppRouter(createMemoryHistory({
             initialEntries: ['/sessions']
         }))

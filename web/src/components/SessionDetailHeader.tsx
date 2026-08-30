@@ -1,4 +1,4 @@
-import { useCallback, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslation } from '@/lib/use-translation'
 import { cn } from '@/lib/utils'
 
@@ -32,23 +32,6 @@ export function SessionDetailHeader(props: {
     className?: string
 }) {
     const { t } = useTranslation()
-    const backPointerUpAtRef = useRef(0)
-
-    const handleBackPointerUp = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-        // Standalone iOS touch/pen pointer events may not expose button=0.
-        // Ignore only non-primary mouse button releases.
-        if (event.pointerType === 'mouse' && event.button !== 0) return
-
-        backPointerUpAtRef.current = Date.now()
-        event.preventDefault()
-        props.onBack()
-    }, [props.onBack])
-
-    const handleBackClick = useCallback(() => {
-        if (Date.now() - backPointerUpAtRef.current < 1_000) return
-        props.onBack()
-    }, [props.onBack])
-
     return (
         <header
             className={cn(
@@ -61,8 +44,7 @@ export function SessionDetailHeader(props: {
             <div className={SESSION_DETAIL_HEADER_ROW_CLASS} data-testid="session-detail-header-row">
                 <button
                     type="button"
-                    onPointerUp={handleBackPointerUp}
-                    onClick={handleBackClick}
+                    onClick={props.onBack}
                     className="touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                     aria-label={t('session.back')}
                     title={t('session.back')}

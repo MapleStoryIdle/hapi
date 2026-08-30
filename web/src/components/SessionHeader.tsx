@@ -5,7 +5,6 @@ import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexSubscriptionLimits } from '@/hooks/queries/useCodexSubscriptionLimits'
-import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
 import {
     useSessionConnection,
     type SessionConnectionContextValue,
@@ -201,7 +200,6 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
     const toggleDetails = useCallback(() => {
         setDetailsOpen((open) => !open)
     }, [])
-    const detailsActivation = useReliableTopEdgeAction(toggleDetails)
 
     const copyDetail = async (key: string, value: string) => {
         try {
@@ -248,7 +246,7 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
         <div ref={titleDetailsRef} className="relative min-w-0 max-w-[min(58vw,22rem)]">
             <button
                 type="button"
-                {...detailsActivation}
+                onClick={toggleDetails}
                 className="pointer-events-auto touch-manipulation flex h-11 max-w-full items-center truncate rounded-full pl-1 pr-2 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                 aria-haspopup="dialog"
                 aria-expanded={detailsOpen}
@@ -263,7 +261,7 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
                     id={detailsId}
                     role="dialog"
                     aria-label={t('session.header.details.title')}
-                    className="fixed left-3 top-[calc(var(--app-safe-area-top)+4.25rem)] z-50 w-[min(calc(100vw-1.5rem),22rem)] rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+                    className="pointer-events-auto fixed left-3 top-[calc(var(--app-safe-area-top)+4.25rem)] z-50 w-[min(calc(100vw-1.5rem),22rem)] rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
                 >
                     <div className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">{t('session.header.details.title')}</div>
                     <div className="flex flex-col gap-2">
@@ -285,14 +283,12 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
 })
 
 export function SessionHeaderBackButton(props: { onBack: () => void; label?: string }) {
-    const backActivation = useReliableTopEdgeAction(props.onBack)
-
     const { t } = useTranslation()
 
     return (
         <button
             type="button"
-            {...backActivation}
+            onClick={props.onBack}
             data-testid="session-header-back"
             aria-label={props.label ?? t('session.back')}
             title={props.label ?? t('session.back')}
@@ -381,8 +377,6 @@ export function SessionConnectionStatusControl(props: {
         }
         void connection.recover()
     }, [connection])
-    const recoveryActivation = useReliableTopEdgeAction(recover)
-
     if (!connection || connection.health === 'connected') {
         return null
     }
@@ -423,7 +417,7 @@ export function SessionConnectionStatusControl(props: {
         >
             <button
                 type="button"
-                {...recoveryActivation}
+                onClick={recover}
                 disabled={connection.health === 'recovering'}
                 data-testid={testId}
                 className="pointer-events-auto touch-manipulation relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:border-[var(--app-hint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
@@ -468,11 +462,10 @@ export function FloatingSessionHeader(props: {
     // browser-provided inset remains the source of truth.
     const headerTopInsetClass = SESSION_DETAIL_HEADER_SAFE_AREA_CLASS
     // The message viewport intentionally scrolls under this transparent
-    // shell. Keep the shell and every control in one isolated, explicit hit
-    // testing layer: inherited pointer-events:none is unreliable for nested
-    // controls in iOS standalone WebKit.
+    // shell. Only visible controls receive hits: the empty transparent area
+    // must continue sending a vertical pan to the conversation below.
     const headerShellClass = props.floating
-        ? `pointer-events-auto absolute inset-x-0 top-0 z-40 isolate touch-manipulation ${headerTopInsetClass}`
+        ? `pointer-events-none absolute inset-x-0 top-0 z-40 isolate ${headerTopInsetClass}`
         : headerTopInsetClass
     // The full-width title-bar shell is transparent. Its compact controls
     // deliberately keep their own solid surface for legibility.
@@ -649,7 +642,6 @@ export function CodexSubscriptionLimitsBadge(props: {
     const toggleOpen = useCallback(() => {
         setOpen((value) => !value)
     }, [])
-    const limitsActivation = useReliableTopEdgeAction(toggleOpen)
     const rootRef = useRef<HTMLDivElement | null>(null)
     const windows = getDisplayLimitWindows(props.limits)
     const text = windows.map((window) => formatLimitWindow(window, t)).filter(Boolean).join(' · ')
@@ -710,7 +702,7 @@ export function CodexSubscriptionLimitsBadge(props: {
         <div ref={rootRef} className="pointer-events-auto relative shrink-0">
             <button
                 type="button"
-                {...limitsActivation}
+                onClick={toggleOpen}
                 className={[
                     'flex h-11 min-w-[50px] flex-col items-start justify-center gap-1 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-2 text-[11px] font-semibold leading-none tabular-nums text-[var(--app-hint)] transition-colors hover:border-[var(--app-hint)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                     props.isFetching ? 'opacity-60' : ''
@@ -885,8 +877,6 @@ export const SessionHeader = memo(function SessionHeader(props: {
         }
         setMenuOpen((open) => !open)
     }
-    const menuActivation = useReliableTopEdgeAction(handleMenuToggle)
-
     // Keep the normal-session Telegram behavior unchanged: Telegram provides
     // its own header and must not receive the normal action menu either.
     if (isTelegramApp()) {
@@ -914,11 +904,8 @@ export const SessionHeader = memo(function SessionHeader(props: {
 
                         <button
                             type="button"
-                            {...menuActivation}
-                            onPointerDown={(event) => {
-                                menuActivation.onPointerDown(event)
-                                event.stopPropagation()
-                            }}
+                            onClick={handleMenuToggle}
+                            onPointerDown={(event) => event.stopPropagation()}
                             ref={menuAnchorRef}
                             aria-haspopup="menu"
                             aria-expanded={menuOpen}

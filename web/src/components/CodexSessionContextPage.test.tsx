@@ -1026,7 +1026,7 @@ describe('CodexSessionContextPage', () => {
         })
     })
 
-    it('opens the native header menu after a cancelled touch falls back to click', async () => {
+    it('opens and closes the native header menu after cancelled-touch click fallbacks', async () => {
         renderPage()
 
         await screen.findByText('Original response')
@@ -1036,6 +1036,11 @@ describe('CodexSessionContextPage', () => {
         fireEvent.click(trigger, { detail: 1 })
 
         expect(await screen.findByRole('menu')).toBeInTheDocument()
+
+        fireEvent.pointerDown(trigger, { pointerType: 'touch', pointerId: 2, clientX: 0, clientY: 0 })
+        fireEvent.click(trigger, { detail: 1 })
+
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     })
 
     it('shows the native runner Codex quota in the header', async () => {

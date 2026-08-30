@@ -1,5 +1,4 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Settings as SettingsIconNode, X as CloseIconNode } from 'lucide'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -17,17 +16,14 @@ import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import { App } from '@/App'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
 import { RecentCodexSessions } from '@/components/RecentCodexSessions'
-import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { CodexSessionContextPage } from '@/components/CodexSessionContextPage'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { ShareIcon } from '@/components/icons'
 import { LoadingState } from '@/components/LoadingState'
 import { SessionEntryLoading } from '@/components/SessionEntryLoading'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
-import { useReliableTopEdgeAction } from '@/hooks/useReliableTopEdgeAction'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
@@ -96,26 +92,6 @@ function BackIcon(props: { className?: string }) {
     )
 }
 
-function PlusIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-    )
-}
-
 function CodexImportIcon(props: { className?: string }) {
     return (
         <svg
@@ -137,46 +113,7 @@ function CodexImportIcon(props: { className?: string }) {
     )
 }
 
-function FolderOpenIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-        </svg>
-    )
-}
-
 function SettingsIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-        </svg>
-    )
-}
-
-function MemoryIcon(props: { className?: string }) {
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -191,9 +128,8 @@ function MemoryIcon(props: { className?: string }) {
             className={props.className}
             aria-hidden="true"
         >
-            <ellipse cx="12" cy="5" rx="7" ry="3" />
-            <path d="M5 5v7c0 1.66 3.13 3 7 3s7-1.34 7-3V5" />
-            <path d="M5 12v7c0 1.66 3.13 3 7 3s7-1.34 7-3v-7" />
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
     )
 }
@@ -476,11 +412,9 @@ function SessionsPage() {
     const [duplicateSessionGroups, setDuplicateSessionGroups] = useState<CodexDuplicateSessionGroup[]>([])
     const [isDuplicateMergeConfirmOpen, setIsDuplicateMergeConfirmOpen] = useState(false)
     const [isMergingDuplicateSessions, setIsMergingDuplicateSessions] = useState(false)
-    const [isSessionsMenuOpen, setIsSessionsMenuOpen] = useState(false)
     const [selectedRunnerMachineId, setSelectedRunnerMachineId] = useState<string | null>(loadSelectedRunnerMachineId)
     const [isRunnerDetailsOpen, setIsRunnerDetailsOpen] = useState(false)
     const [isRunnerSwitcherOpen, setIsRunnerSwitcherOpen] = useState(false)
-    const sessionsMenuRef = useRef<HTMLDivElement>(null)
     const runnerControlRef = useRef<HTMLDivElement>(null)
 
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
@@ -563,28 +497,7 @@ function SessionsPage() {
         }
     }, [isRunnerDetailsOpen, isRunnerSwitcherOpen])
 
-    useEffect(() => {
-        if (!isSessionsMenuOpen) return
-
-        const handlePointerDown = (event: PointerEvent) => {
-            const target = event.target
-            if (target instanceof Node && sessionsMenuRef.current?.contains(target)) return
-            setIsSessionsMenuOpen(false)
-        }
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') setIsSessionsMenuOpen(false)
-        }
-
-        document.addEventListener('pointerdown', handlePointerDown)
-        document.addEventListener('keydown', handleKeyDown)
-        return () => {
-            document.removeEventListener('pointerdown', handlePointerDown)
-            document.removeEventListener('keydown', handleKeyDown)
-        }
-    }, [isSessionsMenuOpen])
-
     const goNewSession = useCallback(() => {
-        setIsSessionsMenuOpen(false)
         navigate({
             to: '/sessions/new',
             search: selectedRunnerMachine ? { machineId: selectedRunnerMachine.id } : {}
@@ -624,16 +537,27 @@ function SessionsPage() {
         }
     }, [addRecentPath, addToast, isQuickSessionPending, navigate, selectedRunnerMachine, setLastUsedMachineId, spawnSession, t])
 
-    // Top-edge controls use the touch-safe activation path shared by the
-    // session header. WebKit can otherwise drop a compatibility click while
-    // the list is repainting after a live session update.
-    const newSessionActivation = useReliableTopEdgeAction(goNewSession)
-    const toggleSessionsMenu = useCallback(() => {
-        setIsSessionsMenuOpen((open) => !open)
-        setIsRunnerDetailsOpen(false)
-        setIsRunnerSwitcherOpen(false)
-    }, [])
-    const sessionsMenuActivation = useReliableTopEdgeAction(toggleSessionsMenu)
+    const handleSessionsMenuAction = useCallback((action: string) => {
+        switch (action) {
+            case 'new':
+                goNewSession()
+                return
+            case 'browse':
+                navigate({ to: '/browse' })
+                return
+            case 'memory':
+                navigate({ to: '/memory' })
+                return
+            case 'shares':
+                navigate({ to: '/shares' })
+                return
+            case 'settings':
+                navigate({ to: '/settings' })
+                return
+            default:
+                return
+        }
+    }, [goNewSession, navigate])
 
     const handleSelectSession = useCallback((sessionId: string) => {
         navigate({
@@ -893,11 +817,6 @@ function SessionsPage() {
         t
     ])
 
-    const sessionsMenuItemClass =
-        'group flex h-11 w-full items-center gap-3 rounded-2xl px-3 text-left text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
-    const sessionsMenuIconClass =
-        'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)] transition-colors group-hover:bg-[var(--app-bg)] group-hover:text-[var(--app-fg)]'
-
     return (
         <>
             <div className="flex h-full min-h-0">
@@ -907,102 +826,31 @@ function SessionsPage() {
             >
                 <div className="bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">
                     <div className="mx-auto grid w-full max-w-[680px] grid-cols-[52px_1fr_52px] items-center px-4 pb-2 pt-3 sm:px-6">
-                        <div ref={sessionsMenuRef} className="relative flex items-center justify-start">
-                            <button
-                                type="button"
-                                {...sessionsMenuActivation}
+                        <div className="relative flex h-[52px] w-[52px] items-center justify-center rounded-xl text-[var(--app-fg)] transition-opacity hover:opacity-70 focus-within:ring-2 focus-within:ring-[var(--app-link)]">
+                            <SettingsIcon className="pointer-events-none h-6 w-6" />
+                            <select
                                 aria-label={t('session.more')}
-                                aria-expanded={isSessionsMenuOpen}
-                                aria-haspopup="menu"
                                 data-testid="sessions-menu-button"
-                                className="pointer-events-auto touch-manipulation flex h-[52px] w-[52px] items-center justify-center text-[var(--app-fg)] transition-opacity hover:opacity-70 active:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                defaultValue=""
+                                onClick={() => {
+                                    setIsRunnerDetailsOpen(false)
+                                    setIsRunnerSwitcherOpen(false)
+                                }}
+                                onChange={(event) => {
+                                    const action = event.currentTarget.value
+                                    event.currentTarget.value = ''
+                                    handleSessionsMenuAction(action)
+                                }}
+                                className="absolute inset-0 z-10 h-full w-full cursor-pointer touch-manipulation opacity-0"
                                 title={t('session.more')}
                             >
-                                <MotionIcon
-                                    icon={toMotionIcon(isSessionsMenuOpen ? CloseIconNode : SettingsIconNode)}
-                                    className="h-6 w-6"
-                                    data-motion-icon={isSessionsMenuOpen ? 'close' : 'settings'}
-                                />
-                            </button>
-                            {isSessionsMenuOpen ? (
-                                <div
-                                    role="menu"
-                                    aria-label={t('session.more')}
-                                    className="absolute left-0 top-full z-50 mt-2 w-56 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
-                                >
-                                    <button
-                                        type="button"
-                                        role="menuitem"
-                                        onClick={() => {
-                                            setIsSessionsMenuOpen(false)
-                                            goNewSession()
-                                        }}
-                                        className={sessionsMenuItemClass}
-                                    >
-                                        <span className={sessionsMenuIconClass}>
-                                            <PlusIcon className="h-4 w-4" />
-                                        </span>
-                                        <span>{t('sessions.new')}</span>
-                                    </button>
-                                    <div className="my-1 h-px bg-[var(--app-divider)]" aria-hidden="true" />
-                                    <button
-                                        type="button"
-                                        role="menuitem"
-                                        onClick={() => {
-                                            setIsSessionsMenuOpen(false)
-                                            navigate({ to: '/browse' })
-                                        }}
-                                        className={sessionsMenuItemClass}
-                                    >
-                                        <span className={sessionsMenuIconClass}>
-                                            <FolderOpenIcon className="h-4 w-4" />
-                                        </span>
-                                        <span>{t('browse.nav')}</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        role="menuitem"
-                                        onClick={() => {
-                                            setIsSessionsMenuOpen(false)
-                                            navigate({ to: '/memory' })
-                                        }}
-                                        className={sessionsMenuItemClass}
-                                    >
-                                        <span className={sessionsMenuIconClass}>
-                                            <MemoryIcon className="h-4 w-4" />
-                                        </span>
-                                        <span>{t('openViking.nav')}</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        role="menuitem"
-                                        onClick={() => {
-                                            setIsSessionsMenuOpen(false)
-                                            navigate({ to: '/shares' })
-                                        }}
-                                        className={sessionsMenuItemClass}
-                                    >
-                                        <span className={sessionsMenuIconClass}>
-                                            <ShareIcon className="h-4 w-4" />
-                                        </span>
-                                        <span>{t('shares.nav')}</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        role="menuitem"
-                                        onClick={() => {
-                                            setIsSessionsMenuOpen(false)
-                                            navigate({ to: '/settings' })
-                                        }}
-                                        className={sessionsMenuItemClass}
-                                    >
-                                        <span className={sessionsMenuIconClass}>
-                                            <SettingsIcon className="h-4 w-4" />
-                                        </span>
-                                        <span>{t('settings.title')}</span>
-                                    </button>
-                                </div>
-                            ) : null}
+                                <option value="" disabled>{t('session.more')}</option>
+                                <option value="new">{t('sessions.new')}</option>
+                                <option value="browse">{t('browse.nav')}</option>
+                                <option value="memory">{t('openViking.nav')}</option>
+                                <option value="shares">{t('shares.nav')}</option>
+                                <option value="settings">{t('settings.title')}</option>
+                            </select>
                         </div>
                         <div ref={runnerControlRef} className="relative flex min-w-0 items-center justify-center gap-1.5 text-sm font-medium leading-5 text-[var(--app-hint)]">
                                 <button
@@ -1047,16 +895,7 @@ function SessionsPage() {
                                     />
                                 ) : null}
                             </div>
-                        <button
-                            type="button"
-                            {...newSessionActivation}
-                            aria-label={t('sessions.new')}
-                            title={t('sessions.new')}
-                            data-testid="sessions-new-button"
-                            className="pointer-events-auto touch-manipulation flex h-11 w-11 items-center justify-center rounded-full text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                        >
-                            <PlusIcon className="h-5 w-5" />
-                        </button>
+                        <div aria-hidden="true" />
                     </div>
                 </div>
 

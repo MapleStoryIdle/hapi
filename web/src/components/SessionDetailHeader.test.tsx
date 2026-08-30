@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { I18nProvider } from '@/lib/i18n-context'
 import { SessionDetailHeader } from './SessionDetailHeader'
 
@@ -7,15 +7,6 @@ afterEach(() => {
     cleanup()
     localStorage.removeItem('hapi-lang')
 })
-
-function fireTouchPointerUp(target: Element) {
-    const event = createEvent.pointerUp(target, { bubbles: true, cancelable: true })
-    Object.defineProperties(event, {
-        button: { value: -1 },
-        pointerType: { value: 'touch' },
-    })
-    fireEvent(target, event)
-}
 
 describe('SessionDetailHeader', () => {
     it('uses the shared fixed-height title-bar row and localized back affordance', () => {
@@ -37,7 +28,7 @@ describe('SessionDetailHeader', () => {
         expect(onBack).toHaveBeenCalledTimes(1)
     })
 
-    it('handles iOS pointer-up navigation without a duplicate compatibility click', () => {
+    it('uses one native click after a touch-like pointer sequence', () => {
         const onBack = vi.fn()
 
         render(
@@ -47,7 +38,8 @@ describe('SessionDetailHeader', () => {
         )
 
         const backButton = screen.getByRole('button', { name: 'Back' })
-        fireTouchPointerUp(backButton)
+        fireEvent.pointerDown(backButton, { pointerType: 'touch', pointerId: 1 })
+        fireEvent.pointerUp(backButton, { pointerType: 'touch', pointerId: 1 })
         fireEvent.click(backButton)
 
         expect(onBack).toHaveBeenCalledTimes(1)
