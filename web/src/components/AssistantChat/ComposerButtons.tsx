@@ -6,8 +6,7 @@ import {
     VolumeX as VolumeXIconNode,
 } from 'lucide'
 import { Filter, Puzzle, Search, Zap } from 'lucide-react'
-import type { PermissionMode, Session, SkillSummary } from '@/types/api'
-import type { ApiClient } from '@/api/client'
+import type { PermissionMode, SkillSummary } from '@/types/api'
 import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
 import { ScheduleIcon } from '@/components/icons'
@@ -15,7 +14,6 @@ import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
-import { RemoteServerContextMenuContent, ServerIcon } from '@/components/RemoteServers'
 
 function ChevronIcon() {
     return <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 3.75L5 6.25L7.5 3.75" /></svg>
@@ -759,11 +757,6 @@ export function ContextUsageProgressRail(props: {
     )
 }
 
-export function getRemoteServerButtonAlias(server: { alias?: string | null; name: string }): string {
-    const alias = server.alias?.trim()
-    return alias && alias.length > 0 ? alias : server.name
-}
-
 type SkillPickerGroup = 'project' | 'user' | 'plugin' | 'system'
 const LARK_SKILL_PREFIX = 'lark-'
 
@@ -1054,11 +1047,6 @@ export function ComposerButtons(props: {
     scratchlistMode?: boolean
     scratchlistCount?: number
     onScratchlistToggle?: () => void
-    remoteServerContext?: {
-        api: ApiClient
-        session: Session
-        onChanged: () => void
-    }
     compact?: boolean
 }) {
     const { t } = useTranslation()
@@ -1067,7 +1055,6 @@ export function ComposerButtons(props: {
     const [showToolsMenu, setShowToolsMenu] = useState(false)
     const [showPermissionMenu, setShowPermissionMenu] = useState(false)
     const [showSkillMenu, setShowSkillMenu] = useState(false)
-    const [showRemoteServerMenu, setShowRemoteServerMenu] = useState(false)
     const [showContextUsageMenu, setShowContextUsageMenu] = useState(false)
     const [skillQuery, setSkillQuery] = useState('')
     const [hideLarkSkills, setHideLarkSkills] = useState(true)
@@ -1082,7 +1069,6 @@ export function ComposerButtons(props: {
     const toolsButtonRef = useRef<HTMLButtonElement>(null)
     const permissionButtonRef = useRef<HTMLButtonElement>(null)
     const skillButtonRef = useRef<HTMLButtonElement>(null)
-    const hasRemoteServerContext = Boolean(props.remoteServerContext)
 
     const hasSchedule = props.pendingSchedule != null
     const hasAttachments = props.hasAttachments ?? false
@@ -1117,7 +1103,6 @@ export function ComposerButtons(props: {
         || props.showGoalModeButton
         || showPermissionButton
         || hasSkillControl
-        || hasRemoteServerContext
         || props.piThinkingLabel
     )
     const showSessionTools = Boolean(
@@ -1129,7 +1114,6 @@ export function ComposerButtons(props: {
     const openPermissionMenuFromTools = () => {
         setShowToolsMenu(false)
         setShowSkillMenu(false)
-        setShowRemoteServerMenu(false)
         setShowSchedulePicker(false)
         setShowContextUsageMenu(false)
         setPermissionAnchor('tools')
@@ -1138,7 +1122,6 @@ export function ComposerButtons(props: {
     const openSkillMenuFromTools = () => {
         setShowToolsMenu(false)
         setShowPermissionMenu(false)
-        setShowRemoteServerMenu(false)
         setShowSchedulePicker(false)
         setShowContextUsageMenu(false)
         setSkillAnchor('tools')
@@ -1148,7 +1131,6 @@ export function ComposerButtons(props: {
         setShowToolsMenu(false)
         setShowPermissionMenu(false)
         setShowSkillMenu(false)
-        setShowRemoteServerMenu(false)
         setShowSchedulePicker(false)
         setShowContextUsageMenu(true)
     }
@@ -1283,27 +1265,6 @@ export function ComposerButtons(props: {
                             {skills.length > 0 ? (
                                 <span className="text-[var(--app-hint)]">{skills.length}</span>
                             ) : null}
-                        </button>
-                    ) : null}
-
-                    {hasRemoteServerContext ? (
-                        <button
-                            type="button"
-                            aria-label="远程服务器"
-                            title="远程服务器"
-                            disabled={props.controlsDisabled}
-                            onClick={() => {
-                                setShowToolsMenu(false)
-                                setShowPermissionMenu(false)
-                                setShowSkillMenu(false)
-                                setShowSchedulePicker(false)
-                                setShowContextUsageMenu(false)
-                                setShowRemoteServerMenu(true)
-                            }}
-                            className={toolMenuItemClass}
-                        >
-                            <ServerIcon className="h-[22px] w-[22px]" />
-                            <span className="flex-1">远程服务器</span>
                         </button>
                     ) : null}
 
@@ -1608,7 +1569,6 @@ export function ComposerButtons(props: {
                         setShowPermissionMenu(false)
                         setShowSkillMenu(false)
                         setShowSchedulePicker(false)
-                        setShowRemoteServerMenu(false)
                         setShowContextUsageMenu(false)
                     }}
                 >
@@ -1653,23 +1613,6 @@ export function ComposerButtons(props: {
                         onClose={() => setShowSchedulePicker(false)}
                         pendingSchedule={props.pendingSchedule}
                     />
-                ) : null}
-
-                {showRemoteServerMenu && props.remoteServerContext ? (
-                    <ToolbarMenu
-                        anchorRef={toolsButtonRef}
-                        align="left"
-                        width={300}
-                        maxHeight={320}
-                        onClose={() => setShowRemoteServerMenu(false)}
-                    >
-                        <RemoteServerContextMenuContent
-                            api={props.remoteServerContext.api}
-                            session={props.remoteServerContext.session}
-                            onChanged={props.remoteServerContext.onChanged}
-                            onClose={() => setShowRemoteServerMenu(false)}
-                        />
-                    </ToolbarMenu>
                 ) : null}
 
                 {showPermissionMenu && permissionMenuContent ? (
@@ -1739,7 +1682,6 @@ export function ComposerButtons(props: {
                     setShowPermissionMenu(false)
                     setShowSkillMenu(false)
                     setShowSchedulePicker(false)
-                    setShowRemoteServerMenu(false)
                     setShowContextUsageMenu(false)
                 }}
             >
@@ -1765,7 +1707,6 @@ export function ComposerButtons(props: {
                         setShowToolsMenu(false)
                         setShowSkillMenu(false)
                         setShowSchedulePicker(false)
-                        setShowRemoteServerMenu(false)
                         setShowContextUsageMenu(false)
                     }}
                 >
@@ -1791,7 +1732,6 @@ export function ComposerButtons(props: {
                         setShowToolsMenu(false)
                         setShowPermissionMenu(false)
                         setShowSchedulePicker(false)
-                        setShowRemoteServerMenu(false)
                         setShowContextUsageMenu(false)
                     }}
                 >
@@ -1872,7 +1812,6 @@ export function ComposerButtons(props: {
                                 setShowPermissionMenu(false)
                                 setShowSkillMenu(false)
                                 setShowSchedulePicker(false)
-                                setShowRemoteServerMenu(false)
                                 setShowContextUsageMenu(false)
                                 props.onSettingsToggle()
                             }}
@@ -1996,23 +1935,6 @@ export function ComposerButtons(props: {
                     onClose={() => setShowSchedulePicker(false)}
                     pendingSchedule={props.pendingSchedule}
                 />
-            ) : null}
-
-            {showRemoteServerMenu && props.remoteServerContext ? (
-                <ToolbarMenu
-                    anchorRef={toolsButtonRef}
-                    align="left"
-                    width={300}
-                    maxHeight={320}
-                    onClose={() => setShowRemoteServerMenu(false)}
-                >
-                    <RemoteServerContextMenuContent
-                        api={props.remoteServerContext.api}
-                        session={props.remoteServerContext.session}
-                        onChanged={props.remoteServerContext.onChanged}
-                        onClose={() => setShowRemoteServerMenu(false)}
-                    />
-                </ToolbarMenu>
             ) : null}
 
             {showContextUsageMenu ? (

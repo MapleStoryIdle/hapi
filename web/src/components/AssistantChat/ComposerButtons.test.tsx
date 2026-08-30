@@ -15,7 +15,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
     }
 })
 
-import { ComposerButtons, ContextUsageProgressRail, UnifiedButton, computeToolbarMenuPlacement, getComposerOptionalControlsVisibility, getRemoteServerButtonAlias } from './ComposerButtons'
+import { ComposerButtons, ContextUsageProgressRail, UnifiedButton, computeToolbarMenuPlacement, getComposerOptionalControlsVisibility } from './ComposerButtons'
 
 function renderInProviders(ui: ReactElement) {
     return render(<I18nProvider>{ui}</I18nProvider>)
@@ -227,24 +227,6 @@ describe('UnifiedButton — routesToScratchlist visual state', () => {
         expect(onParentPointerDown).toHaveBeenCalledWith(false)
         expect(onParentMouseDown).toHaveBeenCalledWith(true)
         expect(onSend).toHaveBeenCalledOnce()
-    })
-})
-
-describe('getRemoteServerButtonAlias', () => {
-    /**
-     * The composer status chip is space-constrained. It should display only
-     * the operator-defined alias, not the longer server name / host tuple.
-     */
-    it('uses alias as the selected server display label', () => {
-        expect(getRemoteServerButtonAlias({ alias: 'prod', name: 'Production Server' })).toBe('prod')
-    })
-
-    /**
-     * Defensive fallback: persisted servers should always have aliases, but a
-     * blank alias must not render an empty pill.
-     */
-    it('falls back to name when alias is blank', () => {
-        expect(getRemoteServerButtonAlias({ alias: '   ', name: 'Production Server' })).toBe('Production Server')
     })
 })
 

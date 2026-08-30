@@ -882,4 +882,32 @@ describe('AppServerEventConverter', () => {
 
         debug.mockRestore();
     });
+
+    it('emits deduplicated safe rate limit chat messages', () => {
+        const converter = new AppServerEventConverter();
+        const params = { rateLimits: { limitName: '5-hour limit', primary: { usedPercent: 42, windowDurationMins: 300 } } };
+        expect(converter.handleNotification('account/rateLimits/updated', params)).toEqual([{
+            type: 'agent_message', message: 'Codex usage updated · 5-hour limit: primary 42% / 300 min', final: true
+        }]);
+        expect(converter.handleNotification('account/rateLimits/updated', params)).toEqual([]);
+        converter.reset();
+        expect(converter.handleNotification('account/rateLimits/updated', params)).toEqual([]);
+        expect(converter.handleNotification('account/rateLimits/updated', {
+            rateLimits: { limitName: '5-hour limit', primary: { usedPercent: 43 } }
+        })).toHaveLength(1);
+        expect(converter.handleNotification('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 'bad' } } })).toEqual([]);
+    });
+
+    it('emits visible wrapped session events while ignoring terminal interaction', () => {
+        const converter = new AppServerEventConverter();
+        for (const type of ['mcp_startup_update', 'mcp_startup_complete', 'skills_update_available', 'stream_error', 'warning']) {
+            expect(converter.handleNotification(`codex/event/${type}`, { msg: { type, current: 1, total: 2 } })).toEqual([{
+                type: 'codex_session_event', event_type: type,
+                ...(type === 'mcp_startup_update' ? { current: 1, total: 2 } : {})
+            }]);
+        }
+        expect(converter.handleNotification('codex/event/terminal_interaction', { msg: { type: 'terminal_interaction' } })).toEqual([]);
+        expect(converter.handleNotification('codex/event/warning', { msg: null })).toEqual([]);
+    });
+
 });

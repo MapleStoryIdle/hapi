@@ -6,5 +6,6 @@ describe('Codex A2A system prompt', () => {
         expect(codexSystemPrompt).toContain('functions.hapi__inspect_peer')
         expect(codexSystemPrompt).toContain('functions.hapi__ping_peer')
         expect(codexSystemPrompt).toContain('/sessions/<id> is a HAPI hub path')
+        expect(codexSystemPrompt).not.toContain('verify_ssh_server_candidate')
     })
 })

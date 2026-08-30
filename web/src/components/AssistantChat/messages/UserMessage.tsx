@@ -38,11 +38,6 @@ export function HappyUserMessage() {
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.attachments
     })
-    const remoteServer = useAssistantState(({ message }) => {
-        if (message.role !== 'user') return undefined
-        const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
-        return custom?.remoteServer
-    })
     const isCliOutput = useAssistantState(({ message }) => {
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.kind === 'cli-output'
@@ -129,13 +124,6 @@ export function HappyUserMessage() {
                     <div className="min-w-0 flex-1">
                         {hasText ? <UserBubbleContent text={text} /> : null}
                         {hasAttachments ? <MessageAttachments attachments={attachments} /> : null}
-                        {remoteServer ? (
-                            <div className="mt-1 flex justify-end">
-                                <span className="max-w-full truncate rounded-full bg-[var(--app-chat-user-chip-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--app-chat-user-chip-fg)]">
-                                    远程服务器 · {remoteServer.name} · {remoteServer.alias} · {remoteServer.user}@{remoteServer.host}
-                                </span>
-                            </div>
-                        ) : null}
                     </div>
                     {(hasText || showStatus) && (
                         <div className="happy-message-actions-first-line flex shrink-0 items-center gap-1">

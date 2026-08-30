@@ -36,6 +36,7 @@ const harness = vi.hoisted(() => ({
     deferThreadStatusNotifications: false,
     emitChildThreadEvents: false,
     emitChildUsageEvents: false,
+    emitChildSessionEvent: false,
     emitChildGoalEvent: false,
     emitChildReasoningBurst: false,
     emitChildDoneStatusWithoutMessage: false,
@@ -46,6 +47,7 @@ const harness = vi.hoisted(() => ({
     emitLateChildCommandAfterParentTool: false,
     emitParentUsageEvents: false,
     emitParentMessageSnapshots: false,
+    emitParentSessionEvents: false,
     emitParentGoalDuplicateEvents: false,
     emitChildNestedAgentTool: false,
     emitParentTitleChange: false,
@@ -385,6 +387,12 @@ vi.mock('./codexAppServerClient', () => {
                     this.notificationHandler?.('item/completed', messageCompleted);
                 }
 
+                if (harness.emitParentSessionEvents) {
+                    this.notificationHandler?.('account/rateLimits/updated', { rateLimits: { limitName: '5-hour limit', primary: { usedPercent: 42 } } });
+                    this.notificationHandler?.('codex/event/mcp_startup_update', { msg: { type: 'mcp_startup_update', current: 1, total: 2 } });
+                    this.notificationHandler?.('codex/event/warning', { msg: { type: 'warning' } });
+                }
+
                 if (harness.emitParentUsageEvents) {
                     const parentUsage = {
                         tokenUsage: {
@@ -549,6 +557,12 @@ vi.mock('./codexAppServerClient', () => {
                     && !harness.suppressChildTaskCompleteEvent
                 ) {
                     emitChildDone();
+                }
+
+                if (harness.emitChildSessionEvent) {
+                    this.notificationHandler?.('codex/event/warning', {
+                        msg: { type: 'warning', thread_id: childThreadId, turn_id: childTurnId }
+                    });
                 }
 
                 if (harness.emitChildUsageEvents) {
@@ -1048,6 +1062,7 @@ describe('codexRemoteLauncher', () => {
         harness.deferThreadStatusNotifications = false;
         harness.emitChildThreadEvents = false;
         harness.emitChildUsageEvents = false;
+        harness.emitChildSessionEvent = false;
         harness.emitChildGoalEvent = false;
         harness.emitChildReasoningBurst = false;
         harness.emitChildDoneStatusWithoutMessage = false;
@@ -1058,6 +1073,7 @@ describe('codexRemoteLauncher', () => {
         harness.emitLateChildCommandAfterParentTool = false;
         harness.emitParentUsageEvents = false;
         harness.emitParentMessageSnapshots = false;
+        harness.emitParentSessionEvents = false;
         harness.emitParentGoalDuplicateEvents = false;
         harness.emitChildNestedAgentTool = false;
         harness.emitParentTitleChange = false;
@@ -1159,6 +1175,15 @@ describe('codexRemoteLauncher', () => {
             itemId: 'parent-msg-1',
             final: true
         });
+    });
+
+    it('forwards rate updates as normal messages and session events as structured data', async () => {
+        harness.emitParentSessionEvents = true;
+        const { session, codexMessages } = createSessionStub();
+        await codexRemoteLauncher(session as never);
+        expect(codexMessages).toContainEqual(expect.objectContaining({ type: 'message', message: 'Codex usage updated · 5-hour limit: primary 42%', final: true }));
+        expect(codexMessages).toContainEqual(expect.objectContaining({ type: 'codex-session-event', eventType: 'mcp_startup_update', current: 1, total: 2 }));
+        expect(codexMessages).toContainEqual(expect.objectContaining({ type: 'codex-session-event', eventType: 'warning' }));
     });
 
     it('uses live permission mode for app-server MCP elicitation handlers', async () => {
@@ -2019,6 +2044,19 @@ describe('codexRemoteLauncher', () => {
 
         expect(thinkingUpdates.length).toBeLessThan(20);
         expect(thinkingUpdates.length).toBeLessThanOrEqual(1);
+    });
+
+    it('keeps child session events out of the parent chat', async () => {
+        harness.emitChildThreadEvents = true;
+        harness.emitChildSessionEvent = true;
+        const { session, codexMessages } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(codexMessages).not.toContainEqual(expect.objectContaining({
+            type: 'codex-session-event',
+            eventType: 'warning'
+        }));
     });
 
     it('keeps child usage and compact events out of the parent context stream', async () => {

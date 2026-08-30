@@ -1026,6 +1026,40 @@ html[data-theme="oled"] .shiki span {
   animation: bounce-in 0.3s ease-out;
 }
 
+/* Conversation first-paint skeleton: a continuous, quiet refresh sweep keeps
+ * the message-shaped placeholder alive without showing a separate loading UI. */
+@keyframes session-message-skeleton-refresh {
+  0% {
+    background-position: 120% 0;
+    opacity: 0.64;
+  }
+  48% {
+    opacity: 1;
+  }
+  100% {
+    background-position: -120% 0;
+    opacity: 0.64;
+  }
+}
+
+.session-message-skeleton-refresh {
+  background: linear-gradient(
+    105deg,
+    var(--app-subtle-bg) 0%,
+    color-mix(in srgb, var(--app-subtle-bg) 35%, var(--app-bg)) 48%,
+    var(--app-subtle-bg) 100%
+  );
+  background-size: 220% 100%;
+  animation: session-message-skeleton-refresh 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-message-skeleton-refresh {
+    animation: none;
+    background-position: 50% 0;
+  }
+}
+
 /* ReactQueryDevtools button - move to middle-right to avoid blocking UI */
 .tsqd-open-btn-container {
   bottom: 50% !important;

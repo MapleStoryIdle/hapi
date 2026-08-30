@@ -953,4 +953,13 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+
+    it('normalizes supported Codex session events without payload details', () => {
+        const normalized = normalizeDecryptedMessage(makeMessage({
+            role: 'agent', content: { type: 'codex', data: { type: 'codex-session-event', eventType: 'stream_error', secret: 'hidden' } }
+        }))
+        expect(normalized).toMatchObject({ role: 'event', content: { type: 'codex-session-event', eventType: 'stream_error' } })
+        expect(JSON.stringify(normalized)).not.toContain('hidden')
+    })
+
 })

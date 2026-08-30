@@ -52,34 +52,6 @@ describe('CodexPermissionHandler', () => {
         });
     });
 
-    it('does not auto-approve SSH server verification in default mode', async () => {
-        const { handler, rpcHandlers, getAgentState } = createHarness('default');
-
-        const resultPromise = handler.handleToolCall('perm-ssh', 'mcp__hapi__verify_ssh_server_candidate', {
-            host: '10.0.0.8',
-            user: 'ubuntu',
-            detectedCommandKind: 'ssh'
-        });
-
-        expect(getAgentState().requests).toMatchObject({
-            'perm-ssh': {
-                tool: 'mcp__hapi__verify_ssh_server_candidate'
-            }
-        });
-
-        await expect(Promise.race([
-            resultPromise.then(() => 'resolved'),
-            Promise.resolve('pending')
-        ])).resolves.toBe('pending');
-
-        const permissionRpc = rpcHandlers.get('permission');
-        expect(permissionRpc).toBeTypeOf('function');
-        await permissionRpc?.({ id: 'perm-ssh', approved: false, decision: 'denied', reason: 'test cleanup' });
-        await expect(resultPromise).resolves.toEqual({
-            decision: 'denied',
-            reason: 'test cleanup'
-        });
-    });
 
     it('auto-approves yolo requests for the session', async () => {
         const { handler, getAgentState } = createHarness('yolo');

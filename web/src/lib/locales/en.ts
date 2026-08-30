@@ -56,7 +56,6 @@ export default {
   'sessions.running.noCodex': 'No native Codex session is running right now.',
   'sessions.running.empty': 'No HAPI or Codex session is running right now.',
   'sessions.new': 'New Session',
-  'sessions.remoteServers': 'Remote Servers',
   'shares.nav': 'Shared Files',
   'shares.title': 'Shared Files',
   'shares.back': 'Back to sessions',

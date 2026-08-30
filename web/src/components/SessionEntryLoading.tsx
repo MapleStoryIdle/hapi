@@ -1,4 +1,3 @@
-import { Spinner } from '@/components/Spinner'
 import {
     SESSION_DETAIL_HEADER_HEIGHT_PX,
     SESSION_DETAIL_HEADER_ROW_CLASS,
@@ -11,9 +10,14 @@ import { mobileLayoutHeaderShellStyle } from '@/lib/mobileLayoutContract'
 import { useTranslation } from '@/lib/use-translation'
 
 const MESSAGE_ROWS = [
-    { align: 'end', width: 'w-2/3', height: 'h-10' },
+    { align: 'end', width: 'w-3/5', height: 'h-10' },
     { align: 'start', width: 'w-5/6', height: 'h-14' },
-    { align: 'start', width: 'w-3/5', height: 'h-9' }
+    { align: 'end', width: 'w-1/2', height: 'h-9' },
+    { align: 'start', width: 'w-3/4', height: 'h-12' },
+    { align: 'end', width: 'w-2/3', height: 'h-14' },
+    { align: 'start', width: 'w-3/5', height: 'h-9' },
+    { align: 'end', width: 'w-4/5', height: 'h-11' },
+    { align: 'start', width: 'w-2/3', height: 'h-12' }
 ] as const
 
 function LoadingBackIcon() {
@@ -36,7 +40,6 @@ function LoadingBackIcon() {
 function SessionEntryLoadingHeader(props: {
     onBack: () => void
     backLabel: string
-    loadingLabel: string
 }) {
     const backActivation = useReliableTopEdgeAction(props.onBack)
 
@@ -47,27 +50,16 @@ function SessionEntryLoadingHeader(props: {
             data-testid="session-entry-loading-header"
         >
             <div className={SESSION_DETAIL_HEADER_ROW_CLASS}>
-                <div className="pointer-events-auto flex h-11 min-w-0 items-center gap-0 rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] px-1 shadow-[0_8px_24px_rgba(15,23,42,0.10)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]">
-                    <button
-                        type="button"
-                        {...backActivation}
-                        data-testid="session-entry-loading-back"
-                        aria-label={props.backLabel}
-                        title={props.backLabel}
-                        className="pointer-events-auto touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                    >
-                        <LoadingBackIcon />
-                    </button>
-                    <div
-                        className="flex h-11 min-w-0 items-center gap-2 truncate pr-3 text-[15px] font-medium leading-5 text-[var(--app-hint)]"
-                        role="status"
-                        aria-live="polite"
-                        aria-label={props.loadingLabel}
-                    >
-                        <Spinner size="sm" label={null} />
-                        <span className="truncate">{props.loadingLabel}</span>
-                    </div>
-                </div>
+                <button
+                    type="button"
+                    {...backActivation}
+                    data-testid="session-entry-loading-back"
+                    aria-label={props.backLabel}
+                    title={props.backLabel}
+                    className="pointer-events-auto touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--app-fg)_14%,var(--app-bg))] bg-[var(--app-bg)] text-[var(--app-hint)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
+                >
+                    <LoadingBackIcon />
+                </button>
             </div>
         </div>
     )
@@ -94,12 +86,13 @@ export function SessionConversationLoading(props: {
                     }}
                 >
                     <div
-                        className="mx-auto w-full max-w-content space-y-3 motion-safe:animate-bounce-in"
+                        className="mx-auto flex min-h-full w-full max-w-content flex-col justify-between gap-4 py-1"
                         data-testid={props.testId}
                         role="status"
                         aria-live="polite"
                         aria-label={props.label}
                         aria-busy="true"
+                        data-session-loading-animation="refresh-loop"
                     >
                         {MESSAGE_ROWS.map((row, index) => (
                             <div
@@ -109,14 +102,11 @@ export function SessionConversationLoading(props: {
                                 aria-hidden="true"
                             >
                                 <div
-                                    className={`${row.height} ${row.width} rounded-2xl bg-[var(--app-subtle-bg)] motion-safe:animate-pulse`}
+                                    className={`${row.height} ${row.width} session-message-skeleton-refresh rounded-2xl`}
+                                    style={{ animationDelay: `${index * 140}ms` }}
                                 />
                             </div>
                         ))}
-                        <div className="inline-flex items-center gap-2 rounded-full bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
-                            <Spinner size="sm" label={null} />
-                            <span>{props.label}</span>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -124,8 +114,8 @@ export function SessionConversationLoading(props: {
                 <SessionDetailBottomDockComposer testId={props.composerTestId}>
                     <div className="px-3 pb-[calc(var(--app-safe-area-bottom)+0.75rem)] pt-2" aria-hidden="true">
                         <div className="mx-auto flex w-full max-w-content items-center gap-2">
-                            <div className="h-11 flex-1 rounded-[22px] bg-[var(--app-secondary-bg)] motion-safe:animate-pulse" />
-                            <div className="h-11 w-11 shrink-0 rounded-full bg-[var(--app-secondary-bg)] motion-safe:animate-pulse" />
+                            <div className="h-11 flex-1 rounded-[22px] session-message-skeleton-refresh" style={{ animationDelay: '560ms' }} />
+                            <div className="h-11 w-11 shrink-0 rounded-full session-message-skeleton-refresh" style={{ animationDelay: '700ms' }} />
                         </div>
                     </div>
                 </SessionDetailBottomDockComposer>
@@ -148,7 +138,6 @@ export function SessionEntryLoading(props: { onBack: () => void }) {
             <SessionEntryLoadingHeader
                 onBack={props.onBack}
                 backLabel={t('session.back')}
-                loadingLabel={t('loading.session')}
             />
             <SessionDetailContent ariaLabel={t('loading.session')}>
                 <SessionConversationLoading

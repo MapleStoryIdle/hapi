@@ -92,7 +92,6 @@ import { useVoiceOptional } from '@/lib/voice-context'
 import { registerSessionStore } from '@/realtime/realtimeClientTools'
 import { registerVoiceHooksStore, voiceHooks } from '@/realtime/hooks/voiceHooks'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
-import { RemoteServerCandidatePrompt } from '@/components/RemoteServers'
 import { ArrowRightIcon } from '@/components/icons'
 import { encodeBase64 } from '@/lib/utils'
 import { queryKeys } from '@/lib/query-keys'
@@ -2038,15 +2037,6 @@ function SessionChatInner(props: SessionChatProps) {
                         bottom={BOTTOM_OVERLAY_INSET_PX}
                     >
                         <div className="pointer-events-auto px-3">
-                            {agentFlavor === 'codex' ? (
-                                <>
-                                    <RemoteServerCandidatePrompt
-                                        api={props.api}
-                                        session={props.session}
-                                        onChanged={props.onRefresh}
-                                    />
-                                </>
-                            ) : null}
                             {/*
                              * Scratchlist drawer - composer-controlled. Only
                              * mounted when the operator clicks the notepad icon
@@ -2218,14 +2208,6 @@ function SessionChatInner(props: SessionChatProps) {
                                 scratchlistMode={scratchlistMode}
                                 scratchlistCount={scratchlist.entries.length}
                                 onScratchlistToggle={handleScratchlistToggle}
-                                remoteServerContext={agentFlavor === 'codex'
-                                    ? {
-                                        api: props.api,
-                                        session: props.session,
-                                        onChanged: props.onRefresh
-                                    }
-                                    : undefined
-                                }
                                 activeSideSessions={activeSideSessions}
                                 onSelectSideSession={handleSelectSideSession}
                                 sendError={props.sendError ?? null}

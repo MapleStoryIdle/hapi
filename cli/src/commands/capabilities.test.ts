@@ -8,11 +8,13 @@ describe('HAPI CLI machine-readable capabilities', () => {
             sourceRunnerAffinity: 'selected_runner_owns_transcript',
             localTranscriptRpc: true
         })
-        expect(HAPI_CLI_CAPABILITIES.commands.mcp.tools).toEqual(expect.arrayContaining([
+        expect(HAPI_CLI_CAPABILITIES.commands.mcp.tools).toEqual([
+            'change_title',
+            'display_image',
             'list_peers',
             'inspect_peer',
             'ping_peer'
-        ]))
+        ])
         expect(getHapiCliCommandCapabilities('ping-peer')).toMatchObject({
             command: 'ping-peer',
             sideEffects: 'resume_target_and_send_message',

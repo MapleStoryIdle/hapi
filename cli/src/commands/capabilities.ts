@@ -40,7 +40,7 @@ export const HAPI_CLI_CAPABILITIES = {
             sideEffects: 'upload_selected_local_file'
         },
         mcp: {
-            tools: ['change_title', 'display_image', 'verify_ssh_server_candidate', 'list_peers', 'inspect_peer', 'ping_peer']
+            tools: ['change_title', 'display_image', 'list_peers', 'inspect_peer', 'ping_peer']
         }
     }
 } as const

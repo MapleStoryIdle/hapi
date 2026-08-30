@@ -184,6 +184,18 @@ export function getEventPresentation(event: AgentEvent): EventPresentation {
     if (event.type === 'task-status') {
         return formatTaskStatusEvent(event)
     }
+    if (event.type === 'codex-session-event') {
+        if (event.eventType === 'mcp_startup_update') {
+            const progress = typeof event.current === 'number' && typeof event.total === 'number'
+                ? ` ${event.current}/${event.total}`
+                : ''
+            return { icon: '◷', text: `MCP servers starting${progress}` }
+        }
+        if (event.eventType === 'mcp_startup_complete') return { icon: '✓', text: 'MCP servers ready' }
+        if (event.eventType === 'skills_update_available') return { icon: '↻', text: 'Skills updated' }
+        if (event.eventType === 'stream_error') return { icon: '⚠️', text: 'Codex stream issue; recovery may continue' }
+        return { icon: '⚠️', text: 'Codex warning' }
+    }
     if (event.type === 'api-error') {
         const { retryAttempt, maxRetries } = event as { retryAttempt: number; maxRetries: number }
         if (maxRetries > 0 && retryAttempt >= maxRetries) {
@@ -252,11 +264,7 @@ export function getEventPresentation(event: AgentEvent): EventPresentation {
     if (event.type === 'token-count') {
         return formatTokenCountEvent(event)
     }
-    try {
-        return { icon: null, text: JSON.stringify(event) }
-    } catch {
-        return { icon: null, text: String(event.type) }
-    }
+    return { icon: null, text: 'Session event' }
 }
 
 export function renderEventLabel(event: AgentEvent): string {

@@ -5,17 +5,12 @@ import {
     DecryptedMessageSchema,
     MachineSchema,
     PermissionModeSchema,
-    RemoteServerCandidateSchema,
-    RemoteServerDetectedCommandKindSchema,
-    RemoteServerSchema,
     SessionSchema
 } from './schemas'
 import { AgentFlavorSchema } from './modes'
 import type {
     DecryptedMessage,
     Machine,
-    RemoteServer,
-    RemoteServerCandidate,
     Session
 } from './schemas'
 import type { SessionSummary } from './sessionSummary'
@@ -107,11 +102,6 @@ export type ShareDetails = ShareSummary & {
 export type SharesResponse = { shares: ShareSummary[] }
 export type ShareResponse = { share: ShareDetails }
 export type RevokeShareResponse = { ok: true; cleanupPending: boolean }
-
-export type RemoteServersResponse = { servers: RemoteServer[] }
-export type RemoteServerResponse = { server: RemoteServer }
-export type RemoteServerCandidatesResponse = { candidates: RemoteServerCandidate[] }
-export type RemoteServerCandidateResponse = { candidate: RemoteServerCandidate }
 
 export type SpawnResponse =
     | { type: 'success'; sessionId: string; session?: Session }
@@ -261,7 +251,6 @@ export const SendMessageRequestSchema = z.object({
     localId: z.string().min(1).optional(),
     attachments: z.array(AttachmentMetadataSchema).optional(),
     scheduledAt: z.number().int().positive().nullable().optional(),
-    remoteServerId: z.string().min(1).nullable().optional()
 }).refine(
     (data) => data.scheduledAt == null || typeof data.localId === 'string',
     { message: 'scheduledAt requires localId', path: ['localId'] }
@@ -274,64 +263,6 @@ export const SendMessageRequestSchema = z.object({
 )
 
 export type SendMessageRequest = z.infer<typeof SendMessageRequestSchema>
-
-const RemoteServerNameSchema = z.string().trim().min(1).max(120)
-const RemoteServerAliasSchema = z.string().trim().max(120)
-const RemoteServerHostSchema = z.string().trim().min(1).max(255)
-const RemoteServerUserSchema = z.string().trim().min(1).max(120)
-const RemoteServerWorkspaceSchema = z.string().trim().min(1).max(80)
-const RemoteServerPortSchema = z.number().int().min(1).max(65535)
-const RemoteServerTagsSchema = z.array(z.string().trim().min(1).max(50)).max(12)
-
-export const SetSessionRemoteServerRequestSchema = z.object({
-    remoteServerId: z.string().min(1).nullable()
-})
-
-export type SetSessionRemoteServerRequest = z.infer<typeof SetSessionRemoteServerRequestSchema>
-
-export const UpdateRemoteServerRequestSchema = z.object({
-    name: RemoteServerNameSchema.optional(),
-    alias: RemoteServerAliasSchema.optional(),
-    workspace: RemoteServerWorkspaceSchema.optional(),
-    tags: RemoteServerTagsSchema.optional()
-}).strict()
-
-export type UpdateRemoteServerRequest = z.infer<typeof UpdateRemoteServerRequestSchema>
-
-export const VerifyRemoteServerCandidateRequestSchema = z.object({
-    host: RemoteServerHostSchema,
-    user: RemoteServerUserSchema,
-    port: RemoteServerPortSchema.optional(),
-    alias: RemoteServerAliasSchema.optional(),
-    workspace: RemoteServerWorkspaceSchema.optional(),
-    tags: RemoteServerTagsSchema.optional(),
-    detectedCommandKind: RemoteServerDetectedCommandKindSchema,
-    detectedToolCallId: z.string().min(1).max(200).nullable().optional()
-}).strict()
-
-export type VerifyRemoteServerCandidateRequest = z.infer<typeof VerifyRemoteServerCandidateRequestSchema>
-
-export const VerifyRemoteServerCandidateResponseSchema = z.discriminatedUnion('status', [
-    z.object({
-        status: z.literal('candidate-created'),
-        candidate: RemoteServerCandidateSchema
-    }),
-    z.object({
-        status: z.literal('already-recorded'),
-        server: RemoteServerSchema
-    })
-])
-
-export type VerifyRemoteServerCandidateResponse = z.infer<typeof VerifyRemoteServerCandidateResponseSchema>
-
-export const AcceptRemoteServerCandidateRequestSchema = z.object({
-    name: RemoteServerNameSchema.optional(),
-    alias: RemoteServerAliasSchema.optional(),
-    workspace: RemoteServerWorkspaceSchema.optional(),
-    tags: RemoteServerTagsSchema.optional()
-}).strict()
-
-export type AcceptRemoteServerCandidateRequest = z.infer<typeof AcceptRemoteServerCandidateRequestSchema>
 
 export const SpawnSessionRequestSchema = z.object({
     directory: z.string().min(1),

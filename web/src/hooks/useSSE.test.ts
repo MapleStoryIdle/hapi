@@ -94,6 +94,23 @@ describe('useSSE scope handling', () => {
     })
 })
 
+describe('useSSE skills updates', () => {
+    it('invalidates session skills when a skills update message arrives', () => {
+        Object.defineProperty(globalThis, 'EventSource', { value: MockEventSource, configurable: true, writable: true })
+        const invalidateQueries = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
+        renderHook(() => useSSE({ enabled: true, token: 'test-token', baseUrl: 'http://hub.test', subscription: { sessionId: 'session-1' }, scope: 'full', onEvent: vi.fn() }), { wrapper: createWrapper() })
+        act(() => {
+            MockEventSource.instances[0]?.onmessage?.({
+                data: JSON.stringify({ type: 'message-received', sessionId: 'session-1', message: {
+                    id: 'message-1', seq: 1, localId: null, createdAt: 1,
+                    content: { type: 'codex', data: { type: 'codex-session-event', eventType: 'skills_update_available' } }
+                } }), lastEventId: '1'
+            } as MessageEvent<string>)
+        })
+        expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['skills', 'session-1'] })
+    })
+})
+
 describe('useSSE reconnect handling', () => {
     it('actively rebuilds an EventSource that errors while still connecting', () => {
         vi.useFakeTimers()

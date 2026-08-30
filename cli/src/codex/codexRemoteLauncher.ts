@@ -1821,6 +1821,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 updateActivity(formatActivity('Writing', message), 'writing');
                 return;
             }
+            if (msgType === 'codex_session_event') {
+                return;
+            }
             if (msgType === 'agent_message_snapshot') {
                 const message = asString(msg.message);
                 if (message) {
@@ -2599,6 +2602,18 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         streamId: streamId ?? undefined,
                         itemId: itemId ?? undefined,
                         final: Boolean(msg.final),
+                        id: randomUUID()
+                    });
+                }
+            }
+            if (msgType === 'codex_session_event') {
+                const eventType = asString(msg.event_type ?? msg.eventType);
+                if (eventType) {
+                    session.sendAgentMessage({
+                        type: 'codex-session-event',
+                        eventType,
+                        current: msg.current,
+                        total: msg.total,
                         id: randomUUID()
                     });
                 }

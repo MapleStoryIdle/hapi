@@ -432,25 +432,34 @@ export function shouldHideScrollToBottomButton(params: {
 function MessageSkeleton() {
     const { t } = useTranslation()
     const rows = [
-        { align: 'end', width: 'w-2/3', height: 'h-10' },
-        { align: 'start', width: 'w-3/4', height: 'h-12' },
+        { align: 'end', width: 'w-3/5', height: 'h-10' },
+        { align: 'start', width: 'w-5/6', height: 'h-14' },
         { align: 'end', width: 'w-1/2', height: 'h-9' },
-        { align: 'start', width: 'w-5/6', height: 'h-14' }
+        { align: 'start', width: 'w-3/4', height: 'h-12' },
+        { align: 'end', width: 'w-2/3', height: 'h-14' },
+        { align: 'start', width: 'w-3/5', height: 'h-9' },
+        { align: 'end', width: 'w-4/5', height: 'h-11' },
+        { align: 'start', width: 'w-2/3', height: 'h-12' }
     ]
 
     return (
-        <div role="status" aria-live="polite" aria-busy="true">
-            <div className="space-y-3 animate-pulse">
-                {rows.map((row, index) => (
-                    <div key={`skeleton-${index}`} className={row.align === 'end' ? 'flex justify-end' : 'flex justify-start'}>
-                        <div className={`${row.height} ${row.width} rounded-xl bg-[var(--app-subtle-bg)]`} />
-                    </div>
-                ))}
-            </div>
-            <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
-                <Spinner size="sm" label={null} />
-                <span>{t('misc.loadingMessages')}</span>
-            </div>
+        <div
+            className="flex min-h-full flex-col justify-between gap-4 py-1"
+            role="status"
+            aria-live="polite"
+            aria-label={t('misc.loadingMessages')}
+            aria-busy="true"
+            data-testid="happy-thread-message-skeleton"
+            data-session-loading-animation="refresh-loop"
+        >
+            {rows.map((row, index) => (
+                <div key={`skeleton-${index}`} className={row.align === 'end' ? 'flex justify-end' : 'flex justify-start'} aria-hidden="true">
+                    <div
+                        className={`${row.height} ${row.width} session-message-skeleton-refresh rounded-2xl`}
+                        style={{ animationDelay: `${index * 140}ms` }}
+                    />
+                </div>
+            ))}
         </div>
     )
 }

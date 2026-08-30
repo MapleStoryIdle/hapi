@@ -182,6 +182,28 @@ describe('answered question messages', () => {
     })
 })
 
+describe('legacy Remote Server metadata', () => {
+    it('ignores old message metadata instead of surfacing a removed server context', () => {
+        const message = toThreadMessageLike(userText('legacy-remote-server', {
+            meta: {
+                remoteServer: {
+                    id: 'server-1',
+                    name: 'Old production server',
+                    alias: 'prod',
+                    host: '203.0.113.10',
+                    user: 'root',
+                    port: 22,
+                    workspace: '默认',
+                    tags: [],
+                    sourceProject: 'legacy'
+                }
+            }
+        }), 'user-text:legacy-remote-server')
+
+        expect(message.metadata?.custom).not.toHaveProperty('remoteServer')
+    })
+})
+
 describe('aggregateResponseGroups', () => {
     it('1. sums usage and dedups model across distinct localIds in a single response group', () => {
         // user (no aggregate) → agent-text L1 → tool-call L1 → tool-call L2 → agent-text L3

@@ -81,6 +81,15 @@ function getMachinePatch(value: unknown): { active?: boolean; activeAt?: number;
     return Object.keys(parsed.data).length > 0 ? parsed.data : null
 }
 
+function isSkillsUpdateMessage(event: Extract<SyncEvent, { type: 'message-received' }>): boolean {
+    const content = event.message.content
+    if (!isObject(content) || content.type !== 'codex') return false
+    const data = content.data
+    return isObject(data)
+        && data.type === 'codex-session-event'
+        && (data.eventType === 'skills_update_available' || data.event_type === 'skills_update_available')
+}
+
 function getVisibilityState(): VisibilityState {
     if (typeof document === 'undefined') {
         return 'hidden'
@@ -448,6 +457,10 @@ export function useSSE(options: {
                 return
             }
 
+            if (event.type === 'message-received' && isSkillsUpdateMessage(event)) {
+                void queryClient.invalidateQueries({ queryKey: queryKeys.skills(event.sessionId) })
+            }
+
             if (event.type === 'connection-changed') {
                 const data = event.data
                 if (data && typeof data === 'object' && 'subscriptionId' in data) {
@@ -549,22 +562,6 @@ export function useSSE(options: {
 
             if (event.type === 'codex-session-updated') {
                 publishNativeCodexSessionUpdated(event)
-            }
-
-            if (
-                event.type === 'remote-server-candidate-created'
-                || event.type === 'remote-server-candidate-updated'
-            ) {
-                void queryClient.invalidateQueries({ queryKey: queryKeys.remoteServerCandidates })
-            }
-
-            if (event.type === 'remote-server-updated') {
-                void queryClient.invalidateQueries({ queryKey: queryKeys.remoteServers })
-            }
-
-            if (event.type === 'remote-server-deleted') {
-                void queryClient.invalidateQueries({ queryKey: queryKeys.remoteServers })
-                void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
             }
 
             onEventRef.current(event)

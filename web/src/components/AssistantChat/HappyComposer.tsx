@@ -16,9 +16,7 @@ import {
     useState
 } from 'react'
 import { GitBranch, Puzzle } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
-import type { ApiClient } from '@/api/client'
-import type { AgentState, CodexCollaborationMode, PermissionMode, PiModelSummary, Session, SkillSummary, ThreadGoal } from '@/types/api'
+import type { AgentState, CodexCollaborationMode, PermissionMode, PiModelSummary, SkillSummary, ThreadGoal } from '@/types/api'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import type { ConversationStatus } from '@/realtime/types'
 import { useActiveWord } from '@/hooks/useActiveWord'
@@ -34,13 +32,11 @@ import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { shouldShowComposerStatusBar, StatusBar } from '@/components/AssistantChat/StatusBar'
-import { ComposerButtons, ContextUsageProgressRail, GoalModeIcon, PlanModeIcon, ToolbarMenu, UnifiedButton, getRemoteServerButtonAlias, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
+import { ComposerButtons, ContextUsageProgressRail, GoalModeIcon, PlanModeIcon, ToolbarMenu, UnifiedButton, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
-import { ServerIcon, useRemoteServerContextSelection } from '@/components/RemoteServers'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
 import { useTranslation } from '@/lib/use-translation'
-import { queryKeys } from '@/lib/query-keys'
 import { getModelOptionsForFlavor, getNextModelForFlavor } from './modelOptions'
 import { getClaudeComposerEffortOptions } from './claudeEffortOptions'
 import { getCodexComposerReasoningEffortOptions } from './codexReasoningEffortOptions'
@@ -328,11 +324,6 @@ export function HappyComposer(props: {
     showStatusBar?: boolean
     /** Hide file input affordances for transports that only accept text. */
     allowAttachments?: boolean
-    remoteServerContext?: {
-        api: ApiClient
-        session: Session
-        onChanged: () => void
-    }
     activeSideSessions?: ActiveSideSessionChip[]
     onSelectSideSession?: (sessionId: string) => void
 }) {
@@ -391,7 +382,6 @@ export function HappyComposer(props: {
         onClearSendError,
         showStatusBar = true,
         allowAttachments = true,
-        remoteServerContext,
         activeSideSessions = [],
         onSelectSideSession
     } = props
@@ -404,7 +394,6 @@ export function HappyComposer(props: {
     const effort = rawEffort ?? null
     const serviceTier = rawServiceTier ?? null
 
-    const queryClient = useQueryClient()
     const api = useAssistantApi()
     const { composerEnterBehavior } = useComposerEnterBehavior()
     const composerText = useAssistantState(({ composer }) => composer.text)
@@ -439,7 +428,6 @@ export function HappyComposer(props: {
     const [showPiThinkingPanel, setShowPiThinkingPanel] = useState(false)
     const [isAborting, setIsAborting] = useState(false)
     const [isSwitching, setIsSwitching] = useState(false)
-    const [isClearingRemoteServer, setIsClearingRemoteServer] = useState(false)
     const [showSideSessionMenu, setShowSideSessionMenu] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
     // Start small, expand while the text field is active, then return to the
@@ -466,10 +454,6 @@ export function HappyComposer(props: {
     const sideSessionButtonRef = useRef<HTMLButtonElement>(null)
     const prevControlledByUser = useRef(controlledByUser)
     const skillsByName = useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills])
-    const { selected: selectedRemoteServer } = useRemoteServerContextSelection(
-        remoteServerContext?.api ?? null,
-        remoteServerContext?.session ?? null
-    )
 
     useComposerDraft(sessionId, composerText, (text) => api.composer().setText(text))
 
@@ -724,22 +708,6 @@ export function HappyComposer(props: {
             setIsSwitching(false)
         }
     }, [switchDisabled, onSwitchToRemote, haptic])
-
-    const handleClearRemoteServer = useCallback(async () => {
-        if (!remoteServerContext || controlsDisabled || isClearingRemoteServer) return
-        setIsClearingRemoteServer(true)
-        try {
-            await remoteServerContext.api.setSessionRemoteServer(remoteServerContext.session.id, null)
-            await Promise.all([
-                queryClient.invalidateQueries({ queryKey: queryKeys.session(remoteServerContext.session.id) }),
-                queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-            ])
-            remoteServerContext.onChanged()
-            haptic('light')
-        } finally {
-            setIsClearingRemoteServer(false)
-        }
-    }, [controlsDisabled, haptic, isClearingRemoteServer, queryClient, remoteServerContext])
 
     const sendComposerMessage = useCallback(() => {
         if (selectedSkill) {
@@ -1140,12 +1108,10 @@ export function HappyComposer(props: {
     const showGoalSelectionChip = Boolean(showGoalModeTool && threadGoal?.status === 'active')
     const showSideSessionChip = Boolean(onSelectSideSession && activeSideSessions.length > 0)
     const firstActiveSideSession = activeSideSessions[0] ?? null
-    const remoteServerAlias = selectedRemoteServer ? getRemoteServerButtonAlias(selectedRemoteServer) : null
     const hasSelectionChips = selectedSkill !== null
         || showPlanSelectionChip
         || showGoalSelectionChip
         || showSideSessionChip
-        || selectedRemoteServer !== null
     const requiresExpandedComposer = hasText
         || hasAttachments
         || pendingSchedule !== null
@@ -1771,20 +1737,6 @@ export function HappyComposer(props: {
                                 </button>
                             ) : null}
 
-                            {selectedRemoteServer && remoteServerAlias ? (
-                                <button
-                                    type="button"
-                                    data-testid="composer-selected-remote-server"
-                                    aria-label={`取消远程服务器 ${remoteServerAlias}`}
-                                    title={`远程服务器: ${remoteServerAlias}`}
-                                    disabled={controlsDisabled || isClearingRemoteServer}
-                                    className="inline-flex h-7 max-w-[12rem] shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-500/10 px-2.5 text-sm font-semibold text-[var(--app-link)] transition-colors hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-400/30 dark:bg-blue-400/15 [&_svg]:h-4 [&_svg]:w-4"
-                                    onClick={() => { void handleClearRemoteServer() }}
-                                >
-                                    <ServerIcon className="h-4 w-4 shrink-0" />
-                                    <span className="min-w-0 truncate">{remoteServerAlias}</span>
-                                </button>
-                            ) : null}
                         </div>
                     ) : null}
 
@@ -1949,7 +1901,6 @@ export function HappyComposer(props: {
                                 scratchlistMode={props.scratchlistMode}
                                 scratchlistCount={props.scratchlistCount}
                                 onScratchlistToggle={props.onScratchlistToggle}
-                                remoteServerContext={remoteServerContext}
                                 compact={false}
                             />
                         </div>

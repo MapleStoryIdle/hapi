@@ -38,8 +38,7 @@ function createSession(): Session {
         model: null,
         modelReasoningEffort: null,
         effort: null,
-        serviceTier: null,
-        remoteServerId: null
+        serviceTier: null
     }
 }
 

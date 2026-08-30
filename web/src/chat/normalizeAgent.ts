@@ -583,6 +583,31 @@ export function normalizeAgentRecord(
             }
         }
 
+        if (data.type === 'codex-session-event') {
+            const eventType = asString(data.eventType ?? data.event_type)
+            if (
+                eventType !== 'mcp_startup_update'
+                && eventType !== 'mcp_startup_complete'
+                && eventType !== 'skills_update_available'
+                && eventType !== 'stream_error'
+                && eventType !== 'warning'
+            ) return null
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'event',
+                content: {
+                    type: 'codex-session-event',
+                    eventType,
+                    current: asNonNegativeNumber(data.current),
+                    total: asNonNegativeNumber(data.total)
+                },
+                isSidechain: false,
+                meta
+            }
+        }
+
         if (data.type === 'error' && typeof data.message === 'string') {
             return {
                 id: messageId,

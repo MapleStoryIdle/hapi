@@ -99,7 +99,6 @@ export class ApiClient {
             modelReasoningEffort: raw.modelReasoningEffort,
             effort: raw.effort,
             serviceTier: raw.serviceTier,
-            remoteServerId: raw.remoteServerId,
             permissionMode: raw.permissionMode,
             collaborationMode: raw.collaborationMode
         }
@@ -150,7 +149,6 @@ export class ApiClient {
             modelReasoningEffort: raw.modelReasoningEffort,
             effort: raw.effort,
             serviceTier: raw.serviceTier,
-            remoteServerId: raw.remoteServerId,
             permissionMode: raw.permissionMode,
             collaborationMode: raw.collaborationMode
         }

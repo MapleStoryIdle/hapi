@@ -81,13 +81,11 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 localId: parsed.data.localId,
                 attachments: parsed.data.attachments,
                 sentFrom: 'webapp',
-                scheduledAt: parsed.data.scheduledAt,
-                remoteServerId: parsed.data.remoteServerId
+                scheduledAt: parsed.data.scheduledAt
             })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to send message'
-            const status = message === 'Remote server not found' ? 404 : 409
-            return c.json({ error: message }, status)
+            return c.json({ error: message }, 409)
         }
         return c.json({ ok: true })
     })

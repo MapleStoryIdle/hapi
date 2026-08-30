@@ -200,3 +200,15 @@ describe('formatMessageTimestamp', () => {
         expect(result).toContain('2025')
     })
 })
+
+
+describe('getEventPresentation — Codex session events', () => {
+    it('formats supported session events without raw payload output', () => {
+        expect(getEventPresentation({ type: 'codex-session-event', eventType: 'mcp_startup_update', current: 1, total: 2 }).text).toBe('MCP servers starting 1/2')
+        expect(getEventPresentation({ type: 'codex-session-event', eventType: 'mcp_startup_complete' }).text).toBe('MCP servers ready')
+        expect(getEventPresentation({ type: 'codex-session-event', eventType: 'skills_update_available' }).text).toBe('Skills updated')
+        expect(getEventPresentation({ type: 'codex-session-event', eventType: 'stream_error' }).text).toBe('Codex stream issue; recovery may continue')
+        expect(getEventPresentation({ type: 'codex-session-event', eventType: 'warning' }).text).toBe('Codex warning')
+        expect(getEventPresentation({ type: 'unknown-event', secret: 'do-not-leak' }).text).toBe('Session event')
+    })
+})

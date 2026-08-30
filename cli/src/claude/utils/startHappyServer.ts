@@ -41,7 +41,6 @@ type StartHappyServerOptions = {
 export const HAPI_MCP_TOOL_NAMES = [
     'change_title',
     'display_image',
-    'verify_ssh_server_candidate',
     'list_peers',
     'inspect_peer',
     'ping_peer'
@@ -88,16 +87,6 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
         title: z.string().optional().describe('Optional display title or filename for the image'),
     });
 
-    const verifySshServerCandidateInputSchema: z.ZodTypeAny = z.object({
-        host: z.string().min(1).describe('SSH host or IP address'),
-        user: z.string().min(1).describe('SSH username'),
-        port: z.number().int().min(1).max(65535).optional().describe('SSH port, defaults to 22'),
-        alias: z.string().max(120).optional().describe('SSH config Host alias if the successful command used one'),
-        workspace: z.string().min(1).optional().describe('HAPI remote server workspace, defaults to 默认'),
-        tags: z.array(z.string().min(1)).optional().describe('Optional server tags'),
-        detectedCommandKind: z.enum(['ssh', 'scp', 'rsync']).describe('Command kind that discovered this server'),
-        detectedToolCallId: z.string().optional().describe('Optional tool call id that discovered this server'),
-    });
 
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
         sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
@@ -215,67 +204,6 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
         }
     });
 
-    mcp.registerTool<any, any>('verify_ssh_server_candidate', {
-        description: 'Verify an SSH server is reachable and create a pending HAPI remote server candidate for user confirmation. Use this only after a successful ssh, scp, or rsync command.',
-        title: 'Verify SSH Server Candidate',
-        inputSchema: verifySshServerCandidateInputSchema,
-    }, async (args: {
-        host: string;
-        user: string;
-        port?: number;
-        alias?: string;
-        workspace?: string;
-        tags?: string[];
-        detectedCommandKind: 'ssh' | 'scp' | 'rsync';
-        detectedToolCallId?: string;
-    }) => {
-        try {
-            await verifySshConnection(args.user, args.host, args.port ?? 22);
-            const response = await client.verifyRemoteServerCandidate({
-                host: args.host,
-                user: args.user,
-                port: args.port,
-                alias: args.alias,
-                workspace: args.workspace,
-                tags: args.tags,
-                detectedCommandKind: args.detectedCommandKind,
-                detectedToolCallId: args.detectedToolCallId ?? null
-            });
-            if (response.status === 'already-recorded') {
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: `SSH server already recorded: ${response.server.user}@${response.server.host}:${response.server.port} (${response.server.workspace})`,
-                        },
-                    ],
-                    isError: false,
-                };
-            }
-
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Verified SSH server candidate: ${response.candidate.user}@${response.candidate.host}:${response.candidate.port}. Waiting for user confirmation in HAPI.`,
-                    },
-                ],
-                isError: false,
-            };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.debug('[hapiMCP] Failed to verify SSH server candidate:', message);
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Failed to verify SSH server candidate: ${message}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    });
 
     mcp.registerTool<any, any>('list_peers', {
         description: 'List peer HAPI sessions on the same hub/namespace. Returns id, active state, flavor and name only. Then use inspect_peer or ping_peer with an id.',
@@ -366,29 +294,6 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
     });
 
     return mcp;
-}
-
-async function verifySshConnection(user: string, host: string, port: number): Promise<void> {
-    const proc = Bun.spawn([
-        'ssh',
-        '-o', 'BatchMode=yes',
-        '-o', 'ConnectTimeout=5',
-        '-o', 'StrictHostKeyChecking=yes',
-        '-p', String(port),
-        `${user}@${host}`,
-        'true'
-    ], {
-        stdout: 'pipe',
-        stderr: 'pipe'
-    });
-    const exitCode = await proc.exited;
-    if (exitCode === 0) {
-        return;
-    }
-
-    const stderr = await new Response(proc.stderr).text().catch(() => '');
-    const reason = stderr.trim().split('\n').slice(-1)[0] || `ssh exited with ${exitCode}`;
-    throw new Error(reason);
 }
 
 function readMcpSessionId(req: IncomingMessage): string | undefined {

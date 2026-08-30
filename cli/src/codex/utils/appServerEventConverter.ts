@@ -187,6 +187,50 @@ function extractPlanEntries(value: unknown): Array<{ step: string; status: 'pend
     return plan;
 }
 
+function extractRateLimitSnapshots(params: Record<string, unknown>): Record<string, unknown>[] {
+    const snapshots: Record<string, unknown>[] = [];
+    const direct = asRecord(params.rateLimits);
+    if (direct) snapshots.push(direct);
+    const byId = asRecord(params.rateLimitsByLimitId);
+    if (byId) {
+        for (const snapshot of Object.values(byId)) {
+            const record = asRecord(snapshot);
+            if (record) snapshots.push(record);
+        }
+    }
+    return snapshots;
+}
+
+function formatRateLimitWindow(label: string, value: unknown): string | null {
+    const window = asRecord(value);
+    const usedPercent = asNumber(window?.usedPercent);
+    if (usedPercent === null) return null;
+    const duration = asNumber(window?.windowDurationMins);
+    return `${label} ${Math.round(usedPercent)}%${duration !== null ? ` / ${Math.round(duration)} min` : ''}`;
+}
+
+function formatRateLimitUpdate(params: Record<string, unknown>): string | null {
+    const snapshots = extractRateLimitSnapshots(params);
+    const descriptions = snapshots.map((snapshot) => {
+        const name = asString(snapshot.limitName) ?? asString(snapshot.limitId) ?? 'usage limit';
+        const windows = [
+            formatRateLimitWindow('primary', snapshot.primary),
+            formatRateLimitWindow('secondary', snapshot.secondary)
+        ].filter((window): window is string => window !== null);
+        return windows.length > 0 ? `${name}: ${windows.join(', ')}` : null;
+    }).filter((description): description is string => description !== null);
+    return descriptions.length > 0 ? `Codex usage updated · ${descriptions.join(' · ')}` : null;
+}
+
+function extractMcpProgress(params: Record<string, unknown>): { current?: number; total?: number } {
+    const current = asNumber(params.current ?? params.completed ?? params.ready ?? params.completedCount);
+    const total = asNumber(params.total ?? params.count ?? params.serverCount);
+    return {
+        ...(current !== null ? { current: Math.max(0, Math.floor(current)) } : {}),
+        ...(total !== null ? { total: Math.max(0, Math.floor(total)) } : {})
+    };
+}
+
 function extractPlanUpdate(params: Record<string, unknown>): ConvertedEvent[] {
     const plan = extractPlanEntries(
         params.plan ?? params.update ?? params.items ?? params.steps ?? params
@@ -439,6 +483,7 @@ export class AppServerEventConverter {
     private readonly lastReasoningDeltaByItemId = new Map<string, string>();
     private readonly lastCommandOutputDeltaByItemId = new Map<string, string>();
     private readonly lastAgentMessageSnapshotAtByItemId = new Map<string, number>();
+    private lastRateLimitMessage: string | null = null;
 
     constructor(options: { now?: () => number; messageSnapshotThrottleMs?: number } = {}) {
         this.now = options.now ?? Date.now;
@@ -580,16 +625,22 @@ export class AppServerEventConverter {
             ];
         }
 
-        if (
-            msgType === 'mcp_startup_update' ||
-            msgType === 'mcp_startup_complete' ||
-            msgType === 'skills_update_available' ||
-            msgType === 'stream_error' ||
-            msgType === 'warning' ||
-            msgType === 'terminal_interaction' ||
-            msgType === 'user_message'
-        ) {
+        if (msgType === 'terminal_interaction' || msgType === 'user_message') {
             return [];
+        }
+
+        if (
+            msgType === 'mcp_startup_update'
+            || msgType === 'mcp_startup_complete'
+            || msgType === 'skills_update_available'
+            || msgType === 'stream_error'
+            || msgType === 'warning'
+        ) {
+            return addEventScope([{
+                type: 'codex_session_event',
+                event_type: msgType,
+                ...(msgType === 'mcp_startup_update' ? extractMcpProgress(msg) : {})
+            }], msgScope);
         }
 
         return addEventScope([msg as ConvertedEvent], msgScope);
@@ -613,6 +664,12 @@ export class AppServerEventConverter {
         }
 
         if (method === 'account/rateLimits/updated') {
+            const message = formatRateLimitUpdate(paramsRecord);
+            if (!message || message === this.lastRateLimitMessage) {
+                return events;
+            }
+            this.lastRateLimitMessage = message;
+            events.push({ type: 'agent_message', message, final: true });
             return events;
         }
 

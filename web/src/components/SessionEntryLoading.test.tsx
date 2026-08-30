@@ -22,18 +22,26 @@ describe('SessionEntryLoading', () => {
         expect(header).toHaveClass('pointer-events-auto', 'z-40', 'isolate', 'touch-manipulation')
         expect(header.style.backgroundColor).toBe(`var(${MOBILE_LAYOUT_CONTRACT.header.backgroundVariable})`)
         expect(header.style.backdropFilter).toBe(`var(${MOBILE_LAYOUT_CONTRACT.header.backdropFilterVariable})`)
-        expect(screen.getByRole('status', { name: 'loading.session' })).toBeTruthy()
-        expect(screen.getAllByTestId('session-entry-message-skeleton')).toHaveLength(3)
+        const skeleton = screen.getByRole('status', { name: 'misc.loadingMessages' })
+        expect(skeleton).toHaveClass('min-h-full', 'justify-between')
+        expect(skeleton).toHaveAttribute('data-session-loading-animation', 'refresh-loop')
+        expect(screen.getAllByTestId('session-entry-message-skeleton')).toHaveLength(8)
+        expect(screen.getAllByTestId('session-entry-message-skeleton')[0]?.firstElementChild)
+            .toHaveClass('session-message-skeleton-refresh')
         expect(screen.getByTestId('session-entry-composer-skeleton')).toBeTruthy()
+        expect(screen.queryByText('loading.session')).toBeNull()
+        expect(screen.queryByText('misc.loadingMessages')).toBeNull()
 
         fireEvent.click(screen.getByTestId('session-entry-loading-back'))
 
         expect(onBack).toHaveBeenCalledOnce()
     })
 
-    it('does not expose an empty title-details control during loading', () => {
+    it('does not expose a title or visible loading copy while the conversation frame refreshes', () => {
         render(<SessionEntryLoading onBack={() => {}} />)
 
         expect(screen.queryByRole('button', { name: 'loading.session' })).toBeNull()
+        expect(screen.queryByText('loading.session')).toBeNull()
+        expect(screen.queryByText('misc.loadingMessages')).toBeNull()
     })
 })

@@ -13,7 +13,6 @@ export type StoredSession = {
     modelReasoningEffort: string | null
     effort: string | null
     serviceTier: string | null
-    remoteServerId: string | null
     todos: unknown | null
     todosUpdatedAt: number | null
     teamState: unknown | null
@@ -21,56 +20,6 @@ export type StoredSession = {
     active: boolean
     activeAt: number | null
     seq: number
-}
-
-export type StoredRemoteServer = {
-    id: string
-    namespace: string
-    name: string
-    alias: string
-    host: string
-    user: string
-    port: number
-    workspace: string
-    tags: string[]
-    sourceProject: string
-    sourceProjectPath: string | null
-    sourceSessionId: string
-    sourceSessionTitle: string | null
-    machineId: string | null
-    machineIds: string[]
-    lastVerifiedAt: number | null
-    lastUsedAt: number
-    createdAt: number
-    updatedAt: number
-}
-
-export type StoredRemoteServerCandidateStatus = 'pending' | 'accepted' | 'dismissed'
-export type StoredRemoteServerDetectedCommandKind = 'ssh' | 'scp' | 'rsync'
-
-export type StoredRemoteServerCandidate = {
-    id: string
-    namespace: string
-    machineId: string | null
-    sessionId: string
-    status: StoredRemoteServerCandidateStatus
-    name: string
-    alias: string
-    host: string
-    user: string
-    port: number
-    workspace: string
-    tags: string[]
-    sourceProject: string
-    sourceProjectPath: string | null
-    sourceSessionTitle: string | null
-    detectedCommandKind: StoredRemoteServerDetectedCommandKind
-    detectedToolCallId: string | null
-    existingServerId: string | null
-    verifiedAt: number
-    lastSeenAt: number
-    createdAt: number
-    updatedAt: number
 }
 
 export type StoredMachine = {

@@ -40,6 +40,12 @@ export type AgentEvent =
     | { type: 'compact'; trigger: string; preTokens: number }
     | { type: 'thread-goal-updated'; goal: ThreadGoal; threadId?: string; turnId?: string }
     | { type: 'thread-goal-cleared'; threadId?: string }
+    | {
+        type: 'codex-session-event'
+        eventType: 'mcp_startup_update' | 'mcp_startup_complete' | 'skills_update_available' | 'stream_error' | 'warning'
+        current?: number
+        total?: number
+    }
     | ({ type: string } & Record<string, unknown>)
 
 export type ToolResultPermission = {

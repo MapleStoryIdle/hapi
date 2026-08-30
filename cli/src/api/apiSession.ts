@@ -9,7 +9,7 @@ import { apiValidationError } from '@/utils/errorUtils'
 import { AsyncLock } from '@/utils/lock'
 import type { RawJSONLines } from '@/claude/types'
 import { configuration } from '@/configuration'
-import { AGENT_MESSAGE_PAYLOAD_TYPE, VerifyRemoteServerCandidateResponseSchema } from "@hapi/protocol"
+import { AGENT_MESSAGE_PAYLOAD_TYPE } from "@hapi/protocol"
 import type {
     BinaryFileReadRequest,
     BinaryFileReadResponse,
@@ -17,8 +17,6 @@ import type {
     BinaryFileUploadResponse,
     GeneratedImageStoreResponse,
     SessionEndReason,
-    VerifyRemoteServerCandidateRequest,
-    VerifyRemoteServerCandidateResponse
 } from '@hapi/protocol'
 import type { ClientToServerEvents, ServerToClientEvents, Update } from '@hapi/protocol'
 import {
@@ -786,27 +784,6 @@ export class ApiSessionClient extends EventEmitter {
         })
     }
 
-    async verifyRemoteServerCandidate(
-        request: VerifyRemoteServerCandidateRequest
-    ): Promise<VerifyRemoteServerCandidateResponse> {
-        const response = await axios.post<VerifyRemoteServerCandidateResponse>(
-            `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(this.sessionId)}/remote-server-candidates/verify`,
-            request,
-            {
-                headers: buildHubRequestHeaders({
-                    Authorization: `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                }),
-                timeout: 60_000
-            }
-        )
-
-        const parsed = VerifyRemoteServerCandidateResponseSchema.safeParse(response.data)
-        if (!parsed.success) {
-            throw apiValidationError('Invalid /cli/sessions/:id/remote-server-candidates/verify response', response)
-        }
-        return parsed.data
-    }
 
     private async waitForConnected(timeoutMs: number): Promise<boolean> {
         if (this.socket.connected) {
