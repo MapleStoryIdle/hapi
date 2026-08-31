@@ -58,4 +58,19 @@ describe('SessionDetailStatusNotice', () => {
         expect(status.querySelector('.lucide-loader-circle')).not.toBeNull()
         expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled()
     })
+
+    it('keeps a secondary cancellation action usable while the primary action is busy', () => {
+        const onCancel = vi.fn()
+        renderNotice({
+            tone: 'warning',
+            title: 'Native session may be stuck',
+            action: { label: 'Retrying…', onClick: vi.fn(), busy: true },
+            secondaryAction: { label: 'Cancel', onClick: onCancel },
+            testId: 'status'
+        })
+
+        expect(screen.getByRole('button', { name: 'Retrying…' })).toBeDisabled()
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+        expect(onCancel).toHaveBeenCalledTimes(1)
+    })
 })

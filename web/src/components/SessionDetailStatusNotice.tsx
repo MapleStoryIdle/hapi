@@ -23,6 +23,8 @@ export function SessionDetailStatusNotice(props: {
     title: ReactNode
     detail?: ReactNode
     action?: SessionDetailStatusAction
+    /** An optional secondary control, for cancelling an in-flight action. */
+    secondaryAction?: SessionDetailStatusAction
     compact?: boolean
     className?: string
     testId?: string
@@ -92,20 +94,36 @@ export function SessionDetailStatusNotice(props: {
                 ) : null}
             </div>
 
-            {props.action ? (
-                <button
-                    type="button"
-                    onClick={props.action.onClick}
-                    disabled={props.action.disabled || props.action.busy}
-                    aria-busy={props.action.busy || undefined}
-                    className={cn(
-                        'shrink-0 rounded-lg px-2 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-45',
-                        actionClass
-                    )}
-                >
-                    {props.action.busy ? <LoaderCircle className="mr-1 inline-block h-3 w-3 animate-spin" aria-hidden="true" /> : null}
-                    {props.action.label}
-                </button>
+            {props.action || props.secondaryAction ? (
+                <div className="flex shrink-0 items-center gap-1">
+                    {props.action ? (
+                        <button
+                            type="button"
+                            onClick={props.action.onClick}
+                            disabled={props.action.disabled || props.action.busy}
+                            aria-busy={props.action.busy || undefined}
+                            className={cn(
+                                'rounded-lg px-2 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-45',
+                                actionClass
+                            )}
+                        >
+                            {props.action.busy ? <LoaderCircle className="mr-1 inline-block h-3 w-3 animate-spin" aria-hidden="true" /> : null}
+                            {props.action.label}
+                        </button>
+                    ) : null}
+                    {props.secondaryAction ? (
+                        <button
+                            type="button"
+                            onClick={props.secondaryAction.onClick}
+                            disabled={props.secondaryAction.disabled || props.secondaryAction.busy}
+                            aria-busy={props.secondaryAction.busy || undefined}
+                            className="rounded-lg px-2 py-1 text-xs font-semibold text-[var(--app-hint)] transition-colors hover:bg-[var(--app-muted)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                            {props.secondaryAction.busy ? <LoaderCircle className="mr-1 inline-block h-3 w-3 animate-spin" aria-hidden="true" /> : null}
+                            {props.secondaryAction.label}
+                        </button>
+                    ) : null}
+                </div>
             ) : null}
         </div>
     )

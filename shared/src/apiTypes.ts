@@ -126,7 +126,7 @@ export type ShareDetails = ShareSummary & {
 
 export type SharesResponse = { shares: ShareSummary[] }
 export type ShareResponse = { share: ShareDetails }
-export type RevokeShareResponse = { ok: true; cleanupPending: boolean }
+export type RevokeShareResponse = { ok: true }
 export type ShareFeedbackResponse = {
     feedback: ShareFeedbackSummary & { content: string }
 }

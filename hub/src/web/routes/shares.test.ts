@@ -31,7 +31,7 @@ describe('public share route', () => {
     test('uses identical 404 for invalid, revoked, and expired tokens', async () => {
         const { app, service, store } = await setup()
         const made = service.publish({ namespace: 'one', filename: 'a.bin', expiresSeconds: 300, bytes: new Uint8Array([1]) })
-        expect(service.revoke(made.artifact.id, 'one')).toEqual({ type: 'revoked', cleanupPending: false })
+        expect(service.revoke(made.artifact.id, 'one')).toEqual({ type: 'deleted' })
         const revoked = await app.request(`http://hub/${made.token}`); const invalid = await app.request('http://hub/not-a-valid-token')
         const invalidBody = await invalid.text()
         expect(revoked.status).toBe(404); expect(invalid.status).toBe(404); expect(await revoked.text()).toBe(invalidBody)

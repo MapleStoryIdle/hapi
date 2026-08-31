@@ -196,13 +196,14 @@ export function QueuedMessagesBar({
     return (
         <Dialog.Root open={open} onOpenChange={setOpen}>
             <div
-                className="pointer-events-none mx-auto w-full max-w-content px-3"
+                className="pointer-events-none mx-auto flex w-full max-w-content justify-center px-3"
                 data-testid="queued-messages-accessory"
             >
                 <Dialog.Trigger asChild>
                     <SessionDetailQueueTrigger
                         testId="queued-messages-trigger"
                         label={t('queuedMessages.open', { count: queuedMessages.length })}
+                        statusLabel={t('queuedMessages.label')}
                         preview={firstPreviewLabel}
                         count={queuedMessages.length}
                         open={open}
@@ -218,11 +219,9 @@ export function QueuedMessagesBar({
                 >
                     <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-[var(--app-border)]" aria-hidden="true" />
                     <div className="flex shrink-0 items-start gap-3 px-5 pb-3 pt-4">
-                        <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--app-link)_12%,transparent)] text-[var(--app-link)]">
-                            <QueueIcon className="h-5 w-5" />
-                        </span>
                         <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
+                                <QueueIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)]" />
                                 <Dialog.Title className="text-base font-bold text-[var(--app-fg)]">
                                     {t('queuedMessages.drawerTitle')}
                                 </Dialog.Title>
@@ -245,24 +244,7 @@ export function QueuedMessagesBar({
                         </Dialog.Close>
                     </div>
 
-                    <div className="mx-5 mb-3 grid shrink-0 grid-cols-2 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-xs">
-                        <div className="flex items-center gap-2 px-3 py-2.5">
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-bg)] text-[var(--app-hint)]">
-                                <QueueIcon className="h-3 w-3" />
-                            </span>
-                            <span className="min-w-0 flex-1 text-[var(--app-hint)]">{t('queuedMessages.immediate')}</span>
-                            <span className="font-bold tabular-nums text-[var(--app-fg)]">{summary.immediateCount}</span>
-                        </div>
-                        <div className="flex items-center gap-2 border-l border-[var(--app-border)] px-3 py-2.5">
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-bg)] text-[var(--app-link)]">
-                                <ScheduleIcon className="h-3 w-3" />
-                            </span>
-                            <span className="min-w-0 flex-1 text-[var(--app-hint)]">{t('queuedMessages.scheduled')}</span>
-                            <span className="font-bold tabular-nums text-[var(--app-fg)]">{summary.scheduledCount}</span>
-                        </div>
-                    </div>
-
-                    <ul className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-5 pb-2 [scrollbar-width:thin]" aria-label={t('queuedMessages.drawerTitle')}>
+                    <ul className="min-h-0 flex-1 divide-y divide-[var(--app-divider)] overflow-y-auto overscroll-contain px-5 pb-2 [scrollbar-width:thin]" aria-label={t('queuedMessages.drawerTitle')}>
                         {queuedMessages.map((message, index) => {
                             const preview = getQueuedMessagePreview(message)
                             const { text, attachmentNames } = preview
@@ -320,37 +302,21 @@ export function QueuedMessagesBar({
                             return (
                                 <li
                                     key={message.localId ?? message.id}
-                                    className="relative overflow-hidden rounded-[18px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3.5 shadow-[0_5px_16px_rgba(15,23,42,0.06)]"
+                                    className="relative py-3.5 first:pt-1.5"
                                     aria-busy={isPending}
                                 >
-                                    <div className="flex min-w-0 items-start gap-3">
-                                        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] bg-[var(--app-subtle-bg)] text-[11px] font-bold tabular-nums text-[var(--app-hint)]">
-                                            {String(index + 1).padStart(2, '0')}
+                                    <div className="flex min-w-0 items-start gap-2.5">
+                                        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--app-subtle-bg)] text-[10px] font-bold tabular-nums text-[var(--app-hint)]">
+                                            {index + 1}
                                         </span>
                                         <div className="min-w-0 flex-1">
-                                            <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
-                                                {scheduledAt !== null ? (
-                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--app-link)_10%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--app-link)]">
-                                                        <ScheduleIcon className="h-3 w-3" />
-                                                        {t('queuedMessages.scheduledFor', { time: formatScheduledTime(scheduledAt) })}
-                                                    </span>
-                                                ) : (
-                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--app-subtle-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--app-hint)]">
-                                                        <QueueIcon className="h-3 w-3" />
-                                                        {t('queuedMessages.afterCurrentRun')}
-                                                    </span>
-                                                )}
-                                                {waitingForSync ? (
-                                                    <span className="text-[11px] font-medium text-[var(--app-hint)]">{t('queuedMessages.syncing')}</span>
-                                                ) : null}
-                                            </div>
                                             {text ? (
-                                                <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-5 text-[var(--app-fg)]">
+                                                <p className="line-clamp-2 whitespace-pre-wrap break-words text-sm leading-5 text-[var(--app-fg)]">
                                                     {text}
                                                 </p>
                                             ) : null}
                                             {attachmentNames.length > 0 ? (
-                                                <div className={text ? 'mt-2 flex flex-wrap gap-1.5' : 'flex flex-wrap gap-1.5'}>
+                                                <div className={text ? 'mt-1.5 flex flex-wrap gap-1.5' : 'flex flex-wrap gap-1.5'}>
                                                     {attachmentNames.map((name, attachmentIndex) => (
                                                         <span
                                                             key={`${name}-${attachmentIndex}`}
@@ -363,29 +329,40 @@ export function QueuedMessagesBar({
                                                     ))}
                                                 </div>
                                             ) : null}
+                                            {scheduledAt !== null || waitingForSync ? (
+                                                <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
+                                                    {scheduledAt !== null ? (
+                                                        <span className="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--app-link)_10%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--app-link)]">
+                                                            <ScheduleIcon className="h-3 w-3" />
+                                                            {t('queuedMessages.scheduledFor', { time: formatScheduledTime(scheduledAt) })}
+                                                        </span>
+                                                    ) : null}
+                                                    {waitingForSync ? (
+                                                        <span className="text-[11px] font-medium text-[var(--app-hint)]">{t('queuedMessages.syncing')}</span>
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
                                         </div>
-                                    </div>
-
-                                    <div className="mt-3 flex items-center justify-end gap-2 border-t border-[var(--app-border)] pt-2.5">
-                                        <button
-                                            type="button"
-                                            aria-label={t('queuedMessages.edit')}
-                                            disabled={!canCancel}
-                                            onClick={handleEdit}
-                                            className="touch-manipulation inline-flex h-10 items-center gap-1.5 rounded-xl border border-[var(--app-border)] px-3 text-xs font-semibold text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-40"
-                                        >
-                                            <EditIcon className="h-3.5 w-3.5" />
-                                            {t('queuedMessages.edit')}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            aria-label={t('queuedMessages.cancel')}
-                                            disabled={!canCancel}
-                                            onClick={handleCancel}
-                                            className="touch-manipulation flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-hint)] transition-colors hover:border-red-300 hover:bg-red-500/10 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-40"
-                                        >
-                                            <CloseIcon className="h-4 w-4" />
-                                        </button>
+                                        <div className="flex shrink-0 items-center gap-1">
+                                            <button
+                                                type="button"
+                                                aria-label={t('queuedMessages.edit')}
+                                                disabled={!canCancel}
+                                                onClick={handleEdit}
+                                                className="touch-manipulation flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                <EditIcon className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                aria-label={t('queuedMessages.cancel')}
+                                                disabled={!canCancel}
+                                                onClick={handleCancel}
+                                                className="touch-manipulation flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-red-500/10 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                <CloseIcon className="h-4 w-4" />
+                                            </button>
+                                        </div>
                                     </div>
                                 </li>
                             )

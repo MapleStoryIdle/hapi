@@ -86,41 +86,35 @@ export class ArtifactStore {
         return found ? row(found) : null
     }
 
-    listExpired(now = Date.now()): StoredArtifact[] {
-        return this.db.query<ArtifactRow, [number]>('SELECT * FROM artifacts WHERE expires_at <= ?').all(now).map(row)
-    }
-
-    deleteExpired(id: string, now = Date.now()): boolean {
-        return this.db.query('DELETE FROM artifacts WHERE id = ? AND expires_at <= ?').run(id, now).changes > 0
-    }
-
-    /** Internal rollback only: caller has just created this artifact in the same process. */
+    /** Deletes the artifact record; the database cascades its Kanban task. */
     deleteById(id: string): boolean {
         return this.db.query('DELETE FROM artifacts WHERE id = ?').run(id).changes > 0
     }
 
-    listCleanupCandidates(now = Date.now()): StoredArtifact[] {
-        return this.db.query<ArtifactRow, [number]>(
-            'SELECT * FROM artifacts WHERE revoked_at IS NOT NULL OR expires_at <= ? ORDER BY expires_at ASC'
-        ).all(now).map(row)
-    }
-
-    deleteCleanupCandidate(id: string, now = Date.now()): boolean {
-        return this.db.query(
-            'DELETE FROM artifacts WHERE id = ? AND (revoked_at IS NOT NULL OR expires_at <= ?)'
-        ).run(id, now).changes > 0
-    }
-
-    revokeActive(id: string, namespace: string, now = Date.now()): StoredArtifact | null {
-        const found = this.db.query<ArtifactRow, [string, string, number]>(
-            'SELECT * FROM artifacts WHERE id = ? AND namespace = ? AND revoked_at IS NULL AND expires_at > ?'
-        ).get(id, namespace, now)
+    /**
+     * Claim an artifact for owner-requested deletion before touching disk.
+     * A revocation blocks public reads and one-time feedback uploads while the
+     * caller removes both blobs. Already-revoked rows are returned so an
+     * explicit retry can finish an interrupted deletion; expiry is irrelevant
+     * because it only controls public-link access, not data retention.
+     */
+    markForDeletion(id: string, namespace: string, now = Date.now()): StoredArtifact | null {
+        const found = this.db.query<ArtifactRow, [string, string]>(
+            'SELECT * FROM artifacts WHERE id = ? AND namespace = ?'
+        ).get(id, namespace)
         if (!found) return null
 
+        if (found.revoked_at !== null) return row(found)
+
         const updated = this.db.query(
-            'UPDATE artifacts SET revoked_at = ? WHERE id = ? AND namespace = ? AND revoked_at IS NULL AND expires_at > ?'
-        ).run(now, id, namespace, now)
-        if (updated.changes !== 1) return null
+            'UPDATE artifacts SET revoked_at = ? WHERE id = ? AND namespace = ? AND revoked_at IS NULL'
+        ).run(now, id, namespace)
+        if (updated.changes !== 1) {
+            const retried = this.db.query<ArtifactRow, [string, string]>(
+                'SELECT * FROM artifacts WHERE id = ? AND namespace = ?'
+            ).get(id, namespace)
+            return retried ? row(retried) : null
+        }
 
         return row({ ...found, revoked_at: now })
     }

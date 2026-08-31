@@ -197,10 +197,10 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         if (result.type === 'not-found') {
             return c.json({ error: 'Share not found' }, 404)
         }
-        return c.json(
-            { ok: true, cleanupPending: result.cleanupPending },
-            result.cleanupPending ? 202 : 200
-        )
+        if (result.type === 'delete-failed') {
+            return c.json({ error: 'Could not delete share data. Please try revoking again.' }, 500)
+        }
+        return c.json({ ok: true })
     })
 
     app.post('/sessions', async (c) => {

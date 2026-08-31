@@ -213,17 +213,16 @@ export default function KanbanTaskPage() {
         if (!details) return
         setRevoking(true)
         try {
-            const result = await api.revokeShare(details.id)
+            await api.revokeShare(details.id)
             await queryClient.invalidateQueries({ queryKey: queryKeys.shares(baseUrl, namespace) })
-            if (result.cleanupPending) {
-                addToast({
-                    title: t('shares.cleanupPending.title'),
-                    body: t('shares.cleanupPending.body'),
-                    sessionId: '',
-                    url: ''
-                })
-            }
             void navigate({ to: '/shares' })
+        } catch (reason) {
+            addToast({
+                title: t('shares.revoke'),
+                body: reason instanceof Error ? reason.message : String(reason),
+                sessionId: '',
+                url: ''
+            })
         } finally {
             setRevoking(false)
         }

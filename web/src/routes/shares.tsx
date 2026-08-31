@@ -250,16 +250,8 @@ export default function SharesPage() {
         if (!revokeTarget) return
         setPendingShareId(revokeTarget.id)
         try {
-            const result = await api.revokeShare(revokeTarget.id)
+            await api.revokeShare(revokeTarget.id)
             await queryClient.invalidateQueries({ queryKey: queryKeys.shares(baseUrl, namespace) })
-            if (result.cleanupPending) {
-                addToast({
-                    title: t('shares.cleanupPending.title'),
-                    body: t('shares.cleanupPending.body'),
-                    sessionId: '',
-                    url: ''
-                })
-            }
             setRevokeTarget(null)
         } catch (reason) {
             addToast({

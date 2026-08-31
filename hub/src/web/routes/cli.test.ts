@@ -147,7 +147,7 @@ describe('cli public share routes', () => {
 
             const revoked = await app.request(`/cli/shares/${value.id}`, { method: 'DELETE', headers: authHeaders() })
             expect(revoked.status).toBe(200)
-            expect(await revoked.json()).toEqual({ ok: true, cleanupPending: false })
+            expect(await revoked.json()).toEqual({ ok: true })
             expect(service.readPublic(token!)).toBeNull()
             expect((await app.request('/cli/artifacts', { method: 'POST', headers })).status).toBe(404)
         } finally {

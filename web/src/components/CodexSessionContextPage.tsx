@@ -822,6 +822,8 @@ export function CodexSessionContextPage(props: {
     const nativeDirectMessagePageMountedRef = useRef(true)
     const attemptedNativeDirectMessageIdsRef = useRef(new Set<string>())
     const connectionRecoveryTokenRef = useRef(0)
+    const nativeRecoveryAbortControllerRef = useRef<AbortController | null>(null)
+    const nativeRecoveryRequestTokenRef = useRef(0)
     const foregroundRefreshAtRef = useRef(0)
     const nativeEventRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
@@ -833,6 +835,9 @@ export function CodexSessionContextPage(props: {
         nativeDirectMessagePageMountedRef.current = true
         return () => {
             nativeDirectMessagePageMountedRef.current = false
+            nativeRecoveryRequestTokenRef.current += 1
+            nativeRecoveryAbortControllerRef.current?.abort()
+            nativeRecoveryAbortControllerRef.current = null
         }
     }, [])
 
@@ -854,6 +859,9 @@ export function CodexSessionContextPage(props: {
     }, [])
 
     useEffect(() => {
+        nativeRecoveryRequestTokenRef.current += 1
+        nativeRecoveryAbortControllerRef.current?.abort()
+        nativeRecoveryAbortControllerRef.current = null
         setOlderPages([])
         setIsLoadingMore(false)
         setPendingDirectSendCount(0)
@@ -1412,6 +1420,14 @@ export function CodexSessionContextPage(props: {
         const requestScope = pageScope
         const requestNativeDirectMessageScope = nativeDirectMessageScope
         const phaseStartedAt = Date.now()
+        const requestToken = nativeRecoveryRequestTokenRef.current + 1
+        const abortController = new AbortController()
+        nativeRecoveryRequestTokenRef.current = requestToken
+        nativeRecoveryAbortControllerRef.current = abortController
+        // A manual recovery must never be followed by an implicit browser
+        // re-submit. If it is cancelled, leave the durable receipt for a
+        // deliberate retry once the runner state has been refreshed.
+        attemptedNativeDirectMessageIdsRef.current.add(candidate.id)
         setIsRecoveringNativeDelivery(true)
         setDirectSendError(null)
         setDismissedRunnerError(null)
@@ -1434,7 +1450,13 @@ export function CodexSessionContextPage(props: {
                 ...(candidate.deliveryText === candidate.text ? {} : { displayMessage: candidate.text }),
                 clientMessageId: candidate.id,
                 forceRecovery: true
-            })
+            }, { signal: abortController.signal })
+            if (
+                abortController.signal.aborted
+                || nativeRecoveryRequestTokenRef.current !== requestToken
+            ) {
+                return
+            }
             if (response.success !== true) {
                 throw new ApiError(response.error, 409, response.code)
             }
@@ -1463,6 +1485,12 @@ export function CodexSessionContextPage(props: {
             }
             void refetchNativeSnapshot()
         } catch (error) {
+            if (
+                abortController.signal.aborted
+                || nativeRecoveryRequestTokenRef.current !== requestToken
+            ) {
+                return
+            }
             updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
                 message.id === candidate.id ? { ...message, status: 'failed' as const } : message
             )))
@@ -1475,7 +1503,13 @@ export function CodexSessionContextPage(props: {
                 })
             }
         } finally {
-            if (pageScopeRef.current === requestScope) {
+            if (nativeRecoveryAbortControllerRef.current === abortController) {
+                nativeRecoveryAbortControllerRef.current = null
+            }
+            if (
+                pageScopeRef.current === requestScope
+                && nativeRecoveryRequestTokenRef.current === requestToken
+            ) {
                 setIsRecoveringNativeDelivery(false)
             }
         }
@@ -1492,6 +1526,22 @@ export function CodexSessionContextPage(props: {
         t,
         updateNativeDirectMessageEchoes
     ])
+
+    const cancelNativeDeliveryRecovery = useCallback(() => {
+        const abortController = nativeRecoveryAbortControllerRef.current
+        if (!abortController || !isRecoveringNativeDelivery) {
+            return
+        }
+
+        nativeRecoveryRequestTokenRef.current += 1
+        nativeRecoveryAbortControllerRef.current = null
+        abortController.abort()
+        setIsRecoveringNativeDelivery(false)
+        // Cancellation only stops the browser waiting for the hand-off. The
+        // runner may still have accepted it, so reconcile before showing a
+        // new recovery action instead of claiming the message was cancelled.
+        void refetchNativeSnapshot()
+    }, [isRecoveringNativeDelivery, refetchNativeSnapshot])
 
     const sendDirectMessage = useCallback((text: string) => {
         if (!props.machineId || directStatus === null || directStatus === 'unknown') {
@@ -1873,6 +1923,10 @@ export function CodexSessionContextPage(props: {
                                     : getNativeRecoveryActionLabel(nativeRecoveryCandidate.reason, t),
                                 onClick: () => void recoverNativeDelivery(),
                                 busy: isRecoveringNativeDelivery
+                            } : undefined}
+                            secondaryAction={isRecoveringNativeDelivery ? {
+                                label: t('recentCodex.direct.recovery.cancel'),
+                                onClick: cancelNativeDeliveryRecovery
                             } : undefined}
                             testId="codex-native-recovery"
                         />

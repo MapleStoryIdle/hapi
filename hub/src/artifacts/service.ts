@@ -10,7 +10,8 @@ const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown'])
 
 export type RevokeShareResult =
     | { type: 'not-found' }
-    | { type: 'revoked'; cleanupPending: boolean }
+    | { type: 'deleted' }
+    | { type: 'delete-failed' }
 
 export function sha256(value: Uint8Array | string): string { return createHash('sha256').update(value).digest('hex') }
 
@@ -107,34 +108,22 @@ export class ArtifactService {
         } catch (error) { try { rmSync(target, { force: true }) } catch {}; throw error }
     }
     revoke(id: string, namespace: string, now = Date.now()): RevokeShareResult {
-        const artifact = this.store.artifacts.revokeActive(id, namespace, now)
+        const artifact = this.store.artifacts.markForDeletion(id, namespace, now)
         if (!artifact) return { type: 'not-found' }
 
         try {
             rmSync(this.path(artifact.id), { force: true })
             rmSync(feedbackBlobPath(this.dataDir, artifact.id), { force: true })
-            return { type: 'revoked', cleanupPending: false }
         } catch {
-            // The database revocation has already blocked the public bearer URL.
-            // Keep its tombstone so the periodic cleanup can retry the blob removal.
-            console.warn('[Artifacts] Failed to clean revoked share blob')
-            return { type: 'revoked', cleanupPending: true }
+            // The database revocation already blocks public reads and feedback
+            // uploads. Keep the row for an explicit owner retry; HAPI never
+            // deletes it in the background.
+            console.warn('[Artifacts] Failed to delete share data')
+            return { type: 'delete-failed' }
         }
-    }
 
-    cleanupExpired(now = Date.now()): number {
-        let cleaned = 0
-        for (const artifact of this.store.artifacts.listCleanupCandidates(now)) {
-            try {
-                rmSync(this.path(artifact.id), { force: true })
-                rmSync(feedbackBlobPath(this.dataDir, artifact.id), { force: true })
-            } catch {
-                console.warn('[Artifacts] Failed to clean share blob')
-                continue
-            }
-            if (this.store.artifacts.deleteCleanupCandidate(artifact.id, now)) cleaned++
-        }
-        return cleaned
+        this.store.artifacts.deleteById(artifact.id)
+        return { type: 'deleted' }
     }
     readPublic(token: string): { artifact: StoredArtifact; bytes: Uint8Array } | null {
         if (!/^[A-Za-z0-9_-]{43,}$/.test(token)) return null

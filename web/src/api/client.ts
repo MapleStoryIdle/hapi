@@ -339,13 +339,15 @@ export class ApiClient {
             clientMessageId?: string
             /** Explicit user-confirmed retry after a stale/uncertain native hand-off. */
             forceRecovery?: boolean
-        }
+        },
+        options?: { signal?: AbortSignal }
     ): Promise<SendCodexLocalSessionMessageResponse> {
         return await this.request<SendCodexLocalSessionMessageResponse>(
             `/api/codex/sessions/${encodeURIComponent(sessionId)}/messages`,
             {
                 method: 'POST',
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: options?.signal
             }
         )
     }

@@ -974,8 +974,46 @@ describe('CodexSessionContextPage', () => {
                 message: 'Recover this saved prompt',
                 clientMessageId: 'queued-stalled',
                 forceRecovery: true
-            })
+            }, { signal: expect.any(AbortSignal) })
         })
+    })
+
+    it('cancels a pending native recovery request without silently retrying it', async () => {
+        const api = createApi()
+        let recoverySignal: AbortSignal | undefined
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            stalledSince: Date.now() - 10_000,
+            queuedMessages: [{ id: 'queued-stalled', text: 'Cancel this retry', queuedAt: 123 }]
+        })
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementation((
+            _sessionId: string,
+            _payload: unknown,
+            options?: { signal?: AbortSignal }
+        ) => new Promise((_resolve, reject) => {
+            recoverySignal = options?.signal
+            options?.signal?.addEventListener('abort', () => {
+                const error = new Error('Aborted')
+                error.name = 'AbortError'
+                reject(error)
+            }, { once: true })
+        }))
+        renderPage({ api })
+
+        await screen.findByTestId('codex-native-recovery')
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm and retry' }))
+        expect(await screen.findByRole('button', { name: 'Cancel' })).toBeEnabled()
+        await waitFor(() => expect(recoverySignal).toBeDefined())
+
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+        await waitFor(() => {
+            expect(recoverySignal?.aborted).toBe(true)
+            expect(screen.getByRole('button', { name: 'Confirm and retry' })).toBeEnabled()
+        })
+        expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1)
+        expect(screen.getByTestId('codex-native-recovery')).toBeInTheDocument()
     })
 
     it('explains a Codex timeout before allowing a saved prompt to be retried', async () => {
@@ -1042,7 +1080,7 @@ describe('CodexSessionContextPage', () => {
                 displayMessage: 'Retry the lost receipt',
                 clientMessageId: 'native:lost-after-restart',
                 forceRecovery: true
-            })
+            }, { signal: expect.any(AbortSignal) })
         })
     })
 

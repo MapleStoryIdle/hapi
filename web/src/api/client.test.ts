@@ -112,7 +112,7 @@ describe('ApiClient error mapping', () => {
                 share: { id: 'share-1', filename: 'note.md', size: 4, createdAt: 1, expiresAt: 2, url: 'https://example.test/s/token' }
             })))
             .mockResolvedValueOnce(new Response(JSON.stringify({ content: '# Note' })))
-            .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, cleanupPending: true }), { status: 202 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
 
         const api = new ApiClient('test-token')
         await expect(api.getShares()).resolves.toEqual({
@@ -122,7 +122,7 @@ describe('ApiClient error mapping', () => {
             share: { id: 'share-1', filename: 'note.md', size: 4, createdAt: 1, expiresAt: 2, url: 'https://example.test/s/token' }
         })
         await expect(api.getShareContent('share / one')).resolves.toEqual({ content: '# Note' })
-        await expect(api.revokeShare('share / one')).resolves.toEqual({ ok: true, cleanupPending: true })
+        await expect(api.revokeShare('share / one')).resolves.toEqual({ ok: true })
 
         expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/shares')
         expect((fetchMock.mock.calls[0]?.[1] as RequestInit).headers).toBeInstanceOf(Headers)

@@ -53,7 +53,7 @@ describe('share management routes', () => {
             service.publish({ namespace: 'two', filename: 'other.md', expiresSeconds: 300, bytes: new TextEncoder().encode('other') })
             service.publish({ namespace: 'one', filename: 'expired.md', expiresSeconds: -1, bytes: new TextEncoder().encode('expired') })
             const revoked = service.publish({ namespace: 'one', filename: 'revoked.md', expiresSeconds: 300, bytes: new TextEncoder().encode('revoked') })
-            expect(service.revoke(revoked.artifact.id, 'one')).toEqual({ type: 'revoked', cleanupPending: false })
+            expect(service.revoke(revoked.artifact.id, 'one')).toEqual({ type: 'deleted' })
 
             const response = await app.request('http://hub/api/shares', { headers: await authHeaders('one') })
             expect(response.status).toBe(200)
@@ -113,7 +113,7 @@ describe('share management routes', () => {
             })
             const expired = service.publish({ namespace: 'one', filename: 'expired.md', expiresSeconds: -1, bytes: new TextEncoder().encode('expired') })
             const revoked = service.publish({ namespace: 'one', filename: 'revoked.md', expiresSeconds: 300, bytes: new TextEncoder().encode('revoked') })
-            expect(service.revoke(revoked.artifact.id, 'one')).toEqual({ type: 'revoked', cleanupPending: false })
+            expect(service.revoke(revoked.artifact.id, 'one')).toEqual({ type: 'deleted' })
 
             const details = await app.request(`http://hub/api/shares/${stored.artifact.id}`, {
                 headers: await authHeaders('one')
@@ -164,25 +164,32 @@ describe('share management routes', () => {
         }
     })
 
-    test('revokes an owned active share but keeps all unavailable cases indistinguishable', async () => {
+    test('deletes an owned share and permits explicit removal of retained expired data', async () => {
         const { app, dir, service, store } = await setup()
         try {
             const owned = service.publish({ namespace: 'one', filename: 'owned.txt', expiresSeconds: 300, bytes: new TextEncoder().encode('owned') })
             const foreign = service.publish({ namespace: 'two', filename: 'foreign.txt', expiresSeconds: 300, bytes: new TextEncoder().encode('foreign') })
             const expired = service.publish({ namespace: 'one', filename: 'expired.txt', expiresSeconds: -1, bytes: new TextEncoder().encode('expired') })
             const revoked = service.publish({ namespace: 'one', filename: 'revoked.txt', expiresSeconds: 300, bytes: new TextEncoder().encode('revoked') })
-            expect(service.revoke(revoked.artifact.id, 'one')).toEqual({ type: 'revoked', cleanupPending: false })
+            expect(service.revoke(revoked.artifact.id, 'one')).toEqual({ type: 'deleted' })
 
             const deleted = await app.request(`http://hub/api/shares/${owned.artifact.id}`, {
                 method: 'DELETE',
                 headers: await authHeaders('one')
             })
             expect(deleted.status).toBe(200)
-            expect(await deleted.json()).toEqual({ ok: true, cleanupPending: false })
+            expect(await deleted.json()).toEqual({ ok: true })
             expect(service.readPublic(owned.token)).toBeNull()
             expect(existsSync(join(dir, 'artifacts', `${owned.artifact.id}.blob`))).toBe(false)
 
-            const unavailableIds = [foreign.artifact.id, expired.artifact.id, revoked.artifact.id, 'does-not-exist']
+            const expiredDeleted = await app.request(`http://hub/api/shares/${expired.artifact.id}`, {
+                method: 'DELETE',
+                headers: await authHeaders('one')
+            })
+            expect(expiredDeleted.status).toBe(200)
+            expect(await expiredDeleted.json()).toEqual({ ok: true })
+
+            const unavailableIds = [foreign.artifact.id, revoked.artifact.id, 'does-not-exist']
             const unavailable = await Promise.all(unavailableIds.map(async (id) => {
                 const response = await app.request(`http://hub/api/shares/${id}`, {
                     method: 'DELETE',
@@ -196,7 +203,7 @@ describe('share management routes', () => {
         }
     })
 
-    test('reports a pending cleanup without leaving the bearer URL usable', async () => {
+    test('reports a failed manual deletion without deleting data in the background', async () => {
         const { app, dir, service, store } = await setup()
         try {
             const made = service.publish({ namespace: 'one', filename: 'blocked.txt', expiresSeconds: 300, bytes: new TextEncoder().encode('blocked') })
@@ -209,9 +216,17 @@ describe('share management routes', () => {
                 method: 'DELETE',
                 headers: await authHeaders('one')
             })
-            expect(response.status).toBe(202)
-            expect(await response.json()).toEqual({ ok: true, cleanupPending: true })
+            expect(response.status).toBe(500)
+            expect(await response.json()).toEqual({ error: 'Could not delete share data. Please try revoking again.' })
             expect(service.readPublic(made.token)).toBeNull()
+
+            await rm(blob, { recursive: true, force: true })
+            const retried = await app.request(`http://hub/api/shares/${made.artifact.id}`, {
+                method: 'DELETE',
+                headers: await authHeaders('one')
+            })
+            expect(retried.status).toBe(200)
+            expect(await retried.json()).toEqual({ ok: true })
         } finally {
             store.close()
         }

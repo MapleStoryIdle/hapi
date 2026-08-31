@@ -239,12 +239,12 @@ export function createShareManagementRoutes(
         if (result.type === 'not-found') {
             return c.json({ error: 'Share not found' }, 404)
         }
-
-        const response: RevokeShareResponse = {
-            ok: true,
-            cleanupPending: result.cleanupPending
+        if (result.type === 'delete-failed') {
+            return c.json({ error: 'Could not delete share data. Please try revoking again.' }, 500)
         }
-        return c.json(response, result.cleanupPending ? 202 : 200)
+
+        const response: RevokeShareResponse = { ok: true }
+        return c.json(response)
     })
 
     return app
