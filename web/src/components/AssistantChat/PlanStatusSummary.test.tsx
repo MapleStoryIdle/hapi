@@ -201,12 +201,14 @@ describe('PlanStatusSummary helpers', () => {
 })
 
 describe('PlanStatusSummary', () => {
-    // 验证折叠态保留整体完成进度，展开后在输入框上方展示完整计划。
-    it('renders total progress while collapsed and expands an in-flow plan list', () => {
+    // 验证折叠态展示当前步骤和整体进度，展开后在输入框上方展示完整计划。
+    it('renders the current step and total progress while collapsed, then expands the plan list', () => {
         renderSummary()
 
-        const trigger = screen.getByRole('button', { name: /计划.*已完成 1\/3/ })
+        const trigger = screen.getByRole('button', { name: /计划.*Step-2.*实现路由懒加载.*已完成 1\/3/ })
         expect(trigger).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.getByText('Step-2')).toBeInTheDocument()
+        expect(screen.getByText('实现路由懒加载')).toBeInTheDocument()
         expect(screen.getByRole('progressbar', { name: '已完成 1/3' })).toHaveAttribute('aria-valuenow', '1')
 
         fireEvent.click(trigger)

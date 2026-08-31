@@ -16,6 +16,17 @@ function userMessage(id: string, text: string, createdAt: number): NormalizedMes
     }
 }
 
+function agentTextMessage(id: string, text: string, createdAt: number): NormalizedMessage {
+    return {
+        id,
+        localId: null,
+        createdAt,
+        role: 'agent',
+        content: [{ type: 'text', text, uuid: id, parentUUID: null }],
+        isSidechain: false
+    }
+}
+
 function goalMessage(id: string, status: ThreadGoalStatus, createdAt: number): NormalizedMessage {
     const goal: ThreadGoal = {
         threadId: 'thread-1',
@@ -80,6 +91,27 @@ function decryptedMessage(id: string, content: unknown, createdAt: number): Decr
 }
 
 describe('reduceChatBlocks', () => {
+    it('filters routine Codex usage updates while keeping real usage warnings', () => {
+        const reduced = reduceChatBlocks([
+            agentTextMessage(
+                'usage-update',
+                'Codex usage updated · 5-hour limit: primary 42% / 300 min',
+                1
+            ),
+            agentTextMessage(
+                'usage-warning',
+                'Claude AI usage limit warning|1774278000|90|five_hour',
+                2
+            )
+        ], null)
+
+        expect(reduced.blocks).toHaveLength(1)
+        expect(reduced.blocks[0]).toMatchObject({
+            kind: 'agent-event',
+            event: { type: 'limit-warning', utilization: 0.9 }
+        })
+    })
+
     it('ignores child agent usage when calculating parent latest usage', () => {
         const messages: NormalizedMessage[] = [
             {

@@ -124,9 +124,7 @@ function StepStatusIcon(props: { status: ChecklistItem['status'] }) {
 
     if (props.status === 'in_progress') {
         return (
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-[var(--app-link)] bg-[var(--app-bg)]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[var(--app-link)] motion-safe:animate-pulse" />
-            </span>
+            <span className="h-5 w-5 shrink-0 rounded-full border-2 border-[var(--app-border)] border-t-[var(--app-link)] bg-[var(--app-bg)] motion-safe:animate-spin" />
         )
     }
 
@@ -202,6 +200,10 @@ export function PlanStatusSummary(props: {
         completed: props.plan.completed,
         total: props.plan.total
     })
+    const currentStepLabel = props.plan.currentStep.text.trim().length > 0
+        ? props.plan.currentStep.text.trim()
+        : t('planStatus.emptyStep')
+    const currentStepNumber = `Step-${props.plan.currentIndex + 1}`
 
     return (
         <div ref={rootRef} className="pointer-events-none relative mx-auto flex w-full max-w-content justify-center px-3 [font-family:var(--app-chat-font-family)]">
@@ -218,14 +220,24 @@ export function PlanStatusSummary(props: {
                         expanded ? 'min-h-12 py-3' : 'h-[38px]'
                     )}
                     aria-expanded={expanded}
-                    aria-label={`${t('planStatus.title')} · ${progressLabel}`}
+                    aria-label={`${t('planStatus.title')} · ${currentStepNumber} · ${currentStepLabel} · ${progressLabel}`}
                     onClick={() => setExpanded((value) => !value)}
                 >
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[var(--app-subtle-bg)] text-[var(--app-hint)]">
                         <PlanListIcon className="h-3.5 w-3.5" />
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--app-fg)]">
-                        {t('planStatus.title')}
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
+                        <span className="shrink-0 font-semibold text-[var(--app-fg)]">
+                            {expanded ? t('planStatus.title') : currentStepNumber}
+                        </span>
+                        {!expanded ? (
+                            <>
+                                <span className="shrink-0 text-[var(--app-hint)]" aria-hidden="true">·</span>
+                                <span className="min-w-0 truncate font-medium text-[var(--app-hint)]" title={currentStepLabel}>
+                                    {currentStepLabel}
+                                </span>
+                            </>
+                        ) : null}
                     </span>
                     <span className="shrink-0 text-xs font-semibold tabular-nums text-[var(--app-hint)]" aria-hidden="true">
                         {props.plan.completed}/{props.plan.total}
@@ -255,7 +267,7 @@ export function PlanStatusSummary(props: {
                             <span>{progressLabel}</span>
                             <span>{t('planStatus.steps', { total: props.plan.total })}</span>
                         </div>
-                        <div className="overflow-y-auto pr-1" style={{ maxHeight: 'min(38vh, 18rem)' }}>
+                        <div className="overflow-y-auto pl-1 pr-1" style={{ maxHeight: 'min(38vh, 18rem)' }}>
                             <ol className="ml-2 border-l border-[var(--app-border)] pl-4">
                                 {props.plan.steps.map((step, index) => {
                                     const text = step.text.trim().length > 0 ? step.text.trim() : t('planStatus.emptyStep')
