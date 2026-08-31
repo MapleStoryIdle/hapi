@@ -79,7 +79,6 @@ export function ShareCard(props: {
     onDeliverToSourceSession: (share: ShareSummary) => void
     onOpenDetails: (share: ShareSummary) => void
     onRevoke: (share: ShareSummary) => void
-    statusLabel: string
     labels: {
         createdAt: string
         expiresAt: string
@@ -106,26 +105,18 @@ export function ShareCard(props: {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_1px_3px_rgba(15,23,42,0.04)]"
+            className={`overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_1px_3px_rgba(15,23,42,0.04)] ${props.share.feedback ? 'border-l-[3px] border-l-emerald-500' : ''}`}
         >
             <button
                 type="button"
                 onClick={() => props.onOpenDetails(props.share)}
                 aria-label={`${props.labels.details}: ${props.share.filename}`}
-                className="flex w-full min-w-0 items-start gap-3 p-4 pb-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--app-link)]"
+                className="block w-full min-w-0 p-4 pb-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--app-link)]"
             >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--app-subtle-bg)] text-[var(--app-fg)]" aria-hidden="true">
-                    <ShareIcon className="h-5 w-5" />
-                </span>
-                <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-start gap-2">
-                        <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-5 text-[var(--app-fg)]" title={props.share.filename}>
-                            {props.share.filename}
-                        </h2>
-                        <span className="shrink-0 rounded-full bg-[var(--app-subtle-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--app-hint)]">
-                            {props.statusLabel}
-                        </span>
-                    </div>
+                <div className="min-w-0">
+                    <h2 className="truncate text-[15px] font-semibold leading-5 text-[var(--app-fg)]" title={props.share.filename}>
+                        {props.share.filename}
+                    </h2>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--app-hint)]">
                         <span>{formatBytes(props.share.size)}</span>
                         <span aria-hidden="true">·</span>
@@ -303,8 +294,6 @@ export default function SharesPage() {
                 <MotionConfig reducedMotion="user">
                     <main className="app-scroll-y flex-1 p-3">
                         <div className="mx-auto max-w-[680px] space-y-3">
-                            <p className="px-1 text-sm leading-5 text-[var(--app-hint)]">{t('shares.hint')}</p>
-
                             {error ? (
                                 <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/25 dark:text-red-300">
                                     {error instanceof Error ? error.message : String(error)}
@@ -339,7 +328,6 @@ export default function SharesPage() {
                                     onDeliverToSourceSession={deliverToSourceSession}
                                     onOpenDetails={openDetails}
                                     onRevoke={requestRevoke}
-                                    statusLabel={t(`shares.status.${share.status}`)}
                                     labels={{
                                         createdAt: t('shares.createdAt'),
                                         expiresAt: t('shares.expiresAt'),

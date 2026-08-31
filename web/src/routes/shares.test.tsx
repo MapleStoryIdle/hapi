@@ -54,7 +54,6 @@ function renderShareCard(overrides: Partial<Parameters<typeof ShareCard>[0]> = {
                     share={share}
                     locale="en-US"
                     pending={false}
-                    statusLabel="Feedback received"
                     labels={labels}
                     {...handlers}
                     {...overrides}
@@ -72,7 +71,10 @@ describe('ShareCard', () => {
     it('opens details from the card body and keeps compact action icons separate', () => {
         const handlers = renderShareCard()
 
-        fireEvent.click(screen.getByRole('button', { name: 'View details: note.md' }))
+        const detailsButton = screen.getByRole('button', { name: 'View details: note.md' })
+        expect(detailsButton.parentElement).toHaveClass('border-l-emerald-500')
+        expect(screen.queryByText('Feedback received')).toBeNull()
+        fireEvent.click(detailsButton)
         fireEvent.click(screen.getByRole('button', { name: 'Copy public link' }))
         fireEvent.click(screen.getByRole('button', { name: 'Open source session' }))
         fireEvent.click(screen.getByRole('button', { name: 'Deliver to source session' }))
@@ -98,5 +100,6 @@ describe('ShareCard', () => {
 
         expect(screen.getByRole('button', { name: 'No source session' })).toBeDisabled()
         expect(screen.getByRole('button', { name: 'Delivery unavailable' })).toBeDisabled()
+        expect(screen.getByRole('button', { name: 'View details: note.md' }).parentElement).not.toHaveClass('border-l-emerald-500')
     })
 })

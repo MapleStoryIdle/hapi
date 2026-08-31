@@ -12,7 +12,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { ShareDetails, ShareFeedbackResponse } from '@/types/api'
 
-type DetailTab = 'preview' | 'source' | 'info'
+type DetailTab = 'preview' | 'source' | 'info' | 'feedback'
 type FeedbackMode = 'preview' | 'source'
 
 function BackIcon(props: { className?: string }) {
@@ -56,7 +56,7 @@ function isMarkdownDocument(filename: string): boolean {
 
 function SourceDocument(props: { content: string }) {
     return (
-        <pre className="app-scroll-x max-h-[min(70dvh,680px)] overflow-auto rounded-2xl border border-[var(--app-border)] bg-[var(--app-code-bg)] p-4 font-mono text-xs leading-5 text-[var(--app-fg)]">
+        <pre className="overflow-x-auto whitespace-pre rounded-2xl border border-[var(--app-border)] bg-[var(--app-code-bg)] p-4 font-mono text-xs leading-5 text-[var(--app-fg)]">
             {props.content}
         </pre>
     )
@@ -73,7 +73,7 @@ function TabButton(props: {
             role="tab"
             aria-selected={props.active}
             onClick={props.onClick}
-            className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${props.active ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm' : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'}`}
+            className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${props.active ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm' : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'}`}
         >
             {props.label}
         </button>
@@ -92,7 +92,7 @@ function FeedbackPreview(props: {
     const [mode, setMode] = useState<FeedbackMode>('preview')
 
     return (
-        <section className="space-y-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)]/45 p-3">
+        <section className="space-y-4">
             <dl className="grid gap-2 text-sm sm:grid-cols-3">
                 <div>
                     <dt className="text-xs text-[var(--app-hint)]">{props.agentLabel}</dt>
@@ -111,13 +111,7 @@ function FeedbackPreview(props: {
                 <TabButton active={mode === 'preview'} label={props.previewLabel} onClick={() => setMode('preview')} />
                 <TabButton active={mode === 'source'} label={props.sourceLabel} onClick={() => setMode('source')} />
             </div>
-            {mode === 'preview' ? (
-                <div className="max-h-[min(56dvh,520px)] overflow-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
-                    <MarkdownRenderer content={props.feedback.content} standalone />
-                </div>
-            ) : (
-                <SourceDocument content={props.feedback.content} />
-            )}
+            {mode === 'preview' ? <MarkdownRenderer content={props.feedback.content} standalone /> : <SourceDocument content={props.feedback.content} />}
         </section>
     )
 }
@@ -138,10 +132,13 @@ export default function KanbanTaskPage() {
     const [error, setError] = useState<string | null>(null)
     const [contentError, setContentError] = useState<string | null>(null)
     const [feedbackError, setFeedbackError] = useState<string | null>(null)
-    const [feedbackOpen, setFeedbackOpen] = useState(false)
     const [revokeOpen, setRevokeOpen] = useState(false)
     const [revoking, setRevoking] = useState(false)
     const dateLocale = locale === 'zh-CN' ? 'zh-CN' : 'en-US'
+
+    useEffect(() => {
+        setTab('preview')
+    }, [shareId])
 
     useEffect(() => {
         let cancelled = false
@@ -232,7 +229,7 @@ export default function KanbanTaskPage() {
         }
     }, [addToast, api, baseUrl, details, namespace, navigate, queryClient, t])
 
-    const activeTabContent = (() => {
+    const documentTabContent = (() => {
         if (contentError) {
             return <p className="rounded-xl bg-[var(--app-subtle-bg)] p-3 text-sm leading-5 text-[var(--app-hint)]">{contentError}</p>
         }
@@ -240,13 +237,29 @@ export default function KanbanTaskPage() {
             return <p className="p-3 text-sm text-[var(--app-hint)]">{t('shares.details.documentLoading')}</p>
         }
         if (tab === 'preview' && details && isMarkdownDocument(details.filename)) {
-            return (
-                <div className="max-h-[min(70dvh,680px)] overflow-auto rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-4">
-                    <MarkdownRenderer content={content} standalone />
-                </div>
-            )
+            return <MarkdownRenderer content={content} standalone />
         }
         return <SourceDocument content={content} />
+    })()
+
+    const feedbackTabContent = (() => {
+        if (feedbackError) {
+            return <p className="rounded-xl bg-[var(--app-subtle-bg)] p-3 text-sm leading-5 text-[var(--app-hint)]">{feedbackError}</p>
+        }
+        if (feedback === null) {
+            return <p className="p-3 text-sm text-[var(--app-hint)]">{t('shares.feedback.loading')}</p>
+        }
+        return (
+            <FeedbackPreview
+                feedback={feedback}
+                previewLabel={t('shares.details.preview')}
+                sourceLabel={t('shares.document.source')}
+                metadataLabel={t('shares.feedback.metadata')}
+                agentLabel={t('shares.feedback.agent')}
+                modelLabel={t('shares.feedback.model')}
+                environmentLabel={t('shares.feedback.environment')}
+            />
+        )
     })()
 
     if (error) {
@@ -287,9 +300,12 @@ export default function KanbanTaskPage() {
 
             <main className="app-scroll-y flex-1 p-3">
                 <div className="mx-auto max-w-[760px]">
-                    <div role="tablist" aria-label={t('shares.details.tabsLabel')} className="mb-4 inline-flex rounded-xl bg-[var(--app-subtle-bg)] p-1">
+                    <div role="tablist" aria-label={t('shares.details.tabsLabel')} className="mb-4 flex max-w-full overflow-x-auto rounded-xl bg-[var(--app-subtle-bg)] p-1">
                         <TabButton active={tab === 'preview'} label={t('shares.details.preview')} onClick={() => setTab('preview')} />
                         <TabButton active={tab === 'source'} label={t('shares.document.source')} onClick={() => setTab('source')} />
+                        {details?.feedback ? (
+                            <TabButton active={tab === 'feedback'} label={t('shares.details.feedback')} onClick={() => setTab('feedback')} />
+                        ) : null}
                         <TabButton active={tab === 'info'} label={t('shares.details.info')} onClick={() => setTab('info')} />
                     </div>
 
@@ -348,43 +364,6 @@ export default function KanbanTaskPage() {
                                 </button>
                             </section>
 
-                            {details.feedback ? (
-                                <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-4">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div>
-                                            <h2 className="text-sm font-semibold text-[var(--app-fg)]">{t('shares.details.feedback')}</h2>
-                                            <p className="mt-1 text-xs text-[var(--app-hint)]">{details.feedback.filename}</p>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => setFeedbackOpen((open) => !open)}
-                                            className="rounded-lg bg-[var(--app-subtle-bg)] px-3 py-2 text-xs font-semibold text-[var(--app-fg)] transition-colors hover:opacity-80"
-                                        >
-                                            {feedbackOpen ? t('shares.details.hideFeedback') : t('shares.details.viewFeedback')}
-                                        </button>
-                                    </div>
-                                    {feedbackOpen ? (
-                                        <div className="mt-3">
-                                            {feedbackError ? (
-                                                <p className="rounded-xl bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">{feedbackError}</p>
-                                            ) : feedback ? (
-                                                <FeedbackPreview
-                                                    feedback={feedback}
-                                                    previewLabel={t('shares.details.preview')}
-                                                    sourceLabel={t('shares.document.source')}
-                                                    metadataLabel={t('shares.feedback.metadata')}
-                                                    agentLabel={t('shares.feedback.agent')}
-                                                    modelLabel={t('shares.feedback.model')}
-                                                    environmentLabel={t('shares.feedback.environment')}
-                                                />
-                                            ) : (
-                                                <p className="text-sm text-[var(--app-hint)]">{t('shares.feedback.loading')}</p>
-                                            )}
-                                        </div>
-                                    ) : null}
-                                </section>
-                            ) : null}
-
                             <section className="rounded-2xl border border-red-200 bg-red-50/50 p-4 dark:border-red-900/50 dark:bg-red-950/15">
                                 <h2 className="text-sm font-semibold text-red-700 dark:text-red-300">{t('shares.revoke')}</h2>
                                 <p className="mt-1 text-sm leading-5 text-[var(--app-hint)]">{t('shares.revokeConfirm.description', { filename: details.filename })}</p>
@@ -399,7 +378,7 @@ export default function KanbanTaskPage() {
                         </div>
                     ) : tab === 'info' ? (
                         <p className="p-3 text-sm text-[var(--app-hint)]">{t('shares.details.loading')}</p>
-                    ) : activeTabContent}
+                    ) : tab === 'feedback' ? feedbackTabContent : documentTabContent}
                 </div>
             </main>
 
