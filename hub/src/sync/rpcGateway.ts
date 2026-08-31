@@ -6,6 +6,7 @@ import type {
     CodexLocalSessionSnapshotRpcResponse,
     CodexLocalSessionStatusRpcResponse,
     CodexLocalSessionsRpcResponse,
+    DiscardCodexLocalSessionMessageRpcResponse,
     SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import type { BinaryFileReadRequest, BinaryFileReadResponse, BinaryFileUploadRequest, BinaryFileUploadResponse } from '@hapi/protocol'
@@ -94,6 +95,7 @@ export type RpcCodexLocalSessionDataResponse = CodexLocalSessionDataRpcResponse
 export type RpcCodexLocalSessionComposerCapabilitiesResponse = CodexLocalSessionComposerCapabilitiesRpcResponse
 export type RpcCodexLocalSessionSnapshotResponse = CodexLocalSessionSnapshotRpcResponse
 export type RpcCodexLocalSessionStatusResponse = CodexLocalSessionStatusRpcResponse
+export type RpcDiscardCodexLocalSessionMessageResponse = DiscardCodexLocalSessionMessageRpcResponse
 export type RpcSendCodexLocalSessionMessageResponse = SendCodexLocalSessionMessageRpcResponse
 export type RpcForkCodexSideSessionResponse =
     | { type: 'success'; childCodexThreadId: string; parentCodexThreadId: string }
@@ -312,6 +314,17 @@ export class RpcGateway {
             ...(clientMessageId === undefined ? {} : { clientMessageId }),
             ...(forceRecovery === true ? { forceRecovery: true } : {})
         }) as RpcSendCodexLocalSessionMessageResponse
+    }
+
+    async discardCodexLocalSessionMessage(
+        machineId: string,
+        sessionId: string,
+        clientMessageId: string
+    ): Promise<RpcDiscardCodexLocalSessionMessageResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.DiscardCodexLocalSessionMessage, {
+            sessionId,
+            clientMessageId
+        }) as RpcDiscardCodexLocalSessionMessageResponse
     }
 
     async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {

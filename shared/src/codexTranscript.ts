@@ -269,6 +269,21 @@ export type SendCodexLocalSessionMessageRpcResponse = {
     code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'invalid_client_message_id' | 'launch_failed' | 'queue_full' | 'not_native_session'
 }
 
+/**
+ * Removes a saved native hand-off receipt from the runner outbox. This never
+ * stops an original Codex turn that might already have received the prompt.
+ */
+export type DiscardCodexLocalSessionMessageRpcResponse = {
+    success: true
+    /** False when the runner no longer owns this receipt. The browser may still drop its local copy. */
+    discarded: boolean
+    queuedMessages: CodexLocalSessionQueuedMessage[]
+} | {
+    success: false
+    error: string
+    code: 'session_not_found' | 'invalid_client_message_id' | 'launch_failed' | 'not_native_session'
+}
+
 export type CodexTranscriptFileCandidate = {
     file: string
     modifiedAt: number

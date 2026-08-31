@@ -12,6 +12,7 @@ import {
     type CodexLocalSessionQueuedMessage,
     type CodexLocalSessionStatusRpcResponse,
     type CodexLocalSessionSummary,
+    type DiscardCodexLocalSessionMessageRpcResponse,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 
@@ -606,6 +607,77 @@ export class NativeCodexSessionDirectSender {
         }
 
         return this.start(sessionId, message, displayMessage, cwd, session.modifiedAt, clientMessageId)
+    }
+
+    /**
+     * Drop a saved runner receipt without attempting to cancel a native Codex
+     * turn. A turn might already have accepted the text, so only the HAPI
+     * outbox is changed here.
+     */
+    discard(sessionId: string, rawClientMessageId: unknown): DiscardCodexLocalSessionMessageRpcResponse {
+        const clientMessageId = normalizeClientMessageId(rawClientMessageId)
+        if (clientMessageId === null || clientMessageId === 'invalid') {
+            return {
+                success: false,
+                code: 'invalid_client_message_id',
+                error: 'clientMessageId is required and must be valid'
+            }
+        }
+
+        const session = this.sessionLookup.getSummary(sessionId)
+        if (!session) {
+            return { success: false, code: 'session_not_found', error: 'Codex session not found' }
+        }
+        if (isHapiInitiatedCodexSession(session)) {
+            return {
+                success: false,
+                code: 'not_native_session',
+                error: 'Only original native Codex sessions support direct delivery'
+            }
+        }
+
+        const queue = this.queues.get(sessionId) ?? []
+        const queueIndex = queue.findIndex((message) => message.id === clientMessageId)
+        if (queueIndex < 0) {
+            const failure = this.recentFailures.get(sessionId)
+            if (failure?.clientMessageId === clientMessageId) {
+                this.recentFailures.delete(sessionId)
+                this.notifyStateChange(sessionId)
+            }
+            return {
+                success: true,
+                discarded: false,
+                queuedMessages: this.getQueuedMessages(sessionId)
+            }
+        }
+
+        const [discarded] = queue.splice(queueIndex, 1)
+        if (queue.length === 0) {
+            this.queues.delete(sessionId)
+        } else {
+            this.queues.set(sessionId, queue)
+        }
+        if (!this.persistOutbox()) {
+            queue.splice(queueIndex, 0, discarded!)
+            this.queues.set(sessionId, queue)
+            return {
+                success: false,
+                code: 'launch_failed',
+                error: 'Could not safely discard this native message'
+            }
+        }
+
+        const failure = this.recentFailures.get(sessionId)
+        if (failure?.clientMessageId === clientMessageId) {
+            this.recentFailures.delete(sessionId)
+        }
+        this.scheduleQueuePump(sessionId, 0, { replacePending: true })
+        this.notifyStateChange(sessionId)
+        return {
+            success: true,
+            discarded: true,
+            queuedMessages: this.getQueuedMessages(sessionId)
+        }
     }
 
     /**

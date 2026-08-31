@@ -65,6 +65,7 @@ import {
     type RpcCursorModel,
     type RpcCodexLocalSessionComposerCapabilitiesResponse,
     type RpcCodexLocalSessionDataResponse,
+    type RpcDiscardCodexLocalSessionMessageResponse,
     type RpcCodexLocalSessionSnapshotResponse,
     type RpcCodexLocalSessionStatusResponse,
     type RpcCodexLocalSessionsResponse,
@@ -101,6 +102,7 @@ export type {
     RpcCursorModel,
     RpcCodexLocalSessionComposerCapabilitiesResponse,
     RpcCodexLocalSessionDataResponse,
+    RpcDiscardCodexLocalSessionMessageResponse,
     RpcCodexLocalSessionSnapshotResponse,
     RpcCodexLocalSessionStatusResponse,
     RpcCodexLocalSessionsResponse,
@@ -1828,6 +1830,14 @@ export class SyncEngine {
             clientMessageId,
             forceRecovery
         )
+    }
+
+    async discardCodexLocalSessionMessage(
+        machineId: string,
+        sessionId: string,
+        clientMessageId: string
+    ): Promise<RpcDiscardCodexLocalSessionMessageResponse> {
+        return await this.rpcGateway.discardCodexLocalSessionMessage(machineId, sessionId, clientMessageId)
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {

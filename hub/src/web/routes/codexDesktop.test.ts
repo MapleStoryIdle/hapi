@@ -999,6 +999,37 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('removes a saved native recovery receipt on the selected runner', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '56565656-5656-4656-8656-565656565660'
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const discardCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            discardCodexLocalSessionMessage: async (...args: unknown[]) => {
+                discardCalls.push(args)
+                return { success: true as const, discarded: true, queuedMessages: [] }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${sessionId}/messages/discard`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    machineId: 'mac-runner',
+                    clientMessageId: 'native:recovery-1'
+                })
+            })
+            expect(response.status).toBe(202)
+            expect(await response.json()).toEqual({ success: true, discarded: true, queuedMessages: [] })
+            expect(discardCalls).toEqual([['mac-runner', sessionId, 'native:recovery-1']])
+        } finally {
+            store.close()
+        }
+    })
+
     it('accepts a direct message while the native thread is processing and returns its queue position', async () => {
         const store = new Store(':memory:')
         const sessionId = '57565656-5756-4756-8756-575656565656'

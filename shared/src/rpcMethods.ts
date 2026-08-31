@@ -14,6 +14,7 @@ export const RPC_METHODS = {
     GetCodexLocalSessionStatus: 'getCodexLocalSessionStatus',
     GetCodexLocalSessionComposerCapabilities: 'getCodexLocalSessionComposerCapabilities',
     SendCodexLocalSessionMessage: 'sendCodexLocalSessionMessage',
+    DiscardCodexLocalSessionMessage: 'discardCodexLocalSessionMessage',
     ListMachineDirectory: 'list-directory',
     PathExists: 'path-exists',
     GetMachineGitBranch: 'get-machine-git-branch',

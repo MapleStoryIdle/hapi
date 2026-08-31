@@ -14,6 +14,7 @@ import {
     type CodexLocalSessionListUpdate,
     type CodexLocalSessionComposerCapabilitiesRpcResponse,
     type CodexLocalSessionDataRpcResponse,
+    type DiscardCodexLocalSessionMessageRpcResponse,
     type CodexLocalSessionRealtimeSnapshot,
     type CodexLocalSessionSnapshotRpcResponse,
     type CodexLocalSessionStatusRpcResponse,
@@ -97,6 +98,11 @@ interface SendCodexLocalSessionMessageRequest {
     displayMessage?: unknown
     clientMessageId?: unknown
     forceRecovery?: unknown
+}
+
+interface DiscardCodexLocalSessionMessageRequest {
+    sessionId?: unknown
+    clientMessageId?: unknown
 }
 
 const MAX_NATIVE_CODEX_REALTIME_SNAPSHOT_BYTES = 96 * 1024
@@ -436,6 +442,21 @@ export class ApiMachineClient {
                     params?.clientMessageId,
                     params?.forceRecovery
                 )
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<
+            DiscardCodexLocalSessionMessageRequest,
+            DiscardCodexLocalSessionMessageRpcResponse
+        >(
+            RPC_METHODS.DiscardCodexLocalSessionMessage,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                if (!sessionId) {
+                    return { success: false, code: 'invalid_client_message_id', error: 'sessionId is required' }
+                }
+                this.observeNativeCodexSession(sessionId)
+                return this.nativeCodexSessionDirectSender.discard(sessionId, params?.clientMessageId)
             }
         )
 

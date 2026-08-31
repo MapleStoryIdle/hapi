@@ -15,6 +15,7 @@ import {
     type CodexLocalSessionData as RunnerCodexLocalSessionData,
     type CodexLocalSessionReadTiming,
     type CodexLocalSessionStatusRpcResponse,
+    type DiscardCodexLocalSessionMessageRpcResponse,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import { parseAutomationHeartbeatMessageContent } from '@hapi/protocol/messages'
@@ -1095,6 +1096,18 @@ function parseSendCodexLocalSessionMessageRequest(value: unknown): {
         ...(clientMessageId ? { clientMessageId } : {}),
         ...(record.forceRecovery === true ? { forceRecovery: true } : {})
     }
+}
+
+function parseDiscardCodexLocalSessionMessageRequest(value: unknown): {
+    machineId: string
+    clientMessageId: string
+} | null {
+    const record = asRecord(value)
+    if (!record) return null
+    const machineId = typeof record.machineId === 'string' ? record.machineId.trim() : ''
+    const clientMessageId = typeof record.clientMessageId === 'string' ? record.clientMessageId.trim() : ''
+    if (!machineId || !clientMessageId) return null
+    return { machineId, clientMessageId }
 }
 
 function getOnlineCodexRunner(engine: SyncEngine, namespace: string, machineId: string): Machine | null {
@@ -2513,6 +2526,47 @@ export function createCodexDesktopRoutes(options: {
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to send message to native Codex session'
+            }, 502)
+        }
+    })
+
+    app.post('/codex/sessions/:id/messages/discard', async (c) => {
+        const request = parseDiscardCodexLocalSessionMessageRequest(await c.req.json().catch(() => null))
+        if (!request) {
+            return c.json({ success: false, error: 'machineId and clientMessageId are required' }, 400)
+        }
+
+        const engine = options.getSyncEngine()
+        const target = resolveDirectCodexLocalSessionTarget({
+            engine,
+            namespace: c.get('namespace'),
+            machineId: request.machineId
+        })
+        if (target.type === 'error') {
+            return c.json({ success: false, error: target.message }, target.status)
+        }
+
+        try {
+            const result = await engine!.discardCodexLocalSessionMessage(
+                target.machine.id,
+                c.req.param('id'),
+                request.clientMessageId
+            )
+            if (result.success === true) {
+                return c.json(result satisfies DiscardCodexLocalSessionMessageRpcResponse, 202)
+            }
+            const status = result.code === 'invalid_client_message_id'
+                ? 400
+                : result.code === 'session_not_found'
+                    ? 404
+                    : result.code === 'launch_failed'
+                        ? 502
+                        : 409
+            return c.json(result satisfies DiscardCodexLocalSessionMessageRpcResponse, status)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to discard native Codex message'
             }, 502)
         }
     })

@@ -221,6 +221,8 @@ export default {
   'recentCodex.direct.recovery.retry': '重新投递',
   'recentCodex.direct.recovery.pending': '恢复投递中…',
   'recentCodex.direct.recovery.cancel': '取消',
+  'recentCodex.direct.recovery.discard': '放弃消息',
+  'recentCodex.direct.recovery.discarding': '正在放弃…',
   'recentCodex.direct.externalWriter.title': '当前无法发送消息',
   'recentCodex.direct.externalWriter.detail': '这个原生会话正在由另一个 Codex 客户端使用。HAPI 会继续同步后续新内容。',
   'recentCodex.direct.error.queueFull': '原生会话队列已满，请等当前处理完成后再试。',

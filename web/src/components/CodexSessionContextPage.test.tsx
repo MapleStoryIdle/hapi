@@ -89,6 +89,11 @@ function createApi() {
             status: 'processing' as const,
             startedAt: Date.now()
         })),
+        discardCodexSessionMessage: vi.fn(async () => ({
+            success: true as const,
+            discarded: true,
+            queuedMessages: []
+        })),
         forkCodexSession: vi.fn(async () => ({
             type: 'success' as const,
             sessionId: 'new-hapi-session'
@@ -978,14 +983,15 @@ describe('CodexSessionContextPage', () => {
         })
     })
 
-    it('cancels a pending native recovery request without silently retrying it', async () => {
+    it('discards a pending native recovery request without silently retrying it', async () => {
         const api = createApi()
         let recoverySignal: AbortSignal | undefined
+        let queuedMessages = [{ id: 'queued-stalled', text: 'Cancel this retry', queuedAt: 123 }]
         ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
             success: true,
             status: 'processing',
             stalledSince: Date.now() - 10_000,
-            queuedMessages: [{ id: 'queued-stalled', text: 'Cancel this retry', queuedAt: 123 }]
+            queuedMessages
         })
         ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementation((
             _sessionId: string,
@@ -999,21 +1005,28 @@ describe('CodexSessionContextPage', () => {
                 reject(error)
             }, { once: true })
         }))
+        ;(api.discardCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+            queuedMessages = []
+            return { success: true, discarded: true, queuedMessages: [] }
+        })
         renderPage({ api })
 
         await screen.findByTestId('codex-native-recovery')
         fireEvent.click(screen.getByRole('button', { name: 'Confirm and retry' }))
-        expect(await screen.findByRole('button', { name: 'Cancel' })).toBeEnabled()
+        expect(await screen.findByRole('button', { name: 'Discard message' })).toBeEnabled()
         await waitFor(() => expect(recoverySignal).toBeDefined())
 
-        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Discard message' }))
 
         await waitFor(() => {
             expect(recoverySignal?.aborted).toBe(true)
-            expect(screen.getByRole('button', { name: 'Confirm and retry' })).toBeEnabled()
+            expect(api.discardCodexSessionMessage).toHaveBeenCalledWith('codex-thread-1', {
+                machineId: 'machine-1',
+                clientMessageId: 'queued-stalled'
+            })
         })
         expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1)
-        expect(screen.getByTestId('codex-native-recovery')).toBeInTheDocument()
+        await waitFor(() => expect(screen.queryByTestId('codex-native-recovery')).not.toBeInTheDocument())
     })
 
     it('explains a Codex timeout before allowing a saved prompt to be retried', async () => {
@@ -1038,6 +1051,7 @@ describe('CodexSessionContextPage', () => {
         const recovery = await screen.findByTestId('codex-native-recovery')
         expect(recovery).toHaveTextContent('Codex has not reported new activity for a while')
         expect(screen.getByRole('button', { name: 'Confirm and retry' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Discard message' })).toBeInTheDocument()
     })
 
     it('recovers a browser receipt left behind by a runner restart only after confirmation', async () => {

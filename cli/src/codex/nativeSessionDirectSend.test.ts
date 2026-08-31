@@ -863,6 +863,74 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
+    it('removes a recovery-required receipt from the persisted native outbox', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-discard-workspace-'))
+        const storeDir = mkdtempSync(join(tmpdir(), 'hapi-native-direct-discard-store-'))
+        const sessionId = '25445678-1234-4234-8234-123456789012'
+        const store = new FileNativeCodexSessionDirectSendStore(join(storeDir, 'native-outbox.json'))
+        try {
+            store.save([{
+                sessionId,
+                id: 'native:discard-me',
+                text: 'Do not retry this hand-off',
+                deliveryText: 'Do not retry this hand-off',
+                queuedAt: 600,
+                recoveryRequired: true,
+                recoveryReason: 'session_status_unknown'
+            }, {
+                sessionId,
+                id: 'native:keep-me',
+                text: 'Continue after the abandoned receipt',
+                deliveryText: 'Continue after the abandoned receipt',
+                queuedAt: 601,
+                recoveryRequired: false
+            }])
+            // Construct after writing the file so the queue comes from the
+            // runner-persisted outbox, not just this process's memory.
+            const restored = new NativeCodexSessionDirectSender(
+                vi.fn<SpawnNativeCodexProcess>(),
+                () => 701,
+                1_000,
+                {
+                    getSummary: () => ({
+                        id: sessionId,
+                        title: 'Native thread',
+                        cwd,
+                        file: '/not-read.jsonl',
+                        modifiedAt: 100,
+                        runState: 'processing'
+                    })
+                },
+                null,
+                store
+            )
+            try {
+                expect(restored.discard(sessionId, 'native:discard-me')).toEqual({
+                    success: true,
+                    discarded: true,
+                    queuedMessages: [{
+                        id: 'native:keep-me',
+                        text: 'Continue after the abandoned receipt',
+                        queuedAt: 601
+                    }]
+                })
+                expect(store.load()).toEqual([{
+                    sessionId,
+                    id: 'native:keep-me',
+                    text: 'Continue after the abandoned receipt',
+                    deliveryText: 'Continue after the abandoned receipt',
+                    queuedAt: 601,
+                    recoveryRequired: false
+                }])
+            } finally {
+                restored.dispose()
+            }
+        } finally {
+            rmSync(cwd, { recursive: true, force: true })
+            rmSync(storeDir, { recursive: true, force: true })
+        }
+    })
+
     it('persists a failed native hand-off as a recovery-required receipt', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-failed-recovery-workspace-'))
         const storeDir = mkdtempSync(join(tmpdir(), 'hapi-native-direct-failed-recovery-store-'))

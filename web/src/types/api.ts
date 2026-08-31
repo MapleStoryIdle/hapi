@@ -332,6 +332,18 @@ export type SendCodexLocalSessionMessageResponse =
         code?: string
     }
 
+export type DiscardCodexLocalSessionMessageResponse =
+    | {
+        success: true
+        discarded: boolean
+        queuedMessages: CodexLocalSessionQueuedMessage[]
+    }
+    | {
+        success: false
+        error: string
+        code?: string
+    }
+
 export type CodexLocalSessionQueuedMessage = {
     id: string
     text: string

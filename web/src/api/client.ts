@@ -6,6 +6,7 @@ import type {
     CodexLocalSessionComposerCapabilitiesResponse,
     CodexLocalSessionSnapshotResponse,
     CodexLocalSessionStatusResponse,
+    DiscardCodexLocalSessionMessageResponse,
     ForkCodexLocalSessionResponse,
     SendCodexLocalSessionMessageResponse,
     CodexDuplicateSessionsResponse,
@@ -348,6 +349,22 @@ export class ApiClient {
                 method: 'POST',
                 body: JSON.stringify(payload),
                 signal: options?.signal
+            }
+        )
+    }
+
+    async discardCodexSessionMessage(
+        sessionId: string,
+        payload: {
+            machineId: string
+            clientMessageId: string
+        }
+    ): Promise<DiscardCodexLocalSessionMessageResponse> {
+        return await this.request<DiscardCodexLocalSessionMessageResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/messages/discard`,
+            {
+                method: 'POST',
+                body: JSON.stringify(payload)
             }
         )
     }

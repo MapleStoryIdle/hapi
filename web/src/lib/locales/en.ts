@@ -221,6 +221,8 @@ export default {
   'recentCodex.direct.recovery.retry': 'Retry delivery',
   'recentCodex.direct.recovery.pending': 'Retrying delivery…',
   'recentCodex.direct.recovery.cancel': 'Cancel',
+  'recentCodex.direct.recovery.discard': 'Discard message',
+  'recentCodex.direct.recovery.discarding': 'Discarding…',
   'recentCodex.direct.externalWriter.title': 'Unable to send messages right now',
   'recentCodex.direct.externalWriter.detail': 'This native session is open in another Codex client. HAPI will keep syncing new transcript updates.',
   'recentCodex.direct.error.queueFull': 'The native queue is full. Wait for a turn to finish, then try again.',
