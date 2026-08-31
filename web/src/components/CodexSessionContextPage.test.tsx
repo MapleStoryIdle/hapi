@@ -813,7 +813,10 @@ describe('CodexSessionContextPage', () => {
             })
         })
         expect(await screen.findByRole('button', { name: 'Open 1 queued messages' })).toBeInTheDocument()
-        expect(screen.getByTestId('codex-direct-send-phase-queued')).toBeInTheDocument()
+        const queuedNotice = screen.getByTestId('codex-direct-send-phase-queued')
+        expect(queuedNotice).toHaveTextContent('Native Codex is still working')
+        expect(queuedNotice).toHaveTextContent('This message is queued')
+        expect(screen.queryByTestId('codex-native-recovery')).not.toBeInTheDocument()
     })
 
     it('keeps a confirmed queue visible while a status refresh has not published it yet', async () => {

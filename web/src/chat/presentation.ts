@@ -177,6 +177,13 @@ export type EventPresentation = {
     text: string
 }
 
+export function isUsageLimitEvent(event: AgentEvent | undefined): boolean {
+    return event?.type === 'codex-usage-updated'
+        || event?.type === 'limit-warning'
+        || event?.type === 'limit-reached'
+        || (event?.type === 'task-status' && event.code === 'usage_limit')
+}
+
 export function getEventPresentation(event: AgentEvent): EventPresentation {
     if (event.type === 'automation-heartbeat') {
         return { icon: '◌', text: `Automation heartbeat · ${event.automationId}` }
@@ -236,6 +243,9 @@ export function getEventPresentation(event: AgentEvent): EventPresentation {
         const typeLabel = formatLimitType(ev.limitType)
         const suffix = typeLabel ? ` (${typeLabel})` : ''
         return { icon: '⏳', text: endsAt ? `Usage limit reached${suffix} until ${formatUnixTimestamp(endsAt)}` : `Usage limit reached${suffix}` }
+    }
+    if (event.type === 'codex-usage-updated') {
+        return { icon: '◷', text: 'Codex usage updated' }
     }
     if (event.type === 'error') {
         return { icon: '⚠️', text: typeof event.message === 'string' ? event.message : 'Error' }

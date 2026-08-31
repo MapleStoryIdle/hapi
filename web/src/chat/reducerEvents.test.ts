@@ -61,6 +61,15 @@ describe('parseMessageAsEvent — usage limit formats', () => {
         })
     })
 
+    it('parses Codex usage updates into a compact event', () => {
+        const text = 'Codex usage updated · GPT-5.3-Codex-Spark: primary 0% / 300 min, secondary 0% / 10080 min'
+
+        expect(parseMessageAsEvent(makeAgentTextMessage(text))).toEqual({
+            type: 'codex-usage-updated',
+            message: text,
+        })
+    })
+
     it('handles missing limitType', () => {
         const msg = makeAgentTextMessage('Claude AI usage limit warning|1774278000|100|')
         expect(parseMessageAsEvent(msg)).toEqual({

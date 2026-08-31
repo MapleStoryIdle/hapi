@@ -241,6 +241,88 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
+    it('waits for an external native writer before retrying a safe pre-turn conflict', async () => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-active-writer-workspace-'))
+        const sessionId = '81845678-1234-4234-8234-123456789012'
+        let runState: 'idle' | 'processing' = 'idle'
+        let modifiedAt = 100
+        const lookup = vi.fn(() => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt,
+            runState
+        }))
+        const blockedClient = new FakeAppServerClient()
+        blockedClient.resumeError = new Error('thread-store conflict: thread already has an active writer')
+        const readyClient = new FakeAppServerClient()
+        let nextClient = 0
+        const createClient = vi.fn(() => [blockedClient, readyClient][nextClient++]!)
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1_000,
+            { getSummary: lookup },
+            createClient
+        )
+
+        try {
+            expect(sender.send(sessionId, 'Wait for the original Codex turn', undefined, 'native:active-writer')).toMatchObject({
+                success: true,
+                status: 'processing'
+            })
+            expect(sender.send(sessionId, 'Stay behind the first prompt', undefined, 'native:after-active-writer')).toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            await flushMicrotasks()
+
+            expect(spawn).not.toHaveBeenCalled()
+            expect(sender.getStatus(sessionId)).toEqual({
+                success: true,
+                status: 'idle',
+                queuedMessages: [{
+                    id: 'native:active-writer',
+                    text: 'Wait for the original Codex turn',
+                    queuedAt: 123
+                }, {
+                    id: 'native:after-active-writer',
+                    text: 'Stay behind the first prompt',
+                    queuedAt: 123
+                }]
+            })
+
+            // The cache can still say idle immediately after the conflict. Do
+            // not keep opening bridges until the original native turn appears.
+            await vi.advanceTimersByTimeAsync(5_000)
+            expect(createClient).toHaveBeenCalledTimes(1)
+
+            runState = 'processing'
+            modifiedAt = 101
+            sender.notifyTranscriptChanged(sessionId)
+            await vi.advanceTimersByTimeAsync(0)
+            expect(createClient).toHaveBeenCalledTimes(1)
+
+            runState = 'idle'
+            modifiedAt = 102
+            sender.notifyTranscriptChanged(sessionId)
+            await vi.advanceTimersByTimeAsync(0)
+            await flushMicrotasks()
+
+            expect(createClient).toHaveBeenCalledTimes(2)
+            expect(readyClient.startTurnCalls).toEqual([{
+                threadId: sessionId,
+                input: [{ type: 'text', text: 'Wait for the original Codex turn' }]
+            }])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('does not fall back after turn/start could already have accepted the prompt', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-bridge-ambiguous-workspace-'))
         const sessionId = '82345678-1234-4234-8234-123456789012'
@@ -865,7 +947,8 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('persists a synchronous launch failure instead of losing the native prompt', () => {
+    it('retries a synchronous launch failure automatically because no native turn started', async () => {
+        vi.useFakeTimers()
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-launch-failure-workspace-'))
         const storeDir = mkdtempSync(join(tmpdir(), 'hapi-native-direct-launch-failure-store-'))
         const sessionId = '25645678-1234-4234-8234-123456789012'
@@ -878,57 +961,49 @@ describe('NativeCodexSessionDirectSender', () => {
             runState: 'idle' as const
         }))
         const store = new FileNativeCodexSessionDirectSendStore(join(storeDir, 'native-outbox.json'))
-        const sender = new NativeCodexSessionDirectSender(
-            () => {
+        const retryChild = new FakeChildProcess()
+        let launchAttempts = 0
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => {
+            launchAttempts += 1
+            if (launchAttempts === 1) {
                 throw new Error('codex executable unavailable')
-            },
+            }
+            return retryChild as never
+        })
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
             () => 700,
             10,
             { getSummary: lookup },
             null,
             store
         )
-        let replacementSender: NativeCodexSessionDirectSender | null = null
 
         try {
-            expect(sender.send(sessionId, 'Keep this launch failure', undefined, 'native:launch-failure')).toEqual({
-                success: false,
-                code: 'launch_failed',
-                error: 'codex executable unavailable'
+            expect(sender.send(sessionId, 'Keep this launch failure', undefined, 'native:launch-failure')).toMatchObject({
+                success: true,
+                status: 'queued',
+                queueId: 'native:launch-failure'
             })
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
                 status: 'idle',
-                lastErrorCode: 'launch_failed',
                 queuedMessages: [{
                     id: 'native:launch-failure',
-                    text: 'Keep this launch failure',
-                    recoveryRequired: true,
-                    recoveryReason: 'launch_failed'
+                    text: 'Keep this launch failure'
                 }]
             })
 
-            sender.dispose()
-            replacementSender = new NativeCodexSessionDirectSender(
-                vi.fn<SpawnNativeCodexProcess>(),
-                () => 701,
-                10,
-                { getSummary: lookup },
-                null,
-                store
-            )
-            expect(replacementSender.getStatus(sessionId)).toMatchObject({
+            await vi.advanceTimersByTimeAsync(5_000)
+            expect(spawn).toHaveBeenCalledTimes(2)
+            expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
-                status: 'idle',
-                queuedMessages: [{
-                    id: 'native:launch-failure',
-                    recoveryRequired: true,
-                    recoveryReason: 'launch_failed'
-                }]
+                status: 'processing',
+                progress: { transport: 'exec-resume' },
+                queuedMessages: []
             })
         } finally {
             sender.dispose()
-            replacementSender?.dispose()
             rmSync(cwd, { recursive: true, force: true })
             rmSync(storeDir, { recursive: true, force: true })
         }

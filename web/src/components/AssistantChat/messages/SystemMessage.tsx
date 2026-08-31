@@ -1,6 +1,6 @@
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
 import { Activity, AlertTriangle, Archive, Clock, ExternalLink, Layers2, RefreshCw, type LucideIcon } from 'lucide-react'
-import { getEventPresentation } from '@/chat/presentation'
+import { getEventPresentation, isUsageLimitEvent } from '@/chat/presentation'
 import type { AgentEvent } from '@/chat/types'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { useTranslation } from '@/lib/use-translation'
@@ -197,24 +197,73 @@ function ContextCompactedDivider(props: { messageId: string }) {
     const detail = t('contextCompacted.detail')
 
     return (
+        <TimelineDivider
+            messageId={props.messageId}
+            title={title}
+            detail={detail}
+            Icon={Layers2}
+            iconClassName="text-indigo-500 dark:text-indigo-300"
+            testId="context-compacted-event"
+        />
+    )
+}
+
+function TimelineDivider(props: {
+    messageId: string
+    title: string
+    detail: string
+    Icon: LucideIcon
+    iconClassName: string
+    testId: string
+}) {
+    const Icon = props.Icon
+
+    return (
         <MessagePrimitive.Root id={getConversationMessageAnchorId(props.messageId)} className="scroll-mt-4 py-2">
             <div
                 className="mx-auto flex w-full max-w-[min(92%,42rem)] items-center gap-2 px-2"
-                data-testid="context-compacted-event"
+                data-testid={props.testId}
                 data-event-style="divider"
                 role="status"
-                aria-label={`${title}. ${detail}`}
+                aria-label={`${props.title}. ${props.detail}`}
             >
                 <span className="h-px min-w-3 flex-1 bg-[color-mix(in_srgb,var(--app-border)_72%,transparent)]" aria-hidden="true" />
-                <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-[var(--app-hint)]" title={detail}>
-                    <Layers2 className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-300" aria-hidden="true" />
-                    <span className="font-medium text-[var(--app-fg)]">{title}</span>
-                    <span aria-hidden="true">·</span>
-                    <MessageTimestamp className="text-[10px]" />
+                <span className="inline-flex min-w-0 max-w-[75%] shrink items-center gap-1.5 text-[11px] text-[var(--app-hint)]" title={props.detail}>
+                    <Icon className={`h-3.5 w-3.5 shrink-0 ${props.iconClassName}`} aria-hidden="true" />
+                    <span className="min-w-0 truncate font-medium text-[var(--app-fg)]">{props.title}</span>
+                    <span className="shrink-0" aria-hidden="true">·</span>
+                    <MessageTimestamp className="shrink-0 text-[10px]" />
                 </span>
                 <span className="h-px min-w-3 flex-1 bg-[color-mix(in_srgb,var(--app-border)_72%,transparent)]" aria-hidden="true" />
             </div>
         </MessagePrimitive.Root>
+    )
+}
+
+function UsageLimitDivider(props: { event: AgentEvent; messageId: string }) {
+    const presentation = getEventPresentation(props.event)
+    const isWarning = props.event.type === 'limit-warning'
+    const isUpdate = props.event.type === 'codex-usage-updated'
+
+    return (
+        <TimelineDivider
+            messageId={props.messageId}
+            title={presentation.text}
+            detail={
+                props.event.type === 'codex-usage-updated' && typeof props.event.message === 'string'
+                    ? props.event.message
+                    : presentation.text
+            }
+            Icon={isWarning ? AlertTriangle : Clock}
+            iconClassName={
+                isWarning
+                    ? 'text-amber-600 dark:text-amber-300'
+                    : isUpdate
+                        ? 'text-sky-600 dark:text-sky-300'
+                        : 'text-red-600 dark:text-red-300'
+            }
+            testId="usage-limit-event"
+        />
     )
 }
 
@@ -238,6 +287,10 @@ export function HappySystemMessage() {
     })
 
     if (role !== 'system') return null
+
+    if (event && isUsageLimitEvent(event)) {
+        return <UsageLimitDivider event={event} messageId={messageId} />
+    }
 
     if (isTaskStatusEvent(event)) {
         return <TaskStatusCard event={event} messageId={messageId} />

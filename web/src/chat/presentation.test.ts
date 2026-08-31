@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getEventPresentation, formatMessageTimestamp, formatResetTime } from './presentation'
+import { getEventPresentation, formatMessageTimestamp, formatResetTime, isUsageLimitEvent } from './presentation'
 
 describe('getEventPresentation — agent errors', () => {
     it('formats error events with warning icon and message text', () => {
@@ -118,6 +118,57 @@ describe('getEventPresentation — limit-reached', () => {
         expect(result.icon).toBe('⏳')
         expect(result.text).toMatch(/^Usage limit reached until/)
         expect(result.text).not.toMatch(/\(/)
+    })
+})
+
+describe('Codex usage updates', () => {
+    it('uses a concise label while retaining the full event payload for the divider detail', () => {
+        expect(getEventPresentation({
+            type: 'codex-usage-updated',
+            message: 'Codex usage updated · GPT-5.3-Codex-Spark: primary 0% / 300 min'
+        })).toEqual({
+            icon: '◷',
+            text: 'Codex usage updated'
+        })
+    })
+})
+
+describe('isUsageLimitEvent', () => {
+    it('includes every quota event rendered as a compact divider', () => {
+        expect(isUsageLimitEvent({
+            type: 'codex-usage-updated',
+            message: 'Codex usage updated · primary 0%'
+        })).toBe(true)
+        expect(isUsageLimitEvent({
+            type: 'limit-warning',
+            utilization: 0.9,
+            endsAt: 1774278000,
+            limitType: 'five_hour'
+        })).toBe(true)
+        expect(isUsageLimitEvent({
+            type: 'limit-reached',
+            endsAt: 1774278000,
+            limitType: 'five_hour'
+        })).toBe(true)
+        expect(isUsageLimitEvent({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'usage_limit',
+            message: "You've hit your usage limit.",
+            recoverable: false
+        })).toBe(true)
+    })
+
+    it('leaves non-quota task failures as cards', () => {
+        expect(isUsageLimitEvent({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'model_capacity',
+            message: 'Selected model is at capacity.',
+            recoverable: false
+        })).toBe(false)
     })
 })
 

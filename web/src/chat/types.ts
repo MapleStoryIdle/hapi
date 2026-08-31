@@ -20,6 +20,7 @@ export type AgentEvent =
     | { type: 'title-changed'; title: string }
     | { type: 'limit-reached'; endsAt: number; limitType: string }
     | { type: 'limit-warning'; /** 0–1 ratio (e.g. 0.9 = 90%), integer-precision via CLI pipe format */ utilization: number; endsAt: number; limitType: string }
+    | { type: 'codex-usage-updated'; message: string }
     | { type: 'ready' }
     | { type: 'automation-heartbeat'; automationId: string; decision?: string; message: string; currentTimeIso?: string }
     | {

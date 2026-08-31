@@ -182,6 +182,12 @@ type QueuedSend = CodexLocalSessionQueuedMessage & {
     recoveryReason?: CodexLocalSessionDirectSendRecoveryReason
 }
 
+type ExternalNativeWriterWait = {
+    /** The transcript must show this external writer before a stale idle cache can release the queue. */
+    observedProcessing: boolean
+    modifiedAt: number
+}
+
 const RECENT_FAILURE_TTL_MS = 60_000
 const MAX_FAILURE_MESSAGE_LENGTH = 400
 const MAX_NATIVE_QUEUE_LENGTH = 50
@@ -207,6 +213,16 @@ function trimFailureMessage(value: string): string {
     return trimmed.length > MAX_FAILURE_MESSAGE_LENGTH
         ? `${trimmed.slice(0, MAX_FAILURE_MESSAGE_LENGTH - 1)}…`
         : trimmed
+}
+
+/**
+ * `thread/resume` can reject before turn/start when another Codex client owns
+ * the original thread. No user text has reached Codex at that point.
+ */
+function isExternalNativeWriterConflict(value: string): boolean {
+    const normalized = value.toLowerCase()
+    return normalized.includes('thread-store conflict')
+        && normalized.includes('active writer')
 }
 
 function parseRecoveryReason(value: unknown): CodexLocalSessionDirectSendRecoveryReason | null {
@@ -297,6 +313,7 @@ export class NativeCodexSessionDirectSender {
     private readonly recentFailures = new Map<string, RecentFailure>()
     private readonly queues = new Map<string, QueuedSend[]>()
     private readonly queueTimers = new Map<string, ReturnType<typeof setTimeout>>()
+    private readonly externalWriterWaits = new Map<string, ExternalNativeWriterWait>()
     private stateChangeListener: ((sessionId: string) => void) | null = null
 
     constructor(
@@ -703,7 +720,8 @@ export class NativeCodexSessionDirectSender {
         sessionId: string,
         deliveryText: string,
         displayText: string,
-        clientMessageId: string | null
+        clientMessageId: string | null,
+        options: { front?: boolean; queuedAt?: number } = {}
     ): SendCodexLocalSessionMessageRpcResponse {
         const queue = this.queues.get(sessionId) ?? []
         if (queue.length >= MAX_NATIVE_QUEUE_LENGTH) {
@@ -714,7 +732,7 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
-        const queuedAt = this.now()
+        const queuedAt = options.queuedAt ?? this.now()
         const item: QueuedSend = {
             id: clientMessageId ?? randomUUID(),
             text: displayText,
@@ -722,10 +740,18 @@ export class NativeCodexSessionDirectSender {
             queuedAt,
             recoveryRequired: false
         }
-        queue.push(item)
+        if (options.front) {
+            queue.unshift(item)
+        } else {
+            queue.push(item)
+        }
         this.queues.set(sessionId, queue)
         if (!this.persistOutbox()) {
-            queue.pop()
+            if (options.front) {
+                queue.shift()
+            } else {
+                queue.pop()
+            }
             if (queue.length === 0) {
                 this.queues.delete(sessionId)
             }
@@ -737,7 +763,7 @@ export class NativeCodexSessionDirectSender {
             success: true,
             status: 'queued',
             queuedAt,
-            queuePosition: queue.length,
+            queuePosition: options.front ? 1 : queue.length,
             queueId: item.id,
             queuedMessages: this.getQueuedMessages(sessionId)
         }
@@ -857,8 +883,17 @@ export class NativeCodexSessionDirectSender {
             child = this.spawnProcess(args, cwd)
         } catch (error) {
             const failure = trimFailureMessage(error instanceof Error ? error.message : String(error))
-            this.preserveFailedReceipt(sessionId, recoveryReceipt, 'launch_failed')
-            this.persistOutbox()
+            // `spawn` threw before a Codex process existed, so the prompt
+            // cannot have reached the native thread. Replace the crash
+            // reservation with a normal FIFO item and retry safely.
+            const queued = this.enqueue(sessionId, deliveryText, displayText, clientMessageId, {
+                front: true,
+                queuedAt: startedAt
+            })
+            if (queued.success) {
+                this.scheduleQueuePump(sessionId, NATIVE_QUEUE_RETRY_INTERVAL_MS, { replacePending: true })
+                return queued
+            }
             this.recentFailures.set(sessionId, {
                 message: failure,
                 occurredAt: startedAt,
@@ -1041,6 +1076,25 @@ export class NativeCodexSessionDirectSender {
         if (!this.isCurrentActive(sessionId, active)) return
         this.detachBridge(sessionId, active)
         const session = this.sessionLookup.getSummary(sessionId)
+        if (isExternalNativeWriterConflict(setupFailure)) {
+            const queued = this.enqueue(sessionId, active.deliveryText, active.displayText, active.clientMessageId, {
+                front: true,
+                queuedAt: active.startedAt
+            })
+            if (queued.success) {
+                this.externalWriterWaits.set(sessionId, {
+                    observedProcessing: session?.runState === 'processing',
+                    modifiedAt: session?.modifiedAt ?? active.initialModifiedAt
+                })
+                // The status cache can remain idle briefly after Codex rejects
+                // the bridge. Wait for the external transcript transition
+                // instead of immediately opening another competing bridge.
+                this.scheduleQueuePump(sessionId, NATIVE_QUEUE_RETRY_INTERVAL_MS, { replacePending: true })
+                return
+            }
+            this.recordBridgeFallbackFailure(sessionId, active, queued)
+            return
+        }
         if (session?.runState === 'idle') {
             const result = this.startExecResume(
                 sessionId,
@@ -1056,7 +1110,10 @@ export class NativeCodexSessionDirectSender {
             return
         }
         if (session?.runState === 'processing') {
-            const queued = this.enqueue(sessionId, active.deliveryText, active.displayText, active.clientMessageId)
+            const queued = this.enqueue(sessionId, active.deliveryText, active.displayText, active.clientMessageId, {
+                front: true,
+                queuedAt: active.startedAt
+            })
             if (queued.success) return
         }
         this.preserveFailedActive(sessionId, active, 'session_status_unknown')
@@ -1075,7 +1132,10 @@ export class NativeCodexSessionDirectSender {
         this.detachBridge(sessionId, active)
         const session = this.sessionLookup.getSummary(sessionId)
         if (session?.runState === 'processing') {
-            const queued = this.enqueue(sessionId, active.deliveryText, active.displayText, active.clientMessageId)
+            const queued = this.enqueue(sessionId, active.deliveryText, active.displayText, active.clientMessageId, {
+                front: true,
+                queuedAt: active.startedAt
+            })
             if (queued.success) return
         }
         if (session?.runState === 'idle') {
@@ -1462,6 +1522,7 @@ export class NativeCodexSessionDirectSender {
         const queue = this.queues.get(sessionId)
         if (!queue || queue.length === 0) {
             this.queues.delete(sessionId)
+            this.externalWriterWaits.delete(sessionId)
             this.persistOutbox()
             return
         }
@@ -1474,6 +1535,26 @@ export class NativeCodexSessionDirectSender {
         }
 
         const session = this.sessionLookup.getSummary(sessionId)
+        const externalWriterWait = this.externalWriterWaits.get(sessionId)
+        if (externalWriterWait) {
+            if (session?.runState === 'processing') {
+                externalWriterWait.observedProcessing = true
+                this.scheduleQueuePump(sessionId)
+                return
+            }
+            // The bridge conflict proves another writer was active. A stale
+            // idle summary alone is not evidence that it has finished. The
+            // next transcript change (or an observed processing → idle turn)
+            // releases this safe queue automatically.
+            if (
+                session?.runState !== 'idle'
+                || (!externalWriterWait.observedProcessing && session.modifiedAt <= externalWriterWait.modifiedAt)
+            ) {
+                this.scheduleQueuePump(sessionId, NATIVE_QUEUE_RETRY_INTERVAL_MS)
+                return
+            }
+            this.externalWriterWaits.delete(sessionId)
+        }
         // A delivery bridge must never race a second writer. Do not infer
         // ownership from a machine-global control socket: it may belong to a
         // different native Codex thread.

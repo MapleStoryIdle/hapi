@@ -22,6 +22,12 @@ function parseClaudeUsageLimit(text: string): AgentEvent | null {
     return null
 }
 
+function parseCodexUsageUpdate(text: string): AgentEvent | null {
+    return /^Codex usage updated(?:\s·\s|$)/.test(text)
+        ? { type: 'codex-usage-updated', message: text }
+        : null
+}
+
 export function parseMessageAsEvent(msg: NormalizedMessage): AgentEvent | null {
     if (msg.isSidechain) return null
     if (msg.role !== 'agent') return null
@@ -31,6 +37,11 @@ export function parseMessageAsEvent(msg: NormalizedMessage): AgentEvent | null {
             const limitEvent = parseClaudeUsageLimit(content.text)
             if (limitEvent !== null) {
                 return limitEvent
+            }
+
+            const codexUsageUpdate = parseCodexUsageUpdate(content.text)
+            if (codexUsageUpdate !== null) {
+                return codexUsageUpdate
             }
         }
     }
