@@ -11,24 +11,29 @@ import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
-import { ArtifactService, MAX_ARTIFACT_BYTES } from '../../artifacts/service'
+import { ArtifactService, isMarkdownShare, MAX_ARTIFACT_BYTES } from '../../artifacts/service'
 import type { Store } from '../../store'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
 
 const MAX_SHARE_FILENAME_BYTES = 255
 
-export function decodeShareFilename(raw: string | undefined): string | null {
+export function decodeShareHeaderText(raw: string | undefined, maxBytes: number): string | null {
     if (!raw || !/^[A-Za-z0-9_-]+$/.test(raw)) return null
     try {
         const bytes = Buffer.from(raw, 'base64url')
-        if (bytes.length === 0 || bytes.length > MAX_SHARE_FILENAME_BYTES || bytes.toString('base64url') !== raw) return null
-        const filename = new TextDecoder('utf-8', { fatal: true }).decode(bytes).normalize('NFC')
-        if (filename !== basename(filename) || filename === '.' || filename === '..' || /[\/\\\u0000-\u001f\u007f]/.test(filename)) return null
-        return filename
+        if (bytes.length === 0 || bytes.length > maxBytes || bytes.toString('base64url') !== raw) return null
+        const value = new TextDecoder('utf-8', { fatal: true }).decode(bytes).normalize('NFC')
+        return /[\u0000-\u001f\u007f]/.test(value) ? null : value
     } catch {
         return null
     }
+}
+
+export function decodeShareFilename(raw: string | undefined): string | null {
+    const filename = decodeShareHeaderText(raw, MAX_SHARE_FILENAME_BYTES)
+    if (!filename || filename !== basename(filename) || filename === '.' || filename === '..' || /[\\/\\\\]/.test(filename)) return null
+    return filename
 }
 
 export async function readShareBody(body: ReadableStream<Uint8Array> | null): Promise<Uint8Array | null> {
@@ -132,13 +137,35 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
     app.post('/shares', async (c) => {
         if (!shareService) return c.json({ error: 'Not ready' }, 503)
         const filename = decodeShareFilename(c.req.header('x-hapi-share-filename'))
+        const sourceHeader = c.req.header('x-hapi-share-source-session')
+        const sourceSessionId = sourceHeader ? decodeShareHeaderText(sourceHeader, 255) : null
+        const feedbackHeader = c.req.header('x-hapi-share-feedback')
+        const feedback = feedbackHeader === '1'
+        const feedbackRequestHeader = c.req.header('x-hapi-share-feedback-request')
+        const feedbackRequest = feedbackRequestHeader ? decodeShareHeaderText(feedbackRequestHeader, 2000) : null
         const expires = Number(c.req.header('x-hapi-share-expires'))
         const length = Number(c.req.header('content-length'))
-        if (!filename || !Number.isInteger(expires) || expires < 300 || expires > 604800 || (!Number.isNaN(length) && (length < 0 || length > MAX_ARTIFACT_BYTES))) {
+        if (!filename || (sourceHeader && !sourceSessionId) || (feedbackHeader && !feedback) || (feedbackRequestHeader && !feedbackRequest) || !Number.isInteger(expires) || expires < 300 || expires > 604800 || (!Number.isNaN(length) && (length < 0 || length > MAX_ARTIFACT_BYTES))) {
             return c.json({ error: 'Invalid share upload' }, 400)
+        }
+        if (feedback && (!sourceSessionId || !isMarkdownShare(filename))) {
+            return c.json({ error: 'Feedback requires a source session and a Markdown share' }, 400)
+        }
+        if (sourceSessionId) {
+            const engine = getSyncEngine()
+            if (!engine) return c.json({ error: 'Not ready' }, 503)
+            const source = engine.resolveSessionAccess(sourceSessionId, c.get('namespace'))
+            if (!source.ok) return c.json({ error: 'Source session not found' }, 404)
         }
         const bytes = await readShareBody(c.req.raw.body)
         if (!bytes) return c.json({ error: 'Share exceeds 10 MiB' }, 413)
+        if (feedback) {
+            try {
+                new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+            } catch {
+                return c.json({ error: 'Feedback-enabled shares must be UTF-8 Markdown' }, 400)
+            }
+        }
         try {
             const base = getConfiguration().publicUrl.replace(/\/+$/, '')
             const makePublicUrl = (token: string): string => `${base}/s/${token}`
@@ -147,10 +174,19 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
                 filename,
                 expiresSeconds: expires,
                 bytes,
-                makePublicUrl
+                makePublicUrl,
+                sourceSessionId,
+                feedback: feedback ? {
+                    request: feedbackRequest,
+                    makeFeedbackUrl: (artifactId: string): string => `${base}/f/${artifactId}`
+                } : undefined
             })
             return c.json({ id: published.artifact.id, expiresAt: published.artifact.expiresAt, url: makePublicUrl(published.token) }, 201)
-        } catch {
+        } catch (error) {
+            const message = error instanceof Error ? error.message : ''
+            if (message === 'Share exceeds 10 MiB' || message.includes('Feedback is only available')) {
+                return c.json({ error: message }, 400)
+            }
             return c.json({ error: 'Could not store share' }, 500)
         }
     })

@@ -24,7 +24,10 @@ import type {
     PushSubscriptionPayload,
     PushUnsubscribePayload,
     PushVapidPublicKeyResponse,
+    DeliverShareFeedbackResponse,
     RevokeShareResponse,
+    ShareContentResponse,
+    ShareFeedbackResponse,
     ShareResponse,
     SharesResponse,
     SlashCommandsResponse,
@@ -612,6 +615,20 @@ export class ApiClient {
     async revokeShare(shareId: string): Promise<RevokeShareResponse> {
         return await this.request<RevokeShareResponse>(`/api/shares/${encodeURIComponent(shareId)}`, {
             method: 'DELETE'
+        })
+    }
+
+    async getShareFeedback(shareId: string): Promise<ShareFeedbackResponse> {
+        return await this.request<ShareFeedbackResponse>(`/api/shares/${encodeURIComponent(shareId)}/feedback`)
+    }
+
+    async getShareContent(shareId: string): Promise<ShareContentResponse> {
+        return await this.request<ShareContentResponse>(`/api/shares/${encodeURIComponent(shareId)}/content`)
+    }
+
+    async deliverShareFeedback(shareId: string): Promise<DeliverShareFeedbackResponse> {
+        return await this.request<DeliverShareFeedbackResponse>(`/api/shares/${encodeURIComponent(shareId)}/feedback/deliver`, {
+            method: 'POST'
         })
     }
 

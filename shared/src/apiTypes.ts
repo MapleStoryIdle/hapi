@@ -85,13 +85,38 @@ export type MessagesResponse = {
 
 export type MachinesResponse = { machines: Machine[] }
 
-/** Safe metadata for a currently active public share. */
+export type KanbanTaskStatus =
+    | 'published'
+    | 'awaiting_feedback'
+    | 'feedback_received'
+    | 'review_sending'
+    | 'review_sent'
+
+/** Feedback-agent details are self-reported by the external agent. */
+export type ShareFeedbackMetadata = {
+    agent: { name: string; version: string }
+    model: { provider: string; id: string; reasoningEffort: string | null }
+    environment: { os: string; arch: string; runtime: string }
+}
+
+export type ShareFeedbackSummary = {
+    filename: string
+    size: number
+    receivedAt: number
+    metadata: ShareFeedbackMetadata
+    reviewDeliveredAt: number | null
+}
+
+/** Safe metadata for a currently active Kanban task / public share. */
 export type ShareSummary = {
     id: string
     filename: string
     size: number
     createdAt: number
     expiresAt: number
+    sourceSessionId: string | null
+    status: KanbanTaskStatus
+    feedback: ShareFeedbackSummary | null
 }
 
 /** Owner-only detail for a share. Legacy shares have no recoverable original URL. */
@@ -102,6 +127,17 @@ export type ShareDetails = ShareSummary & {
 export type SharesResponse = { shares: ShareSummary[] }
 export type ShareResponse = { share: ShareDetails }
 export type RevokeShareResponse = { ok: true; cleanupPending: boolean }
+export type ShareFeedbackResponse = {
+    feedback: ShareFeedbackSummary & { content: string }
+}
+/** Owner-only UTF-8 text preview of an active Kanban source document. */
+export type ShareContentResponse = {
+    content: string
+}
+export type DeliverShareFeedbackResponse = {
+    ok: true
+    status: 'review_sent'
+}
 
 export type SpawnResponse =
     | { type: 'success'; sessionId: string; session?: Session }

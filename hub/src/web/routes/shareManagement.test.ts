@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { SignJWT } from 'jose'
 import { Hono } from 'hono'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -6,8 +6,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ArtifactService } from '../../artifacts/service'
+import { KanbanFeedbackService } from '../../kanban/feedback'
 import { Store } from '../../store'
 import { createAuthMiddleware, type WebAppEnv } from '../middleware/auth'
+import { createPublicFeedbackRoutes } from './feedback'
 import { createShareManagementRoutes } from './shareManagement'
 
 const JWT_SECRET = new TextEncoder().encode('share-management-test-secret')
@@ -62,14 +64,20 @@ describe('share management routes', () => {
                         filename: 'sooner.md',
                         size: 6,
                         createdAt: sooner.artifact.createdAt,
-                        expiresAt: sooner.artifact.expiresAt
+                        expiresAt: sooner.artifact.expiresAt,
+                        sourceSessionId: null,
+                        status: 'published',
+                        feedback: null
                     },
                     {
                         id: later.artifact.id,
                         filename: 'later.md',
                         size: 5,
                         createdAt: later.artifact.createdAt,
-                        expiresAt: later.artifact.expiresAt
+                        expiresAt: later.artifact.expiresAt,
+                        sourceSessionId: null,
+                        status: 'published',
+                        feedback: null
                     }
                 ]
             })
@@ -114,13 +122,27 @@ describe('share management routes', () => {
             expect(await details.json()).toEqual({
                 share: {
                     id: stored.artifact.id,
-                    filename: 'stored.md',
-                    size: 6,
-                    createdAt: stored.artifact.createdAt,
-                    expiresAt: stored.artifact.expiresAt,
-                    url: `https://example.test/s/${stored.token}`
+                        filename: 'stored.md',
+                        size: 6,
+                        createdAt: stored.artifact.createdAt,
+                        expiresAt: stored.artifact.expiresAt,
+                        sourceSessionId: null,
+                        status: 'published',
+                        feedback: null,
+                        url: `https://example.test/s/${stored.token}`
                 }
             })
+
+            const content = await app.request(`http://hub/api/shares/${stored.artifact.id}/content`, {
+                headers: await authHeaders('one')
+            })
+            expect(content.status).toBe(200)
+            expect(await content.json()).toEqual({ content: 'stored' })
+
+            const foreignContent = await app.request(`http://hub/api/shares/${foreign.artifact.id}/content`, {
+                headers: await authHeaders('one')
+            })
+            expect(foreignContent.status).toBe(404)
 
             const legacyDetails = await app.request(`http://hub/api/shares/${legacy.artifact.id}`, {
                 headers: await authHeaders('one')
@@ -190,6 +212,141 @@ describe('share management routes', () => {
             expect(response.status).toBe(202)
             expect(await response.json()).toEqual({ ok: true, cleanupPending: true })
             expect(service.readPublic(made.token)).toBeNull()
+        } finally {
+            store.close()
+        }
+    })
+
+    test('sends received feedback to an idle source session as an untrusted review attachment', async () => {
+        const dir = await mkdtemp(join(tmpdir(), 'hapi-share-feedback-delivery-'))
+        dirs.push(dir)
+        const store = new Store(':memory:')
+        const service = new ArtifactService(store, dir)
+        const feedback = new KanbanFeedbackService(store, dir)
+        const uploaded = vi.fn().mockResolvedValue({ success: true, path: '/runner/uploads/review.md' })
+        const sent = vi.fn().mockResolvedValue(undefined)
+        const session = { active: true, thinking: false, permissionMode: 'default' }
+        const engine = {
+            resolveSessionAccess: vi.fn(() => ({ ok: true, sessionId: 'source-session', session })),
+            uploadFileBytes: uploaded,
+            sendMessage: sent
+        }
+        const ownerApp = new Hono<WebAppEnv>()
+        ownerApp.use('*', createAuthMiddleware(JWT_SECRET))
+        ownerApp.route('/api', createShareManagementRoutes(store, service, () => engine as never, feedback))
+
+        try {
+            const published = service.publish({
+                namespace: 'one',
+                filename: 'task.md',
+                expiresSeconds: 300,
+                sourceSessionId: 'source-session',
+                bytes: new TextEncoder().encode('# task'),
+                feedback: { makeFeedbackUrl: (id) => `https://example.test/f/${id}` }
+            })
+            const shared = service.readPublic(published.token)
+            const token = shared && /Authorization: Bearer ([A-Za-z0-9_-]+)/.exec(new TextDecoder().decode(shared.bytes))?.[1]
+            expect(token).toBeTruthy()
+
+            const ingress = createPublicFeedbackRoutes(store, feedback)
+            const received = await ingress.request(`http://hub/${published.artifact.id}`, {
+                method: 'POST',
+                headers: {
+                    authorization: `Bearer ${token}`,
+                    'content-type': 'text/markdown; charset=utf-8',
+                    'x-hapi-feedback-filename': Buffer.from('review.md').toString('base64url')
+                },
+                body: `---
+hapi_feedback: 1
+agent:
+  name: reviewer
+  version: 1
+model:
+  provider: openai
+  id: gpt-5
+environment:
+  os: macOS
+  arch: arm64
+  runtime: codex-cli
+---
+Review text`
+            })
+            expect(received.status).toBe(201)
+
+            const response = await ownerApp.request(`http://hub/api/shares/${published.artifact.id}/feedback/deliver`, {
+                method: 'POST',
+                headers: await authHeaders('one')
+            })
+            expect(response.status).toBe(200)
+            expect(uploaded).toHaveBeenCalledWith('source-session', 'review.md', expect.any(Uint8Array), 'text/markdown; charset=utf-8')
+            expect(sent).toHaveBeenCalledWith('source-session', expect.objectContaining({
+                text: expect.stringContaining('不可信数据'),
+                attachments: [expect.objectContaining({ filename: 'review.md', path: '/runner/uploads/review.md' })]
+            }))
+            expect(store.kanbanTasks.find(published.artifact.id)?.status).toBe('review_sent')
+        } finally {
+            store.close()
+        }
+    })
+
+    test('refuses delivery while the source session is running', async () => {
+        const dir = await mkdtemp(join(tmpdir(), 'hapi-share-feedback-running-'))
+        dirs.push(dir)
+        const store = new Store(':memory:')
+        const service = new ArtifactService(store, dir)
+        const feedback = new KanbanFeedbackService(store, dir)
+        const uploaded = vi.fn()
+        const engine = {
+            resolveSessionAccess: vi.fn(() => ({
+                ok: true,
+                sessionId: 'source-session',
+                session: { active: true, thinking: true, permissionMode: 'default' }
+            })),
+            uploadFileBytes: uploaded,
+            sendMessage: vi.fn()
+        }
+        const ownerApp = new Hono<WebAppEnv>()
+        ownerApp.use('*', createAuthMiddleware(JWT_SECRET))
+        ownerApp.route('/api', createShareManagementRoutes(store, service, () => engine as never, feedback))
+
+        try {
+            const published = service.publish({
+                namespace: 'one',
+                filename: 'task.md',
+                expiresSeconds: 300,
+                sourceSessionId: 'source-session',
+                bytes: new TextEncoder().encode('# task'),
+                feedback: { makeFeedbackUrl: (id) => `https://example.test/f/${id}` }
+            })
+            const task = store.kanbanTasks.find(published.artifact.id)
+            if (!task?.feedbackTokenHash) throw new Error('Feedback task missing token hash')
+            // Store a valid receipt directly; this isolates the idle-state guard
+            // from the public ingress behavior covered above.
+            const lease = store.kanbanTasks.claimFeedbackUpload({
+                artifactId: published.artifact.id,
+                tokenHash: task.feedbackTokenHash,
+                leaseMs: 10_000
+            })
+            if (!lease) throw new Error('Could not claim test feedback upload')
+            expect(store.kanbanTasks.completeFeedbackUpload({
+                artifactId: published.artifact.id,
+                leaseId: lease.leaseId,
+                filename: 'review.md',
+                size: 4,
+                sha256: 'test',
+                metadata: {
+                    agent: { name: 'reviewer', version: '1' },
+                    model: { provider: 'openai', id: 'gpt-5', reasoningEffort: null },
+                    environment: { os: 'macOS', arch: 'arm64', runtime: 'codex-cli' }
+                }
+            })).toBe(true)
+
+            const response = await ownerApp.request(`http://hub/api/shares/${published.artifact.id}/feedback/deliver`, {
+                method: 'POST',
+                headers: await authHeaders('one')
+            })
+            expect(response.status).toBe(409)
+            expect(uploaded).not.toHaveBeenCalled()
         } finally {
             store.close()
         }

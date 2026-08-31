@@ -56,22 +56,50 @@ export async function readShareSource(input: string, cwd = process.cwd()): Promi
     }
 }
 
-function parseExpires(args: string[]): { path: string; expires: number } {
+type PublishShareOptions = {
+    path: string
+    expires: number
+    sourceSessionId: string | null
+    feedback: boolean
+    feedbackRequest: string | null
+}
+
+export function parseSharePublishOptions(args: string[], inheritedSessionId?: string | null): PublishShareOptions {
     const positional: string[] = []
     let expires = DEFAULT_EXPIRES
+    let sourceSessionId: string | null = null
+    let feedback = false
+    let feedbackRequest: string | null = null
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--expires') {
             const raw = args[++i]
             if (!raw || !/^\d+$/.test(raw)) fail('--expires must be integer seconds.')
             expires = Number(raw)
+        } else if (args[i] === '--session') {
+            const value = args[++i]?.trim()
+            if (!value || value.length > 255 || /[\u0000-\u001f\u007f]/.test(value)) fail('--session must be a session ID.')
+            sourceSessionId = value
+        } else if (args[i] === '--feedback') {
+            feedback = true
+        } else if (args[i] === '--feedback-request') {
+            const value = args[++i]?.trim()
+            if (!value || value.length > 2000 || /[\u0000\r\n]/.test(value)) fail('--feedback-request must be one line, up to 2000 characters.')
+            feedbackRequest = value
         } else {
             positional.push(args[i])
         }
     }
     if (positional.length !== 1 || !Number.isSafeInteger(expires) || expires < 300 || expires > 604800) {
-        fail('Usage: hapi share publish <relative-file> [--expires 300..604800]')
+        fail('Usage: hapi share publish <relative-file> [--expires 300..604800] [--session <session-id>] [--feedback] [--feedback-request <text>]')
     }
-    return { path: positional[0], expires }
+    const inherited = inheritedSessionId?.trim() || null
+    if (!sourceSessionId && inherited) {
+        if (inherited.length > 255 || /[\u0000-\u001f\u007f]/.test(inherited)) fail('Inherited HAPI session ID is invalid.')
+        sourceSessionId = inherited
+    }
+    if (feedbackRequest && !feedback) fail('--feedback-request requires --feedback.')
+    if (feedback && !sourceSessionId) fail('--feedback requires --session <session-id>.')
+    return { path: positional[0], expires, sourceSessionId, feedback, feedbackRequest }
 }
 
 function shareUrl(path: string): string {
@@ -98,21 +126,33 @@ export const shareCommand: CommandDefinition = {
             await initializeToken()
             const verb = commandArgs[0]
             if (verb === 'publish') {
-                const parsed = parseExpires(commandArgs.slice(1))
+                const parsed = parseSharePublishOptions(commandArgs.slice(1), process.env.HAPI_SESSION_ID)
                 const source = await readShareSource(parsed.path)
+                if (parsed.feedback && !/\.(?:md|markdown)$/i.test(source.filename)) {
+                    fail('--feedback is only supported for Markdown files.')
+                }
                 const filename = Buffer.from(source.filename, 'utf8').toString('base64url')
+                const sourceSession = parsed.sourceSessionId
+                    ? Buffer.from(parsed.sourceSessionId, 'utf8').toString('base64url')
+                    : null
+                const feedbackRequest = parsed.feedbackRequest
+                    ? Buffer.from(parsed.feedbackRequest, 'utf8').toString('base64url')
+                    : null
                 const response = await request('cli/shares', {
                     method: 'POST',
                     headers: {
                         'content-type': 'application/octet-stream',
                         'x-hapi-share-filename': filename,
-                        'x-hapi-share-expires': String(parsed.expires)
+                        'x-hapi-share-expires': String(parsed.expires),
+                        ...(sourceSession ? { 'x-hapi-share-source-session': sourceSession } : {}),
+                        ...(parsed.feedback ? { 'x-hapi-share-feedback': '1' } : {}),
+                        ...(feedbackRequest ? { 'x-hapi-share-feedback-request': feedbackRequest } : {})
                     },
                     body: source.bytes
                 })
                 if (!response.ok) fail(`Share failed (${response.status}).`)
                 const value = await response.json() as { id: string; url: string; expiresAt: number }
-                console.log(`Share ${value.id}\n${value.url}\nExpires: ${new Date(value.expiresAt).toISOString()}`)
+                console.log(`Kanban task ${value.id}\n${value.url}\nExpires: ${new Date(value.expiresAt).toISOString()}${parsed.feedback ? '\nFeedback: enabled (one-time token embedded in the shared Markdown)' : ''}`)
                 return
             }
             if (verb === 'revoke' && commandArgs.length === 2) {
@@ -125,7 +165,7 @@ export const shareCommand: CommandDefinition = {
                     : `Share ${commandArgs[1]} revoked.`)
                 return
             }
-            fail('Usage: hapi share publish <relative-file> [--expires <seconds>] | hapi share revoke <share-id>')
+            fail('Usage: hapi share publish <relative-file> [--expires <seconds>] [--session <session-id>] [--feedback] [--feedback-request <text>] | hapi share revoke <share-id>')
         } catch (error) {
             console.error(error instanceof Error ? error.message : 'Share command failed.')
             process.exitCode = 1

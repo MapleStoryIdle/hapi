@@ -85,3 +85,51 @@ export type StoredArtifact = {
     expiresAt: number
     revokedAt: number | null
 }
+
+/**
+ * One publicly shared file is one Kanban task. The feedback document itself
+ * intentionally lives outside SQLite so a database export does not include
+ * untrusted agent content.
+ */
+export type KanbanTaskStatus =
+    | 'published'
+    | 'awaiting_feedback'
+    | 'feedback_received'
+    | 'review_sending'
+    | 'review_sent'
+
+export type FeedbackMetadata = {
+    agent: {
+        name: string
+        version: string
+    }
+    model: {
+        provider: string
+        id: string
+        reasoningEffort: string | null
+    }
+    environment: {
+        os: string
+        arch: string
+        runtime: string
+    }
+}
+
+export type StoredKanbanTask = {
+    artifactId: string
+    namespace: string
+    sourceSessionId: string | null
+    status: KanbanTaskStatus
+    feedbackRequest: string | null
+    feedbackTokenHash: string | null
+    feedbackLeaseId: string | null
+    feedbackLeaseExpiresAt: number | null
+    feedbackFilename: string | null
+    feedbackSize: number | null
+    feedbackSha256: string | null
+    feedbackMetadata: FeedbackMetadata | null
+    feedbackReceivedAt: number | null
+    reviewDeliveredAt: number | null
+    createdAt: number
+    updatedAt: number
+}

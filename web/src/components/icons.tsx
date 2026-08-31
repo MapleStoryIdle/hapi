@@ -35,6 +35,18 @@ export function ShareIcon(props: IconProps) {
     )
 }
 
+/** Source-session shortcut used by Kanban task cards. */
+export function SessionIcon(props: IconProps) {
+    return createIcon(
+        <>
+            <path d="M20.25 12c0 4.556-3.694 8.25-8.25 8.25a8.21 8.21 0 0 1-3.85-.954L3.75 20.25l.954-4.4A8.21 8.21 0 0 1 3.75 12C3.75 7.444 7.444 3.75 12 3.75S20.25 7.444 20.25 12Z" />
+            <path d="M8.25 12h.008v.008H8.25V12Zm3.75 0h.008v.008H12V12Zm3.75 0h.008v.008H15.75V12Z" strokeWidth="2.5" />
+        </>,
+        props,
+        1.8
+    )
+}
+
 export function PlusCircleIcon(props: IconProps) {
     return createIcon(
         <path d="M12 9v6m3-3H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,

@@ -27,6 +27,7 @@ import { createPushRoutes } from './routes/push'
 import { createVoiceRoutes } from './routes/voice'
 import { createLegacyPublicShareTombstoneRoutes, createPublicShareRoutes } from './routes/shares'
 import { createShareManagementRoutes } from './routes/shareManagement'
+import { createPublicFeedbackRoutes } from './routes/feedback'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
@@ -220,7 +221,7 @@ function createWebApp(options: {
     const app = new Hono<WebAppEnv>()
 
     app.use('*', async (c, next) => {
-        if (c.req.path.startsWith('/s/') || c.req.path.startsWith('/a/')) return await next()
+        if (c.req.path.startsWith('/s/') || c.req.path.startsWith('/a/') || c.req.path.startsWith('/f/')) return await next()
         return await logger()(c, next)
     })
 
@@ -240,6 +241,7 @@ function createWebApp(options: {
 
     app.route('/cli', createCliRoutes(options.getSyncEngine, options.store))
     app.route('/s', createPublicShareRoutes(options.store))
+    app.route('/f', createPublicFeedbackRoutes(options.store))
     app.route('/a', createLegacyPublicShareTombstoneRoutes())
 
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
@@ -254,7 +256,7 @@ function createWebApp(options: {
     app.route('/api', createGitRoutes(options.getSyncEngine))
     app.route('/api', createLocalPreviewRoutes(options.getSyncEngine))
     app.route('/api', createOpenVikingRoutes(options.getSyncEngine))
-    app.route('/api', createShareManagementRoutes(options.store))
+    app.route('/api', createShareManagementRoutes(options.store, undefined, options.getSyncEngine))
     // 中文注释：这里提供两类 Codex 辅助能力：扫描本地 transcript 以导入到 Hapi，以及按需重启 Codex Desktop 客户端。
     app.route('/api', createCodexDesktopRoutes({
         store: options.store,

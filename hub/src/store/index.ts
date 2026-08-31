@@ -8,9 +8,13 @@ import { PushStore } from './pushStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { ArtifactStore } from './artifacts'
+import { KanbanTaskStore } from './kanbanTasks'
 
 export type {
+    FeedbackMetadata,
+    KanbanTaskStatus,
     StoredArtifact,
+    StoredKanbanTask,
     StoredMachine,
     StoredMessage,
     StoredPushSubscription,
@@ -25,15 +29,17 @@ export { PushStore } from './pushStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { ArtifactStore } from './artifacts'
+export { KanbanTaskStore } from './kanbanTasks'
 
-const SCHEMA_VERSION: number = 15
+const SCHEMA_VERSION: number = 16
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'messages',
     'users',
     'push_subscriptions',
-    'artifacts'
+    'artifacts',
+    'kanban_tasks'
 ] as const
 
 export class Store {
@@ -47,6 +53,7 @@ export class Store {
     readonly users: UserStore
     readonly push: PushStore
     readonly artifacts: ArtifactStore
+    readonly kanbanTasks: KanbanTaskStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -98,6 +105,7 @@ export class Store {
         this.users = new UserStore(this.db)
         this.push = new PushStore(this.db)
         this.artifacts = new ArtifactStore(this.db)
+        this.kanbanTasks = new KanbanTaskStore(this.db)
     }
 
     close(): void {
@@ -135,6 +143,7 @@ export class Store {
             12: () => this.migrateFromV12ToV13(),
             13: () => this.migrateFromV13ToV14(),
             14: () => this.migrateFromV14ToV15(),
+            15: () => this.migrateFromV15ToV16(),
         })
 
         if (currentVersion === 0) {
@@ -271,6 +280,29 @@ export class Store {
                 created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_artifacts_namespace ON artifacts(namespace, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS kanban_tasks (
+                artifact_id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL,
+                source_session_id TEXT,
+                status TEXT NOT NULL,
+                feedback_request TEXT,
+                feedback_token_hash TEXT UNIQUE,
+                feedback_lease_id TEXT,
+                feedback_lease_expires_at INTEGER,
+                feedback_filename TEXT,
+                feedback_size INTEGER,
+                feedback_sha256 TEXT,
+                feedback_metadata TEXT,
+                feedback_received_at INTEGER,
+                review_delivered_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_kanban_tasks_namespace ON kanban_tasks(namespace, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_kanban_tasks_feedback_state
+                ON kanban_tasks(status, feedback_token_hash);
         `)
     }
 
@@ -491,6 +523,37 @@ export class Store {
         if (columns.size !== 0 && !columns.has('public_url')) {
             this.db.exec('ALTER TABLE artifacts ADD COLUMN public_url TEXT')
         }
+    }
+
+    private migrateFromV15ToV16(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS kanban_tasks (
+                artifact_id TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL,
+                source_session_id TEXT,
+                status TEXT NOT NULL,
+                feedback_request TEXT,
+                feedback_token_hash TEXT UNIQUE,
+                feedback_lease_id TEXT,
+                feedback_lease_expires_at INTEGER,
+                feedback_filename TEXT,
+                feedback_size INTEGER,
+                feedback_sha256 TEXT,
+                feedback_metadata TEXT,
+                feedback_received_at INTEGER,
+                review_delivered_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_kanban_tasks_namespace ON kanban_tasks(namespace, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_kanban_tasks_feedback_state
+                ON kanban_tasks(status, feedback_token_hash);
+            INSERT OR IGNORE INTO kanban_tasks (
+                artifact_id, namespace, status, created_at, updated_at
+            )
+            SELECT id, namespace, 'published', created_at, created_at FROM artifacts;
+        `)
     }
 
     private getUserVersion(): number {

@@ -94,6 +94,11 @@ export class ArtifactStore {
         return this.db.query('DELETE FROM artifacts WHERE id = ? AND expires_at <= ?').run(id, now).changes > 0
     }
 
+    /** Internal rollback only: caller has just created this artifact in the same process. */
+    deleteById(id: string): boolean {
+        return this.db.query('DELETE FROM artifacts WHERE id = ?').run(id).changes > 0
+    }
+
     listCleanupCandidates(now = Date.now()): StoredArtifact[] {
         return this.db.query<ArtifactRow, [number]>(
             'SELECT * FROM artifacts WHERE revoked_at IS NOT NULL OR expires_at <= ? ORDER BY expires_at ASC'
