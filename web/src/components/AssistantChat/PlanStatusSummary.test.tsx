@@ -201,27 +201,26 @@ describe('PlanStatusSummary helpers', () => {
 })
 
 describe('PlanStatusSummary', () => {
-    // 验证折叠态展示计划进度和当前步骤，点击后展开详细计划弹窗。
-    it('renders the plan pill and expands a scrollable dialog', () => {
+    // 验证折叠态保留整体完成进度，展开后在输入框上方展示完整计划。
+    it('renders total progress while collapsed and expands an in-flow plan list', () => {
         renderSummary()
 
-        expect(screen.getByRole('button', { name: /计划 2\/3 步/ })).toBeInTheDocument()
+        const trigger = screen.getByRole('button', { name: /计划.*已完成 1\/3/ })
+        expect(trigger).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.getByRole('progressbar', { name: '已完成 1/3' })).toHaveAttribute('aria-valuenow', '1')
 
-        fireEvent.click(screen.getByRole('button', { name: /计划 2\/3 步/ }))
+        fireEvent.click(trigger)
 
-        const dialog = screen.getByRole('dialog', { name: '当前计划' })
-        expect(dialog).toBeInTheDocument()
-        expect(dialog).toHaveStyle({
-            width: 'max-content',
-            minWidth: '14rem',
-            maxWidth: 'min(50vw, 28rem)',
-            maxHeight: 'min(50vh, 22rem)'
-        })
-        expect(dialog.querySelector('.overflow-y-auto')).toBeTruthy()
+        const list = screen.getByRole('region', { name: '当前计划' })
+        expect(list).toBeInTheDocument()
+        expect(list.querySelector('.overflow-y-auto')).toBeTruthy()
         expect(screen.getByText('确认 router/realtime 依赖边界')).toBeInTheDocument()
         expect(screen.getByText('实现语音懒加载')).toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: '收起' })).toBeNull()
-        expect(screen.queryByText('已完成')).toBeNull()
+        expect(screen.queryByRole('dialog')).toBeNull()
+
+        fireEvent.click(trigger)
+        expect(trigger).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByRole('region', { name: '当前计划' })).toBeNull()
     })
 
     // 验证弹窗展开状态会上报给父层，用于隐藏回到底部按钮。
@@ -240,7 +239,7 @@ describe('PlanStatusSummary', () => {
             </I18nProvider>
         )
 
-        fireEvent.click(screen.getByRole('button', { name: /计划 1\/1 步/ }))
+        fireEvent.click(screen.getByRole('button', { name: /计划.*已完成 0\/1/ }))
 
         expect(onExpandedChange).toHaveBeenCalledWith(true)
     })

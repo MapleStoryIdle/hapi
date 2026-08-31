@@ -1,6 +1,6 @@
 const FILE_PATH_HREF_PREFIX = 'hapi-file:'
 
-const PATH_PATTERN = /(?:\.\/|[A-Za-z0-9_.-]+\/)[^\s`"\'<>]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?::\d+)?)?|(?:[A-Za-z0-9_.-]+\.(?:[A-Za-z0-9]{1,12}|lock))(?::\d+(?::\d+)?)?/g
+const PATH_PATTERN = /(?:[A-Za-z]:[\\/](?:[^\s`"\'<>\\/]+[\\/])*[^\s`"\'<>\\/]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?::\d+)?)?|\/(?:[^\s`"\'<>\/]+\/)*[^\s`"\'<>\/]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?::\d+)?)?|(?:\.\/|[A-Za-z0-9_.-]+\/)[^\s`"\'<>]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?::\d+)?)?|(?:[A-Za-z0-9_.-]+\.(?:[A-Za-z0-9]{1,12}|lock))(?::\d+(?::\d+)?)?)/g
 
 const TRAILING_PUNCTUATION = new Set(['.', ',', ';', ':', '!', '?'])
 const COMMON_FILE_EXTENSIONS = new Set([
@@ -14,6 +14,14 @@ export type FilePathLinkTarget = {
     path: string
     line?: number
     column?: number
+}
+
+export type FilePathLinkOptions = {
+    /**
+     * The current session workspace. Required before an absolute POSIX or
+     * Windows drive-root path can be treated as an internal file link.
+     */
+    workspacePath?: string | null
 }
 
 type MarkdownNode = {
@@ -41,6 +49,14 @@ function parsePositiveInt(value: string | null): number | undefined {
     if (!/^\d+$/.test(value)) return undefined
     const parsed = Number(value)
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+function decodeHrefPath(value: string): string | null {
+    try {
+        return decodeURIComponent(value)
+    } catch {
+        return null
+    }
 }
 
 export function decodeFilePathLinkHref(href: string): FilePathLinkTarget | null {
@@ -118,18 +134,198 @@ function hasKnownFileExtension(value: string): boolean {
     return COMMON_FILE_EXTENSIONS.has(ext)
 }
 
-function shouldLinkPath(value: string): boolean {
-    if (value.includes('://')) return false
-    const path = stripLineSuffix(value)
-    if (path.length < 3) return false
-    if (path.startsWith('/') || path.startsWith('~/')) return false
-    if (path.startsWith('../') || path.includes('/../')) return false
-    if (/^[A-Za-z]:[\\/]/.test(path)) return false
-    if (path.includes('/')) return hasKnownFileExtension(path)
-    return hasKnownFileExtension(path)
+function hasUrlScheme(value: string): boolean {
+    return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)
 }
 
-function linkTextNode(node: MarkdownNode): MarkdownNode[] {
+/**
+ * A drive-root path has exactly one leading forward slash, or a backslash.
+ * `x://…` / `c://…` are URL schemes, not Windows paths.
+ */
+export function isWindowsDriveRootPath(value: string): boolean {
+    return /^[A-Za-z]:(?:\\|\/(?!\/))/.test(value)
+}
+
+function isUnsupportedNetworkPath(value: string): boolean {
+    // Keep protocol-relative URLs and UNC shares on the normal web-link path:
+    // neither has a session-safe local workspace-root mapping.
+    return value.startsWith('//') || value.startsWith('\\\\')
+}
+
+function hasPathTraversal(value: string): boolean {
+    return value.split(/[\\/]/).some((segment) => segment === '..')
+}
+
+type NormalizedAbsolutePath = {
+    kind: 'posix' | 'windows'
+    value: string
+}
+
+function normalizePathSegments(value: string, separator: RegExp): string[] | null {
+    const segments: string[] = []
+    for (const segment of value.split(separator)) {
+        if (!segment || segment === '.') continue
+        if (segment === '..') return null
+        segments.push(segment)
+    }
+    return segments
+}
+
+function normalizeAbsolutePath(value: string): NormalizedAbsolutePath | null {
+    if (isWindowsDriveRootPath(value)) {
+        const segments = normalizePathSegments(value.slice(3), /[\\/]/)
+        if (!segments) return null
+        const drive = value.slice(0, 2).toLowerCase()
+        return {
+            kind: 'windows',
+            value: segments.length > 0 ? `${drive}/${segments.join('/')}`.toLowerCase() : `${drive}/`
+        }
+    }
+
+    if (!value.startsWith('/') || isUnsupportedNetworkPath(value)) {
+        return null
+    }
+
+    const segments = normalizePathSegments(value, /\//)
+    if (!segments) return null
+    return {
+        kind: 'posix',
+        value: segments.length > 0 ? `/${segments.join('/')}` : '/'
+    }
+}
+
+function isProjectAbsolutePath(path: string, workspacePath: string | null | undefined): boolean {
+    const target = normalizeAbsolutePath(path)
+    const workspace = workspacePath ? normalizeAbsolutePath(workspacePath) : null
+    if (!target || !workspace || target.kind !== workspace.kind) return false
+    if (target.value === workspace.value) return true
+    return target.value.startsWith(workspace.value.endsWith('/') ? workspace.value : `${workspace.value}/`)
+}
+
+type ParsedFilePathHref = {
+    target: FilePathLinkTarget
+    isAbsolute: boolean
+    hasTraversal: boolean
+}
+
+function classifyFilePath(path: string): Pick<ParsedFilePathHref, 'isAbsolute' | 'hasTraversal'> | null {
+    const windowsDrivePath = isWindowsDriveRootPath(path)
+    if (
+        !path
+        || path.length < 3
+        || (!windowsDrivePath && hasUrlScheme(path))
+        || path.startsWith('~/')
+        || isUnsupportedNetworkPath(path)
+    ) {
+        return null
+    }
+
+    const isAbsolute = path.startsWith('/') || windowsDrivePath
+    const hasTraversal = hasPathTraversal(path)
+    if (!isAbsolute && (hasTraversal || path.includes('\\'))) {
+        return null
+    }
+
+    return { isAbsolute, hasTraversal }
+}
+
+function parseFilePathHref(href: string): ParsedFilePathHref | null {
+    const trimmedHref = href.trim()
+    if (!trimmedHref || trimmedHref.includes('?') || trimmedHref.includes('#')) {
+        return null
+    }
+
+    const decodedHref = decodeHrefPath(trimmedHref)
+    if (!decodedHref || /[\0]/.test(decodedHref)) {
+        return null
+    }
+
+    const target = parseLineTarget(decodedHref)
+    const classified = classifyFilePath(target.path)
+    if (!classified) {
+        return null
+    }
+
+    if (!hasKnownFileExtension(target.path)) {
+        return null
+    }
+
+    return { target, ...classified }
+}
+
+type SafeProtocolFilePath = {
+    isAbsolute: boolean
+}
+
+function classifyProtocolFilePath(path: string): SafeProtocolFilePath | null {
+    const windowsDrivePath = isWindowsDriveRootPath(path)
+    if (
+        !path
+        || /[\0]/.test(path)
+        || (!windowsDrivePath && hasUrlScheme(path))
+        || path === '~'
+        || path.startsWith('~/')
+        || path.startsWith('~\\')
+        || path.startsWith('\\')
+        || isUnsupportedNetworkPath(path)
+        || hasPathTraversal(path)
+    ) {
+        return null
+    }
+
+    return { isAbsolute: path.startsWith('/') || windowsDrivePath }
+}
+
+/**
+ * Parses an absolute POSIX or Windows file-looking Markdown href without
+ * deciding whether the current session is allowed to open it.
+ */
+export function parseAbsoluteFilePathHref(href: string): FilePathLinkTarget | null {
+    const parsed = parseFilePathHref(href)
+    return parsed?.isAbsolute ? parsed.target : null
+}
+
+/**
+ * Validates an already-decoded hapi-file target before it reaches a session
+ * file viewer. Unlike Markdown href detection, this does not require a known
+ * extension so legitimate protocol links such as `Makefile` remain usable.
+ */
+export function isProjectFilePathTarget(
+    target: FilePathLinkTarget,
+    options: FilePathLinkOptions = {}
+): boolean {
+    const classified = classifyProtocolFilePath(target.path)
+    if (!classified) {
+        return false
+    }
+
+    return !classified.isAbsolute || isProjectAbsolutePath(target.path, options.workspacePath)
+}
+
+/**
+ * Parses a Markdown href only when it unambiguously names a file in the
+ * current project. Relative paths are project-local by definition; absolute
+ * POSIX and Windows drive-root paths require the session workspace boundary
+ * supplied by chat metadata. URL/query/fragment/custom-scheme targets remain
+ * ordinary links.
+ */
+export function parseProjectFilePathHref(
+    href: string,
+    options: FilePathLinkOptions = {}
+): FilePathLinkTarget | null {
+    const parsed = parseFilePathHref(href)
+    if (!parsed) {
+        return null
+    }
+
+    if (parsed.hasTraversal || (parsed.isAbsolute && !isProjectAbsolutePath(parsed.target.path, options.workspacePath))) {
+        return null
+    }
+
+    return parsed.target
+}
+
+function linkTextNode(node: MarkdownNode, options: FilePathLinkOptions): MarkdownNode[] {
     const value = node.value ?? ''
     const parts: MarkdownNode[] = []
     let lastIndex = 0
@@ -143,9 +339,8 @@ function linkTextNode(node: MarkdownNode): MarkdownNode[] {
             continue
         }
         const { path: displayPath, trailing } = splitTrailingPunctuation(rawMatch)
-        const filePath = stripLineSuffix(displayPath)
-
-        if (!shouldLinkPath(filePath)) {
+        const target = parseProjectFilePathHref(displayPath, options)
+        if (!target) {
             continue
         }
 
@@ -154,7 +349,7 @@ function linkTextNode(node: MarkdownNode): MarkdownNode[] {
         }
         parts.push({
             type: 'link',
-            url: createFileHref(parseLineTarget(displayPath)),
+            url: createFileHref(target),
             title: null,
             children: [{ type: 'text', value: displayPath }]
         })
@@ -171,22 +366,26 @@ function linkTextNode(node: MarkdownNode): MarkdownNode[] {
     return parts
 }
 
-function visit(node: MarkdownNode, parentType: string | null = null): void {
+function visit(node: MarkdownNode, options: FilePathLinkOptions, parentType: string | null = null): void {
     if (!node.children) return
     if (parentType === 'link' || parentType === 'linkReference') return
 
     const nextChildren: MarkdownNode[] = []
     for (const child of node.children) {
-        if (child.type === 'text') {
-            nextChildren.push(...linkTextNode(child))
+        if (child.type === 'link' || child.type === 'linkReference') {
+            nextChildren.push(child)
             continue
         }
-        visit(child, child.type ?? null)
+        if (child.type === 'text') {
+            nextChildren.push(...linkTextNode(child, options))
+            continue
+        }
+        visit(child, options, child.type ?? null)
         nextChildren.push(child)
     }
     node.children = nextChildren
 }
 
-export function remarkFilePathLinks() {
-    return (tree: MarkdownNode) => visit(tree)
+export function remarkFilePathLinks(options: FilePathLinkOptions = {}) {
+    return (tree: MarkdownNode) => visit(tree, options)
 }

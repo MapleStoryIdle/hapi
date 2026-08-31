@@ -31,7 +31,7 @@ export { UserStore } from './userStore'
 export { ArtifactStore } from './artifacts'
 export { KanbanTaskStore } from './kanbanTasks'
 
-const SCHEMA_VERSION: number = 16
+const SCHEMA_VERSION: number = 17
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -144,6 +144,7 @@ export class Store {
             13: () => this.migrateFromV13ToV14(),
             14: () => this.migrateFromV14ToV15(),
             15: () => this.migrateFromV15ToV16(),
+            16: () => this.migrateFromV16ToV17(),
         })
 
         if (currentVersion === 0) {
@@ -285,6 +286,9 @@ export class Store {
                 artifact_id TEXT PRIMARY KEY,
                 namespace TEXT NOT NULL,
                 source_session_id TEXT,
+                source_type TEXT,
+                source_machine_id TEXT,
+                source_codex_session_id TEXT,
                 status TEXT NOT NULL,
                 feedback_request TEXT,
                 feedback_token_hash TEXT UNIQUE,
@@ -554,6 +558,16 @@ export class Store {
             )
             SELECT id, namespace, 'published', created_at, created_at FROM artifacts;
         `)
+    }
+
+    private migrateFromV16ToV17(): void {
+        const columns = this.getColumnNames('kanban_tasks')
+        if (columns.size === 0) return
+        if (!columns.has('source_type')) this.db.exec('ALTER TABLE kanban_tasks ADD COLUMN source_type TEXT')
+        if (!columns.has('source_machine_id')) this.db.exec('ALTER TABLE kanban_tasks ADD COLUMN source_machine_id TEXT')
+        if (!columns.has('source_codex_session_id')) this.db.exec('ALTER TABLE kanban_tasks ADD COLUMN source_codex_session_id TEXT')
+        // V16 only knew HAPI session ids. Retain their exact routing meaning.
+        this.db.exec("UPDATE kanban_tasks SET source_type = 'hapi' WHERE source_type IS NULL AND source_session_id IS NOT NULL")
     }
 
     private getUserVersion(): number {

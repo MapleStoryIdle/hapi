@@ -86,6 +86,15 @@ function parseErrorCode(bodyText: string): string | undefined {
     }
 }
 
+function parseErrorMessage(bodyText: string): string | undefined {
+    try {
+        const parsed = JSON.parse(bodyText) as ErrorPayload
+        return typeof parsed.error === 'string' ? parsed.error : undefined
+    } catch {
+        return undefined
+    }
+}
+
 export class ApiError extends Error {
     status: number
     code?: string
@@ -187,7 +196,7 @@ export class ApiClient {
                 const body = await res.text().catch(() => '')
                 const code = parseErrorCode(body)
                 throw new ApiError(
-                    `HTTP ${res.status} ${res.statusText}: ${body}`,
+                    parseErrorMessage(body) ?? 'Request could not be completed.',
                     res.status,
                     code,
                     body || undefined

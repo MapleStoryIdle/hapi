@@ -52,7 +52,7 @@ describe('ArtifactService', () => {
             filename: 'task.md',
             expiresSeconds: 300,
             bytes: new TextEncoder().encode('# task'),
-            sourceSessionId: 'session-1',
+            source: { type: 'hapi', sessionId: 'session-1' },
             feedback: { makeFeedbackUrl: (id) => `https://example.test/f/${id}` }
         })
         const blob = join(dir, 'artifacts', `${made.artifact.id}.blob`)

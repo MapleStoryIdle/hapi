@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import type { Database } from 'bun:sqlite'
+import type { ShareSource } from '@hapi/protocol/apiTypes'
 import type { FeedbackMetadata, KanbanTaskStatus, StoredKanbanTask } from './types'
 
 type KanbanTaskRow = {
     artifact_id: string
     namespace: string
     source_session_id: string | null
+    source_type: 'hapi' | 'native-codex' | null
+    source_machine_id: string | null
+    source_codex_session_id: string | null
     status: KanbanTaskStatus
     feedback_request: string | null
     feedback_token_hash: string | null
@@ -32,10 +36,21 @@ function parseMetadata(value: string | null): FeedbackMetadata | null {
 }
 
 function row(value: KanbanTaskRow): StoredKanbanTask {
+    const source: ShareSource | null = value.source_type === 'native-codex'
+        && value.source_machine_id
+        && value.source_codex_session_id
+        ? {
+            type: 'native-codex',
+            machineId: value.source_machine_id,
+            codexSessionId: value.source_codex_session_id
+        }
+        : value.source_session_id
+            ? { type: 'hapi', sessionId: value.source_session_id }
+            : null
     return {
         artifactId: value.artifact_id,
         namespace: value.namespace,
-        sourceSessionId: value.source_session_id,
+        source,
         status: value.status,
         feedbackRequest: value.feedback_request,
         feedbackTokenHash: value.feedback_token_hash,
@@ -55,7 +70,7 @@ function row(value: KanbanTaskRow): StoredKanbanTask {
 export type CreateKanbanTaskInput = {
     artifactId: string
     namespace: string
-    sourceSessionId?: string | null
+    source?: ShareSource | null
     feedbackRequest?: string | null
     feedbackTokenHash?: string | null
     createdAt?: number
@@ -76,15 +91,19 @@ export class KanbanTaskStore {
         const status: KanbanTaskStatus = input.feedbackTokenHash ? 'awaiting_feedback' : 'published'
         this.db.query(
             `INSERT INTO kanban_tasks (
-                artifact_id, namespace, source_session_id, status, feedback_request,
+                artifact_id, namespace, source_session_id, source_type, source_machine_id, source_codex_session_id,
+                status, feedback_request,
                 feedback_token_hash, feedback_lease_id, feedback_lease_expires_at,
                 feedback_filename, feedback_size, feedback_sha256, feedback_metadata,
                 feedback_received_at, review_delivered_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
         ).run(
             input.artifactId,
             input.namespace,
-            input.sourceSessionId ?? null,
+            input.source?.type === 'hapi' ? input.source.sessionId : null,
+            input.source?.type ?? null,
+            input.source?.type === 'native-codex' ? input.source.machineId : null,
+            input.source?.type === 'native-codex' ? input.source.codexSessionId : null,
             status,
             input.feedbackRequest ?? null,
             input.feedbackTokenHash ?? null,

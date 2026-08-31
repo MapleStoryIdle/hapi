@@ -72,7 +72,8 @@ export function SessionExportDialog(props: SessionExportDialogProps) {
                 title: t('session.export.toast.success.title'),
                 body: t('session.export.toast.success.body', { filename: result.filename }),
                 sessionId: props.session.id,
-                url: `/sessions/${props.session.id}`
+                url: `/sessions/${props.session.id}`,
+                kind: 'success'
             })
             props.onClose()
         } catch (error) {
@@ -87,7 +88,8 @@ export function SessionExportDialog(props: SessionExportDialogProps) {
                 title: t('session.export.toast.error.title'),
                 body: message,
                 sessionId: props.session.id,
-                url: `/sessions/${props.session.id}`
+                url: `/sessions/${props.session.id}`,
+                kind: 'error'
             })
         } finally {
             if (abortRef.current === controller) {

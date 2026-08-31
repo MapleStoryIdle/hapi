@@ -286,6 +286,7 @@ export function QueuedMessagesBar({
                                                     body: '',
                                                     sessionId,
                                                     url: window.location.href,
+                                                    kind: 'warning'
                                                 })
                                                 return
                                             }

@@ -26,8 +26,9 @@ import { parseGitCodeBlock } from '@/components/assistant-ui/git-codeblock'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { useOptionalHappyChatContext, type HappyChatFileLinkTarget } from '@/components/AssistantChat/context'
-import { decodeFilePathLinkHref, remarkFilePathLinks, type FilePathLinkTarget } from '@/lib/remark-file-path-links'
+import { decodeFilePathLinkHref, isProjectFilePathTarget, isWindowsDriveRootPath, parseAbsoluteFilePathHref, parseProjectFilePathHref, remarkFilePathLinks, type FilePathLinkTarget } from '@/lib/remark-file-path-links'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
+import { useTranslation } from '@/lib/use-translation'
 
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
 
@@ -80,6 +81,31 @@ export const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
 } satisfies NonNullable<MarkdownTextPrimitiveProps['componentsByLanguage']>
 
 const CODE_BLOCK_COPY_BUTTON_CLASS = 'rounded-md p-0.5 text-[var(--app-hint)] opacity-70 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)] hover:opacity-100'
+
+/**
+ * Selects the file-link transformer for the current rendering surface.
+ * Standalone previews have no session boundary, so leave file-looking text
+ * and explicit Markdown links alone. Session chat surfaces retain relative
+ * file links and pass the workspace to absolute-path detection.
+ */
+export function useMarkdownRemarkPlugins(preserveSingleLineBreaks = false) {
+    const chat = useOptionalHappyChatContext()
+    const hasChat = chat !== null
+    const workspacePath = chat?.metadata?.path
+    const basePlugins = preserveSingleLineBreaks ? MARKDOWN_PLUGINS_WITH_BREAKS : MARKDOWN_PLUGINS
+
+    return useMemo(() => {
+        const withoutFilePathLinks = basePlugins.slice(0, -1)
+        if (!hasChat) {
+            return withoutFilePathLinks
+        }
+
+        return [
+            ...withoutFilePathLinks,
+            workspacePath ? [remarkFilePathLinks, { workspacePath }] : remarkFilePathLinks
+        ] satisfies NonNullable<MarkdownTextPrimitiveProps['remarkPlugins']>
+    }, [basePlugins, hasChat, workspacePath])
+}
 
 // ── URI scheme policy (inlined from url-scheme-policy.ts) ───────────────────
 //
@@ -170,6 +196,7 @@ export function classifyScheme(url: string): 'iana' | 'deny' | 'custom' {
  * where relative markdown links were silently blocked by the onClick deny guard).
  */
 function hasScheme(href: string): boolean {
+    if (isWindowsDriveRootPath(href.trimStart())) return false
     const colonIdx = href.indexOf(':')
     if (colonIdx <= 0) return false
     const boundaryIdx = href.search(/[/?#]/)
@@ -444,6 +471,63 @@ function formatFileTargetTitle(fileTarget: FilePathLinkTarget): string {
     return `${fileTarget.path}:${fileTarget.line}${fileTarget.column !== undefined ? `:${fileTarget.column}` : ''}`
 }
 
+const FILE_PATH_CHIP_CLASS = 'aui-md-a aui-md-file-link min-w-0 max-w-full truncate rounded-md border border-[var(--app-inline-code-border)] bg-[var(--app-inline-code-bg)] px-[0.42em] py-[0.13em] font-mono text-[0.86em] font-medium leading-[1.35] text-[var(--app-inline-code-fg)] no-underline decoration-transparent'
+
+function FilePathCopyButton(props: { path: string }) {
+    const { copied, copy } = useCopyToClipboard()
+    const { t } = useTranslation()
+    const copyLabel = copied ? t('button.copied') : t('file.page.copyPath')
+
+    return (
+        <button
+            type="button"
+            onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void copy(props.path)
+            }}
+            className="ml-0.5 shrink-0 rounded p-0.5 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+            title={copyLabel}
+            aria-label={copyLabel}
+        >
+            <MotionIcon
+                icon={toMotionIcon(copied ? CheckIconNode : CopyIconNode)}
+                className="h-3 w-3"
+                data-motion-icon={copied ? 'check' : 'copy'}
+                aria-hidden="true"
+            />
+        </button>
+    )
+}
+
+function UnavailableFilePathChip(props: ComponentPropsWithoutRef<'a'> & {
+    fileTarget: FilePathLinkTarget
+}) {
+    const { children, className, fileTarget, title } = props
+    const linkTitle = title ?? formatFileTargetTitle(fileTarget)
+    const unavailableLabel = `${linkTitle} — unavailable in this session`
+
+    return (
+        <span className="aui-md-file-link-group inline-flex max-w-full items-center align-bottom">
+            <span
+                role="link"
+                aria-disabled="true"
+                aria-label={unavailableLabel}
+                tabIndex={-1}
+                title={unavailableLabel}
+                className={cn(
+                    FILE_PATH_CHIP_CLASS,
+                    'cursor-not-allowed opacity-60',
+                    className
+                )}
+            >
+                {children}
+            </span>
+            <FilePathCopyButton path={fileTarget.path} />
+        </span>
+    )
+}
+
 function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
     fileTarget: FilePathLinkTarget
     sessionId: string
@@ -510,19 +594,23 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
     }
 
     return (
-        <a
-            {...anchorProps}
-            href={href}
-            target={target}
-            rel={rel}
-            title={linkTitle}
-            onClick={handleClick}
-            data-hapi-file-link="true"
-            className={cn(
-                'aui-md-a aui-md-file-link inline-block max-w-full truncate rounded-md border border-[var(--app-inline-code-border)] bg-[var(--app-inline-code-bg)] px-[0.42em] py-[0.13em] align-bottom font-mono text-[0.86em] font-medium leading-[1.35] text-[var(--app-inline-code-fg)] no-underline decoration-transparent transition-colors hover:border-[var(--app-link-muted)] hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-link)]',
-                className
-            )}
-        />
+        <span className="aui-md-file-link-group inline-flex max-w-full items-center align-bottom">
+            <a
+                {...anchorProps}
+                href={href}
+                target={target}
+                rel={rel}
+                title={linkTitle}
+                onClick={handleClick}
+                data-hapi-file-link="true"
+                className={cn(
+                    FILE_PATH_CHIP_CLASS,
+                    'transition-colors hover:border-[var(--app-link-muted)] hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-link)]',
+                    className
+                )}
+            />
+            <FilePathCopyButton path={fileTarget.path} />
+        </span>
     )
 }
 
@@ -538,8 +626,11 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
  *   so middle-click / drag-to-bar cannot bypass the dialog. Dialog opens on left-click
  *   via the shared UriConfirmContext (single dialog per markdown root).
  * - Custom schemes, already allowed by user: live href in DOM; middle-click works.
- * - File-path links (decoded by remarkFilePathLinks): delegated to FilePathAnchor
- *   which uses useNavigate for SPA routing.
+ * - File-path links (decoded from hapi-file: or recognized from project-local
+ *   Markdown hrefs): delegated to FilePathAnchor, which uses useNavigate for
+ *   SPA routing. Authored protocol payloads, absolute file-looking hrefs
+ *   outside the workspace, and traversal paths are unavailable copyable chips,
+ *   never web links.
  */
 function A(props: ComponentPropsWithoutRef<'a'>) {
     const chat = useOptionalHappyChatContext()
@@ -554,7 +645,20 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     // Removing it requires tests that render <A> directly to wrap with
     // <UriConfirmProvider> (or supply a mock UriConfirmContext.Provider).
     const ctx = useContext(UriConfirmContext)
-    const fileTarget = typeof props.href === 'string' ? decodeFilePathLinkHref(props.href) : null
+    const markdownHref = typeof props.href === 'string' ? props.href : null
+    const decodedFileTarget = markdownHref ? decodeFilePathLinkHref(markdownHref) : null
+    const decodedFileTargetAllowed = decodedFileTarget
+        ? !chat || isProjectFilePathTarget(decodedFileTarget, { workspacePath: chat.metadata?.path })
+        : false
+    const projectFileTarget = markdownHref && chat
+        ? parseProjectFilePathHref(markdownHref, { workspacePath: chat.metadata?.path })
+        : null
+    const unavailableFileTarget = chat && decodedFileTarget && !decodedFileTargetAllowed
+        ? decodedFileTarget
+        : markdownHref && chat && !decodedFileTarget && !projectFileTarget
+            ? parseAbsoluteFilePathHref(markdownHref)
+            : null
+    const fileTarget = decodedFileTarget && decodedFileTargetAllowed ? decodedFileTarget : projectFileTarget
     const rel = props.target === '_blank' ? (props.rel ?? 'noreferrer') : props.rel
 
     if (fileTarget) {
@@ -567,6 +671,10 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
             sessionId={chat.sessionId}
             fileLinkTarget={chat.fileLinkTarget}
         />
+    }
+
+    if (unavailableFileTarget) {
+        return <UnavailableFilePathChip {...props} fileTarget={unavailableFileTarget} />
     }
 
     const isAllowed = ctx?.isAllowed ?? (() => false)
@@ -765,10 +873,12 @@ export const defaultComponents = memoizeMarkdownComponents({
 } as const)
 
 export function MarkdownText() {
+    const remarkPlugins = useMarkdownRemarkPlugins()
+
     return (
         <UriConfirmProvider>
             <MarkdownTextPrimitive
-                remarkPlugins={MARKDOWN_PLUGINS}
+                remarkPlugins={remarkPlugins}
                 rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
                 components={defaultComponents}
                 componentsByLanguage={MARKDOWN_COMPONENTS_BY_LANGUAGE}

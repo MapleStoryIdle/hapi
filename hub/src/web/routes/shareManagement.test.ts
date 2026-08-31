@@ -65,7 +65,7 @@ describe('share management routes', () => {
                         size: 6,
                         createdAt: sooner.artifact.createdAt,
                         expiresAt: sooner.artifact.expiresAt,
-                        sourceSessionId: null,
+                        source: null,
                         status: 'published',
                         feedback: null
                     },
@@ -75,7 +75,7 @@ describe('share management routes', () => {
                         size: 5,
                         createdAt: later.artifact.createdAt,
                         expiresAt: later.artifact.expiresAt,
-                        sourceSessionId: null,
+                        source: null,
                         status: 'published',
                         feedback: null
                     }
@@ -126,7 +126,7 @@ describe('share management routes', () => {
                         size: 6,
                         createdAt: stored.artifact.createdAt,
                         expiresAt: stored.artifact.expiresAt,
-                        sourceSessionId: null,
+                        source: null,
                         status: 'published',
                         feedback: null,
                         url: `https://example.test/s/${stored.token}`
@@ -255,7 +255,7 @@ describe('share management routes', () => {
                 namespace: 'one',
                 filename: 'task.md',
                 expiresSeconds: 300,
-                sourceSessionId: 'source-session',
+                source: { type: 'hapi', sessionId: 'source-session' },
                 bytes: new TextEncoder().encode('# task'),
                 feedback: { makeFeedbackUrl: (id) => `https://example.test/f/${id}` }
             })
@@ -304,7 +304,152 @@ Review text`
         }
     })
 
-    test('refuses delivery while the source session is running', async () => {
+    test('stages native feedback privately, sends only its path, and cleans it up before revoking', async () => {
+        const dir = await mkdtemp(join(tmpdir(), 'hapi-native-share-feedback-delivery-'))
+        dirs.push(dir)
+        const store = new Store(':memory:')
+        const service = new ArtifactService(store, dir)
+        const feedback = new KanbanFeedbackService(store, dir)
+        const staged = vi.fn().mockResolvedValue({ success: true, path: '/private/hapi/native-kanban-feedback/feedback.md' })
+        const sent = vi.fn().mockResolvedValue({ success: true, status: 'processing' })
+        const discarded = vi.fn().mockResolvedValue({ success: true, discarded: true })
+        const deletedStage = vi.fn().mockResolvedValue({ success: true, deleted: true })
+        const engine = {
+            getMachineByNamespace: vi.fn((machineId: string) => machineId === 'machine-1'
+                ? { id: 'machine-1', active: true, metadata: { codexHome: '/Users/test/.codex' } }
+                : null),
+            readCodexLocalSession: vi.fn(async () => ({
+                success: true,
+                data: { session: { id: 'native-1', originator: null }, importedMessages: [] }
+            })),
+            getSessionsByNamespace: vi.fn(() => []),
+            getCodexLocalSessionStatus: vi.fn(async () => ({ success: true, status: 'idle' })),
+            stageNativeKanbanFeedback: staged,
+            sendCodexLocalSessionMessage: sent,
+            discardCodexLocalSessionMessage: discarded,
+            deleteNativeKanbanFeedback: deletedStage
+        }
+        const ownerApp = new Hono<WebAppEnv>()
+        ownerApp.use('*', createAuthMiddleware(JWT_SECRET))
+        ownerApp.route('/api', createShareManagementRoutes(store, service, () => engine as never, feedback))
+
+        try {
+            const published = service.publish({
+                namespace: 'default',
+                filename: 'task.md',
+                expiresSeconds: 300,
+                source: { type: 'native-codex', machineId: 'machine-1', codexSessionId: 'native-1' },
+                bytes: new TextEncoder().encode('# task'),
+                feedback: { makeFeedbackUrl: (id) => `https://example.test/f/${id}` }
+            })
+            const shared = service.readPublic(published.token)
+            const token = shared && /Authorization: Bearer ([A-Za-z0-9_-]+)/.exec(new TextDecoder().decode(shared.bytes))?.[1]
+            expect(token).toBeTruthy()
+
+            const ingress = createPublicFeedbackRoutes(store, feedback)
+            const received = await ingress.request(`http://hub/${published.artifact.id}`, {
+                method: 'POST',
+                headers: {
+                    authorization: `Bearer ${token}`,
+                    'content-type': 'text/markdown; charset=utf-8',
+                    'x-hapi-feedback-filename': Buffer.from('review.md').toString('base64url')
+                },
+                body: `---
+hapi_feedback: 1
+agent:
+  name: reviewer
+  version: 1
+model:
+  provider: openai
+  id: gpt-5
+environment:
+  os: macOS
+  arch: arm64
+  runtime: codex-cli
+---
+Native reviewer private content`
+            })
+            expect(received.status).toBe(201)
+
+            const delivery = await ownerApp.request(`http://hub/api/shares/${published.artifact.id}/feedback/deliver`, {
+                method: 'POST',
+                headers: await authHeaders('default')
+            })
+            expect(delivery.status).toBe(200)
+            expect(staged).toHaveBeenCalledWith('machine-1', expect.objectContaining({
+                artifactId: published.artifact.id,
+                codexSessionId: 'native-1',
+                filename: 'review.md',
+                bytes: expect.any(Uint8Array)
+            }))
+            expect(sent).toHaveBeenCalledWith(
+                'machine-1',
+                'native-1',
+                expect.stringContaining('/private/hapi/native-kanban-feedback/feedback.md'),
+                'Review feedback: review.md',
+                `hapi-kanban-review:${published.artifact.id}`,
+                false,
+                'untrusted-review',
+                expect.objectContaining({
+                    stagePath: '/private/hapi/native-kanban-feedback/feedback.md',
+                    sha256: expect.any(String)
+                })
+            )
+            const prompt = sent.mock.calls[0]?.[2] as string
+            expect(prompt).not.toContain('Native reviewer private content')
+            expect(store.kanbanTasks.find(published.artifact.id)?.status).toBe('review_sent')
+
+            const revoke = await ownerApp.request(`http://hub/api/shares/${published.artifact.id}`, {
+                method: 'DELETE',
+                headers: await authHeaders('default')
+            })
+            expect(revoke.status).toBe(200)
+            expect(discarded).toHaveBeenCalledWith('machine-1', 'native-1', `hapi-kanban-review:${published.artifact.id}`)
+            expect(deletedStage).toHaveBeenCalledWith('machine-1', expect.objectContaining({
+                artifactId: published.artifact.id,
+                codexSessionId: 'native-1'
+            }))
+            expect(store.kanbanTasks.find(published.artifact.id)).toBeNull()
+        } finally {
+            store.close()
+        }
+    })
+
+    test('keeps a native task intact when its runner cannot confirm revoke cleanup', async () => {
+        const { service, store } = await setup()
+        try {
+            const published = service.publish({
+                namespace: 'one',
+                filename: 'task.md',
+                expiresSeconds: 300,
+                source: { type: 'native-codex', machineId: 'machine-1', codexSessionId: 'native-1' },
+                bytes: new TextEncoder().encode('# task'),
+                feedback: { makeFeedbackUrl: (id) => `https://example.test/f/${id}` }
+            })
+            const offlineApp = new Hono<WebAppEnv>()
+            offlineApp.use('*', createAuthMiddleware(JWT_SECRET))
+            offlineApp.route('/api', createShareManagementRoutes(store, service, () => ({
+                getMachineByNamespace: () => ({ id: 'machine-1', active: false })
+            }) as never))
+
+            const response = await offlineApp.request(`http://hub/api/shares/${published.artifact.id}`, {
+                method: 'DELETE',
+                headers: await authHeaders('one')
+            })
+            expect(response.status).toBe(409)
+            expect(await response.json()).toEqual(expect.objectContaining({
+                code: 'native_feedback_cleanup_pending',
+                cleanupPending: true
+            }))
+            expect(store.artifacts.findOwned(published.artifact.id, 'one')).not.toBeNull()
+            expect(store.kanbanTasks.find(published.artifact.id)).not.toBeNull()
+            expect(service.readPublic(published.token)).toBeNull()
+        } finally {
+            store.close()
+        }
+    })
+
+    test('returns a semantic error code when the source session uses an unsafe permission mode', async () => {
         const dir = await mkdtemp(join(tmpdir(), 'hapi-share-feedback-running-'))
         dirs.push(dir)
         const store = new Store(':memory:')
@@ -315,7 +460,7 @@ Review text`
             resolveSessionAccess: vi.fn(() => ({
                 ok: true,
                 sessionId: 'source-session',
-                session: { active: true, thinking: true, permissionMode: 'default' }
+                session: { active: true, thinking: false, permissionMode: 'acceptEdits' }
             })),
             uploadFileBytes: uploaded,
             sendMessage: vi.fn()
@@ -329,7 +474,7 @@ Review text`
                 namespace: 'one',
                 filename: 'task.md',
                 expiresSeconds: 300,
-                sourceSessionId: 'source-session',
+                source: { type: 'hapi', sessionId: 'source-session' },
                 bytes: new TextEncoder().encode('# task'),
                 feedback: { makeFeedbackUrl: (id) => `https://example.test/f/${id}` }
             })
@@ -361,6 +506,9 @@ Review text`
                 headers: await authHeaders('one')
             })
             expect(response.status).toBe(409)
+            await expect(response.json()).resolves.toEqual(expect.objectContaining({
+                code: 'source_session_permission_unsafe'
+            }))
             expect(uploaded).not.toHaveBeenCalled()
         } finally {
             store.close()

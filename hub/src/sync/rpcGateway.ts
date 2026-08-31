@@ -7,9 +7,20 @@ import type {
     CodexLocalSessionStatusRpcResponse,
     CodexLocalSessionsRpcResponse,
     DiscardCodexLocalSessionMessageRpcResponse,
+    NativeCodexDeliveryPolicy,
+    NativeKanbanFeedbackReviewGuard,
     SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
-import type { BinaryFileReadRequest, BinaryFileReadResponse, BinaryFileUploadRequest, BinaryFileUploadResponse } from '@hapi/protocol'
+import type {
+    BinaryFileReadRequest,
+    BinaryFileReadResponse,
+    BinaryFileUploadRequest,
+    BinaryFileUploadResponse,
+    NativeKanbanFeedbackDeleteRequest,
+    NativeKanbanFeedbackDeleteResponse,
+    NativeKanbanFeedbackStageRequest,
+    NativeKanbanFeedbackStageResponse
+} from '@hapi/protocol'
 import type {
     CodexSubscriptionLimitsResponse,
     GetCodexSubscriptionLimitsRequest,
@@ -97,6 +108,8 @@ export type RpcCodexLocalSessionSnapshotResponse = CodexLocalSessionSnapshotRpcR
 export type RpcCodexLocalSessionStatusResponse = CodexLocalSessionStatusRpcResponse
 export type RpcDiscardCodexLocalSessionMessageResponse = DiscardCodexLocalSessionMessageRpcResponse
 export type RpcSendCodexLocalSessionMessageResponse = SendCodexLocalSessionMessageRpcResponse
+export type RpcNativeKanbanFeedbackStageResponse = NativeKanbanFeedbackStageResponse
+export type RpcNativeKanbanFeedbackDeleteResponse = NativeKanbanFeedbackDeleteResponse
 export type RpcForkCodexSideSessionResponse =
     | { type: 'success'; childCodexThreadId: string; parentCodexThreadId: string }
     | { type: 'error'; message: string; code?: string }
@@ -305,14 +318,18 @@ export class RpcGateway {
         message: string,
         displayMessage?: string,
         clientMessageId?: string,
-        forceRecovery?: boolean
+        forceRecovery?: boolean,
+        deliveryPolicy?: NativeCodexDeliveryPolicy,
+        reviewGuard?: NativeKanbanFeedbackReviewGuard
     ): Promise<RpcSendCodexLocalSessionMessageResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.SendCodexLocalSessionMessage, {
             sessionId,
             message,
             ...(displayMessage === undefined ? {} : { displayMessage }),
             ...(clientMessageId === undefined ? {} : { clientMessageId }),
-            ...(forceRecovery === true ? { forceRecovery: true } : {})
+            ...(forceRecovery === true ? { forceRecovery: true } : {}),
+            ...(deliveryPolicy === undefined || deliveryPolicy === 'default' ? {} : { deliveryPolicy }),
+            ...(deliveryPolicy === 'untrusted-review' && reviewGuard ? { reviewGuard } : {})
         }) as RpcSendCodexLocalSessionMessageResponse
     }
 
@@ -325,6 +342,30 @@ export class RpcGateway {
             sessionId,
             clientMessageId
         }) as RpcDiscardCodexLocalSessionMessageResponse
+    }
+
+    async stageNativeKanbanFeedback(
+        machineId: string,
+        request: NativeKanbanFeedbackStageRequest
+    ): Promise<RpcNativeKanbanFeedbackStageResponse> {
+        const socket = this.getSocketForMachine(machineId, 'native-kanban-feedback:stage')
+        const response = await socket.timeout(DEFAULT_RPC_TIMEOUT_MS).emitWithAck('native-kanban-feedback:stage', request) as NativeKanbanFeedbackStageResponse | unknown
+        if (!response || typeof response !== 'object') return { success: false, error: 'Unexpected native feedback stage response' }
+        const record = response as Record<string, unknown>
+        if (record.success === true && typeof record.path === 'string') return { success: true, path: record.path }
+        return { success: false, error: typeof record.error === 'string' ? record.error : 'Could not stage native feedback' }
+    }
+
+    async deleteNativeKanbanFeedback(
+        machineId: string,
+        request: NativeKanbanFeedbackDeleteRequest
+    ): Promise<RpcNativeKanbanFeedbackDeleteResponse> {
+        const socket = this.getSocketForMachine(machineId, 'native-kanban-feedback:delete')
+        const response = await socket.timeout(DEFAULT_RPC_TIMEOUT_MS).emitWithAck('native-kanban-feedback:delete', request) as NativeKanbanFeedbackDeleteResponse | unknown
+        if (!response || typeof response !== 'object') return { success: false, error: 'Unexpected native feedback delete response' }
+        const record = response as Record<string, unknown>
+        if (record.success === true && typeof record.deleted === 'boolean') return { success: true, deleted: record.deleted }
+        return { success: false, error: typeof record.error === 'string' ? record.error : 'Could not delete native feedback stage' }
     }
 
     async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {

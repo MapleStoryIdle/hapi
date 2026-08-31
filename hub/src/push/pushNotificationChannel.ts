@@ -43,7 +43,8 @@ export class PushNotificationChannel implements NotificationChannel {
                     title: payload.title,
                     body: payload.body,
                     sessionId: session.id,
-                    url
+                    url,
+                    kind: 'warning'
                 }
             })
             if (delivered > 0) {
@@ -81,7 +82,8 @@ export class PushNotificationChannel implements NotificationChannel {
                     title: payload.title,
                     body: payload.body,
                     sessionId: session.id,
-                    url
+                    url,
+                    kind: 'info'
                 }
             })
             if (delivered > 0) {
@@ -123,7 +125,8 @@ export class PushNotificationChannel implements NotificationChannel {
                     title: payload.title,
                     body: payload.body,
                     sessionId: session.id,
-                    url
+                    url,
+                    kind: isFailure ? 'error' : 'success'
                 }
             })
             if (delivered > 0) {

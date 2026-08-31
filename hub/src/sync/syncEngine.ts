@@ -66,6 +66,8 @@ import {
     type RpcCodexLocalSessionComposerCapabilitiesResponse,
     type RpcCodexLocalSessionDataResponse,
     type RpcDiscardCodexLocalSessionMessageResponse,
+    type RpcNativeKanbanFeedbackDeleteResponse,
+    type RpcNativeKanbanFeedbackStageResponse,
     type RpcCodexLocalSessionSnapshotResponse,
     type RpcCodexLocalSessionStatusResponse,
     type RpcCodexLocalSessionsResponse,
@@ -75,6 +77,8 @@ import {
     type RpcUploadFileResponse,
     type RpcSendCodexLocalSessionMessageResponse
 } from './rpcGateway'
+import type { NativeKanbanFeedbackDeleteRequest, NativeKanbanFeedbackStageRequest } from '@hapi/protocol'
+import type { NativeCodexDeliveryPolicy, NativeKanbanFeedbackReviewGuard } from '@hapi/protocol/codexTranscript'
 import { SessionCache } from './sessionCache'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
@@ -103,6 +107,8 @@ export type {
     RpcCodexLocalSessionComposerCapabilitiesResponse,
     RpcCodexLocalSessionDataResponse,
     RpcDiscardCodexLocalSessionMessageResponse,
+    RpcNativeKanbanFeedbackDeleteResponse,
+    RpcNativeKanbanFeedbackStageResponse,
     RpcCodexLocalSessionSnapshotResponse,
     RpcCodexLocalSessionStatusResponse,
     RpcCodexLocalSessionsResponse,
@@ -1820,7 +1826,9 @@ export class SyncEngine {
         message: string,
         displayMessage?: string,
         clientMessageId?: string,
-        forceRecovery?: boolean
+        forceRecovery?: boolean,
+        deliveryPolicy?: NativeCodexDeliveryPolicy,
+        reviewGuard?: NativeKanbanFeedbackReviewGuard
     ): Promise<RpcSendCodexLocalSessionMessageResponse> {
         return await this.rpcGateway.sendCodexLocalSessionMessage(
             machineId,
@@ -1828,7 +1836,9 @@ export class SyncEngine {
             message,
             displayMessage,
             clientMessageId,
-            forceRecovery
+            forceRecovery,
+            deliveryPolicy,
+            reviewGuard
         )
     }
 
@@ -1838,6 +1848,20 @@ export class SyncEngine {
         clientMessageId: string
     ): Promise<RpcDiscardCodexLocalSessionMessageResponse> {
         return await this.rpcGateway.discardCodexLocalSessionMessage(machineId, sessionId, clientMessageId)
+    }
+
+    async stageNativeKanbanFeedback(
+        machineId: string,
+        request: NativeKanbanFeedbackStageRequest
+    ): Promise<RpcNativeKanbanFeedbackStageResponse> {
+        return await this.rpcGateway.stageNativeKanbanFeedback(machineId, request)
+    }
+
+    async deleteNativeKanbanFeedback(
+        machineId: string,
+        request: NativeKanbanFeedbackDeleteRequest
+    ): Promise<RpcNativeKanbanFeedbackDeleteResponse> {
+        return await this.rpcGateway.deleteNativeKanbanFeedback(machineId, request)
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {

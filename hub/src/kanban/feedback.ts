@@ -163,7 +163,7 @@ export class KanbanFeedbackService {
 
     read(artifactId: string): { bytes: Uint8Array; metadata: FeedbackMetadata; filename: string; receivedAt: number } | null {
         const task = this.store.kanbanTasks.find(artifactId)
-        if (!task || (task.status !== 'feedback_received' && task.status !== 'review_sent') || !task.feedbackMetadata || !task.feedbackFilename || !task.feedbackSha256 || !task.feedbackReceivedAt) {
+        if (!task || (task.status !== 'feedback_received' && task.status !== 'review_sending' && task.status !== 'review_sent') || !task.feedbackMetadata || !task.feedbackFilename || !task.feedbackSha256 || !task.feedbackReceivedAt) {
             return null
         }
         const path = feedbackBlobPath(this.dataDir, artifactId)

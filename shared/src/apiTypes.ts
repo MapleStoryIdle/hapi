@@ -107,6 +107,14 @@ export type ShareFeedbackSummary = {
     reviewDeliveredAt: number | null
 }
 
+/**
+ * The conversation that owns a feedback-enabled Kanban task. Native Codex
+ * threads are deliberately not masqueraded as HAPI session ids.
+ */
+export type ShareSource =
+    | { type: 'hapi'; sessionId: string }
+    | { type: 'native-codex'; machineId: string; codexSessionId: string }
+
 /** Safe metadata for a currently active Kanban task / public share. */
 export type ShareSummary = {
     id: string
@@ -114,7 +122,7 @@ export type ShareSummary = {
     size: number
     createdAt: number
     expiresAt: number
-    sourceSessionId: string | null
+    source: ShareSource | null
     status: KanbanTaskStatus
     feedback: ShareFeedbackSummary | null
 }

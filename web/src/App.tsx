@@ -35,7 +35,7 @@ import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
 import { PwaUpdateProvider } from '@/lib/pwa-update-context'
-import { ToastProvider, useToast } from '@/lib/toast-context'
+import { ToastProvider, type ToastKind, useToast } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
 
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
@@ -479,7 +479,7 @@ function AppInner() {
             window.clearInterval(timer)
         }
     }, [api, reconcileSelectedSessionMessages, selectedSessionId])
-    const translateIncomingToast = useCallback((title: string, body: string): { title: string; body: string } => {
+    const translateIncomingToast = useCallback((title: string, body: string, kind?: ToastKind): { title: string; body: string; kind: ToastKind } => {
         const normalizedTitle = title.trim()
         const normalizedBody = body.trim()
 
@@ -490,46 +490,52 @@ function AppInner() {
                 const sessionName = waitingMatch[2]?.trim() ?? ''
                 return {
                     title: t('toast.ready.title'),
-                    body: t('toast.ready.body', { agent, session: sessionName })
+                    body: t('toast.ready.body', { agent, session: sessionName }),
+                    kind: kind ?? 'info'
                 }
             }
             return {
                 title: t('toast.ready.title'),
-                body: normalizedBody
+                body: normalizedBody,
+                kind: kind ?? 'info'
             }
         }
 
         if (normalizedTitle === 'Permission Request') {
             return {
                 title: t('toast.permission.title'),
-                body: normalizedBody
+                body: normalizedBody,
+                kind: kind ?? 'warning'
             }
         }
 
         if (normalizedTitle === 'Task completed') {
             return {
                 title: t('toast.task.completed'),
-                body: normalizedBody
+                body: normalizedBody,
+                kind: kind ?? 'success'
             }
         }
 
         if (normalizedTitle === 'Task failed') {
             return {
                 title: t('toast.task.failed'),
-                body: normalizedBody
+                body: normalizedBody,
+                kind: kind ?? 'error'
             }
         }
 
-        return { title, body }
+        return { title, body, kind: kind ?? 'info' }
     }, [t])
 
     const handleToast = useCallback((event: ToastEvent) => {
-        const localized = translateIncomingToast(event.data.title, event.data.body)
+        const localized = translateIncomingToast(event.data.title, event.data.body, event.data.kind)
         addToast({
             title: localized.title,
             body: localized.body,
             sessionId: event.data.sessionId,
-            url: event.data.url
+            url: event.data.url,
+            kind: localized.kind
         })
     }, [addToast, translateIncomingToast])
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 const removeToast = vi.fn()
 const navigate = vi.fn()
@@ -15,7 +15,9 @@ vi.mock('@/lib/toast-context', () => ({
             title: 'Task completed',
             body: 'Header regression check',
             sessionId: '',
-            url: ''
+            url: '/shares/share-1',
+            kind: 'error',
+            durationMs: null
         }],
         removeToast
     })
@@ -35,6 +37,21 @@ describe('ToastContainer', () => {
 
         const container = screen.getByText('Task completed').closest<HTMLElement>('[aria-live="polite"]')
         if (!container) throw new Error('toast container missing')
-        expect(container).toHaveClass('top-[calc(var(--app-safe-area-top)+4.5rem)]')
+        expect(container).toHaveClass('top-[var(--app-toast-top)]')
+        expect(screen.getByText('Task completed').closest<HTMLElement>('[data-toast-kind]')).toHaveAttribute('data-toast-kind', 'error')
+    })
+
+    it('navigates from the toast card while the close control only dismisses it', () => {
+        render(<ToastContainer />)
+
+        fireEvent.click(screen.getByText('Task completed'))
+        expect(removeToast).toHaveBeenCalledWith('toast-1')
+        expect(navigate).toHaveBeenCalledWith({ to: '/shares/share-1' })
+
+        removeToast.mockReset()
+        navigate.mockReset()
+        fireEvent.click(screen.getByLabelText('Dismiss'))
+        expect(removeToast).toHaveBeenCalledWith('toast-1')
+        expect(navigate).not.toHaveBeenCalled()
     })
 })

@@ -25,6 +25,7 @@ describe('parseSharePublishOptions', () => {
             path: 'task.md',
             expires: 600,
             sourceSessionId: 'session-1',
+            sourceMachineId: null,
             feedback: true,
             feedbackRequest: 'Review the rollout plan'
         })
@@ -38,6 +39,15 @@ describe('parseSharePublishOptions', () => {
     test('uses the current HAPI session as the source when invoked from a managed agent session', () => {
         expect(parseSharePublishOptions(['task.md', '--feedback'], 'inherited-session')).toMatchObject({
             sourceSessionId: 'inherited-session',
+            sourceMachineId: null,
+            feedback: true
+        })
+    })
+
+    test('keeps an explicit runner as native-session disambiguation', () => {
+        expect(parseSharePublishOptions(['task.md', '--session', 'native-session', '--machine', 'runner-1', '--feedback'])).toMatchObject({
+            sourceSessionId: 'native-session',
+            sourceMachineId: 'runner-1',
             feedback: true
         })
     })

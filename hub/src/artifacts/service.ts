@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { StoredArtifact, Store } from '../store'
+import type { ShareSource } from '@hapi/protocol/apiTypes'
 import { feedbackBlobPath } from '../kanban/feedback'
 
 export const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024
@@ -51,17 +52,22 @@ export class ArtifactService {
         expiresSeconds: number
         bytes: Uint8Array
         makePublicUrl?: (token: string) => string
-        sourceSessionId?: string | null
+        source?: ShareSource | null
         feedback?: {
             request?: string | null
             makeFeedbackUrl: (artifactId: string) => string
         }
     }): { artifact: StoredArtifact; token: string } {
         if (input.feedback && !isMarkdownShare(input.filename)) throw new Error('Feedback is only available for Markdown shares')
-        if (input.feedback && !input.sourceSessionId) throw new Error('Feedback requires a source session')
-        if (input.sourceSessionId && (input.sourceSessionId.length > 255 || /[\u0000-\u001f\u007f]/.test(input.sourceSessionId))) {
+        if (input.feedback && !input.source) throw new Error('Feedback requires a source session')
+        if (input.source?.type === 'hapi' && (input.source.sessionId.length > 255 || /[\u0000-\u001f\u007f]/.test(input.source.sessionId))) {
             throw new Error('Invalid source session')
         }
+        if (input.source?.type === 'native-codex' && (
+            input.source.machineId.length > 200 || input.source.codexSessionId.length > 200
+            || /[\u0000-\u001f\u007f]/.test(input.source.machineId)
+            || /[\u0000-\u001f\u007f]/.test(input.source.codexSessionId)
+        )) throw new Error('Invalid native Codex source')
         if (input.feedback?.request && (input.feedback.request.length > 2000 || /[\u0000-\u001f\u007f]/.test(input.feedback.request))) {
             throw new Error('Invalid feedback request')
         }
@@ -95,7 +101,7 @@ export class ArtifactService {
                 this.store.kanbanTasks.create({
                     artifactId: id,
                     namespace: input.namespace,
-                    sourceSessionId: input.sourceSessionId ?? null,
+                    source: input.source ?? null,
                     feedbackRequest: input.feedback?.request ?? null,
                     feedbackTokenHash: feedbackToken ? sha256(feedbackToken) : null,
                     createdAt: stored.createdAt

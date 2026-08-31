@@ -86,6 +86,14 @@ export class ArtifactStore {
         return found ? row(found) : null
     }
 
+    /** Owner lookup for explicit cleanup; expiry never deletes retained data. */
+    findOwned(id: string, namespace: string): StoredArtifact | null {
+        const found = this.db.query<ArtifactRow, [string, string]>(
+            'SELECT * FROM artifacts WHERE id = ? AND namespace = ?'
+        ).get(id, namespace)
+        return found ? row(found) : null
+    }
+
     /** Deletes the artifact record; the database cascades its Kanban task. */
     deleteById(id: string): boolean {
         return this.db.query('DELETE FROM artifacts WHERE id = ?').run(id).changes > 0

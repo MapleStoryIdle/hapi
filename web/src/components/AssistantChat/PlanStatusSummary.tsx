@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChatBlock, ToolCallBlock } from '@/chat/types'
 import { extractUpdatePlanChecklist, type ChecklistItem } from '@/components/ToolCard/checklist'
 import { ArrowDownIcon, CheckIcon } from '@/components/icons'
@@ -116,7 +116,7 @@ export function removeChatBlockById(blocks: ChatBlock[], blockId: string): ChatB
 function StepStatusIcon(props: { status: ChecklistItem['status'] }) {
     if (props.status === 'completed') {
         return (
-            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white shadow-[0_2px_7px_rgba(16,185,129,0.28)]">
                 <CheckIcon className="h-3 w-3" />
             </span>
         )
@@ -124,13 +124,35 @@ function StepStatusIcon(props: { status: ChecklistItem['status'] }) {
 
     if (props.status === 'in_progress') {
         return (
-            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 border-[var(--app-link)]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[var(--app-link)]" />
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-[var(--app-link)] bg-[var(--app-bg)]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--app-link)] motion-safe:animate-pulse" />
             </span>
         )
     }
 
-    return <span className="h-4 w-4 shrink-0 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)]" />
+    return <span className="h-5 w-5 shrink-0 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)]" />
+}
+
+function PlanListIcon(props: { className?: string }) {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <path d="M9 6h10" />
+            <path d="M9 12h10" />
+            <path d="M9 18h10" />
+            <path d="m4 6 1 1 2-2" />
+            <path d="m4 12 1 1 2-2" />
+            <path d="M5 18h.01" />
+        </svg>
+    )
 }
 
 export function PlanStatusSummary(props: {
@@ -173,81 +195,96 @@ export function PlanStatusSummary(props: {
         setExpanded(false)
     }, [props.plan?.sourceBlockId])
 
-    const visibleSteps = useMemo(() => props.plan?.steps ?? [], [props.plan?.steps])
-
     if (!props.plan) return null
 
+    const progressPercent = Math.round((props.plan.completed / props.plan.total) * 100)
+    const progressLabel = t('planStatus.progress', {
+        completed: props.plan.completed,
+        total: props.plan.total
+    })
+
     return (
-        <div ref={rootRef} className="pointer-events-none relative mx-auto flex w-full max-w-content justify-center px-3">
-            {expanded ? (
-                <div
-                    className="pointer-events-auto absolute bottom-14 left-1/2 z-20 origin-bottom -translate-x-1/2 overflow-hidden rounded-[18px] border border-[var(--app-border)] bg-[var(--app-code-bg)] shadow-[0_18px_45px_rgba(15,23,42,0.16)] animate-diff-pop"
-                    style={{
-                        width: 'max-content',
-                        minWidth: '14rem',
-                        maxWidth: 'min(50vw, 28rem)',
-                        maxHeight: 'min(50vh, 22rem)'
-                    }}
-                    role="dialog"
-                    aria-label={t('planStatus.dialogTitle')}
+        <div ref={rootRef} className="pointer-events-none relative mx-auto flex w-full max-w-content justify-center px-3 [font-family:var(--app-chat-font-family)]">
+            <div className={cn(
+                'pointer-events-auto w-full max-w-[min(88vw,34rem)] overflow-hidden border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_10px_26px_rgba(15,23,42,0.12)] transition-[border-radius,box-shadow] duration-200 ease-out',
+                expanded
+                    ? 'rounded-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.16)] animate-diff-pop'
+                    : 'rounded-full animate-diff-pill'
+            )}>
+                <button
+                    type="button"
+                    className={cn(
+                        'flex w-full min-w-0 items-center gap-2.5 px-4 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--app-link)]',
+                        expanded ? 'min-h-12 py-3' : 'h-[38px]'
+                    )}
+                    aria-expanded={expanded}
+                    aria-label={`${t('planStatus.title')} · ${progressLabel}`}
+                    onClick={() => setExpanded((value) => !value)}
                 >
-                    <div className="px-4 pb-3 pt-4">
-                        <div className="flex min-w-0 items-center gap-2">
-                            <span className="text-[0.95rem] font-semibold text-[var(--app-fg)]">
-                                {t('planStatus.title')}
-                            </span>
-                            <span className="text-sm font-medium text-[var(--app-hint)]">
-                                {t('planStatus.steps', { total: props.plan.total })}
-                            </span>
-                        </div>
-                    </div>
-                    <div
-                        className="overflow-y-auto px-4 pb-4"
-                        style={{ maxHeight: 'min(38vh, 16rem)' }}
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[var(--app-subtle-bg)] text-[var(--app-hint)]">
+                        <PlanListIcon className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--app-fg)]">
+                        {t('planStatus.title')}
+                    </span>
+                    <span className="shrink-0 text-xs font-semibold tabular-nums text-[var(--app-hint)]" aria-hidden="true">
+                        {props.plan.completed}/{props.plan.total}
+                    </span>
+                    <span
+                        className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-[var(--app-subtle-bg)]"
+                        role="progressbar"
+                        aria-label={progressLabel}
+                        aria-valuemin={0}
+                        aria-valuemax={props.plan.total}
+                        aria-valuenow={props.plan.completed}
                     >
-                        <div className="flex flex-col gap-3 border-t border-[var(--app-border)] pt-3">
-                            {visibleSteps.map((step, index) => {
-                                const text = step.text.trim().length > 0 ? step.text.trim() : t('planStatus.emptyStep')
-                                return (
-                                    <div key={`${step.id ?? index}:${text}`} className="flex min-w-0 items-start gap-3">
-                                        <StepStatusIcon status={step.status} />
-                                        <div className="min-w-0 text-sm leading-5">
-                                            <div className={cn(
-                                                'whitespace-normal break-words',
+                        <span
+                            className="block h-full rounded-full bg-emerald-500 transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                            style={{ width: `${progressPercent}%` }}
+                        />
+                    </span>
+                    <ArrowDownIcon className={cn(
+                        'h-3.5 w-3.5 shrink-0 text-[var(--app-hint)] transition-transform duration-200',
+                        expanded ? 'rotate-180' : ''
+                    )} />
+                </button>
+
+                {expanded ? (
+                    <section className="border-t border-[var(--app-border)] px-4 pb-4 pt-3" role="region" aria-label={t('planStatus.dialogTitle')}>
+                        <div className="mb-3 flex items-center justify-between gap-3 text-xs text-[var(--app-hint)]">
+                            <span>{progressLabel}</span>
+                            <span>{t('planStatus.steps', { total: props.plan.total })}</span>
+                        </div>
+                        <div className="overflow-y-auto pr-1" style={{ maxHeight: 'min(38vh, 18rem)' }}>
+                            <ol className="ml-2 border-l border-[var(--app-border)] pl-4">
+                                {props.plan.steps.map((step, index) => {
+                                    const text = step.text.trim().length > 0 ? step.text.trim() : t('planStatus.emptyStep')
+                                    return (
+                                        <li key={`${step.id ?? index}:${text}`} className="relative min-w-0 py-1.5 first:pt-0 last:pb-0">
+                                            <span className={cn(
+                                                'absolute -left-[1.6rem] bg-[var(--app-bg)]',
+                                                index === 0 ? 'top-0' : 'top-1.5'
+                                            )}>
+                                                <StepStatusIcon status={step.status} />
+                                            </span>
+                                            <span className={cn(
+                                                'block whitespace-normal break-words text-sm leading-5',
                                                 step.status === 'completed'
-                                                    ? 'text-[var(--app-hint)] line-through'
+                                                    ? 'text-[var(--app-hint)]'
                                                     : step.status === 'in_progress'
                                                         ? 'font-semibold text-[var(--app-fg)]'
                                                         : 'text-[var(--app-hint)]'
                                             )}>
                                                 {text}
-                                            </div>
-                                        </div>
-                                    </div>
-                                )
-                            })}
+                                            </span>
+                                        </li>
+                                    )
+                                })}
+                            </ol>
                         </div>
-                    </div>
-                </div>
-            ) : null}
-
-            <button
-                type="button"
-                className="pointer-events-auto inline-flex h-[34px] max-w-[min(82vw,26rem)] items-center gap-2 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-4 text-sm font-medium shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-[0_12px_30px_rgba(15,23,42,0.16)] animate-diff-pill"
-                aria-expanded={expanded}
-                onClick={() => setExpanded((value) => !value)}
-            >
-                <StepStatusIcon status={props.plan.currentStep.status} />
-                <span className="shrink-0 font-semibold text-[var(--app-fg)]">{t('planStatus.title')}</span>
-                <span className="shrink-0 text-[var(--app-hint)]">
-                    {t('planStatus.counter', { current: props.plan.currentIndex + 1, total: props.plan.total })}
-                </span>
-                <span className="shrink-0 text-[var(--app-hint)]">{t('planStatus.stepUnit')}</span>
-                <ArrowDownIcon className={cn(
-                    'h-3.5 w-3.5 shrink-0 text-[var(--app-hint)] transition-transform',
-                    expanded ? 'rotate-180' : ''
-                )} />
-            </button>
+                    </section>
+                ) : null}
+            </div>
         </div>
     )
 }

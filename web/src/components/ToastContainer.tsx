@@ -12,16 +12,16 @@ export function ToastContainer() {
 
     return (
         <div
-            className="pointer-events-none fixed inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-50 flex flex-col items-center gap-2 px-3"
+            className="pointer-events-none fixed inset-x-0 top-[var(--app-toast-top)] z-50 flex flex-col items-center gap-2 px-3"
             aria-live="polite"
         >
             {toasts.map((toast) => (
                 <Toast
                     key={toast.id}
+                    kind={toast.kind}
                     title={toast.title}
                     body={toast.body}
-                    className="cursor-pointer"
-                    onClick={() => {
+                    onNavigate={toast.sessionId || toast.url ? () => {
                         removeToast(toast.id)
                         if (toast.sessionId) {
                             void navigate({
@@ -33,7 +33,7 @@ export function ToastContainer() {
                         if (toast.url) {
                             void navigate({ to: toast.url })
                         }
-                    }}
+                    } : undefined}
                     onClose={() => removeToast(toast.id)}
                 />
             ))}

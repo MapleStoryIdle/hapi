@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { domAnimation, LazyMotion, MotionConfig } from 'motion/react'
+import { ApiError } from '@/api/client'
 import type { ShareSummary } from '@/types/api'
-import { ShareCard } from './shares'
+import { feedbackDeliveryFailureToast, ShareCard } from './shares'
 
 const share: ShareSummary = {
     id: 'share-1',
@@ -10,7 +11,7 @@ const share: ShareSummary = {
     size: 4,
     createdAt: 1,
     expiresAt: 2,
-    sourceSessionId: 'source-session',
+    source: { type: 'hapi', sessionId: 'source-session' },
     status: 'feedback_received',
     feedback: {
         filename: 'feedback.md',
@@ -82,7 +83,7 @@ describe('ShareCard', () => {
 
         expect(handlers.onOpenDetails).toHaveBeenCalledWith(share)
         expect(handlers.onCopyLink).toHaveBeenCalledWith(share)
-        expect(handlers.onOpenSourceSession).toHaveBeenCalledWith('source-session')
+        expect(handlers.onOpenSourceSession).toHaveBeenCalledWith({ type: 'hapi', sessionId: 'source-session' })
         expect(handlers.onDeliverToSourceSession).toHaveBeenCalledWith(share)
         expect(handlers.onRevoke).toHaveBeenCalledWith(share)
         expect(screen.queryByRole('button', { name: /^View details$/ })).toBeNull()
@@ -92,7 +93,7 @@ describe('ShareCard', () => {
         renderShareCard({
             share: {
                 ...share,
-                sourceSessionId: null,
+                source: null,
                 status: 'awaiting_feedback',
                 feedback: null,
             },
@@ -101,5 +102,39 @@ describe('ShareCard', () => {
         expect(screen.getByRole('button', { name: 'No source session' })).toBeDisabled()
         expect(screen.getByRole('button', { name: 'Delivery unavailable' })).toBeDisabled()
         expect(screen.getByRole('button', { name: 'View details: note.md' }).parentElement).not.toHaveClass('border-l-emerald-500')
+    })
+
+    it('maps an unsafe source permission error to a source-session toast', () => {
+        const toast = feedbackDeliveryFailureToast(
+            share,
+            new ApiError('unsafe mode', 409, 'source_session_permission_unsafe'),
+            (key) => key
+        )
+
+        expect(toast).toMatchObject({
+            title: 'shares.toast.permissionUnsafe.title',
+            body: 'shares.toast.permissionUnsafe.body',
+            kind: 'error',
+            sessionId: 'source-session',
+            url: ''
+        })
+    })
+
+    it('links a native source delivery error back to the exact native session', () => {
+        const toast = feedbackDeliveryFailureToast(
+            {
+                ...share,
+                source: { type: 'native-codex', machineId: 'machine-1', codexSessionId: 'native-session' },
+            },
+            new ApiError('runner offline', 409, 'native_source_machine_offline'),
+            (key) => key
+        )
+
+        expect(toast).toMatchObject({
+            title: 'shares.toast.sourceUnavailable.title',
+            kind: 'error',
+            sessionId: '',
+            url: '/sessions/codex/native-session?machineId=machine-1'
+        })
     })
 })

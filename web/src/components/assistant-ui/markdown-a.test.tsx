@@ -46,14 +46,14 @@ function renderA(props: React.ComponentPropsWithoutRef<'a'>) {
 
 function renderAInChat(
     props: React.ComponentPropsWithoutRef<'a'>,
-    options?: { fileLinkTarget?: HappyChatFileLinkTarget }
+    options?: { fileLinkTarget?: HappyChatFileLinkTarget; workspacePath?: string }
 ) {
     return render(
         <I18nProvider>
             <HappyChatProvider value={{
                 api: {} as never,
                 sessionId: 'session-1',
-                metadata: { path: 'repo', host: 'local' },
+                metadata: { path: options?.workspacePath ?? 'repo', host: 'local' },
                 terminalToolDisplayMode: 'compact',
                 disabled: false,
                 onRefresh: vi.fn(),
@@ -326,10 +326,42 @@ describe('markdown <A> component — relative / no-scheme hrefs navigate normall
     it('https://example.com → click not prevented (regression: IANA still passes through)', () => {
         clickAndCheckNotPrevented('https://example.com')
     })
+
+    it('C:/repo/file.ts → click not prevented (Windows drive path is not a custom scheme)', () => {
+        clickAndCheckNotPrevented('C:/repo/file.ts')
+    })
+
+    it.each(['x://repo/file.ts', 'c://repo/file.ts'])('%s → stays on the custom-scheme confirmation path outside chat', (href) => {
+        renderA({ href, children: 'custom link' })
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveAttribute('href', '#')
+        expect(link).not.toHaveClass('aui-md-file-link')
+        expect(screen.queryByRole('button', { name: 'Copy path' })).toBeNull()
+    })
 })
 
 describe('markdown <A> component — file path links', () => {
-    it('renders file paths as inline chips and keeps line targets in the file URL', () => {
+    it('routes explicit relative Markdown file hrefs through the session viewer', () => {
+        renderAInChat({ href: 'docs/guide.md:42', children: 'guide' })
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveClass('aui-md-file-link')
+        expect(link).toHaveAttribute('title', 'docs/guide.md:42')
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).toHaveBeenCalledWith({
+            to: '/sessions/$sessionId/file',
+            params: { sessionId: 'session-1' },
+            search: {
+                path: encodeBase64('docs/guide.md'),
+                from: 'session',
+                line: 42
+            }
+        })
+    })
+
+    it('routes authored relative hapi-file targets and preserves their coordinates', () => {
         const href = `hapi-file:${encodeURIComponent('web/src/router.tsx')}?line=42&column=7`
 
         renderAInChat({ href, children: 'web/src/router.tsx:42:7' })
@@ -344,6 +376,312 @@ describe('markdown <A> component — file path links', () => {
         expect(target.searchParams.get('from')).toBe('session')
         expect(target.searchParams.get('line')).toBe('42')
         expect(target.searchParams.get('column')).toBe('7')
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).toHaveBeenCalledWith({
+            to: '/sessions/$sessionId/file',
+            params: { sessionId: 'session-1' },
+            search: {
+                path: encodeBase64('web/src/router.tsx'),
+                from: 'session',
+                line: 42,
+                column: 7
+            }
+        })
+    })
+
+    it.each(['a', 'go', 'Makefile'])('routes short or extensionless relative hapi-file target %s', (filePath) => {
+        const href = `hapi-file:${encodeURIComponent(filePath)}`
+        renderAInChat({ href, children: filePath })
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveAttribute('data-hapi-file-link', 'true')
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).toHaveBeenCalledWith({
+            to: '/sessions/$sessionId/file',
+            params: { sessionId: 'session-1' },
+            search: {
+                path: encodeBase64(filePath),
+                from: 'session'
+            }
+        })
+    })
+
+    it('routes a Windows-backslash relative hapi-file target with coordinates', () => {
+        const filePath = 'src\\App.tsx'
+        const href = `hapi-file:${encodeURIComponent(filePath)}?line=42&column=7`
+        renderAInChat({ href, children: 'App.tsx:42:7' })
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveAttribute('data-hapi-file-link', 'true')
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).toHaveBeenCalledWith({
+            to: '/sessions/$sessionId/file',
+            params: { sessionId: 'session-1' },
+            search: {
+                path: encodeBase64(filePath),
+                from: 'session',
+                line: 42,
+                column: 7
+            }
+        })
+    })
+
+    it('routes encoded absolute project paths through the session file viewer', () => {
+        const workspacePath = '/Users/dev/IdeaProjects/homebar-cloud'
+        const filePath = `${workspacePath}/doc/中文 文件.md`
+        const href = `${workspacePath}/doc/${encodeURIComponent('中文 文件.md')}:42:7`
+
+        renderAInChat(
+            { href, children: '中文 文件.md:42:7' },
+            { workspacePath }
+        )
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveClass('aui-md-file-link')
+        expect(link).toHaveAttribute('title', `${filePath}:42:7`)
+        expect(link.nextElementSibling).toHaveAttribute('aria-label', 'Copy path')
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).toHaveBeenCalledWith({
+            to: '/sessions/$sessionId/file',
+            params: { sessionId: 'session-1' },
+            search: {
+                path: encodeBase64(filePath),
+                from: 'session',
+                line: 42,
+                column: 7
+            }
+        })
+    })
+
+    it('routes Windows drive-root paths with a backslash workspace', () => {
+        const workspacePath = 'C:\\Repo'
+        const filePath = 'C:/repo/src/App.tsx'
+        const href = `${filePath}:42:7`
+
+        renderAInChat(
+            { href, children: 'App.tsx:42:7' },
+            { workspacePath }
+        )
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveClass('aui-md-file-link')
+        expect(link).toHaveAttribute('title', `${filePath}:42:7`)
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).toHaveBeenCalledWith({
+            to: '/sessions/$sessionId/file',
+            params: { sessionId: 'session-1' },
+            search: {
+                path: encodeBase64(filePath),
+                from: 'session',
+                line: 42,
+                column: 7
+            }
+        })
+    })
+
+    it.each(['x://repo/file.ts', 'c://repo/file.ts'])('%s is not a chat file link or copy target', (href) => {
+        renderAInChat(
+            { href, children: 'custom link' },
+            { workspacePath: 'C:/repo' }
+        )
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveAttribute('href', '#')
+        expect(link).not.toHaveClass('aui-md-file-link')
+        expect(screen.queryByRole('button', { name: 'Copy path' })).toBeNull()
+    })
+
+    it('keeps external absolute paths unavailable but copyable, while HTTP(S) stays a web link', async () => {
+        const workspacePath = '/Users/dev/IdeaProjects/homebar-cloud'
+        const externalPath = '/Users/dev/IdeaProjects/other-project/doc/中文 文件.md'
+        const externalHref = '/Users/dev/IdeaProjects/other-project/doc/%E4%B8%AD%E6%96%87%20%E6%96%87%E4%BB%B6.md'
+        const writeText = vi.fn(async () => {})
+        const previousClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText }
+        })
+
+        try {
+            renderAInChat(
+                { href: externalHref, children: 'external file' },
+                { workspacePath }
+            )
+
+            let link = screen.getByRole('link')
+            expect(link).toHaveClass('aui-md-file-link')
+            expect(link).toHaveAttribute('aria-disabled', 'true')
+            expect(link).not.toHaveAttribute('href')
+            expect(link).not.toHaveAttribute('data-hapi-file-link')
+
+            fireEvent.click(link)
+            expect(routerMocks.navigate).not.toHaveBeenCalled()
+
+            const copyButton = screen.getByRole('button', { name: 'Copy path' })
+            fireEvent.click(copyButton)
+            await waitFor(() => expect(writeText).toHaveBeenCalledWith(externalPath))
+
+            cleanup()
+            renderAInChat(
+                { href: 'https://example.com/docs/README.md', children: 'web docs' },
+                { workspacePath }
+            )
+
+            link = screen.getByRole('link')
+            expect(link).not.toHaveClass('aui-md-file-link')
+            expect(link).toHaveAttribute('href', 'https://example.com/docs/README.md')
+            expect(screen.queryByRole('button', { name: 'Copy path' })).toBeNull()
+        } finally {
+            if (previousClipboard) {
+                Object.defineProperty(navigator, 'clipboard', previousClipboard)
+            } else {
+                Reflect.deleteProperty(navigator, 'clipboard')
+            }
+        }
+    })
+
+    it('keeps external Windows drive paths unavailable', () => {
+        renderAInChat(
+            { href: 'C:/other-project/doc/README.md', children: 'external Windows file' },
+            { workspacePath: 'C:/repo' }
+        )
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveClass('aui-md-file-link')
+        expect(link).toHaveAttribute('aria-disabled', 'true')
+        expect(link).not.toHaveAttribute('href')
+        expect(link).not.toHaveAttribute('data-hapi-file-link')
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).not.toHaveBeenCalled()
+        expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument()
+    })
+
+    it('keeps authored absolute hapi-file targets outside the workspace unavailable and copyable', async () => {
+        const workspacePath = '/Users/dev/IdeaProjects/project'
+        const filePath = '/Users/dev/IdeaProjects/other-project/doc/README.md'
+        const writeText = vi.fn(async () => {})
+        const previousClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText }
+        })
+
+        try {
+            const href = `hapi-file:${encodeURIComponent(filePath)}?line=42&column=7`
+            renderAInChat({ href, children: 'external protocol file' }, { workspacePath })
+
+            const link = screen.getByRole('link')
+            expect(link).toHaveClass('aui-md-file-link')
+            expect(link).toHaveAttribute('aria-disabled', 'true')
+            expect(link).not.toHaveAttribute('href')
+            expect(link).not.toHaveAttribute('data-hapi-file-link')
+
+            fireEvent.click(link)
+            expect(routerMocks.navigate).not.toHaveBeenCalled()
+
+            const copyButton = screen.getByRole('button', { name: 'Copy path' })
+            fireEvent.click(copyButton)
+            await waitFor(() => expect(writeText).toHaveBeenCalledWith(filePath))
+        } finally {
+            if (previousClipboard) {
+                Object.defineProperty(navigator, 'clipboard', previousClipboard)
+            } else {
+                Reflect.deleteProperty(navigator, 'clipboard')
+            }
+        }
+    })
+
+    it.each([
+        ['/Users/dev/project/../other/README.md', '/Users/dev/project'],
+        ['C:/repo/../other/README.md', 'C:/repo'],
+        ['../other/README.md', '/Users/dev/project'],
+    ])('keeps traversal target %s unavailable', (filePath, workspacePath) => {
+        const href = `hapi-file:${encodeURIComponent(filePath)}`
+        renderAInChat({ href, children: 'traversal file' }, { workspacePath })
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveClass('aui-md-file-link')
+        expect(link).toHaveAttribute('aria-disabled', 'true')
+        expect(link).not.toHaveAttribute('href')
+        expect(link).not.toHaveAttribute('data-hapi-file-link')
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).not.toHaveBeenCalled()
+        expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument()
+    })
+
+    it.each(['vscode://file/secret', 'file:///secret'])('keeps authored protocol scheme target %s unavailable', (filePath) => {
+        const href = `hapi-file:${encodeURIComponent(filePath)}`
+        renderAInChat({ href, children: 'unsafe protocol target' })
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveAttribute('aria-disabled', 'true')
+        expect(link).not.toHaveAttribute('href')
+        expect(link).not.toHaveAttribute('data-hapi-file-link')
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).not.toHaveBeenCalled()
+    })
+
+    it.each([
+        ['/Users/dev/project/../other/README.md', '/Users/dev/project'],
+        ['C:/repo/../other/README.md', 'C:/repo'],
+    ])('keeps explicit traversal href %s unavailable', (href, workspacePath) => {
+        renderAInChat({ href, children: 'traversal file' }, { workspacePath })
+
+        const link = screen.getByRole('link')
+        expect(link).toHaveClass('aui-md-file-link')
+        expect(link).toHaveAttribute('aria-disabled', 'true')
+        expect(link).not.toHaveAttribute('href')
+        expect(link).not.toHaveAttribute('data-hapi-file-link')
+
+        fireEvent.click(link)
+        expect(routerMocks.navigate).not.toHaveBeenCalled()
+        expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument()
+    })
+
+    it('copies the decoded file path without navigating', async () => {
+        const filePath = '/Users/dev/IdeaProjects/homebar-cloud/doc/中文 文件.md'
+        const writeText = vi.fn(async () => {})
+        const previousClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText }
+        })
+
+        try {
+            const href = `hapi-file:${encodeURIComponent(filePath)}?line=42`
+            renderAInChat(
+                { href, children: '中文 文件.md:42' },
+                { workspacePath: '/Users/dev/IdeaProjects/homebar-cloud' }
+            )
+
+            const link = screen.getByRole('link')
+            expect(link).toHaveAttribute('data-hapi-file-link', 'true')
+            const copyButton = screen.getByRole('button', { name: 'Copy path' })
+            expect(link.nextElementSibling).toBe(copyButton)
+
+            fireEvent.click(copyButton)
+
+            await waitFor(() => {
+                expect(writeText).toHaveBeenCalledWith(filePath)
+                expect(copyButton).toHaveAttribute('aria-label', 'Copied!')
+                expect(copyButton.querySelector('[data-motion-icon="check"]')).not.toBeNull()
+            })
+            expect(routerMocks.navigate).not.toHaveBeenCalled()
+        } finally {
+            if (previousClipboard) {
+                Object.defineProperty(navigator, 'clipboard', previousClipboard)
+            } else {
+                Reflect.deleteProperty(navigator, 'clipboard')
+            }
+        }
     })
 
     it('routes native Codex file paths through the owning runner', () => {

@@ -7,11 +7,14 @@ import {
     CursorMigrateToAcpRequestSchema,
     PROTOCOL_VERSION
 } from '@hapi/protocol'
+import type { ShareSource } from '@hapi/protocol/apiTypes'
+import { isHapiInitiatedCodexSession } from '@hapi/protocol/codexTranscript'
 import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import { ArtifactService, isMarkdownShare, MAX_ARTIFACT_BYTES } from '../../artifacts/service'
+import { revokeShareWithNativeCleanup } from '../../kanban/nativeFeedbackRevoke'
 import type { Store } from '../../store'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
@@ -106,6 +109,92 @@ function resolveMachineForNamespace(
     return { ok: false, status: 404, error: 'Machine not found' }
 }
 
+type ResolvedShareSource =
+    | { ok: true; source: ShareSource }
+    | { ok: false; status: 400 | 403 | 404 | 409 | 503; error: string; code: string }
+
+async function resolveNativeCodexShareSource(
+    engine: SyncEngine,
+    namespace: string,
+    codexSessionId: string,
+    explicitMachineId: string | null
+): Promise<ResolvedShareSource> {
+    // The native desktop API is currently intentionally scoped to default.
+    // Reject rather than publishing a task that can never be delivered.
+    if (namespace !== 'default') {
+        return {
+            ok: false,
+            status: 409,
+            code: 'native_source_namespace_unsupported',
+            error: 'Native Codex feedback is currently available from the default workspace only'
+        }
+    }
+
+    const candidates = explicitMachineId
+        ? [engine.getMachineByNamespace(explicitMachineId, namespace)].filter((machine): machine is Machine => Boolean(machine))
+        : engine.getOnlineMachinesByNamespace(namespace).filter((machine) => typeof machine.metadata?.codexHome === 'string')
+
+    if (explicitMachineId && candidates.length === 0) {
+        return { ok: false, status: 404, code: 'native_source_machine_not_found', error: 'Selected native Codex runner was not found' }
+    }
+    if (explicitMachineId && !candidates[0]?.active) {
+        return { ok: false, status: 409, code: 'native_source_machine_offline', error: 'Selected native Codex runner is offline' }
+    }
+    if (explicitMachineId && typeof candidates[0]?.metadata?.codexHome !== 'string') {
+        return { ok: false, status: 409, code: 'native_source_runner_unsupported', error: 'Selected runner cannot read native Codex sessions' }
+    }
+
+    const hapiManagedSessionIds = new Set(engine.getSessionsByNamespace(namespace).map((session) => session.id))
+    const matches: Array<Extract<ShareSource, { type: 'native-codex' }>> = []
+    for (const machine of candidates) {
+        if (!machine.active) continue
+        try {
+            const read = await engine.readCodexLocalSession(machine.id, codexSessionId, { limit: 1 })
+            if (read.success !== true || read.data.session.id !== codexSessionId) continue
+            if (isHapiInitiatedCodexSession(read.data.session) || hapiManagedSessionIds.has(codexSessionId)) continue
+            matches.push({ type: 'native-codex', machineId: machine.id, codexSessionId })
+        } catch {
+            // A runner can disappear while discovery is in flight. Treat that
+            // as no match instead of allowing an unverified source.
+        }
+    }
+
+    if (matches.length === 1) return { ok: true, source: matches[0]! }
+    if (matches.length > 1) {
+        return {
+            ok: false,
+            status: 409,
+            code: 'native_source_machine_ambiguous',
+            error: 'This native Codex session exists on more than one runner; publish again with --machine <machine-id>'
+        }
+    }
+    return {
+        ok: false,
+        status: 404,
+        code: 'native_source_not_found',
+        error: 'Native Codex session was not found on an online runner'
+    }
+}
+
+async function resolveShareSource(
+    engine: SyncEngine,
+    namespace: string,
+    sourceSessionId: string,
+    sourceMachineId: string | null
+): Promise<ResolvedShareSource> {
+    // An explicit runner is a request for a native source. Do not silently
+    // fall back to an HAPI session with a coincidentally equal id.
+    if (sourceMachineId) {
+        return await resolveNativeCodexShareSource(engine, namespace, sourceSessionId, sourceMachineId)
+    }
+    const hapi = engine.resolveSessionAccess(sourceSessionId, namespace)
+    if (hapi.ok) return { ok: true, source: { type: 'hapi', sessionId: hapi.sessionId } }
+    if (hapi.reason === 'access-denied') {
+        return { ok: false, status: 403, code: 'source_session_access_denied', error: 'Source session access denied' }
+    }
+    return await resolveNativeCodexShareSource(engine, namespace, sourceSessionId, null)
+}
+
 export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: Store, injectedShareService?: ArtifactService): Hono<CliEnv> {
     const shareService = injectedShareService ?? (store ? new ArtifactService(store, getConfiguration().dataDir) : null)
     const app = new Hono<CliEnv>()
@@ -139,23 +228,27 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         const filename = decodeShareFilename(c.req.header('x-hapi-share-filename'))
         const sourceHeader = c.req.header('x-hapi-share-source-session')
         const sourceSessionId = sourceHeader ? decodeShareHeaderText(sourceHeader, 255) : null
+        const sourceMachineHeader = c.req.header('x-hapi-share-source-machine')
+        const sourceMachineId = sourceMachineHeader ? decodeShareHeaderText(sourceMachineHeader, 200) : null
         const feedbackHeader = c.req.header('x-hapi-share-feedback')
         const feedback = feedbackHeader === '1'
         const feedbackRequestHeader = c.req.header('x-hapi-share-feedback-request')
         const feedbackRequest = feedbackRequestHeader ? decodeShareHeaderText(feedbackRequestHeader, 2000) : null
         const expires = Number(c.req.header('x-hapi-share-expires'))
         const length = Number(c.req.header('content-length'))
-        if (!filename || (sourceHeader && !sourceSessionId) || (feedbackHeader && !feedback) || (feedbackRequestHeader && !feedbackRequest) || !Number.isInteger(expires) || expires < 300 || expires > 604800 || (!Number.isNaN(length) && (length < 0 || length > MAX_ARTIFACT_BYTES))) {
+        if (!filename || (sourceHeader && !sourceSessionId) || (sourceMachineHeader && !sourceMachineId) || (sourceMachineId && !sourceSessionId) || (feedbackHeader && !feedback) || (feedbackRequestHeader && !feedbackRequest) || !Number.isInteger(expires) || expires < 300 || expires > 604800 || (!Number.isNaN(length) && (length < 0 || length > MAX_ARTIFACT_BYTES))) {
             return c.json({ error: 'Invalid share upload' }, 400)
         }
         if (feedback && (!sourceSessionId || !isMarkdownShare(filename))) {
             return c.json({ error: 'Feedback requires a source session and a Markdown share' }, 400)
         }
+        let source: ShareSource | null = null
         if (sourceSessionId) {
             const engine = getSyncEngine()
             if (!engine) return c.json({ error: 'Not ready' }, 503)
-            const source = engine.resolveSessionAccess(sourceSessionId, c.get('namespace'))
-            if (!source.ok) return c.json({ error: 'Source session not found' }, 404)
+            const resolved = await resolveShareSource(engine, c.get('namespace'), sourceSessionId, sourceMachineId)
+            if (!resolved.ok) return c.json({ error: resolved.error, code: resolved.code }, resolved.status)
+            source = resolved.source
         }
         const bytes = await readShareBody(c.req.raw.body)
         if (!bytes) return c.json({ error: 'Share exceeds 10 MiB' }, 413)
@@ -175,7 +268,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
                 expiresSeconds: expires,
                 bytes,
                 makePublicUrl,
-                sourceSessionId,
+                source,
                 feedback: feedback ? {
                     request: feedbackRequest,
                     makeFeedbackUrl: (artifactId: string): string => `${base}/f/${artifactId}`
@@ -191,11 +284,22 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         }
     })
 
-    app.delete('/shares/:id', (c) => {
+    app.delete('/shares/:id', async (c) => {
         if (!shareService) return c.json({ error: 'Not ready' }, 503)
-        const result = shareService.revoke(c.req.param('id'), c.get('namespace'))
+        const result = store
+            ? await revokeShareWithNativeCleanup({
+                store,
+                shares: shareService,
+                engine: getSyncEngine(),
+                artifactId: c.req.param('id'),
+                namespace: c.get('namespace')
+            })
+            : shareService.revoke(c.req.param('id'), c.get('namespace'))
         if (result.type === 'not-found') {
             return c.json({ error: 'Share not found' }, 404)
+        }
+        if (result.type === 'cleanup-pending') {
+            return c.json({ error: result.error, code: 'native_feedback_cleanup_pending', cleanupPending: true }, 409)
         }
         if (result.type === 'delete-failed') {
             return c.json({ error: 'Could not delete share data. Please try revoking again.' }, 500)

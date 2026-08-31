@@ -22,7 +22,10 @@ describe('HAPI CLI machine-readable capabilities', () => {
         })
         expect(HAPI_CLI_CAPABILITIES.commands.share).toMatchObject({
             subcommands: {
-                publish: { args: ['relativeFile'], options: ['--expires'] },
+                publish: {
+                    args: ['relativeFile'],
+                    options: ['--expires', '--session', '--machine', '--feedback', '--feedback-request']
+                },
                 revoke: { args: ['shareId'] }
             },
             sideEffects: 'upload_selected_local_file'

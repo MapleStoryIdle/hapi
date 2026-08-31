@@ -3,17 +3,106 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { article as MotionArticle, div as MotionDiv } from 'motion/react-m'
+import { ApiError } from '@/api/client'
 import { CopyIcon, RevokeLinkIcon, SessionIcon, ShareIcon } from '@/components/icons'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useAppContext } from '@/lib/app-context'
 import { getShareCacheNamespace } from '@/lib/shareCacheScope'
 import { queryKeys } from '@/lib/query-keys'
-import { useToast } from '@/lib/toast-context'
+import { type ToastInput, useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useShares } from '@/hooks/queries/useShares'
 import type { ShareSummary } from '@/types/api'
+
+type Translate = (key: string, params?: Record<string, string | number>) => string
+
+function shareDetailsTarget(shareId: string): Pick<ToastInput, 'sessionId' | 'url'> {
+    return { sessionId: '', url: `/shares/${shareId}` }
+}
+
+function sourceSessionTarget(share: ShareSummary): Pick<ToastInput, 'sessionId' | 'url'> {
+    if (share.source?.type === 'hapi') return { sessionId: share.source.sessionId, url: '' }
+    if (share.source?.type === 'native-codex') {
+        return { sessionId: '', url: `/sessions/codex/${encodeURIComponent(share.source.codexSessionId)}?machineId=${encodeURIComponent(share.source.machineId)}` }
+    }
+    return shareDetailsTarget(share.id)
+}
+
+export function feedbackDeliveryFailureToast(share: ShareSummary, reason: unknown, t: Translate): ToastInput {
+    const code = reason instanceof ApiError ? reason.code : undefined
+    switch (code) {
+        case 'source_session_permission_unsafe':
+            return {
+                title: t('shares.toast.permissionUnsafe.title'),
+                body: t('shares.toast.permissionUnsafe.body'),
+                kind: 'error',
+                ...sourceSessionTarget(share)
+            }
+        case 'source_session_running':
+            return {
+                title: t('shares.toast.sourceRunning.title'),
+                body: t('shares.toast.sourceRunning.body'),
+                kind: 'warning',
+                ...sourceSessionTarget(share)
+            }
+        case 'source_session_offline':
+        case 'source_session_unavailable':
+        case 'native_source_machine_offline':
+        case 'native_source_session_unavailable':
+        case 'native_source_runner_unreachable':
+        case 'native_source_status_unknown':
+            return {
+                title: t('shares.toast.sourceUnavailable.title'),
+                body: t('shares.toast.sourceUnavailable.body'),
+                kind: 'error',
+                ...sourceSessionTarget(share)
+            }
+        case 'native_source_namespace_unsupported':
+            return {
+                title: t('shares.actions.deliveryFailed'),
+                body: t('shares.toast.deliveryFailed.body'),
+                kind: 'error',
+                ...sourceSessionTarget(share)
+            }
+        case 'feedback_review_already_sent':
+            return {
+                title: t('shares.actions.delivered'),
+                body: t('shares.toast.reviewAlreadySent.body'),
+                kind: 'success',
+                ...sourceSessionTarget(share)
+            }
+        case 'feedback_review_delivering':
+            return {
+                title: t('shares.toast.reviewDelivering.title'),
+                body: t('shares.toast.reviewDelivering.body'),
+                kind: 'warning',
+                ...shareDetailsTarget(share.id)
+            }
+        case 'feedback_not_ready':
+            return {
+                title: t('shares.toast.feedbackNotReady.title'),
+                body: t('shares.toast.feedbackNotReady.body'),
+                kind: 'warning',
+                ...shareDetailsTarget(share.id)
+            }
+        case 'feedback_unreadable':
+            return {
+                title: t('shares.toast.feedbackUnreadable.title'),
+                body: t('shares.toast.feedbackUnreadable.body'),
+                kind: 'error',
+                ...shareDetailsTarget(share.id)
+            }
+        default:
+            return {
+                title: t('shares.actions.deliveryFailed'),
+                body: t('shares.toast.deliveryFailed.body'),
+                kind: 'error',
+                ...shareDetailsTarget(share.id)
+            }
+    }
+}
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -75,7 +164,7 @@ export function ShareCard(props: {
     locale: string
     pending: boolean
     onCopyLink: (share: ShareSummary) => void
-    onOpenSourceSession: (sessionId: string) => void
+    onOpenSourceSession: (source: NonNullable<ShareSummary['source']>) => void
     onDeliverToSourceSession: (share: ShareSummary) => void
     onOpenDetails: (share: ShareSummary) => void
     onRevoke: (share: ShareSummary) => void
@@ -92,8 +181,8 @@ export function ShareCard(props: {
         revoke: string
     }
 }) {
-    const sourceSessionId = props.share.sourceSessionId
-    const canDeliver = Boolean(sourceSessionId && props.share.status === 'feedback_received')
+    const source = props.share.source
+    const canDeliver = Boolean(source && props.share.status === 'feedback_received')
     const deliveryLabel = props.share.status === 'review_sent'
         ? props.labels.delivered
         : canDeliver
@@ -137,10 +226,10 @@ export function ShareCard(props: {
                     <CopyIcon className="h-[18px] w-[18px]" />
                 </ActionIconButton>
                 <ActionIconButton
-                    label={sourceSessionId ? props.labels.sourceSession : props.labels.sourceSessionUnavailable}
-                    disabled={props.pending || !sourceSessionId}
+                    label={source ? props.labels.sourceSession : props.labels.sourceSessionUnavailable}
+                    disabled={props.pending || !source}
                     onClick={() => {
-                        if (sourceSessionId) props.onOpenSourceSession(sourceSessionId)
+                        if (source) props.onOpenSourceSession(source)
                     }}
                 >
                     <SessionIcon className="h-[19px] w-[19px]" />
@@ -178,8 +267,16 @@ export default function SharesPage() {
     const [revokeTarget, setRevokeTarget] = useState<ShareSummary | null>(null)
     const dateLocale = locale === 'zh-CN' ? 'zh-CN' : 'en-US'
 
-    const openSourceSession = useCallback((sessionId: string) => {
-        void navigate({ to: '/sessions/$sessionId', params: { sessionId } })
+    const openSourceSession = useCallback((source: NonNullable<ShareSummary['source']>) => {
+        if (source.type === 'hapi') {
+            void navigate({ to: '/sessions/$sessionId', params: { sessionId: source.sessionId } })
+            return
+        }
+        void navigate({
+            to: '/sessions/codex/$codexSessionId',
+            params: { codexSessionId: source.codexSessionId },
+            search: { machineId: source.machineId }
+        })
     }, [navigate])
 
     const openDetails = useCallback((share: ShareSummary) => {
@@ -194,8 +291,8 @@ export default function SharesPage() {
                 addToast({
                     title: t('shares.actions.copyUnavailable'),
                     body: share.filename,
-                    sessionId: '',
-                    url: ''
+                    kind: 'warning',
+                    ...shareDetailsTarget(share.id)
                 })
                 return
             }
@@ -203,15 +300,15 @@ export default function SharesPage() {
             addToast({
                 title: copied ? t('shares.actions.copied') : t('shares.actions.copyFailed'),
                 body: share.filename,
-                sessionId: '',
-                url: ''
+                kind: copied ? 'success' : 'error',
+                ...shareDetailsTarget(share.id)
             })
-        } catch (reason) {
+        } catch {
             addToast({
                 title: t('shares.actions.copyFailed'),
-                body: reason instanceof Error ? reason.message : String(reason),
-                sessionId: '',
-                url: ''
+                body: t('shares.toast.copyFailed.body'),
+                kind: 'error',
+                ...shareDetailsTarget(share.id)
             })
         } finally {
             setPendingShareId(null)
@@ -219,7 +316,7 @@ export default function SharesPage() {
     }, [addToast, api, copy, t])
 
     const deliverToSourceSession = useCallback(async (share: ShareSummary) => {
-        if (!share.sourceSessionId || share.status !== 'feedback_received') return
+        if (!share.source || share.status !== 'feedback_received') return
         setPendingShareId(share.id)
         try {
             await api.deliverShareFeedback(share.id)
@@ -227,16 +324,11 @@ export default function SharesPage() {
             addToast({
                 title: t('shares.actions.delivered'),
                 body: share.filename,
-                sessionId: '',
-                url: ''
+                kind: 'success',
+                ...sourceSessionTarget(share)
             })
         } catch (reason) {
-            addToast({
-                title: t('shares.actions.deliveryFailed'),
-                body: reason instanceof Error ? reason.message : String(reason),
-                sessionId: '',
-                url: ''
-            })
+            addToast(feedbackDeliveryFailureToast(share, reason, t))
         } finally {
             setPendingShareId(null)
         }
@@ -253,12 +345,12 @@ export default function SharesPage() {
             await api.revokeShare(revokeTarget.id)
             await queryClient.invalidateQueries({ queryKey: queryKeys.shares(baseUrl, namespace) })
             setRevokeTarget(null)
-        } catch (reason) {
+        } catch {
             addToast({
                 title: t('shares.revoke'),
-                body: reason instanceof Error ? reason.message : String(reason),
-                sessionId: '',
-                url: ''
+                body: t('shares.toast.revokeFailed.body'),
+                kind: 'error',
+                ...shareDetailsTarget(revokeTarget.id)
             })
         } finally {
             setPendingShareId(null)

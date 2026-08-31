@@ -123,7 +123,9 @@ export default function KanbanTaskPage() {
     const { addToast } = useToast()
     const queryClient = useQueryClient()
     const navigate = useNavigate()
-    const { copied, copy } = useCopyToClipboard()
+    const { copied: linkCopied, copy: copyLinkValue } = useCopyToClipboard()
+    const { copied: documentCopied, copy: copyDocument } = useCopyToClipboard()
+    const { copied: feedbackCopied, copy: copyFeedback } = useCopyToClipboard()
     const namespace = useMemo(() => getShareCacheNamespace(token), [token])
     const [tab, setTab] = useState<DetailTab>('preview')
     const [details, setDetails] = useState<ShareDetails | null>(null)
@@ -195,19 +197,37 @@ export default function KanbanTaskPage() {
 
     const copyLink = useCallback(async () => {
         if (!details?.url) return
-        const success = await copy(details.url)
+        const success = await copyLinkValue(details.url)
         addToast({
             title: success ? t('shares.actions.copied') : t('shares.actions.copyFailed'),
             body: details.filename,
-            sessionId: '',
-            url: ''
+            kind: success ? 'success' : 'error',
+            url: `/shares/${shareId}`
         })
-    }, [addToast, copy, details, t])
+    }, [addToast, copyLinkValue, details, shareId, t])
+
+    const copyVisibleContent = useCallback(async () => {
+        if (tab === 'feedback') {
+            if (feedback === null) return
+            await copyFeedback(feedback.content)
+            return
+        }
+        if (tab === 'info' || content === null) return
+        await copyDocument(content)
+    }, [content, copyDocument, copyFeedback, feedback, tab])
 
     const openSourceSession = useCallback(() => {
-        if (!details?.sourceSessionId) return
-        void navigate({ to: '/sessions/$sessionId', params: { sessionId: details.sourceSessionId } })
-    }, [details?.sourceSessionId, navigate])
+        if (!details?.source) return
+        if (details.source.type === 'hapi') {
+            void navigate({ to: '/sessions/$sessionId', params: { sessionId: details.source.sessionId } })
+            return
+        }
+        void navigate({
+            to: '/sessions/codex/$codexSessionId',
+            params: { codexSessionId: details.source.codexSessionId },
+            search: { machineId: details.source.machineId }
+        })
+    }, [details?.source, navigate])
 
     const revoke = useCallback(async () => {
         if (!details) return
@@ -216,12 +236,12 @@ export default function KanbanTaskPage() {
             await api.revokeShare(details.id)
             await queryClient.invalidateQueries({ queryKey: queryKeys.shares(baseUrl, namespace) })
             void navigate({ to: '/shares' })
-        } catch (reason) {
+        } catch {
             addToast({
                 title: t('shares.revoke'),
-                body: reason instanceof Error ? reason.message : String(reason),
-                sessionId: '',
-                url: ''
+                body: t('shares.toast.revokeFailed.body'),
+                kind: 'error',
+                url: `/shares/${shareId}`
             })
         } finally {
             setRevoking(false)
@@ -278,7 +298,14 @@ export default function KanbanTaskPage() {
     }
 
     const filename = details?.filename ?? t('shares.details.loading')
-    const sourceExists = Boolean(details?.sourceSessionId)
+    const sourceExists = Boolean(details?.source)
+    const copyContentAvailable = tab === 'feedback'
+        ? feedback !== null
+        : tab !== 'info' && content !== null
+    const copyContentLabel = tab === 'feedback'
+        ? t('shares.actions.copyFeedback')
+        : t('shares.actions.copyContent')
+    const visibleContentCopied = tab === 'feedback' ? feedbackCopied : documentCopied
 
     return (
         <div className="flex h-full min-h-0 flex-col bg-[var(--app-bg)]">
@@ -299,13 +326,26 @@ export default function KanbanTaskPage() {
 
             <main className="app-scroll-y flex-1 p-3">
                 <div className="mx-auto max-w-[760px]">
-                    <div role="tablist" aria-label={t('shares.details.tabsLabel')} className="mb-4 flex max-w-full overflow-x-auto rounded-xl bg-[var(--app-subtle-bg)] p-1">
-                        <TabButton active={tab === 'preview'} label={t('shares.details.preview')} onClick={() => setTab('preview')} />
-                        <TabButton active={tab === 'source'} label={t('shares.document.source')} onClick={() => setTab('source')} />
-                        {details?.feedback ? (
-                            <TabButton active={tab === 'feedback'} label={t('shares.details.feedback')} onClick={() => setTab('feedback')} />
+                    <div className="mb-4 flex items-center gap-2">
+                        <div role="tablist" aria-label={t('shares.details.tabsLabel')} className="flex min-w-0 flex-1 overflow-x-auto rounded-xl bg-[var(--app-subtle-bg)] p-1">
+                            <TabButton active={tab === 'preview'} label={t('shares.details.preview')} onClick={() => setTab('preview')} />
+                            <TabButton active={tab === 'source'} label={t('shares.document.source')} onClick={() => setTab('source')} />
+                            {details?.feedback ? (
+                                <TabButton active={tab === 'feedback'} label={t('shares.details.feedback')} onClick={() => setTab('feedback')} />
+                            ) : null}
+                            <TabButton active={tab === 'info'} label={t('shares.details.info')} onClick={() => setTab('info')} />
+                        </div>
+                        {copyContentAvailable ? (
+                            <button
+                                type="button"
+                                onClick={() => { void copyVisibleContent() }}
+                                aria-label={copyContentLabel}
+                                title={copyContentLabel}
+                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                            >
+                                {visibleContentCopied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
+                            </button>
                         ) : null}
-                        <TabButton active={tab === 'info'} label={t('shares.details.info')} onClick={() => setTab('info')} />
                     </div>
 
                     {tab === 'info' && details ? (
@@ -342,7 +382,7 @@ export default function KanbanTaskPage() {
                                             aria-label={t('shares.actions.copyLink')}
                                             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--app-border)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
                                         >
-                                            {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
+                                            {linkCopied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
                                         </button>
                                     </div>
                                 ) : (

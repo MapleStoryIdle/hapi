@@ -24,7 +24,7 @@ async function setup(pushService?: Pick<PushService, 'sendToNamespace'>) {
         namespace: 'default',
         filename: 'task.md',
         expiresSeconds: 300,
-        sourceSessionId: 'source-session',
+        source: { type: 'hapi', sessionId: 'source-session' },
         bytes: new TextEncoder().encode('# Task'),
         makePublicUrl: (token) => `https://example.test/s/${token}`,
         feedback: {

@@ -58,6 +58,28 @@ describe('ApiClient error mapping', () => {
         }
     })
 
+    it('uses the server error message instead of exposing a raw HTTP/JSON string', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({
+                    error: 'Source session has an unsafe permission mode',
+                    code: 'source_session_permission_unsafe'
+                }),
+                { status: 409, statusText: 'Conflict' }
+            )
+        )
+
+        const api = new ApiClient('test-token')
+        try {
+            await api.deliverShareFeedback('share-1')
+            expect.unreachable('expected deliverShareFeedback to throw')
+        } catch (error) {
+            expect(error).toBeInstanceOf(ApiError)
+            expect((error as ApiError).message).toBe('Source session has an unsafe permission mode')
+            expect((error as ApiError).message).not.toContain('HTTP 409')
+        }
+    })
+
     it('passes the 422 missing-metadata body through unchanged so the UI can show the missing fields', async () => {
         fetchMock.mockResolvedValueOnce(
             new Response(

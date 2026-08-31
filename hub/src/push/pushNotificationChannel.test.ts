@@ -42,6 +42,9 @@ describe('PushNotificationChannel', () => {
         })
 
         expect(toasts).toHaveLength(1)
+        expect(toasts[0]).toEqual(expect.objectContaining({
+            data: expect.objectContaining({ kind: 'success' })
+        }))
         expect(pushed).toHaveLength(0)
     })
 

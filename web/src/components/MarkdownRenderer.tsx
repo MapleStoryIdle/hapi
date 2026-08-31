@@ -4,14 +4,13 @@ import { TextMessagePartProvider } from '@assistant-ui/react'
 import ReactMarkdown, { type Options as ReactMarkdownOptions } from 'react-markdown'
 import type { ComponentPropsWithoutRef } from 'react'
 import {
-    MARKDOWN_PLUGINS,
-    MARKDOWN_PLUGINS_WITH_BREAKS,
     MARKDOWN_REHYPE_PLUGINS,
     MARKDOWN_COMPONENTS_BY_LANGUAGE,
     MARKDOWN_CLASSNAME,
     defaultComponents,
     denyOnlyTransform,
     UriConfirmProvider,
+    useMarkdownRemarkPlugins,
 } from '@/components/assistant-ui/markdown-text'
 import { cn } from '@/lib/utils'
 
@@ -70,6 +69,8 @@ function StandaloneCode(props: ComponentPropsWithoutRef<'code'>) {
 }
 
 function MarkdownContent(props: MarkdownRendererProps) {
+    const remarkPlugins = useMarkdownRemarkPlugins(props.preserveSingleLineBreaks)
+
     if (props.standalone) {
         const mergedComponents = {
             ...defaultComponents,
@@ -82,7 +83,7 @@ function MarkdownContent(props: MarkdownRendererProps) {
             <UriConfirmProvider>
                 <div className={cn(MARKDOWN_CLASSNAME, props.className)}>
                     <ReactMarkdown
-                        remarkPlugins={props.preserveSingleLineBreaks ? MARKDOWN_PLUGINS_WITH_BREAKS : MARKDOWN_PLUGINS}
+                        remarkPlugins={remarkPlugins}
                         rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
                         components={mergedComponents}
                         urlTransform={denyOnlyTransform}
@@ -102,7 +103,7 @@ function MarkdownContent(props: MarkdownRendererProps) {
         <UriConfirmProvider>
             <TextMessagePartProvider text={props.content}>
                 <MarkdownTextPrimitive
-                    remarkPlugins={props.preserveSingleLineBreaks ? MARKDOWN_PLUGINS_WITH_BREAKS : MARKDOWN_PLUGINS}
+                    remarkPlugins={remarkPlugins}
                     rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
                     components={mergedComponents}
                     componentsByLanguage={MARKDOWN_COMPONENTS_BY_LANGUAGE}

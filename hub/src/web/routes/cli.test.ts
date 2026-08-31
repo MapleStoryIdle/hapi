@@ -155,4 +155,48 @@ describe('cli public share routes', () => {
             await rm(dir, { recursive: true, force: true })
         }
     })
+
+    it('binds a feedback task to a verified original native Codex session when --machine is explicit', async () => {
+        const { mkdtemp, rm } = await import('node:fs/promises')
+        const { tmpdir } = await import('node:os')
+        const { join } = await import('node:path')
+        const { Store } = await import('../../store')
+        const { ArtifactService } = await import('../../artifacts/service')
+        const dir = await mkdtemp(join(tmpdir(), 'hapi-native-share-cli-route-'))
+        const store = new Store(':memory:')
+        const service = new ArtifactService(store, dir)
+        const machine = { id: 'machine-1', active: true, metadata: { codexHome: '/Users/test/.codex' } }
+        const engine = {
+            getMachineByNamespace: (id: string) => id === 'machine-1' ? machine : undefined,
+            readCodexLocalSession: async () => ({
+                success: true,
+                data: { session: { id: 'native-1', originator: null }, importedMessages: [] }
+            }),
+            getSessionsByNamespace: () => []
+        }
+        const app = new Hono()
+        app.route('/cli', createCliRoutes(() => engine as unknown as SyncEngine, store, service))
+        const headers = {
+            ...authHeaders(),
+            'content-type': 'application/octet-stream',
+            'x-hapi-share-filename': Buffer.from('task.md', 'utf8').toString('base64url'),
+            'x-hapi-share-expires': '300',
+            'x-hapi-share-source-session': Buffer.from('native-1', 'utf8').toString('base64url'),
+            'x-hapi-share-source-machine': Buffer.from('machine-1', 'utf8').toString('base64url'),
+            'x-hapi-share-feedback': '1'
+        }
+        try {
+            const response = await app.request('/cli/shares', { method: 'POST', headers, body: '# task' })
+            expect(response.status).toBe(201)
+            const { id } = await response.json() as { id: string }
+            expect(store.kanbanTasks.find(id)?.source).toEqual({
+                type: 'native-codex',
+                machineId: 'machine-1',
+                codexSessionId: 'native-1'
+            })
+        } finally {
+            store.close()
+            await rm(dir, { recursive: true, force: true })
+        }
+    })
 })

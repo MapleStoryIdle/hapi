@@ -147,6 +147,30 @@ export type BinaryFileUploadResponse = {
     error: string
 }
 
+/** Runner-private staging for a feedback file addressed to an original Codex thread. */
+export type NativeKanbanFeedbackStageRequest = {
+    artifactId: string
+    codexSessionId: string
+    filename: string
+    size: number
+    sha256: string
+    bytes: Uint8Array | ArrayBuffer
+}
+
+export type NativeKanbanFeedbackStageResponse =
+    | { success: true; path: string }
+    | { success: false; error: string }
+
+export type NativeKanbanFeedbackDeleteRequest = {
+    artifactId: string
+    codexSessionId: string
+    sha256: string
+}
+
+export type NativeKanbanFeedbackDeleteResponse =
+    | { success: true; deleted: boolean }
+    | { success: false; error: string }
+
 /** A generated image copied from the CLI to durable hub storage. */
 export type GeneratedImageStoreRequest = {
     sid: string
@@ -288,6 +312,8 @@ export interface ServerToClientEvents {
     'rpc-request': (data: { method: string; params: string }, callback: (response: string) => void) => void
     'file:read-bytes': (data: BinaryFileReadRequest, callback: (response: BinaryFileReadResponse) => void) => void
     'file:upload-bytes': (data: BinaryFileUploadRequest, callback: (response: BinaryFileUploadResponse) => void) => void
+    'native-kanban-feedback:stage': (data: NativeKanbanFeedbackStageRequest, callback: (response: NativeKanbanFeedbackStageResponse) => void) => void
+    'native-kanban-feedback:delete': (data: NativeKanbanFeedbackDeleteRequest, callback: (response: NativeKanbanFeedbackDeleteResponse) => void) => void
     'terminal:open': (data: TerminalOpenPayload) => void
     'terminal:write': (data: TerminalWritePayload) => void
     'terminal:resize': (data: TerminalResizePayload) => void

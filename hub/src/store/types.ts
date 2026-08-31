@@ -1,3 +1,5 @@
+import type { ShareSource } from '@hapi/protocol/apiTypes'
+
 export type StoredSession = {
     id: string
     tag: string | null
@@ -118,7 +120,7 @@ export type FeedbackMetadata = {
 export type StoredKanbanTask = {
     artifactId: string
     namespace: string
-    sourceSessionId: string | null
+    source: ShareSource | null
     status: KanbanTaskStatus
     feedbackRequest: string | null
     feedbackTokenHash: string | null

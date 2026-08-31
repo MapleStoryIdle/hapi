@@ -5,11 +5,11 @@ import { cn } from '@/lib/utils'
 import {
     MARKDOWN_CLASSNAME,
     MARKDOWN_COMPONENTS_BY_LANGUAGE,
-    MARKDOWN_PLUGINS,
     MARKDOWN_REHYPE_PLUGINS,
     defaultComponents,
     denyOnlyTransform,
     UriConfirmProvider,
+    useMarkdownRemarkPlugins,
 } from '@/components/assistant-ui/markdown-text'
 
 function ChevronIcon(props: { className?: string; open?: boolean }) {
@@ -42,10 +42,12 @@ function ShimmerDot() {
 }
 
 export const Reasoning: FC = () => {
+    const remarkPlugins = useMarkdownRemarkPlugins()
+
     return (
         <UriConfirmProvider>
             <MarkdownTextPrimitive
-                remarkPlugins={MARKDOWN_PLUGINS}
+                remarkPlugins={remarkPlugins}
                 rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
                 components={defaultComponents}
                 componentsByLanguage={MARKDOWN_COMPONENTS_BY_LANGUAGE}

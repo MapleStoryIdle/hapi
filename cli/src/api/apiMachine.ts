@@ -8,7 +8,19 @@ import { realpathSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
-import type { BinaryFileReadRequest, BinaryFileReadResponse, ClientToServerEvents, ExternalCodexRequestPayload, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
+import type {
+    BinaryFileReadRequest,
+    BinaryFileReadResponse,
+    ClientToServerEvents,
+    ExternalCodexRequestPayload,
+    NativeKanbanFeedbackDeleteRequest,
+    NativeKanbanFeedbackDeleteResponse,
+    NativeKanbanFeedbackStageRequest,
+    NativeKanbanFeedbackStageResponse,
+    ServerToClientEvents,
+    Update,
+    UpdateMachineBody
+} from '@hapi/protocol'
 import type { FileReadResponse, GitBranchResponse, GitCommandResponse, MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
 import {
     type CodexLocalSessionListUpdate,
@@ -20,10 +32,14 @@ import {
     type CodexLocalSessionStatusRpcResponse,
     type CodexLocalSessionSummary,
     type CodexLocalSessionsRpcResponse,
-    type SendCodexLocalSessionMessageRpcResponse
+    type NativeCodexDeliveryPolicy,
+    type NativeKanbanFeedbackReviewGuard,
+    type SendCodexLocalSessionMessageRpcResponse,
+    isHapiInitiatedCodexSession
 } from '@hapi/protocol/codexTranscript'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import { FileNativeCodexSessionDirectSendStore, NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
+import { NativeKanbanFeedbackStore } from '@/codex/nativeKanbanFeedbackStore'
 import { CodexAppServerClient } from '@/codex/codexAppServerClient'
 import { NativeCodexSessionListCache } from '@/codex/nativeSessionListCache'
 import { NativeCodexSessionTitleCache } from '@/codex/nativeSessionTitleCache'
@@ -98,6 +114,8 @@ interface SendCodexLocalSessionMessageRequest {
     displayMessage?: unknown
     clientMessageId?: unknown
     forceRecovery?: unknown
+    deliveryPolicy?: unknown
+    reviewGuard?: unknown
 }
 
 interface DiscardCodexLocalSessionMessageRequest {
@@ -227,6 +245,9 @@ export class ApiMachineClient {
         resolveTitles: (sessionIds, options) => this.nativeCodexSessionTitleCache.resolve(sessionIds, options)
     })
     private readonly nativeCodexSessionDirectSender: NativeCodexSessionDirectSender
+    private readonly nativeKanbanFeedbackStore = new NativeKanbanFeedbackStore(
+        join(configuration.happyHomeDir, 'native-kanban-feedback')
+    )
     private readonly nativeCodexSessionWatcher = new NativeCodexSessionWatcher({
         onChange: ({ codexSessionId, filePath, modifiedAt }) => {
             const listSession = this.nativeCodexSessionListCache.update(filePath, modifiedAt)
@@ -257,7 +278,8 @@ export class ApiMachineClient {
             // client across original Codex sessions: their local owner can
             // continue editing the transcript outside HAPI.
             () => new CodexAppServerClient(),
-            new FileNativeCodexSessionDirectSendStore(join(configuration.happyHomeDir, 'native-codex-direct-outbox.json'))
+            new FileNativeCodexSessionDirectSendStore(join(configuration.happyHomeDir, 'native-codex-direct-outbox.json')),
+            (sessionId, guard) => this.nativeKanbanFeedbackStore.verify(sessionId, guard)
         )
 
         this.rpcHandlerManager = new RpcHandlerManager({
@@ -434,13 +456,21 @@ export class ApiMachineClient {
                 if (params?.forceRecovery !== undefined && typeof params.forceRecovery !== 'boolean') {
                     return { success: false, code: 'invalid_message', error: 'forceRecovery must be a boolean' }
                 }
+                if (params?.deliveryPolicy !== undefined && params.deliveryPolicy !== 'default' && params.deliveryPolicy !== 'untrusted-review') {
+                    return { success: false, code: 'invalid_message', error: 'deliveryPolicy is invalid' }
+                }
+                if (params?.reviewGuard !== undefined && (params.deliveryPolicy !== 'untrusted-review' || !params.reviewGuard || typeof params.reviewGuard !== 'object')) {
+                    return { success: false, code: 'invalid_message', error: 'reviewGuard is only valid for an untrusted review' }
+                }
                 this.observeNativeCodexSession(sessionId)
                 return this.nativeCodexSessionDirectSender.send(
                     sessionId,
                     params?.message,
                     params?.displayMessage,
                     params?.clientMessageId,
-                    params?.forceRecovery
+                    params?.forceRecovery,
+                    params?.deliveryPolicy as NativeCodexDeliveryPolicy | undefined,
+                    params?.reviewGuard as NativeKanbanFeedbackReviewGuard | undefined
                 )
             }
         )
@@ -914,6 +944,26 @@ export class ApiMachineClient {
                 callback({ success: false, error: error instanceof Error ? error.message : String(error) })
             }
         })
+
+        this.socket.on(
+            'native-kanban-feedback:stage',
+            (data: NativeKanbanFeedbackStageRequest, callback: (response: NativeKanbanFeedbackStageResponse) => void) => {
+                const sessionId = typeof data?.codexSessionId === 'string' ? data.codexSessionId.trim() : ''
+                const summary = sessionId ? this.nativeCodexTranscriptCache.getSummary(sessionId) : null
+                if (!summary || isHapiInitiatedCodexSession(summary)) {
+                    callback({ success: false, error: 'Only an original native Codex session may receive feedback' })
+                    return
+                }
+                callback(this.nativeKanbanFeedbackStore.stage({ ...data, codexSessionId: sessionId }))
+            }
+        )
+
+        this.socket.on(
+            'native-kanban-feedback:delete',
+            (data: NativeKanbanFeedbackDeleteRequest, callback: (response: NativeKanbanFeedbackDeleteResponse) => void) => {
+                callback(this.nativeKanbanFeedbackStore.delete(data))
+            }
+        )
 
         this.socket.on('update', (data: Update) => {
             if (data.body.t !== 'update-machine') {

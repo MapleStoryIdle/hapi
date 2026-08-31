@@ -532,7 +532,8 @@ function SessionsPage() {
                     ? error.message
                     : t('newSession.quickCreate.failed.body'),
                 sessionId: '',
-                url: ''
+                url: '',
+                kind: 'error'
             })
             return false
         }
@@ -630,7 +631,8 @@ function SessionsPage() {
                 title: t('codexSync.restart.started.title'),
                 body: t('codexSync.restart.started.body'),
                 sessionId: '',
-                url: ''
+                url: '',
+                kind: 'success'
             })
         } catch (error) {
             addToast({
@@ -640,7 +642,8 @@ function SessionsPage() {
                     t('codexSync.restart.failed.body')
                 ),
                 sessionId: '',
-                url: ''
+                url: '',
+                kind: 'error'
             })
         } finally {
             setIsRestartingCodexDesktop(false)
@@ -661,7 +664,8 @@ function SessionsPage() {
                 title: t('codexSync.duplicates.merge.success.title'),
                 body: t('codexSync.duplicates.merge.success.body'),
                 sessionId: '',
-                url: ''
+                url: '',
+                kind: 'success'
             })
 
             const redirectTarget = selectedSessionId
@@ -694,7 +698,8 @@ function SessionsPage() {
                     t('codexSync.duplicates.merge.failed.body')
                 ),
                 sessionId: '',
-                url: ''
+                url: '',
+                kind: 'error'
             })
             throw error
         } finally {
@@ -732,7 +737,8 @@ function SessionsPage() {
                 title: t('codexSync.failed.title'),
                 body: formatCodexSyncFailureBody(reason),
                 sessionId: '',
-                url: ''
+                url: '',
+                kind: 'error'
             })
         } finally {
             setIsLoadingCodexSessions(false)
@@ -754,7 +760,8 @@ function SessionsPage() {
                 title: t('codexSync.success.title'),
                 body: t('codexSync.success.body', { n: result.syncedCount ?? sessionIds.length }),
                 sessionId: '',
-                url: ''
+                url: '',
+                kind: 'success'
             })
             // 中文注释：导入成功后先在浏览器侧记住这些 Codex thread 的导入时间，供左侧会话列表显示特殊时间文案。
             markCodexSessionsImported(sessionIds)
@@ -785,9 +792,10 @@ function SessionsPage() {
                     body: normalizeCodexScriptError(
                         duplicateError instanceof Error ? duplicateError.message : null,
                         t('codexSync.duplicates.detect.failed.body')
-                    ),
-                    sessionId: '',
-                    url: ''
+                ),
+                sessionId: '',
+                url: '',
+                kind: 'error'
                 })
             }
         } catch (syncError) {
@@ -799,7 +807,8 @@ function SessionsPage() {
                 title: t('codexSync.failed.title'),
                 body: formatCodexSyncFailureBody(reason),
                 sessionId: '',
-                url: ''
+                url: '',
+                kind: 'error'
             })
         } finally {
             setIsSyncingCodexSession(false)
@@ -827,7 +836,7 @@ function SessionsPage() {
             >
                 <div className="bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">
                     <div className="mx-auto grid w-full max-w-[680px] grid-cols-[52px_1fr_52px] items-center px-4 pb-2 pt-3 sm:px-6">
-                        <div className="relative flex h-[52px] w-[52px] items-center justify-center rounded-xl text-[var(--app-fg)] transition-opacity hover:opacity-70 focus-within:ring-2 focus-within:ring-[var(--app-link)]">
+                        <div className="relative flex h-[52px] w-[52px] items-center justify-center rounded-xl text-[var(--app-fg)] transition-colors hover:opacity-70 focus-within:bg-[var(--app-subtle-bg)]">
                             <SettingsIcon className="pointer-events-none h-6 w-6" />
                             <select
                                 aria-label={t('session.more')}
@@ -1095,7 +1104,8 @@ function SessionPage() {
                     title: t('resume.failed.title'),
                     body: message,
                     sessionId: errorSessionId,
-                    url: ''
+                    url: '',
+                    kind: 'error'
                 })
             } finally {
                 setReopeningSessionId(null)
@@ -1176,7 +1186,8 @@ function SessionPage() {
                     title: t('resume.failed.title'),
                     body: message,
                     sessionId: currentSessionId,
-                    url: ''
+                    url: '',
+                    kind: 'error'
                 })
                 // Rebrand as a session_inactive ApiError so the inline
                 // affordance offers Reopen (a separate code path from the
@@ -1221,7 +1232,8 @@ function SessionPage() {
                     title: t('send.blocked.title'),
                     body: t('send.blocked.noConnection'),
                     sessionId: sessionId ?? '',
-                    url: ''
+                    url: '',
+                    kind: 'error'
                 })
             }
             // 'no-session' and 'pending' don't need toast - either invalid state or expected behavior

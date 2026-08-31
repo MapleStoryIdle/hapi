@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -10,6 +11,7 @@ import {
     type NativeCodexAppServerClient,
     type SpawnNativeCodexProcess
 } from './nativeSessionDirectSend'
+import { NativeKanbanFeedbackStore } from './nativeKanbanFeedbackStore'
 import type { InitializeParams, ThreadResumeParams, TurnStartParams, TurnStartResponse } from './appServerTypes'
 
 const originalCodexHome = process.env.CODEX_HOME
@@ -83,6 +85,19 @@ async function flushMicrotasks(): Promise<void> {
     }
 }
 
+const reviewGuard = {
+    stagePath: '/runner-private/native-kanban-feedback/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/feedback.md',
+    sha256: 'a'.repeat(64)
+}
+
+function acceptsReviewGuard() {
+    return { success: true as const }
+}
+
+function sha256(bytes: Uint8Array): string {
+    return createHash('sha256').update(bytes).digest('hex')
+}
+
 function writeTranscript(options: {
     codexHome: string
     sessionId: string
@@ -98,6 +113,436 @@ function writeTranscript(options: {
 }
 
 describe('NativeCodexSessionDirectSender', () => {
+    it('keeps an accepted untrusted Kanban review idempotent across a runner restart', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-review-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789012'
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'idle' as const
+        })
+        const persisted: Array<Record<string, unknown>> = []
+        const store = {
+            load: () => persisted as never,
+            save: (items: readonly Record<string, unknown>[]) => {
+                persisted.splice(0, persisted.length, ...items.map((item) => ({ ...item })))
+            }
+        }
+        const client = new FakeAppServerClient()
+        const first = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            { getSummary: lookup },
+            () => client,
+            store as never,
+            acceptsReviewGuard
+        )
+        try {
+            expect(first.send(
+                sessionId,
+                'Read the staged review path only',
+                'Review feedback: report.md',
+                'hapi-kanban-review:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                false,
+                'untrusted-review',
+                reviewGuard
+            )).toMatchObject({ success: true, status: 'processing' })
+            await flushMicrotasks()
+            expect(client.resumeCalls[0]).toMatchObject({
+                threadId: sessionId,
+                sandbox: 'read-only',
+                approvalPolicy: 'on-request'
+            })
+            expect(persisted).toEqual([expect.objectContaining({
+                accepted: true,
+                deliveryPolicy: 'untrusted-review',
+                recoveryRequired: false
+            })])
+            client.emit('turn/completed', {
+                thread: { id: sessionId },
+                turn: { id: 'native-turn-1' },
+                status: 'completed'
+            })
+            expect(persisted).toEqual([expect.objectContaining({
+                accepted: true,
+                completed: true,
+                deliveryPolicy: 'untrusted-review'
+            })])
+            first.dispose()
+
+            const secondClient = new FakeAppServerClient()
+            const second = new NativeCodexSessionDirectSender(
+                vi.fn<SpawnNativeCodexProcess>(),
+                () => 124,
+                1_000,
+            { getSummary: lookup },
+            () => secondClient,
+            store as never,
+            acceptsReviewGuard
+            )
+            expect(second.send(
+                sessionId,
+                'Read the staged review path only',
+                'Review feedback: report.md',
+                'hapi-kanban-review:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                false,
+                'untrusted-review',
+                reviewGuard
+            )).toMatchObject({ success: true, status: 'processing' })
+            expect(secondClient.connectCalls).toBe(0)
+            expect(second.discard(sessionId, 'hapi-kanban-review:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')).toMatchObject({
+                success: true,
+                discarded: true
+            })
+        } finally {
+            first.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps an untrusted review read-only when app-server setup falls back to exec', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-review-exec-workspace-'))
+        const sessionId = '80345678-1234-4234-8234-123456789013'
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'idle' as const
+        })
+        const client = new FakeAppServerClient()
+        client.resumeError = new Error('bridge unavailable')
+        const child = new FakeChildProcess()
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1_000,
+            { getSummary: lookup },
+            () => client,
+            null,
+            acceptsReviewGuard
+        )
+
+        try {
+            expect(sender.send(
+                sessionId,
+                'Read only the staged path',
+                'Review feedback: report.md',
+                'hapi-kanban-review:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                false,
+                'untrusted-review',
+                reviewGuard
+            )).toMatchObject({ success: true, status: 'processing' })
+            await flushMicrotasks()
+            expect(spawn).toHaveBeenCalledWith([
+                '--sandbox', 'read-only', '--ask-for-approval', 'on-request',
+                'exec', 'resume', '--json', '--skip-git-repo-check', sessionId, 'Read only the staged path'
+            ], cwd)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps an external-writer rejected review as a durable FIFO receipt until it can run', async () => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-review-writer-workspace-'))
+        const sessionId = '81345678-1234-4234-8234-123456789013'
+        let runState: 'idle' | 'processing' = 'idle'
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState
+        })
+        const persisted: Array<Record<string, unknown>> = []
+        const saves: Array<Array<Record<string, unknown>>> = []
+        const store = {
+            load: () => persisted as never,
+            save: (items: readonly Record<string, unknown>[]) => {
+                const copy = items.map((item) => ({ ...item }))
+                persisted.splice(0, persisted.length, ...copy)
+                saves.push(copy)
+            }
+        }
+        const client = new FakeAppServerClient()
+        client.resumeError = new Error('thread-store conflict: active writer')
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1,
+            { getSummary: lookup },
+            () => client,
+            store as never,
+            acceptsReviewGuard
+        )
+
+        try {
+            expect(sender.send(
+                sessionId,
+                'Read the staged review path only',
+                'Review feedback: report.md',
+                'hapi-kanban-review:cccccccccccccccccccccccccccccccc',
+                false,
+                'untrusted-review',
+                reviewGuard
+            )).toMatchObject({ success: true, status: 'processing' })
+            const savesBeforeConflict = saves.length
+            await flushMicrotasks()
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'idle',
+                queuedMessages: [expect.objectContaining({ id: 'hapi-kanban-review:cccccccccccccccccccccccccccccccc' })]
+            })
+            expect(persisted).toEqual([expect.objectContaining({
+                id: 'hapi-kanban-review:cccccccccccccccccccccccccccccccc',
+                deliveryPolicy: 'untrusted-review',
+                recoveryRequired: false
+            })])
+            expect(saves.slice(savesBeforeConflict)).toEqual([[
+                expect.objectContaining({
+                    id: 'hapi-kanban-review:cccccccccccccccccccccccccccccccc',
+                    deliveryPolicy: 'untrusted-review',
+                    recoveryRequired: false
+                })
+            ]])
+
+            client.resumeError = null
+            runState = 'idle'
+            sender.notifyTranscriptChanged(sessionId)
+            await vi.advanceTimersByTimeAsync(5_000)
+            expect(client.startTurnCalls).toHaveLength(1)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps a recovery receipt when the atomic active-to-queue write fails', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-review-writer-save-workspace-'))
+        const sessionId = '81445678-1234-4234-8234-123456789013'
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'idle' as const
+        })
+        const persisted: Array<Record<string, unknown>> = []
+        const successfulSaves: Array<Array<Record<string, unknown>>> = []
+        let saveAttempts = 0
+        const store = {
+            load: () => persisted as never,
+            save: (items: readonly Record<string, unknown>[]) => {
+                saveAttempts += 1
+                if (saveAttempts === 2) throw new Error('disk temporarily unavailable')
+                const copy = items.map((item) => ({ ...item }))
+                persisted.splice(0, persisted.length, ...copy)
+                successfulSaves.push(copy)
+            }
+        }
+        const client = new FakeAppServerClient()
+        client.resumeError = new Error('thread-store conflict: active writer')
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            { getSummary: lookup },
+            () => client,
+            store as never,
+            acceptsReviewGuard
+        )
+        const reviewId = 'hapi-kanban-review:11111111111111111111111111111111'
+
+        try {
+            expect(sender.send(
+                sessionId,
+                'Read the staged review path only',
+                'Review feedback: report.md',
+                reviewId,
+                false,
+                'untrusted-review',
+                reviewGuard
+            )).toMatchObject({ success: true, status: 'processing' })
+            await flushMicrotasks()
+            expect(successfulSaves).toHaveLength(2)
+            expect(successfulSaves.every((items) => items.length > 0)).toBe(true)
+            expect(persisted).toEqual([expect.objectContaining({
+                id: reviewId,
+                recoveryRequired: true,
+                recoveryReason: 'launch_failed',
+                deliveryPolicy: 'untrusted-review'
+            })])
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                lastErrorCode: 'launch_failed',
+                queuedMessages: [expect.objectContaining({ id: reviewId, recoveryRequired: true })]
+            })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps ambiguous review receipts after restart until a persisted terminal tombstone exists', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-review-revoke-workspace-'))
+        const sessionId = '82345678-1234-4234-8234-123456789013'
+        let summary: ReturnType<() => { id: string; title: string; cwd: string; file: string; modifiedAt: number; runState: 'idle' | 'processing' }> | null = {
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'processing'
+        }
+        const acceptedId = 'hapi-kanban-review:dddddddddddddddddddddddddddddddd'
+        const recoveryId = 'hapi-kanban-review:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+        const completedId = 'hapi-kanban-review:ffffffffffffffffffffffffffffffff'
+        const safeQueuedId = 'native:safe-queued'
+        const persisted: Array<Record<string, unknown>> = [{
+            sessionId,
+            id: acceptedId,
+            text: 'Review feedback: report.md',
+            deliveryText: 'Read only staged review',
+            queuedAt: 100,
+            recoveryRequired: false,
+            deliveryPolicy: 'untrusted-review',
+            accepted: true,
+            reviewGuard
+        }, {
+            sessionId,
+            id: recoveryId,
+            text: 'Review feedback: pending.md',
+            deliveryText: 'Read only staged review',
+            queuedAt: 101,
+            recoveryRequired: true,
+            recoveryReason: 'launch_failed',
+            deliveryPolicy: 'untrusted-review',
+            reviewGuard
+        }, {
+            sessionId,
+            id: completedId,
+            text: 'Review feedback: completed.md',
+            deliveryText: 'Read only staged review',
+            queuedAt: 102,
+            recoveryRequired: false,
+            deliveryPolicy: 'untrusted-review',
+            accepted: true,
+            completed: true,
+            reviewGuard
+        }, {
+            sessionId,
+            id: safeQueuedId,
+            text: 'Safe queued message',
+            deliveryText: 'Safe queued message',
+            queuedAt: 103,
+            recoveryRequired: false
+        }]
+        const store = {
+            load: () => persisted as never,
+            save: (items: readonly Record<string, unknown>[]) => {
+                persisted.splice(0, persisted.length, ...items.map((item) => ({ ...item })))
+            }
+        }
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            { getSummary: () => summary },
+            null,
+            store as never,
+            acceptsReviewGuard
+        )
+        try {
+            expect(sender.discard(sessionId, acceptedId)).toMatchObject({ success: true, discarded: false, active: true })
+            expect(persisted.some((item) => item.id === acceptedId)).toBe(true)
+
+            summary = { ...summary!, runState: 'idle' }
+            expect(sender.discard(sessionId, acceptedId)).toMatchObject({ success: true, discarded: false, active: true })
+            expect(persisted.some((item) => item.id === acceptedId)).toBe(true)
+
+            summary = null
+            expect(sender.discard(sessionId, recoveryId)).toMatchObject({ success: true, discarded: false, active: true })
+            expect(sender.discard(sessionId, completedId)).toMatchObject({ success: true, discarded: true })
+            expect(sender.discard(sessionId, safeQueuedId)).toMatchObject({ success: true, discarded: true })
+            expect(persisted.map((item) => item.id)).toEqual([acceptedId, recoveryId])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not launch a queued review whose staged file changes before its idle hand-off', async () => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-review-guard-workspace-'))
+        const stageRoot = mkdtempSync(join(tmpdir(), 'hapi-native-review-stage-'))
+        const sessionId = '83345678-1234-4234-8234-123456789013'
+        const bytes = new TextEncoder().encode('# Untrusted feedback\n')
+        const store = new NativeKanbanFeedbackStore(stageRoot)
+        const staged = store.stage({
+            artifactId: 'f'.repeat(32),
+            codexSessionId: sessionId,
+            filename: 'review.md',
+            size: bytes.length,
+            sha256: sha256(bytes),
+            bytes
+        })
+        if (staged.success !== true) throw new Error(staged.error)
+        let runState: 'idle' | 'processing' = 'processing'
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState
+        })
+        const client = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1,
+            { getSummary: lookup },
+            () => client,
+            null,
+            (id, guard) => store.verify(id, guard)
+        )
+        try {
+            expect(sender.send(
+                sessionId,
+                'Read the staged review path only',
+                'Review feedback: review.md',
+                'hapi-kanban-review:ffffffffffffffffffffffffffffffff',
+                false,
+                'untrusted-review',
+                { stagePath: staged.path, sha256: sha256(bytes) }
+            )).toMatchObject({ success: true, status: 'queued' })
+            writeFileSync(staged.path, '# altered after queueing\n')
+            runState = 'idle'
+            sender.notifyTranscriptChanged(sessionId)
+            await vi.advanceTimersByTimeAsync(1)
+            expect(client.connectCalls).toBe(0)
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                queuedMessages: [expect.objectContaining({
+                    id: 'hapi-kanban-review:ffffffffffffffffffffffffffffffff',
+                    recoveryRequired: true
+                })]
+            })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+            rmSync(stageRoot, { recursive: true, force: true })
+        }
+    })
+
     it('uses one short-lived app-server bridge for an exact native thread', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-bridge-workspace-'))
         const sessionId = '80345678-1234-4234-8234-123456789012'

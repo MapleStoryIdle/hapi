@@ -36,7 +36,7 @@ export const HAPI_CLI_CAPABILITIES = {
             rejectsCallerSession: true
         },
         share: {
-            subcommands: { publish: { args: ['relativeFile'], options: ['--expires'] }, revoke: { args: ['shareId'] } },
+            subcommands: { publish: { args: ['relativeFile'], options: ['--expires', '--session', '--machine', '--feedback', '--feedback-request'] }, revoke: { args: ['shareId'] } },
             sideEffects: 'upload_selected_local_file'
         },
         mcp: {
