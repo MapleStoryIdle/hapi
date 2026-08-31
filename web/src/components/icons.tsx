@@ -73,6 +73,19 @@ export function CheckIcon(props: IconProps) {
     )
 }
 
+/** Public-link revoke action used by Kanban task cards. */
+export function RevokeLinkIcon(props: IconProps) {
+    return createIcon(
+        <>
+            <path d="m10.5 13.5 3-3" />
+            <path d="m7.2 16.8-1.1 1.1a4.25 4.25 0 0 1-6-6l3-3a4.25 4.25 0 0 1 6 0" />
+            <path d="m16.8 7.2 1.1-1.1a4.25 4.25 0 0 1 6 6l-3 3a4.25 4.25 0 0 1-6 0" />
+            <path d="M3 3 21 21" />
+        </>,
+        props
+    )
+}
+
 export function ArrowDownIcon(props: IconProps) {
     return createIcon(
         <path d="M12 5v14m7-7-7 7-7-7" />,

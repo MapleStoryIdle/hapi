@@ -60,6 +60,7 @@ const OpenVikingPage = lazy(() => import('@/routes/memory'))
 const SettingsPage = lazy(() => import('@/routes/settings'))
 const SharePage = lazy(() => import('@/routes/share'))
 const SharesPage = lazy(() => import('@/routes/shares'))
+const KanbanTaskPage = lazy(() => import('@/routes/kanban-task'))
 
 type ComposerSendError = {
     id: number
@@ -1761,7 +1762,19 @@ const settingsRoute = createRoute({
 const sharesRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/shares',
+    component: Outlet,
+})
+
+const sharesIndexRoute = createRoute({
+    getParentRoute: () => sharesRoute,
+    path: '/',
     component: SharesPage,
+})
+
+const kanbanTaskRoute = createRoute({
+    getParentRoute: () => sharesRoute,
+    path: '$shareId',
+    component: KanbanTaskPage,
 })
 
 // Web Share Target landing route. Service worker (`web/src/sw.ts`)
@@ -1798,7 +1811,10 @@ export const routeTree = rootRoute.addChildren([
     ]),
     browseRoute,
     memoryRoute,
-    sharesRoute,
+    sharesRoute.addChildren([
+        sharesIndexRoute,
+        kanbanTaskRoute,
+    ]),
     settingsRoute,
     shareRoute,
 ])

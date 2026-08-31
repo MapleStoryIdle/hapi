@@ -36,7 +36,12 @@ describe('recent Codex session route', () => {
         }))
 
         await router.load()
-        expect(router.state.matches.at(-1)?.routeId).toBe('/shares')
+        expect(router.state.matches.at(-1)?.routeId).toBe('/shares/')
+
+        await router.navigate({ to: '/shares/$shareId', params: { shareId: 'task-1' } })
+        expect(router.state.location.pathname).toBe('/shares/task-1')
+        expect(router.state.matches.at(-1)?.routeId).toBe('/shares/$shareId')
+        expect(router.state.matches.at(-1)?.params).toEqual({ shareId: 'task-1' })
 
         await router.navigate({ to: '/share', search: { id: 'transfer-1' } })
         expect(router.state.matches.at(-1)?.routeId).toBe('/share')
