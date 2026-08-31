@@ -18,6 +18,15 @@ function notFound(): Response {
     return new Response('Not found', { status: 404, headers: SAFETY_HEADERS })
 }
 
+/**
+ * A malformed document is safe to correct and retry: validation happens
+ * before the task-scoped token is claimed. Keep this generic so it reveals
+ * nothing about whether a task or token exists.
+ */
+function invalidFeedbackDocument(): Response {
+    return new Response('Feedback format rejected', { status: 400, headers: SAFETY_HEADERS })
+}
+
 function decodeFilename(raw: string | undefined): string | null {
     if (!raw || !/^[A-Za-z0-9_-]+$/.test(raw)) return null
     try {
@@ -61,9 +70,10 @@ async function readFeedbackBody(body: ReadableStream<Uint8Array> | null): Promis
 }
 
 /**
- * Public, bearer-token based one-time feedback ingress. Every invalid,
- * expired, already-used, or concurrent request receives the same response so
- * it cannot be used to probe task state.
+ * Public, bearer-token based one-time feedback ingress. Malformed documents
+ * receive one generic 400 before the token is claimed. Unknown, expired,
+ * already-used, or concurrent tasks all receive the same 404 so callers
+ * cannot probe task state.
  */
 export function createPublicFeedbackRoutes(
     store: Store,
@@ -81,13 +91,13 @@ export function createPublicFeedbackRoutes(
         const contentType = c.req.header('content-type')?.toLowerCase() ?? ''
         const contentLength = Number(c.req.header('content-length'))
         if (!/^[a-f0-9]{32}$/.test(artifactId) || !token || !filename || !/^text\/markdown(?:\s*;|$)/.test(contentType) || (!Number.isNaN(contentLength) && (contentLength <= 0 || contentLength > MAX_KANBAN_FEEDBACK_BYTES))) {
-            return notFound()
+            return invalidFeedbackDocument()
         }
 
         const bytes = await readFeedbackBody(c.req.raw.body)
-        if (!bytes) return notFound()
+        if (!bytes) return invalidFeedbackDocument()
         const metadata = parseFeedbackMetadata(bytes)
-        if (!metadata) return notFound()
+        if (!metadata) return invalidFeedbackDocument()
 
         if (!feedback.receive({ artifactId, token, filename, bytes, metadata })) return notFound()
 

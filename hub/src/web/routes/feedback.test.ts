@@ -96,15 +96,27 @@ describe('public Kanban feedback route', () => {
         }
     })
 
-    test('does not consume the one-time token when metadata is malformed', async () => {
+    test('returns a safe format error without consuming the one-time token', async () => {
         const { app, artifactId, token, store } = await setup()
         try {
+            const missingFilename = await app.request(`http://hub/${artifactId}`, {
+                method: 'POST',
+                headers: {
+                    authorization: `Bearer ${token}`,
+                    'content-type': 'text/markdown; charset=utf-8'
+                },
+                body: body()
+            })
+            expect(missingFilename.status).toBe(400)
+            expect(await missingFilename.text()).toBe('Feedback format rejected')
+
             const malformed = await app.request(`http://hub/${artifactId}`, {
                 method: 'POST',
                 headers: headers(token),
                 body: '# no contract'
             })
-            expect(malformed.status).toBe(404)
+            expect(malformed.status).toBe(400)
+            expect(await malformed.text()).toBe('Feedback format rejected')
 
             const retry = await app.request(`http://hub/${artifactId}`, {
                 method: 'POST',
