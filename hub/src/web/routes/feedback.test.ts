@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ArtifactService } from '../../artifacts/service'
 import { KanbanFeedbackService } from '../../kanban/feedback'
+import type { PushPayload, PushService } from '../../push/pushService'
 import { Store } from '../../store'
 import { createPublicFeedbackRoutes } from './feedback'
 
@@ -13,7 +14,7 @@ afterEach(async () => {
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-async function setup() {
+async function setup(pushService?: Pick<PushService, 'sendToNamespace'>) {
     const dir = await mkdtemp(join(tmpdir(), 'hapi-kanban-feedback-'))
     dirs.push(dir)
     const store = new Store(':memory:')
@@ -36,7 +37,7 @@ async function setup() {
     const token = /Authorization: Bearer ([A-Za-z0-9_-]+)/.exec(sharedText)?.[1]
     if (!token) throw new Error('Feedback contract token missing from shared Markdown')
     return {
-        app: createPublicFeedbackRoutes(store, feedback),
+        app: createPublicFeedbackRoutes(store, feedback, pushService),
         artifactId: published.artifact.id,
         token,
         feedback,
@@ -111,6 +112,31 @@ describe('public Kanban feedback route', () => {
                 body: body('retry-model')
             })
             expect(retry.status).toBe(201)
+        } finally {
+            store.close()
+        }
+    })
+
+    test('notifies the task owner with a deep link after feedback is safely stored', async () => {
+        const sendToNamespace = vi.fn<(namespace: string, payload: PushPayload) => Promise<void>>().mockResolvedValue(undefined)
+        const pushService: Pick<PushService, 'sendToNamespace'> = { sendToNamespace }
+        const { app, artifactId, token, store } = await setup(pushService)
+        try {
+            const response = await app.request(`http://hub/${artifactId}`, {
+                method: 'POST',
+                headers: headers(token),
+                body: body()
+            })
+
+            expect(response.status).toBe(201)
+            expect(sendToNamespace).toHaveBeenCalledWith('default', expect.objectContaining({
+                title: '看板收到反馈',
+                tag: `kanban-feedback-${artifactId}`,
+                data: {
+                    type: 'kanban-feedback',
+                    url: `/shares/${artifactId}`
+                }
+            }))
         } finally {
             store.close()
         }

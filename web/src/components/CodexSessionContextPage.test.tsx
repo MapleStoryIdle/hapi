@@ -628,6 +628,88 @@ describe('CodexSessionContextPage', () => {
         expect(api.forkCodexSession).not.toHaveBeenCalled()
     })
 
+    it('drops an external-writer prompt without blocking later native transcript updates', async () => {
+        const api = createApi()
+        let rejectedClientMessageId: string | null = null
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementation(async (
+            _sessionId: string,
+            request: { clientMessageId?: string }
+        ) => {
+            rejectedClientMessageId = request.clientMessageId ?? null
+            return {
+                success: true as const,
+                status: 'processing' as const,
+                startedAt: Date.now()
+            }
+        })
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockImplementation(async () => (
+            rejectedClientMessageId
+                ? {
+                    success: true as const,
+                    status: 'idle' as const,
+                    lastError: 'This native Codex session is currently controlled by another Codex client',
+                    lastErrorAt: Date.now(),
+                    lastErrorClientMessageId: rejectedClientMessageId,
+                    lastErrorCode: 'external_writer_active' as const,
+                    queuedMessages: []
+                }
+                : {
+                    success: true as const,
+                    status: 'idle' as const
+                }
+        ))
+        renderPage({ api, realtimeAvailable: true, realtimeConnected: true })
+
+        await screen.findByText('Original response')
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Ignore this locked prompt' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+        const notice = await screen.findByTestId('codex-native-external-writer')
+        expect(notice).toHaveTextContent('Unable to send messages right now')
+        expect(notice).toHaveTextContent('HAPI will keep syncing new transcript updates')
+        await waitFor(() => {
+            expect(screen.queryByText('Ignore this locked prompt')).not.toBeInTheDocument()
+        })
+        expect(screen.queryByTestId('codex-native-recovery')).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /Open .* queued messages/ })).not.toBeInTheDocument()
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            snapshot: {
+                revision: 2,
+                status: { success: true, status: 'idle' },
+                timing: { cache: 'miss', durationMs: 2 },
+                session: {
+                    id: 'codex-thread-1',
+                    title: 'Recent Codex task',
+                    cwd: '/workspace/project',
+                    modifiedAt: 2,
+                    model: 'gpt-5.6-terra',
+                    modelReasoningEffort: 'high'
+                },
+                importedMessages: [
+                    {
+                        createdAt: 0,
+                        role: 'user',
+                        content: { type: 'text', text: 'Original prompt' }
+                    },
+                    {
+                        createdAt: 2,
+                        role: 'agent',
+                        content: { type: 'codex', data: { type: 'message', message: 'New native update' } }
+                    }
+                ],
+                startIndex: 0,
+                page: { limit: 50, nextBefore: null, hasMore: false }
+            }
+        })
+
+        expect(await screen.findByText('New native update')).toBeInTheDocument()
+        expect(screen.getByRole('textbox')).not.toBeDisabled()
+    })
+
     it('expands a native custom command but keeps the typed command as its display receipt', async () => {
         const api = createApi()
         ;(api.getCodexSessionComposerCapabilities as ReturnType<typeof vi.fn>).mockResolvedValue({

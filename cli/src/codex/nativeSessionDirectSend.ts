@@ -182,12 +182,6 @@ type QueuedSend = CodexLocalSessionQueuedMessage & {
     recoveryReason?: CodexLocalSessionDirectSendRecoveryReason
 }
 
-type ExternalNativeWriterWait = {
-    /** The transcript must show this external writer before a stale idle cache can release the queue. */
-    observedProcessing: boolean
-    modifiedAt: number
-}
-
 const RECENT_FAILURE_TTL_MS = 60_000
 const MAX_FAILURE_MESSAGE_LENGTH = 400
 const MAX_NATIVE_QUEUE_LENGTH = 50
@@ -230,6 +224,7 @@ function parseRecoveryReason(value: unknown): CodexLocalSessionDirectSendRecover
         || value === 'session_status_unknown'
         || value === 'launch_failed'
         || value === 'runner_restarted'
+        || value === 'external_writer_active'
         ? value
         : null
 }
@@ -313,7 +308,6 @@ export class NativeCodexSessionDirectSender {
     private readonly recentFailures = new Map<string, RecentFailure>()
     private readonly queues = new Map<string, QueuedSend[]>()
     private readonly queueTimers = new Map<string, ReturnType<typeof setTimeout>>()
-    private readonly externalWriterWaits = new Map<string, ExternalNativeWriterWait>()
     private stateChangeListener: ((sessionId: string) => void) | null = null
 
     constructor(
@@ -1077,22 +1071,17 @@ export class NativeCodexSessionDirectSender {
         this.detachBridge(sessionId, active)
         const session = this.sessionLookup.getSummary(sessionId)
         if (isExternalNativeWriterConflict(setupFailure)) {
-            const queued = this.enqueue(sessionId, active.deliveryText, active.displayText, active.clientMessageId, {
-                front: true,
-                queuedAt: active.startedAt
+            // The exact-thread resume failed before turn/start, so Codex has
+            // not received this prompt. Do not save a recovery receipt or
+            // wait behind a Desktop-owned writer: that would make the reader
+            // look busy forever and can block later transcript updates.
+            this.recentFailures.set(sessionId, {
+                message: 'This native Codex session is currently controlled by another Codex client',
+                occurredAt: this.now(),
+                clientMessageId: active.clientMessageId,
+                code: 'external_writer_active'
             })
-            if (queued.success) {
-                this.externalWriterWaits.set(sessionId, {
-                    observedProcessing: session?.runState === 'processing',
-                    modifiedAt: session?.modifiedAt ?? active.initialModifiedAt
-                })
-                // The status cache can remain idle briefly after Codex rejects
-                // the bridge. Wait for the external transcript transition
-                // instead of immediately opening another competing bridge.
-                this.scheduleQueuePump(sessionId, NATIVE_QUEUE_RETRY_INTERVAL_MS, { replacePending: true })
-                return
-            }
-            this.recordBridgeFallbackFailure(sessionId, active, queued)
+            this.notifyStateChange(sessionId)
             return
         }
         if (session?.runState === 'idle') {
@@ -1522,7 +1511,6 @@ export class NativeCodexSessionDirectSender {
         const queue = this.queues.get(sessionId)
         if (!queue || queue.length === 0) {
             this.queues.delete(sessionId)
-            this.externalWriterWaits.delete(sessionId)
             this.persistOutbox()
             return
         }
@@ -1535,26 +1523,6 @@ export class NativeCodexSessionDirectSender {
         }
 
         const session = this.sessionLookup.getSummary(sessionId)
-        const externalWriterWait = this.externalWriterWaits.get(sessionId)
-        if (externalWriterWait) {
-            if (session?.runState === 'processing') {
-                externalWriterWait.observedProcessing = true
-                this.scheduleQueuePump(sessionId)
-                return
-            }
-            // The bridge conflict proves another writer was active. A stale
-            // idle summary alone is not evidence that it has finished. The
-            // next transcript change (or an observed processing → idle turn)
-            // releases this safe queue automatically.
-            if (
-                session?.runState !== 'idle'
-                || (!externalWriterWait.observedProcessing && session.modifiedAt <= externalWriterWait.modifiedAt)
-            ) {
-                this.scheduleQueuePump(sessionId, NATIVE_QUEUE_RETRY_INTERVAL_MS)
-                return
-            }
-            this.externalWriterWaits.delete(sessionId)
-        }
         // A delivery bridge must never race a second writer. Do not infer
         // ownership from a machine-global control socket: it may belong to a
         // different native Codex thread.

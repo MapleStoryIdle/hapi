@@ -267,6 +267,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         jwtSecret,
         store,
         vapidPublicKey: vapidKeys.publicKey,
+        pushService,
         socketEngine: socketServer.engine,
         corsOrigins,
         relayMode: relayFlag.enabled,

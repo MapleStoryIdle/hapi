@@ -28,6 +28,7 @@ import { createVoiceRoutes } from './routes/voice'
 import { createLegacyPublicShareTombstoneRoutes, createPublicShareRoutes } from './routes/shares'
 import { createShareManagementRoutes } from './routes/shareManagement'
 import { createPublicFeedbackRoutes } from './routes/feedback'
+import type { PushService } from '../push/pushService'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
@@ -213,6 +214,7 @@ function createWebApp(options: {
     jwtSecret: Uint8Array
     store: Store
     vapidPublicKey: string
+    pushService: PushService
     corsOrigins?: string[]
     embeddedAssetMap: Map<string, EmbeddedWebAsset> | null
     relayMode?: boolean
@@ -241,7 +243,7 @@ function createWebApp(options: {
 
     app.route('/cli', createCliRoutes(options.getSyncEngine, options.store))
     app.route('/s', createPublicShareRoutes(options.store))
-    app.route('/f', createPublicFeedbackRoutes(options.store))
+    app.route('/f', createPublicFeedbackRoutes(options.store, undefined, options.pushService))
     app.route('/a', createLegacyPublicShareTombstoneRoutes())
 
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
@@ -375,6 +377,7 @@ export async function startWebServer(options: {
     jwtSecret: Uint8Array
     store: Store
     vapidPublicKey: string
+    pushService: PushService
     socketEngine: SocketEngine
     corsOrigins?: string[]
     relayMode?: boolean
@@ -389,6 +392,7 @@ export async function startWebServer(options: {
         jwtSecret: options.jwtSecret,
         store: options.store,
         vapidPublicKey: options.vapidPublicKey,
+        pushService: options.pushService,
         corsOrigins: options.corsOrigins,
         embeddedAssetMap,
         relayMode: options.relayMode,

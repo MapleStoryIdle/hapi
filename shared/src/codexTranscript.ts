@@ -154,6 +154,8 @@ export type CodexLocalSessionDirectSendRecoveryReason =
     | 'session_status_unknown'
     | 'launch_failed'
     | 'runner_restarted'
+    /** Another Codex client owns this original thread; no prompt was delivered. */
+    | 'external_writer_active'
 
 export type CodexLocalSessionStatusRpcResponse = {
     success: true

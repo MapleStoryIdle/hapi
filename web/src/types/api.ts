@@ -257,6 +257,7 @@ export type CodexLocalSessionDirectSendRecoveryReason =
     | 'session_status_unknown'
     | 'launch_failed'
     | 'runner_restarted'
+    | 'external_writer_active'
 
 export type CodexLocalSessionStatusResponse =
     | {

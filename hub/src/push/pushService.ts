@@ -8,7 +8,7 @@ export type PushPayload = {
     tag?: string
     data?: {
         type: string
-        sessionId: string
+        sessionId?: string
         url: string
     }
 }

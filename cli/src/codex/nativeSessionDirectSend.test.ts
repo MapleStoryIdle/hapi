@@ -241,19 +241,16 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('waits for an external native writer before retrying a safe pre-turn conflict', async () => {
-        vi.useFakeTimers()
+    it('drops an external native writer conflict before turn/start without queueing the prompt', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-active-writer-workspace-'))
         const sessionId = '81845678-1234-4234-8234-123456789012'
-        let runState: 'idle' | 'processing' = 'idle'
-        let modifiedAt = 100
         const lookup = vi.fn(() => ({
             id: sessionId,
             title: 'Native thread',
             cwd,
             file: '/not-read.jsonl',
-            modifiedAt,
-            runState
+            modifiedAt: 100,
+            runState: 'idle' as const
         }))
         const blockedClient = new FakeAppServerClient()
         blockedClient.resumeError = new Error('thread-store conflict: thread already has an active writer')
@@ -261,61 +258,49 @@ describe('NativeCodexSessionDirectSender', () => {
         let nextClient = 0
         const createClient = vi.fn(() => [blockedClient, readyClient][nextClient++]!)
         const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const store = {
+            load: vi.fn(() => []),
+            save: vi.fn()
+        }
         const sender = new NativeCodexSessionDirectSender(
             spawn,
             () => 123,
             1_000,
             { getSummary: lookup },
-            createClient
+            createClient,
+            store
         )
 
         try {
-            expect(sender.send(sessionId, 'Wait for the original Codex turn', undefined, 'native:active-writer')).toMatchObject({
+            expect(sender.send(sessionId, 'Ignore this locked prompt', undefined, 'native:active-writer')).toMatchObject({
                 success: true,
                 status: 'processing'
-            })
-            expect(sender.send(sessionId, 'Stay behind the first prompt', undefined, 'native:after-active-writer')).toMatchObject({
-                success: true,
-                status: 'queued'
             })
             await flushMicrotasks()
 
             expect(spawn).not.toHaveBeenCalled()
-            expect(sender.getStatus(sessionId)).toEqual({
+            expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
                 status: 'idle',
-                queuedMessages: [{
-                    id: 'native:active-writer',
-                    text: 'Wait for the original Codex turn',
-                    queuedAt: 123
-                }, {
-                    id: 'native:after-active-writer',
-                    text: 'Stay behind the first prompt',
-                    queuedAt: 123
-                }]
+                lastError: 'This native Codex session is currently controlled by another Codex client',
+                lastErrorClientMessageId: 'native:active-writer',
+                lastErrorCode: 'external_writer_active',
+                queuedMessages: []
             })
+            expect(store.save).toHaveBeenLastCalledWith([])
 
-            // The cache can still say idle immediately after the conflict. Do
-            // not keep opening bridges until the original native turn appears.
-            await vi.advanceTimersByTimeAsync(5_000)
-            expect(createClient).toHaveBeenCalledTimes(1)
-
-            runState = 'processing'
-            modifiedAt = 101
-            sender.notifyTranscriptChanged(sessionId)
-            await vi.advanceTimersByTimeAsync(0)
-            expect(createClient).toHaveBeenCalledTimes(1)
-
-            runState = 'idle'
-            modifiedAt = 102
-            sender.notifyTranscriptChanged(sessionId)
-            await vi.advanceTimersByTimeAsync(0)
+            // Once the Desktop owner releases the thread, a later message is
+            // a fresh hand-off rather than a retry of the discarded prompt.
+            expect(sender.send(sessionId, 'Send after the owner releases it', undefined, 'native:after-active-writer')).toMatchObject({
+                success: true,
+                status: 'processing'
+            })
             await flushMicrotasks()
 
             expect(createClient).toHaveBeenCalledTimes(2)
             expect(readyClient.startTurnCalls).toEqual([{
                 threadId: sessionId,
-                input: [{ type: 'text', text: 'Wait for the original Codex turn' }]
+                input: [{ type: 'text', text: 'Send after the owner releases it' }]
             }])
         } finally {
             sender.dispose()

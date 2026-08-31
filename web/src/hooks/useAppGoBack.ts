@@ -20,6 +20,12 @@ export function useAppGoBack(): () => void {
             return
         }
 
+        // Kanban list always returns to the session list instead of browser history.
+        if (pathname === '/shares') {
+            navigate({ to: '/sessions' })
+            return
+        }
+
         // For single file view, go back to the source surface when it is explicit.
         if (pathname.match(/^\/sessions\/[^/]+\/file$/)) {
             const from = (search && typeof search === 'object' && 'from' in search)

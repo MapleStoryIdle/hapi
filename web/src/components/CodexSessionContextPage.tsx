@@ -285,6 +285,8 @@ function formatDirectSendError(error: unknown, t: Translator): string {
         switch (error.code) {
             case 'queue_full':
                 return t('recentCodex.direct.error.queueFull')
+            case 'external_writer_active':
+                return t('recentCodex.direct.error.externalWriter')
             case 'session_status_unknown':
                 return t('recentCodex.direct.error.statusUnknown')
             case 'workspace_unavailable':
@@ -331,6 +333,8 @@ function getNativeRecoveryDetail(
     t: Translator
 ): string {
     switch (reason) {
+        case 'external_writer_active':
+            return t('recentCodex.direct.error.externalWriter')
         case 'codex_timeout':
             return t('recentCodex.direct.recovery.timeout')
         case 'session_status_unknown':
@@ -888,7 +892,15 @@ export function CodexSessionContextPage(props: {
                     : queuedMessages)
             }
             const queuedMessageIds = new Set(queuedMessages?.map((message) => message.id) ?? [])
+            const discardedExternalWriterEchoId = response.lastErrorCode === 'external_writer_active'
+                ? response.lastErrorClientMessageId ?? null
+                : null
             updateNativeDirectMessageEchoes(nativeDirectMessageScope, (current) => {
+                if (discardedExternalWriterEchoId && current.some((echo) => echo.id === discardedExternalWriterEchoId)) {
+                    // A writer conflict is reported before turn/start, so the
+                    // optimistic bubble is known not to exist in Codex.
+                    return current.filter((echo) => echo.id !== discardedExternalWriterEchoId)
+                }
                 let changed = false
                 const failedEchoIndex = response.lastError && (
                     response.lastErrorClientMessageId !== undefined || response.lastErrorAt !== undefined
@@ -1026,6 +1038,12 @@ export function CodexSessionContextPage(props: {
         ? statusQuery.data.queuedMessages
         : null
     const nativeRecoveryCandidate = useMemo(() => {
+        if (directStatusErrorCode === 'external_writer_active') {
+            // The runner knows the bridge was rejected before turn/start, so
+            // this is not an uncertain delivery and must not block reading or
+            // offer a retry for the discarded optimistic message.
+            return { candidate: null, uncertain: false, reason: null }
+        }
         const runnerQueueIds = new Set(runnerQueuedMessages?.map((message) => message.id) ?? [])
         const recoveryRequired = nativeQueuedMessages.find((message) => message.recoveryRequired)
         const staleQueued = nativeStalledSince !== null ? nativeQueuedMessages[0] : null
@@ -1334,8 +1352,9 @@ export function CodexSessionContextPage(props: {
                         : statusQuery.isError || directStatus === null
                             ? t('recentCodex.direct.statusFailed')
                             : null
+    const externalWriterActive = directStatusErrorCode === 'external_writer_active'
     const visibleRunnerError = directStatusError === dismissedRunnerError ? null : directStatusError
-    const composerSendError = directSendError ?? (visibleRunnerError
+    const composerSendError = directSendError ?? (!externalWriterActive && visibleRunnerError
         ? {
             id: statusQuery.dataUpdatedAt,
             text: '',
@@ -1856,6 +1875,15 @@ export function CodexSessionContextPage(props: {
                                 busy: isRecoveringNativeDelivery
                             } : undefined}
                             testId="codex-native-recovery"
+                        />
+                    </div>
+                ) : externalWriterActive ? (
+                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
+                        <SessionDetailStatusNotice
+                            tone="warning"
+                            title={t('recentCodex.direct.externalWriter.title')}
+                            detail={t('recentCodex.direct.externalWriter.detail')}
+                            testId="codex-native-external-writer"
                         />
                     </div>
                 ) : directSendPhase ? (

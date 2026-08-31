@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { basename } from 'node:path'
 import { KanbanFeedbackService, MAX_KANBAN_FEEDBACK_BYTES, parseFeedbackMetadata } from '../../kanban/feedback'
 import { getConfiguration } from '../../configuration'
+import type { PushService } from '../../push/pushService'
 import type { Store } from '../../store'
 
 const SAFETY_HEADERS = {
@@ -64,7 +65,11 @@ async function readFeedbackBody(body: ReadableStream<Uint8Array> | null): Promis
  * expired, already-used, or concurrent request receives the same response so
  * it cannot be used to probe task state.
  */
-export function createPublicFeedbackRoutes(store: Store, service?: KanbanFeedbackService): Hono {
+export function createPublicFeedbackRoutes(
+    store: Store,
+    service?: KanbanFeedbackService,
+    pushService?: Pick<PushService, 'sendToNamespace'>
+): Hono {
     const app = new Hono()
     const feedback = service ?? new KanbanFeedbackService(store, getConfiguration().dataDir)
 
@@ -85,6 +90,22 @@ export function createPublicFeedbackRoutes(store: Store, service?: KanbanFeedbac
         if (!metadata) return notFound()
 
         if (!feedback.receive({ artifactId, token, filename, bytes, metadata })) return notFound()
+
+        const task = store.kanbanTasks.find(artifactId)
+        if (task) {
+            void pushService?.sendToNamespace(task.namespace, {
+                title: '看板收到反馈',
+                body: '点击查看 Agent 返回的内容。',
+                tag: `kanban-feedback-${artifactId}`,
+                data: {
+                    type: 'kanban-feedback',
+                    url: `/shares/${encodeURIComponent(artifactId)}`
+                }
+            }).catch((error) => {
+                console.error('[KanbanFeedback] Failed to send feedback notification:', error)
+            })
+        }
+
         return c.json({ ok: true }, 201, SAFETY_HEADERS)
     })
 
