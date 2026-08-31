@@ -18,6 +18,8 @@ export type TerminalExecutionDetails = {
 
 export type TerminalExecutionState = 'pending' | 'running' | 'completed' | 'failed'
 
+export type TerminalExecutionDrawerTab = 'output' | 'input' | 'environment'
+
 export function isTerminalExecutionTool(toolName: string): boolean {
     return TERMINAL_EXECUTION_TOOL_NAMES.has(toolName)
 }
@@ -143,7 +145,7 @@ function terminalStateDotClass(state: TerminalExecutionState): string {
     if (state === 'failed') return 'bg-red-500'
     if (state === 'completed') return 'bg-emerald-500'
     if (state === 'pending') return 'bg-amber-500'
-    return 'bg-[var(--app-hint)] animate-pulse'
+    return 'bg-[var(--app-hint)] animate-pulse motion-reduce:animate-none'
 }
 
 function terminalStateLabel(
@@ -162,42 +164,148 @@ function terminalOutputFallback(
         : t('terminal.execution.noOutput')
 }
 
-export function TerminalExecutionDetail(props: { block: ToolCallBlock; surface?: 'dialog' | 'drawer' | 'modal' }) {
+type TerminalExecutionDetailProps = {
+    block: ToolCallBlock
+    surface?: 'dialog' | 'drawer'
+    drawerTab?: TerminalExecutionDrawerTab
+    panelId?: string
+    labelledBy?: string
+    hidden?: boolean
+}
+
+function TerminalExecutionDrawerPanel(props: {
+    details: TerminalExecutionDetails
+    state: TerminalExecutionState
+    duration: string | null
+    tab: TerminalExecutionDrawerTab
+    panelId?: string
+    labelledBy?: string
+    hidden?: boolean
+    t: (key: string, params?: Record<string, string | number>) => string
+}) {
+    const hasOutput = Boolean(props.details.stdout || props.details.stderr)
+
+    return (
+        <div
+            aria-labelledby={props.labelledBy}
+            className="relative isolate min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(var(--app-safe-area-bottom),1.25rem)] pt-4 sm:px-6 sm:pb-6"
+            data-terminal-execution-detail
+            data-terminal-execution-panel={props.tab}
+            hidden={props.hidden}
+            id={props.panelId}
+            role="tabpanel"
+            tabIndex={props.hidden ? -1 : 0}
+        >
+            {props.tab === 'output' ? (
+                <section className="flex flex-col gap-3" data-terminal-execution-output>
+                    <h3 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('terminal.execution.output')}</h3>
+                    {props.details.stderr ? (
+                        <CodeBlock code={props.details.stderr} language="text" title={props.t('terminal.stderr')} size="comfortable" />
+                    ) : null}
+                    {props.details.stdout ? (
+                        <CodeBlock code={props.details.stdout} language="text" title={props.t('terminal.stdout')} size="comfortable" />
+                    ) : null}
+                    {!hasOutput ? (
+                        <p className="rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-3 text-sm leading-6 text-[var(--app-hint)]">
+                            {terminalOutputFallback(props.state, props.t)}
+                        </p>
+                    ) : null}
+                </section>
+            ) : null}
+
+            {props.tab === 'input' ? (
+                <section className="flex flex-col gap-3" data-terminal-execution-input>
+                    <h3 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('terminal.execution.input')}</h3>
+                    {props.details.command ? (
+                        <CodeBlock code={props.details.command} language="bash" title={props.t('terminal.execution.command')} size="comfortable" />
+                    ) : (
+                        <p className="text-sm text-[var(--app-hint)]">{props.t('terminal.execution.commandUnavailable')}</p>
+                    )}
+                </section>
+            ) : null}
+
+            {props.tab === 'environment' ? (
+                <section className="flex flex-col gap-3" data-terminal-execution-environment>
+                    <h3 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('terminal.execution.environment')}</h3>
+                    <dl className="grid gap-2">
+                        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2.5">
+                            <dt className="text-xs font-medium text-[var(--app-hint)]">{props.t('terminal.execution.status')}</dt>
+                            <dd className={cn('mt-1 flex items-center gap-2 text-sm font-medium', terminalStateColorClass(props.state))}>
+                                <span className={cn('h-2 w-2 shrink-0 rounded-full', terminalStateDotClass(props.state))} aria-hidden="true" />
+                                {terminalStateLabel(props.state, props.t)}
+                            </dd>
+                        </div>
+                        {props.details.cwd ? (
+                            <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2.5">
+                                <dt className="text-xs font-medium text-[var(--app-hint)]">{props.t('terminal.execution.workingDirectory')}</dt>
+                                <dd className="mt-1 break-all font-mono text-xs leading-5 text-[var(--app-fg)]">{props.details.cwd}</dd>
+                            </div>
+                        ) : null}
+                        {props.duration ? (
+                            <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2.5">
+                                <dt className="text-xs font-medium text-[var(--app-hint)]">{props.t('terminal.execution.duration')}</dt>
+                                <dd className="mt-1 font-mono text-sm font-medium text-[var(--app-fg)]">{props.duration}</dd>
+                            </div>
+                        ) : null}
+                        {props.details.exitCode !== null ? (
+                            <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2.5" data-terminal-execution-exit-code>
+                                <dt className="text-xs font-medium text-[var(--app-hint)]">{props.t('terminal.execution.exitCodeLabel')}</dt>
+                                <dd className="mt-1 font-mono text-sm font-medium text-[var(--app-fg)]">
+                                    {props.t('terminal.execution.exitCode', { code: props.details.exitCode })}
+                                </dd>
+                            </div>
+                        ) : null}
+                    </dl>
+                </section>
+            ) : null}
+        </div>
+    )
+}
+
+export function TerminalExecutionDetail(props: TerminalExecutionDetailProps) {
     const { t } = useTranslation()
     const details = getTerminalExecutionDetails(props.block)
     const state = getTerminalExecutionState(props.block, details)
     const duration = formatTerminalExecutionDuration(details.durationMs)
     const hasOutput = Boolean(details.stdout || details.stderr)
-    const isCompactSurface = props.surface === 'drawer' || props.surface === 'modal'
+
+    if (props.surface === 'drawer') {
+        return (
+            <TerminalExecutionDrawerPanel
+                details={details}
+                state={state}
+                duration={duration}
+                tab={props.drawerTab ?? 'output'}
+                panelId={props.panelId}
+                labelledBy={props.labelledBy}
+                hidden={props.hidden}
+                t={t}
+            />
+        )
+    }
 
     return (
         <div
-            className={cn(
-                isCompactSurface
-                    ? 'relative isolate flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-5 pb-[max(var(--app-safe-area-bottom),1.25rem)] pt-4 sm:px-6 sm:pb-6'
-                    : 'mt-3 flex min-h-0 max-h-[calc(75vh-4rem)] flex-col gap-4 overflow-y-auto pb-1 max-sm:mt-0 max-sm:max-h-none max-sm:flex-1 max-sm:px-5 max-sm:pb-[calc(1.25rem+var(--app-safe-area-bottom))] max-sm:pt-4'
-            )}
+            className="mt-3 flex min-h-0 max-h-[calc(75vh-4rem)] flex-col gap-4 overflow-y-auto pb-1 max-sm:mt-0 max-sm:max-h-none max-sm:flex-1 max-sm:px-5 max-sm:pb-[calc(1.25rem+var(--app-safe-area-bottom))] max-sm:pt-4"
             data-terminal-execution-detail
         >
-            {!isCompactSurface ? (
-                <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3" data-terminal-execution-overview>
-                    <div className="grid grid-cols-2 gap-2">
-                        <div className="min-w-0 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2">
-                            <div className="text-[11px] font-medium text-[var(--app-hint)]">{t('terminal.execution.status')}</div>
-                            <div className={cn('mt-1 flex items-center gap-2 text-sm font-medium', terminalStateColorClass(state))}>
-                                <span className={cn('h-2 w-2 shrink-0 rounded-full', terminalStateDotClass(state))} aria-hidden="true" />
-                                {terminalStateLabel(state, t)}
-                            </div>
+            <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3" data-terminal-execution-overview>
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="min-w-0 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2">
+                        <div className="text-[11px] font-medium text-[var(--app-hint)]">{t('terminal.execution.status')}</div>
+                        <div className={cn('mt-1 flex items-center gap-2 text-sm font-medium', terminalStateColorClass(state))}>
+                            <span className={cn('h-2 w-2 shrink-0 rounded-full', terminalStateDotClass(state))} aria-hidden="true" />
+                            {terminalStateLabel(state, t)}
                         </div>
-                        {duration ? (
-                            <div className="min-w-0 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2">
-                                <div className="text-[11px] font-medium text-[var(--app-hint)]">{t('terminal.execution.duration')}</div>
-                                <div className="mt-1 font-mono text-sm font-medium text-[var(--app-fg)]">{duration}</div>
-                            </div>
-                        ) : null}
                     </div>
-                </section>
-            ) : null}
+                    {duration ? (
+                        <div className="min-w-0 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2">
+                            <div className="text-[11px] font-medium text-[var(--app-hint)]">{t('terminal.execution.duration')}</div>
+                            <div className="mt-1 font-mono text-sm font-medium text-[var(--app-fg)]">{duration}</div>
+                        </div>
+                    ) : null}
+                </div>
+            </section>
 
             <section className="flex shrink-0 flex-col gap-2" data-terminal-execution-input>
                 <h3 className="text-sm font-semibold text-[var(--app-fg)]">{t('terminal.execution.input')}</h3>
