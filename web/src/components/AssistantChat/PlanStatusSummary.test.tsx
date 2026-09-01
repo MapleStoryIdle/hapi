@@ -201,21 +201,28 @@ describe('PlanStatusSummary helpers', () => {
 })
 
 describe('PlanStatusSummary', () => {
-    // 验证折叠态展示当前步骤和整体进度，展开后在输入框上方展示完整计划。
+    // 验证折叠态只展示整体进度和当前任务，展开后直接展示完整计划。
     it('renders the current step and total progress while collapsed, then expands the plan list', () => {
         renderSummary()
 
-        const trigger = screen.getByRole('button', { name: /计划.*Step-2.*实现路由懒加载.*已完成 1\/3/ })
+        const trigger = screen.getByRole('button', { name: /计划.*实现路由懒加载.*已完成 1\/3/ })
         expect(trigger).toHaveAttribute('aria-expanded', 'false')
-        expect(screen.getByText('Step-2')).toBeInTheDocument()
+        expect(trigger).toHaveTextContent('1/3·实现路由懒加载')
+        expect(screen.queryByText('Step-2')).toBeNull()
         expect(screen.getByText('实现路由懒加载')).toBeInTheDocument()
-        expect(screen.getByRole('progressbar', { name: '已完成 1/3' })).toHaveAttribute('aria-valuenow', '1')
+        expect(screen.queryByRole('progressbar')).toBeNull()
+        expect(trigger.parentElement).not.toHaveClass('animate-diff-pill')
 
         fireEvent.click(trigger)
 
         const list = screen.getByRole('region', { name: '当前计划' })
         expect(list).toBeInTheDocument()
+        expect(trigger).toHaveTextContent('计划1/3')
+        expect(list).not.toHaveTextContent('已完成 1/3')
+        expect(list).not.toHaveTextContent('3 步')
         expect(list.querySelector('.overflow-y-auto')).toBeTruthy()
+        expect(list.querySelector('svg[data-plan-status-spinner]')).toHaveClass('motion-safe:animate-spin')
+        expect(trigger.parentElement).not.toHaveClass('animate-diff-pop')
         expect(screen.getByText('确认 router/realtime 依赖边界')).toBeInTheDocument()
         expect(screen.getByText('实现语音懒加载')).toBeInTheDocument()
         expect(screen.queryByRole('dialog')).toBeNull()

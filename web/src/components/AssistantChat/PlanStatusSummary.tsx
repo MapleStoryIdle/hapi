@@ -124,7 +124,16 @@ function StepStatusIcon(props: { status: ChecklistItem['status'] }) {
 
     if (props.status === 'in_progress') {
         return (
-            <span className="h-5 w-5 shrink-0 rounded-full border-2 border-[var(--app-border)] border-t-[var(--app-link)] bg-[var(--app-bg)] motion-safe:animate-spin" />
+            <svg
+                viewBox="0 0 20 20"
+                fill="none"
+                className="h-5 w-5 shrink-0 text-[var(--app-link)] motion-safe:animate-spin"
+                aria-hidden="true"
+                data-plan-status-spinner
+            >
+                <circle cx="10" cy="10" r="8" stroke="var(--app-border)" strokeWidth="2" />
+                <path d="M10 2a8 8 0 0 1 8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
         )
     }
 
@@ -195,7 +204,6 @@ export function PlanStatusSummary(props: {
 
     if (!props.plan) return null
 
-    const progressPercent = Math.round((props.plan.completed / props.plan.total) * 100)
     const progressLabel = t('planStatus.progress', {
         completed: props.plan.completed,
         total: props.plan.total
@@ -203,15 +211,14 @@ export function PlanStatusSummary(props: {
     const currentStepLabel = props.plan.currentStep.text.trim().length > 0
         ? props.plan.currentStep.text.trim()
         : t('planStatus.emptyStep')
-    const currentStepNumber = `Step-${props.plan.currentIndex + 1}`
 
     return (
         <div ref={rootRef} className="pointer-events-none relative mx-auto flex w-full max-w-content justify-center px-3 [font-family:var(--app-chat-font-family)]">
             <div className={cn(
-                'pointer-events-auto w-full max-w-[min(88vw,34rem)] overflow-hidden border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_10px_26px_rgba(15,23,42,0.12)] transition-[border-radius,box-shadow] duration-200 ease-out',
+                'pointer-events-auto w-full max-w-[min(88vw,34rem)] overflow-hidden border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_10px_26px_rgba(15,23,42,0.12)]',
                 expanded
-                    ? 'rounded-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.16)] animate-diff-pop'
-                    : 'rounded-full animate-diff-pill'
+                    ? 'rounded-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.16)]'
+                    : 'rounded-full'
             )}>
                 <button
                     type="button"
@@ -220,41 +227,36 @@ export function PlanStatusSummary(props: {
                         expanded ? 'min-h-12 py-3' : 'h-[38px]'
                     )}
                     aria-expanded={expanded}
-                    aria-label={`${t('planStatus.title')} · ${currentStepNumber} · ${currentStepLabel} · ${progressLabel}`}
+                    aria-label={`${t('planStatus.title')} · ${currentStepLabel} · ${progressLabel}`}
                     onClick={() => setExpanded((value) => !value)}
                 >
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[var(--app-subtle-bg)] text-[var(--app-hint)]">
-                        <PlanListIcon className="h-3.5 w-3.5" />
-                    </span>
-                    <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
-                        <span className="shrink-0 font-semibold text-[var(--app-fg)]">
-                            {expanded ? t('planStatus.title') : currentStepNumber}
+                    {expanded ? (
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[var(--app-subtle-bg)] text-[var(--app-hint)]">
+                            <PlanListIcon className="h-3.5 w-3.5" />
                         </span>
-                        {!expanded ? (
+                    ) : null}
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
+                        {expanded ? (
+                            <span className="shrink-0 font-semibold text-[var(--app-fg)]">
+                                {t('planStatus.title')}
+                            </span>
+                        ) : (
                             <>
+                                <span className="shrink-0 font-semibold tabular-nums text-[var(--app-fg)]">
+                                    {props.plan.completed}/{props.plan.total}
+                                </span>
                                 <span className="shrink-0 text-[var(--app-hint)]" aria-hidden="true">·</span>
                                 <span className="min-w-0 truncate font-medium text-[var(--app-hint)]" title={currentStepLabel}>
                                     {currentStepLabel}
                                 </span>
                             </>
-                        ) : null}
+                        )}
                     </span>
-                    <span className="shrink-0 text-xs font-semibold tabular-nums text-[var(--app-hint)]" aria-hidden="true">
-                        {props.plan.completed}/{props.plan.total}
-                    </span>
-                    <span
-                        className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-[var(--app-subtle-bg)]"
-                        role="progressbar"
-                        aria-label={progressLabel}
-                        aria-valuemin={0}
-                        aria-valuemax={props.plan.total}
-                        aria-valuenow={props.plan.completed}
-                    >
-                        <span
-                            className="block h-full rounded-full bg-emerald-500 transition-[width] duration-300 ease-out motion-reduce:transition-none"
-                            style={{ width: `${progressPercent}%` }}
-                        />
-                    </span>
+                    {expanded ? (
+                        <span className="shrink-0 text-xs font-semibold tabular-nums text-[var(--app-hint)]" aria-hidden="true">
+                            {props.plan.completed}/{props.plan.total}
+                        </span>
+                    ) : null}
                     <ArrowDownIcon className={cn(
                         'h-3.5 w-3.5 shrink-0 text-[var(--app-hint)] transition-transform duration-200',
                         expanded ? 'rotate-180' : ''
@@ -263,10 +265,6 @@ export function PlanStatusSummary(props: {
 
                 {expanded ? (
                     <section className="border-t border-[var(--app-border)] px-4 pb-4 pt-3" role="region" aria-label={t('planStatus.dialogTitle')}>
-                        <div className="mb-3 flex items-center justify-between gap-3 text-xs text-[var(--app-hint)]">
-                            <span>{progressLabel}</span>
-                            <span>{t('planStatus.steps', { total: props.plan.total })}</span>
-                        </div>
                         <div className="overflow-y-auto pl-1 pr-1" style={{ maxHeight: 'min(38vh, 18rem)' }}>
                             <ol className="ml-2 border-l border-[var(--app-border)] pl-4">
                                 {props.plan.steps.map((step, index) => {
