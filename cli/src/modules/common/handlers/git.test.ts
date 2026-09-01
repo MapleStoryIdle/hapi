@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { getGitBranchStatusForCwd, isLinkedGitWorktree } from './git'
+import { getGitBranchStatusForCwd, hasGitWorktreeChanges, isLinkedGitWorktree } from './git'
 
 const execFileAsync = promisify(execFile)
 
@@ -47,16 +47,32 @@ describe('isLinkedGitWorktree', () => {
 
             await expect(getGitBranchStatusForCwd(primaryCheckout)).resolves.toMatchObject({
                 success: true,
-                stdout: '# branch.head main\n',
-                isWorktree: false
+                stdout: expect.stringContaining('# branch.head main\n'),
+                isWorktree: false,
+                isDirty: false
             })
             await expect(getGitBranchStatusForCwd(linkedWorktree)).resolves.toMatchObject({
                 success: true,
-                stdout: '# branch.head feature-list\n',
-                isWorktree: true
+                stdout: expect.stringContaining('# branch.head feature-list\n'),
+                isWorktree: true,
+                isDirty: false
+            })
+
+            await writeFile(join(primaryCheckout, 'README.md'), '# changed\n')
+            await expect(getGitBranchStatusForCwd(primaryCheckout)).resolves.toMatchObject({
+                success: true,
+                isDirty: true
             })
         } finally {
             await rm(sandbox, { recursive: true, force: true })
         }
+    })
+})
+
+describe('hasGitWorktreeChanges', () => {
+    it('ignores porcelain branch headers and detects changed records', () => {
+        expect(hasGitWorktreeChanges('# branch.oid abc123\n# branch.head main\n')).toBe(false)
+        expect(hasGitWorktreeChanges('# branch.head main\n1 .M N... README.md\n')).toBe(true)
+        expect(hasGitWorktreeChanges('# branch.head main\n? notes.md\n')).toBe(true)
     })
 })

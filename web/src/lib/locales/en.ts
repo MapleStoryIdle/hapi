@@ -216,6 +216,7 @@ export default {
   'recentCodex.noDirectory': 'Other',
   'recentCodex.directory.expand': 'Expand {directory}',
   'recentCodex.directory.collapse': 'Collapse {directory}',
+  'recentCodex.gitDirty': 'Uncommitted changes',
   'recentCodex.context': 'View context',
   'recentCodex.fork': 'Fork to new session',
   'recentCodex.forking': 'Forking…',

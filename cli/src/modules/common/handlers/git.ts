@@ -115,30 +115,38 @@ export function isLinkedGitWorktree(gitDirectoriesOutput: string, cwd: string): 
     return normalize(rawGitDir) !== normalize(rawCommonDir)
 }
 
+export function hasGitWorktreeChanges(statusOutput: string): boolean {
+    return statusOutput
+        .split(/\r?\n/)
+        .some((line) => line.length > 0 && !line.startsWith('# '))
+}
+
 /**
- * Read just the checked-out branch for a project-list subtitle. `git status`
- * refreshes the worktree index, which is unnecessary and costly when several
- * project groups render at once. Keep the familiar porcelain header shape so
- * callers can share the existing branch parser.
+ * Read the checked-out branch and dirty state for a project-list subtitle.
+ * The web caches this result by machine + directory, so multiple session cards
+ * for one project share a single probe.
  */
 export async function getGitBranchStatusForCwd(cwd: string, timeout?: number): Promise<GitBranchResponse> {
-    // One lightweight Git process returns everything the directory header
-    // needs. Avoid `git status`: it refreshes the index for no visual gain.
-    const result = await runGitCommand(
-        ['rev-parse', '--abbrev-ref', 'HEAD', '--git-dir', '--git-common-dir'],
-        cwd,
-        timeout
-    )
-    if (!result.success) return result
+    const [status, gitDirectories] = await Promise.all([
+        runGitCommand(
+            ['status', '--porcelain=v2', '--branch', '--untracked-files=normal'],
+            cwd,
+            timeout
+        ),
+        runGitCommand(
+            ['rev-parse', '--git-dir', '--git-common-dir'],
+            cwd,
+            timeout
+        )
+    ])
+    if (!status.success) return status
 
-    const [rawBranch = '', ...gitDirectories] = (result.stdout ?? '')
-        .split(/\r?\n/)
-        .map((value) => value.trim())
-    const branch = rawBranch === 'HEAD' ? '' : rawBranch
     return {
-        ...result,
-        stdout: `# branch.head ${branch || '(detached)'}\n`,
-        isWorktree: isLinkedGitWorktree(gitDirectories.join('\n'), cwd)
+        ...status,
+        isWorktree: gitDirectories.success
+            ? isLinkedGitWorktree(gitDirectories.stdout ?? '', cwd)
+            : false,
+        isDirty: hasGitWorktreeChanges(status.stdout ?? '')
     }
 }
 

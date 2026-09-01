@@ -412,7 +412,8 @@ describe('RecentCodexSessions', () => {
             stdout: '# branch.oid abc123\n# branch.head feature/kanban\n',
             stderr: '',
             exitCode: 0,
-            isWorktree: true
+            isWorktree: true,
+            isDirty: true
         }))
         const onTogglePin = vi.fn()
         const hapiSession = {
@@ -497,6 +498,10 @@ describe('RecentCodexSessions', () => {
         expect(completedCard).toHaveStyle({ borderLeftColor: projectColor })
         expect(board.querySelector('[data-git-kind="worktree"]')).toHaveAttribute('title', 'worktree · feature/kanban')
         expect(board.querySelector('[data-git-kind="worktree"] [data-motion-icon="worktree"]')).not.toBeNull()
+        expect(board.querySelector('[data-git-kind="worktree"] [data-git-dirty]')).toHaveAttribute(
+            'aria-label',
+            'Uncommitted changes'
+        )
 
         fireEvent.click(screen.getByRole('button', { name: 'Unpin session' }))
         expect(onTogglePin).toHaveBeenCalledWith('native:codex-thread-1')
@@ -660,7 +665,8 @@ describe('RecentCodexSessions', () => {
             stdout: '# branch.oid abc123\n# branch.head feature/session-list\n',
             stderr: '',
             exitCode: 0,
-            isWorktree: true
+            isWorktree: true,
+            isDirty: true
         }))
 
         render(
@@ -677,6 +683,10 @@ describe('RecentCodexSessions', () => {
             'worktree · feature/session-list'
         )
         expect(screen.getByTestId('recent-codex-directory-branch').querySelector('[data-motion-icon="worktree"]')).not.toBeNull()
+        expect(screen.getByTestId('recent-codex-directory-branch').querySelector('[data-git-dirty]')).toHaveAttribute(
+            'aria-label',
+            'Uncommitted changes'
+        )
         expect(screen.getByRole('button', { name: 'Collapse project' })).not.toHaveTextContent('2')
     })
 

@@ -216,6 +216,7 @@ export default {
   'recentCodex.noDirectory': '其他目录',
   'recentCodex.directory.expand': '展开 {directory}',
   'recentCodex.directory.collapse': '收起 {directory}',
+  'recentCodex.gitDirty': '存在未提交改动',
   'recentCodex.context': '查看上下文',
   'recentCodex.fork': 'Fork 到新会话',
   'recentCodex.forking': 'Fork 中…',

@@ -499,7 +499,7 @@ function KanbanSessionCard(props: {
     const completedDirectoryColor = status === 'completed' ? directoryColor : null
     const modifiedAt = toEpochMilliseconds(session.modifiedAt)
     const directoryLabel = getKanbanDirectoryLabel(session.cwd) ?? t('recentCodex.noDirectory')
-    const { branch, isWorktree } = useMachineGitBranch(api, machineId, session.cwd)
+    const { branch, isWorktree, isDirty } = useMachineGitBranch(api, machineId, session.cwd)
     const branchLabel = branch ? getDetachedBranchLabel(branch, t) : null
     const branchIcon = isWorktree ? TreePineIconNode : GitBranchIconNode
     const archiveDescription = session.source === 'native'
@@ -565,6 +565,9 @@ function KanbanSessionCard(props: {
                         >
                             {directoryLabel}
                         </span>
+                        {isDirty && !branchLabel ? (
+                            <GitDirtyIndicator label={t('recentCodex.gitDirty')} />
+                        ) : null}
                     </span>
 
                     {branchLabel ? (
@@ -581,6 +584,7 @@ function KanbanSessionCard(props: {
                                 aria-hidden="true"
                             />
                             <span className="truncate">{branchLabel}</span>
+                            {isDirty ? <GitDirtyIndicator label={t('recentCodex.gitDirty')} /> : null}
                         </span>
                     ) : null}
                 </button>
@@ -633,6 +637,18 @@ function KanbanSessionCard(props: {
 
 const NO_DIRECTORY_KEY = '__no-directory__'
 
+function GitDirtyIndicator(props: { label: string }) {
+    return (
+        <span
+            role="img"
+            aria-label={props.label}
+            title={props.label}
+            data-git-dirty
+            className="h-2 w-2 shrink-0 rounded-full bg-[#F5A524] shadow-[0_0_0_2px_rgba(245,165,36,0.14)]"
+        />
+    )
+}
+
 function getDirectoryKey(directory: string | null): string {
     return directory ?? NO_DIRECTORY_KEY
 }
@@ -664,7 +680,7 @@ function DirectoryGroupHeader(props: {
     const creationFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const mountedRef = useRef(true)
     const folderIcon = toMotionIcon(collapsed ? FolderIconNode : FolderOpenIconNode)
-    const { branch, isWorktree } = useMachineGitBranch(api, machineId, directory)
+    const { branch, isWorktree, isDirty } = useMachineGitBranch(api, machineId, directory)
     const branchLabel = branch ? getDetachedBranchLabel(branch, t) : null
     const branchIcon = isWorktree ? TreePineIconNode : GitBranchIconNode
     const actionLabel = collapsed
@@ -731,11 +747,16 @@ function DirectoryGroupHeader(props: {
                     data-motion-icon={collapsed ? 'folder' : 'folder-open'}
                 />
                 <span className="min-w-0 flex-1">
-                    <span
-                        data-testid="recent-codex-directory-name"
-                        className="block truncate text-[17px] font-semibold leading-6 text-[var(--app-fg)]"
-                    >
-                        {label}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                        <span
+                            data-testid="recent-codex-directory-name"
+                            className="block min-w-0 truncate text-[17px] font-semibold leading-6 text-[var(--app-fg)]"
+                        >
+                            {label}
+                        </span>
+                        {isDirty && !branchLabel ? (
+                            <GitDirtyIndicator label={t('recentCodex.gitDirty')} />
+                        ) : null}
                     </span>
                     {branchLabel ? (
                         <span
@@ -752,6 +773,7 @@ function DirectoryGroupHeader(props: {
                                 aria-hidden="true"
                             />
                             <span className="truncate">{branchLabel}</span>
+                            {isDirty ? <GitDirtyIndicator label={t('recentCodex.gitDirty')} /> : null}
                         </span>
                     ) : null}
                 </span>

@@ -4,6 +4,7 @@ import { parseStatusSummaryV2 } from '@/lib/gitParsers'
 import { queryKeys } from '@/lib/query-keys'
 
 const GIT_BRANCH_STALE_TIME_MS = 60_000
+const GIT_BRANCH_REFRESH_INTERVAL_MS = 60_000
 
 /**
  * Read only the branch line from `git status`. The session-list project header
@@ -58,6 +59,7 @@ export function useMachineGitBranch(
 ): {
     branch: string | null
     isWorktree: boolean
+    isDirty: boolean
 } {
     const resolvedMachineId = machineId ?? 'unknown'
     const resolvedCwd = cwd?.trim() ?? ''
@@ -74,17 +76,21 @@ export function useMachineGitBranch(
             }
             return {
                 branch: getGitBranchFromStatusOutput(result.stdout ?? ''),
-                isWorktree: result.isWorktree === true
+                isWorktree: result.isWorktree === true,
+                isDirty: result.isDirty === true
             }
         },
         enabled: Boolean(enabled && api && machineId && resolvedCwd),
         staleTime: GIT_BRANCH_STALE_TIME_MS,
+        refetchInterval: GIT_BRANCH_REFRESH_INTERVAL_MS,
+        refetchIntervalInBackground: false,
         refetchOnWindowFocus: true,
         retry: false
     })
 
     return {
         branch: query.data?.branch ?? null,
-        isWorktree: query.data?.isWorktree === true
+        isWorktree: query.data?.isWorktree === true,
+        isDirty: query.data?.isDirty === true
     }
 }

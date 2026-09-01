@@ -487,6 +487,8 @@ export type GitCommandResponse = CommandResponse
 export type GitBranchResponse = GitCommandResponse & {
     /** True only for a linked Git worktree, not the primary checkout. */
     isWorktree?: boolean
+    /** True when tracked, staged, or untracked worktree changes exist. */
+    isDirty?: boolean
 }
 
 export type FileReadResponse = {
