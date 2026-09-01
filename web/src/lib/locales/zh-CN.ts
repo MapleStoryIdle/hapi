@@ -60,7 +60,7 @@ export default {
   'sessions.view.list': '切换到列表视图',
   'sessions.kanban.pinned': '置顶',
   'sessions.kanban.pending': '待确认',
-  'sessions.kanban.processing': '处理中',
+  'sessions.kanban.processing': 'thinking',
   'sessions.kanban.completed': '已完成',
   'sessions.kanban.pin': '置顶会话',
   'sessions.kanban.unpin': '取消置顶会话',
@@ -288,6 +288,11 @@ export default {
   'recentCodex.fork.error.sessionMissing': 'runner 上已找不到这个原生 Codex 会话。',
   'recentCodex.fork.error.workspaceMissing': '原始工作区不可用，HAPI 无法创建新会话。',
   'recentCodex.fork.error.generic': 'HAPI 无法创建新会话，请重试。',
+  'recentCodex.archive.title': '归档会话',
+  'recentCodex.archive.hapiDescription': '归档“{name}”？这会断开 HAPI 会话。',
+  'recentCodex.archive.nativeDescription': '归档原生 Codex 会话“{name}”？这可能停止当前原生任务；HAPI 正在投递或排队的消息需先处理。',
+  'recentCodex.archive.confirm': '归档',
+  'recentCodex.archive.confirming': '归档中…',
 
   // Session list
   'session.item.path': '路径',

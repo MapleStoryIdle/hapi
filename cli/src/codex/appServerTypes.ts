@@ -166,6 +166,16 @@ export interface ThreadForkResponse {
     [key: string]: unknown;
 }
 
+/** Native Codex archive operation. This moves thread state through Codex; it
+ * must never be emulated by moving or deleting rollout JSONL files. */
+export interface ThreadArchiveParams {
+    threadId: string;
+}
+
+export interface ThreadArchiveResponse {
+    [key: string]: unknown;
+}
+
 export type UserInput =
     | {
         type: 'text';

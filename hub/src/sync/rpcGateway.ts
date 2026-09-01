@@ -2,6 +2,7 @@ import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type {
     CodexLocalSessionComposerCapabilitiesRpcResponse,
+    ArchiveCodexLocalSessionRpcResponse,
     CodexLocalSessionDataRpcResponse,
     CodexLocalSessionSnapshotRpcResponse,
     CodexLocalSessionStatusRpcResponse,
@@ -106,6 +107,7 @@ export type RpcCodexLocalSessionDataResponse = CodexLocalSessionDataRpcResponse
 export type RpcCodexLocalSessionComposerCapabilitiesResponse = CodexLocalSessionComposerCapabilitiesRpcResponse
 export type RpcCodexLocalSessionSnapshotResponse = CodexLocalSessionSnapshotRpcResponse
 export type RpcCodexLocalSessionStatusResponse = CodexLocalSessionStatusRpcResponse
+export type RpcArchiveCodexLocalSessionResponse = ArchiveCodexLocalSessionRpcResponse
 export type RpcDiscardCodexLocalSessionMessageResponse = DiscardCodexLocalSessionMessageRpcResponse
 export type RpcSendCodexLocalSessionMessageResponse = SendCodexLocalSessionMessageRpcResponse
 export type RpcNativeKanbanFeedbackStageResponse = NativeKanbanFeedbackStageResponse
@@ -342,6 +344,15 @@ export class RpcGateway {
             sessionId,
             clientMessageId
         }) as RpcDiscardCodexLocalSessionMessageResponse
+    }
+
+    async archiveCodexLocalSession(
+        machineId: string,
+        sessionId: string
+    ): Promise<RpcArchiveCodexLocalSessionResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ArchiveCodexLocalSession, {
+            sessionId
+        }) as RpcArchiveCodexLocalSessionResponse
     }
 
     async stageNativeKanbanFeedback(

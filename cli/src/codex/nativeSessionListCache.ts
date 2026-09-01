@@ -32,6 +32,17 @@ export class NativeCodexSessionListCache {
 
     constructor(private readonly options: NativeCodexSessionListCacheOptions = {}) {}
 
+    /**
+     * Drop the runner-local discovery snapshot after a Codex-owned lifecycle
+     * operation such as `thread/archive`. The next list request rescans the
+     * source directory instead of serving a row whose transcript moved.
+     */
+    invalidate(): void {
+        this.candidates = []
+        this.summaries.clear()
+        this.initialized = false
+    }
+
     list(
         limit: number,
         options: CodexLocalSessionListOptions = {},

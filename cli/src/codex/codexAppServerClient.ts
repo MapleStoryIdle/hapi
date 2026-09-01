@@ -16,6 +16,8 @@ import type {
     ThreadResumeResponse,
     ThreadForkParams,
     ThreadForkResponse,
+    ThreadArchiveParams,
+    ThreadArchiveResponse,
     TurnStartParams,
     TurnStartResponse,
     TurnInterruptParams,
@@ -215,6 +217,13 @@ export class CodexAppServerClient extends JsonLineParser {
             timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
         });
         return response as ThreadForkResponse;
+    }
+
+    async archiveThread(params: ThreadArchiveParams): Promise<ThreadArchiveResponse> {
+        const response = await this.sendRequest('thread/archive', params, {
+            timeoutMs: 30_000
+        });
+        return response as ThreadArchiveResponse;
     }
 
     async startTurn(params: TurnStartParams, options?: { signal?: AbortSignal }): Promise<TurnStartResponse> {

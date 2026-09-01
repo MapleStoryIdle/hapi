@@ -9,6 +9,7 @@ import {
     isHapiInitiatedCodexSession,
     type CodexLocalSessionDirectSendProgress,
     type CodexLocalSessionDirectSendRecoveryReason,
+    type ArchiveCodexLocalSessionRpcResponse,
     type CodexLocalSessionQueuedMessage,
     type CodexLocalSessionStatusRpcResponse,
     type CodexLocalSessionSummary,
@@ -35,6 +36,11 @@ export type NativeCodexAppServerClient = {
 }
 
 export type CreateNativeCodexAppServerClient = () => NativeCodexAppServerClient
+
+export type NativeCodexArchiveAttempt = () => Promise<
+    Extract<ArchiveCodexLocalSessionRpcResponse, { success: true }>
+    | Extract<ArchiveCodexLocalSessionRpcResponse, { success: false }>
+>
 
 export type NativeCodexSessionLookup = {
     getSummary: (sessionId: string) => CodexLocalSessionSummary | null
@@ -358,6 +364,12 @@ export class NativeCodexSessionDirectSender {
     private readonly recentFailures = new Map<string, RecentFailure>()
     private readonly queues = new Map<string, QueuedSend[]>()
     private readonly queueTimers = new Map<string, ReturnType<typeof setTimeout>>()
+    /**
+     * A native archive must be atomic with respect to direct delivery.  This
+     * is deliberately runner-local: it closes the gap between an idle check
+     * and Codex's thread/archive RPC without pretending to lock Codex itself.
+     */
+    private readonly archiveReservations = new Set<string>()
     private stateChangeListener: ((sessionId: string) => void) | null = null
 
     constructor(
@@ -640,11 +652,80 @@ export class NativeCodexSessionDirectSender {
         )
     }
 
+    /**
+     * Reserve an exact native thread while the caller performs Codex's
+     * destructive archive operation. Archiving may stop work owned by another
+     * Codex client, just like HAPI archive stops a managed session. It must not
+     * overlap a HAPI-owned hand-off or saved FIFO receipt, because those have
+     * stronger delivery guarantees than an external native turn.
+     */
+    async archive(
+        sessionId: string,
+        attempt: NativeCodexArchiveAttempt
+    ): Promise<ArchiveCodexLocalSessionRpcResponse> {
+        if (this.archiveReservations.has(sessionId)) {
+            return {
+                success: false,
+                code: 'archive_in_progress',
+                error: 'Native Codex session archive is already in progress'
+            }
+        }
+
+        const session = this.sessionLookup.getSummary(sessionId)
+        if (!session) {
+            return { success: false, code: 'session_not_found', error: 'Codex session not found' }
+        }
+        if (isHapiInitiatedCodexSession(session)) {
+            return {
+                success: false,
+                code: 'not_native_session',
+                error: 'Only original native Codex sessions can be archived here'
+            }
+        }
+
+        if (this.activeSends.has(sessionId)) {
+            return {
+                success: false,
+                code: 'session_busy',
+                error: 'HAPI is still delivering a message to this native Codex session'
+            }
+        }
+        if ((this.queues.get(sessionId)?.length ?? 0) > 0) {
+            return {
+                success: false,
+                code: 'session_queued',
+                error: 'Native Codex session has queued messages that must be resolved before archiving'
+            }
+        }
+
+        this.archiveReservations.add(sessionId)
+        const queueTimer = this.queueTimers.get(sessionId)
+        if (queueTimer) {
+            clearTimeout(queueTimer)
+            this.queueTimers.delete(sessionId)
+        }
+        try {
+            return await attempt()
+        } catch (error) {
+            return {
+                success: false,
+                code: 'archive_failed',
+                error: trimFailureMessage(error instanceof Error ? error.message : String(error))
+            }
+        } finally {
+            this.archiveReservations.delete(sessionId)
+            if (this.queues.get(sessionId)?.length && !this.queues.get(sessionId)?.[0]?.recoveryRequired) {
+                this.scheduleQueuePump(sessionId, 0, { replacePending: true })
+            }
+            this.notifyStateChange(sessionId)
+        }
+    }
+
     /** Let the watcher update bridge progress and release a FIFO item on idle. */
     notifyTranscriptChanged(sessionId: string): void {
         const session = this.sessionLookup.getSummary(sessionId)
         this.reconcileActiveWithTranscript(sessionId, session)
-        if (this.activeSends.has(sessionId) || !this.queues.get(sessionId)?.length) {
+        if (this.archiveReservations.has(sessionId) || this.activeSends.has(sessionId) || !this.queues.get(sessionId)?.length) {
             return
         }
         this.scheduleQueuePump(sessionId, 0, { replacePending: true })
@@ -713,6 +794,13 @@ export class NativeCodexSessionDirectSender {
         rawDeliveryPolicy?: unknown,
         rawReviewGuard?: unknown
     ): SendCodexLocalSessionMessageRpcResponse {
+        if (this.archiveReservations.has(sessionId)) {
+            return {
+                success: false,
+                code: 'session_busy',
+                error: 'Native Codex session is being archived'
+            }
+        }
         const message = typeof rawMessage === 'string' ? rawMessage.trim() : ''
         const forceRecovery = rawForceRecovery === true
         const deliveryPolicy = rawDeliveryPolicy === undefined || rawDeliveryPolicy === 'default'
@@ -2006,7 +2094,7 @@ export class NativeCodexSessionDirectSender {
             this.queueTimers.delete(sessionId)
         }
         const queue = this.queues.get(sessionId)
-        if (this.queueTimers.has(sessionId) || !queue?.length || queue[0]?.recoveryRequired) {
+        if (this.archiveReservations.has(sessionId) || this.queueTimers.has(sessionId) || !queue?.length || queue[0]?.recoveryRequired) {
             return
         }
         const timer = setTimeout(() => {
@@ -2020,6 +2108,9 @@ export class NativeCodexSessionDirectSender {
     }
 
     private pumpQueue(sessionId: string): void {
+        if (this.archiveReservations.has(sessionId)) {
+            return
+        }
         const queue = this.queues.get(sessionId)
         if (!queue || queue.length === 0) {
             this.queues.delete(sessionId)

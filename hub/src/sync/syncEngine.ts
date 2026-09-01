@@ -70,6 +70,7 @@ import {
     type RpcNativeKanbanFeedbackStageResponse,
     type RpcCodexLocalSessionSnapshotResponse,
     type RpcCodexLocalSessionStatusResponse,
+    type RpcArchiveCodexLocalSessionResponse,
     type RpcCodexLocalSessionsResponse,
     type RpcOpencodeModel,
     type RpcPathExistsResponse,
@@ -111,6 +112,7 @@ export type {
     RpcNativeKanbanFeedbackStageResponse,
     RpcCodexLocalSessionSnapshotResponse,
     RpcCodexLocalSessionStatusResponse,
+    RpcArchiveCodexLocalSessionResponse,
     RpcCodexLocalSessionsResponse,
     RpcOpencodeModel,
     RpcPathExistsResponse,
@@ -592,11 +594,16 @@ export class SyncEngine {
             await this.rpcGateway.killSession(sessionId)
         } catch (error) {
             if (error instanceof RpcTargetMissingError) {
-                this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
+                // The target disappeared before it could persist the lifecycle
+                // transition. The hub remains the durable fallback below.
             } else {
                 throw error
             }
         }
+        // Persist the lifecycle transition even when the CLI RPC succeeds.
+        // The CLI may disconnect before its final metadata update reaches the
+        // hub; this idempotent write keeps archived cards gone after reload.
+        this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub')
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
     }
 
@@ -1848,6 +1855,13 @@ export class SyncEngine {
         clientMessageId: string
     ): Promise<RpcDiscardCodexLocalSessionMessageResponse> {
         return await this.rpcGateway.discardCodexLocalSessionMessage(machineId, sessionId, clientMessageId)
+    }
+
+    async archiveCodexLocalSession(
+        machineId: string,
+        sessionId: string
+    ): Promise<RpcArchiveCodexLocalSessionResponse> {
+        return await this.rpcGateway.archiveCodexLocalSession(machineId, sessionId)
     }
 
     async stageNativeKanbanFeedback(

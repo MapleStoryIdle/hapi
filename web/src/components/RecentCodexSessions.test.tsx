@@ -10,9 +10,12 @@ import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import {
     RECENT_CODEX_WINDOW_MS,
     RecentCodexSessions,
+    getMergedCodexKanbanStatus,
+    groupMergedCodexCompletedTimeline,
     groupMergedCodexSessionsForKanban,
     groupRecentCodexSessionsByDirectory,
-    mergeRecentCodexSessions
+    mergeRecentCodexSessions,
+    type MergedCodexSession
 } from './RecentCodexSessions'
 
 afterEach(() => cleanup())
@@ -63,7 +66,9 @@ function createApi() {
             stdout: '# branch.oid abc123\n# branch.head main\n',
             stderr: '',
             exitCode: 0
-        }))
+        })),
+        archiveSession: vi.fn(async () => {}),
+        archiveCodexSession: vi.fn(async () => ({ success: true as const }))
     } as unknown as ApiClient
 }
 
@@ -98,6 +103,17 @@ describe('RecentCodexSessions', () => {
             [
                 hapiSession,
                 { ...hapiSession, id: 'old-hapi', updatedAt: old, metadata: { path: '/workspace/hapi', flavor: 'codex', name: 'Old task', agentSessionId: 'old-thread' } },
+                {
+                    ...hapiSession,
+                    id: 'archived-hapi',
+                    metadata: {
+                        path: '/workspace/hapi',
+                        flavor: 'codex',
+                        name: 'Archived task',
+                        agentSessionId: 'archived-thread',
+                        lifecycleState: 'archived'
+                    }
+                },
                 { ...hapiSession, id: 'claude-session', metadata: { path: '/workspace/hapi', flavor: 'claude', name: 'Claude task' } }
             ],
             [
@@ -106,6 +122,9 @@ describe('RecentCodexSessions', () => {
                 },
                 {
                     id: 'thread-native', title: 'Native Codex task', cwd: '/workspace/web', file: '/tmp/native.jsonl', modifiedAt: recent - 1
+                },
+                {
+                    id: 'archived-thread', title: 'Archived duplicate transcript', cwd: '/workspace/hapi', file: '/tmp/archived.jsonl', modifiedAt: recent - 2
                 },
                 {
                     id: 'thread-old', title: 'Old native task', cwd: '/workspace/old', file: '/tmp/old.jsonl', modifiedAt: old
@@ -120,7 +139,7 @@ describe('RecentCodexSessions', () => {
         ])
     })
 
-    it('groups the board as pinned, confirmation, processing, then completed', () => {
+    it('keeps pinning independent from status and sorts pinned cards first inside a status', () => {
         const now = 1_800_000_000_000
         const pending = {
             id: 'hapi-pending',
@@ -145,28 +164,112 @@ describe('RecentCodexSessions', () => {
             updatedAt: now - 20,
             metadata: { path: '/workspace/project', flavor: 'codex', name: 'Processing' },
             pendingRequestsCount: 0,
-            pendingRequestKinds: []
+            pendingRequestKinds: [],
+            thinking: true
         } as SessionSummary
         const rows = mergeRecentCodexSessions(
             [pending, processing],
-            [{
-                id: 'native-completed',
-                title: 'Completed',
-                cwd: '/workspace/project',
-                file: '/tmp/completed.jsonl',
-                modifiedAt: now - 30,
-                runState: 'idle'
-            }],
+            [
+                {
+                    id: 'native-newer-completed',
+                    title: 'Newer completed',
+                    cwd: '/workspace/project',
+                    file: '/tmp/newer-completed.jsonl',
+                    modifiedAt: now - 5,
+                    runState: 'idle'
+                },
+                {
+                    id: 'native-completed',
+                    title: 'Pinned completed',
+                    cwd: '/workspace/project',
+                    file: '/tmp/completed.jsonl',
+                    modifiedAt: now - 30,
+                    runState: 'idle'
+                }
+            ],
             { now }
         )
 
         const groups = groupMergedCodexSessionsForKanban(rows, new Set(['native:native-completed']))
 
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
-            ['pinned', ['native-completed']],
             ['pending', ['hapi-pending']],
             ['processing', ['hapi-processing']],
-            ['completed', []]
+            ['completed', ['native-completed', 'native-newer-completed']]
+        ])
+    })
+
+    it('uses true work state for HAPI and native Kanban groups', () => {
+        const now = 1_800_000_000_000
+        const base = {
+            id: 'base',
+            active: true,
+            thinking: false,
+            activeAt: now,
+            updatedAt: now,
+            metadata: { path: '/workspace/project', flavor: 'codex', name: 'Task' },
+            todoProgress: null,
+            pendingRequestsCount: 0,
+            pendingRequestKinds: [],
+            pendingRequests: [],
+            backgroundTaskCount: 0,
+            futureScheduledMessageCount: 0,
+            nextScheduledAt: null,
+            model: null,
+            effort: null
+        } as SessionSummary
+        const rows = mergeRecentCodexSessions([
+            { ...base, id: 'online-idle' },
+            { ...base, id: 'thinking', thinking: true },
+            { ...base, id: 'background', backgroundTaskCount: 1 },
+            { ...base, id: 'pending', thinking: true, pendingRequestsCount: 1 }
+        ], [
+            { id: 'native-processing', title: 'Native processing', cwd: '/workspace', file: '/tmp/1', modifiedAt: now, runState: 'processing' as const },
+            { id: 'native-idle', title: 'Native idle', cwd: '/workspace', file: '/tmp/2', modifiedAt: now - 1, runState: 'idle' as const },
+            { id: 'native-unknown', title: 'Native unknown', cwd: '/workspace', file: '/tmp/3', modifiedAt: now - 2, runState: 'unknown' as const }
+        ], { now })
+
+        expect(Object.fromEntries(rows.map((row) => [row.id, getMergedCodexKanbanStatus(row)]))).toEqual({
+            'online-idle': 'completed',
+            thinking: 'processing',
+            background: 'processing',
+            pending: 'pending',
+            'native-processing': 'processing',
+            'native-idle': 'completed',
+            'native-unknown': 'completed'
+        })
+    })
+
+    it('groups completed cards by local date and normalizes seconds timestamps', () => {
+        const now = new Date(2026, 7, 13, 12, 0, 0)
+        const localAt = (daysAgo: number) => new Date(2026, 7, 13 - daysAgo, 10, 0, 0).getTime()
+        const session = (id: string, modifiedAt: number): MergedCodexSession => ({
+            key: `native:${id}`,
+            id,
+            title: id,
+            cwd: '/workspace',
+            modifiedAt,
+            source: 'native',
+            active: false,
+            nativeSession: { id, title: id, cwd: '/workspace', file: `/tmp/${id}`, modifiedAt, runState: 'idle' }
+        })
+        const groups = groupMergedCodexCompletedTimeline([
+            session('today-newer', localAt(0) + 1_000),
+            session('today-seconds', Math.floor(localAt(0) / 1000)),
+            session('yesterday-ms', localAt(1)),
+            session('three-days', localAt(3)),
+            session('old', localAt(8))
+        ], now, 'en-US', {
+            today: 'Today',
+            yesterday: 'Yesterday',
+            daysAgo: (days) => `${days} days ago`
+        }, new Set(['native:today-seconds']))
+
+        expect(groups.map((group) => [group.label, group.shares.map((item) => item.id)])).toEqual([
+            ['Today', ['today-seconds', 'today-newer']],
+            ['Yesterday', ['yesterday-ms']],
+            ['3 days ago', ['three-days']],
+            [new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' }).format(new Date(localAt(8))), ['old']]
         ])
     })
 
@@ -186,7 +289,7 @@ describe('RecentCodexSessions', () => {
         const hapiSession = {
             id: 'hapi-session',
             active: true,
-            thinking: false,
+            thinking: true,
             activeAt: Date.now(),
             updatedAt: Date.now(),
             metadata: {
@@ -238,7 +341,7 @@ describe('RecentCodexSessions', () => {
         expect(nativeIcon?.querySelector('[data-session-running-indicator]')).toHaveClass('bg-[#34C759]', 'motion-safe:animate-pulse')
     })
 
-    it('renders status cards with a worktree icon, right-aligned time, and a pin control', async () => {
+    it('keeps a pinned card in its real status group with time above and a persistent pin control', async () => {
         const api = createApi()
         api.getMachineGitBranch = vi.fn(async () => ({
             success: true as const,
@@ -289,15 +392,114 @@ describe('RecentCodexSessions', () => {
         )
 
         const board = await screen.findByTestId('session-kanban-board')
-        expect(board.querySelector('[data-kanban-group="pinned"]')).toHaveTextContent('Recent Codex task')
+        expect(board.querySelector('[data-kanban-group="pinned"]')).toBeNull()
         expect(board.querySelector('[data-kanban-group="pending"]')).toHaveTextContent('Needs confirmation')
-        expect(board.querySelector('[data-kanban-group="completed"]')).toBeNull()
-        expect(board.querySelector('[data-kanban-card-status="pending"] time')).toHaveClass('text-right')
+        expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Recent Codex task')
+        const pendingCard = board.querySelector('[data-kanban-card-status="pending"]')
+        expect(pendingCard?.querySelector('time')).toBeNull()
+        expect(pendingCard?.closest('li')?.querySelector('[data-kanban-card-time]')).not.toBeNull()
         expect(board.querySelector('[data-git-kind="worktree"]')).toHaveAttribute('title', 'worktree · feature/kanban')
         expect(board.querySelector('[data-git-kind="worktree"] [data-motion-icon="worktree"]')).not.toBeNull()
 
         fireEvent.click(screen.getByRole('button', { name: 'Unpin session' }))
         expect(onTogglePin).toHaveBeenCalledWith('native:codex-thread-1')
+    })
+
+    it('keeps card controls outside navigation, lays out the compact card, and archives a native thread after confirmation', async () => {
+        const api = createApi()
+        const onOpen = vi.fn()
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    hapiSessions={[]}
+                    onOpen={onOpen}
+                    onOpenHapi={vi.fn()}
+                    embedded
+                    hideHeader
+                    recentOnly
+                    viewMode="kanban"
+                    onTogglePin={vi.fn()}
+                />
+            </I18nProvider>
+        )
+
+        const board = await screen.findByTestId('session-kanban-board')
+        const card = board.querySelector('.session-kanban-card')
+        expect(card).toHaveClass('min-h-24')
+        expect(card).not.toHaveClass('min-h-[9.75rem]')
+        const topRow = card?.querySelector('[data-kanban-card-top-row]')
+        expect(topRow?.querySelector('[data-session-source="native"]')).not.toBeNull()
+        expect(topRow).toHaveTextContent('Recent Codex task')
+        const directoryRow = card?.querySelector('[data-kanban-directory-row]')
+        expect(directoryRow?.querySelector('[data-motion-icon="folder"]')).not.toBeNull()
+        expect(directoryRow).toHaveTextContent('project')
+        expect(directoryRow?.querySelector('[data-kanban-directory]')).toHaveClass('font-normal')
+        const cardTime = board.querySelector('[data-kanban-card-time]')
+        expect(cardTime).toHaveTextContent(/^\d{2}:\d{2}:\d{2}$/)
+        expect(cardTime?.nextElementSibling?.querySelector('.session-kanban-card')).toBe(card)
+        expect(card?.querySelector('.text-\\[17px\\]')).toHaveTextContent('Recent Codex task')
+        expect(screen.getByRole('button', { name: 'Pin session' })).toBeInTheDocument()
+        const archiveButton = board.querySelector('[data-kanban-archive]') as HTMLButtonElement
+        expect(archiveButton).toHaveClass('bottom-1', 'right-1', 'h-11', 'w-11')
+
+        fireEvent.click(archiveButton)
+        expect(onOpen).not.toHaveBeenCalled()
+        expect(await screen.findByText('Archive session')).toBeInTheDocument()
+        const archiveButtons = screen.getAllByRole('button', { name: 'Archive' })
+        fireEvent.click(archiveButtons.at(-1)!)
+
+        await waitFor(() => {
+            expect(api.archiveCodexSession).toHaveBeenCalledWith('codex-thread-1', { machineId: 'machine-1' })
+            expect(screen.queryByText('Recent Codex task')).toBeNull()
+        })
+        expect(onOpen).not.toHaveBeenCalled()
+    })
+
+    it('uses the HAPI archive endpoint for a managed card', async () => {
+        const api = createApi()
+        const hapiSession = {
+            id: 'hapi-idle',
+            active: true,
+            thinking: false,
+            activeAt: Date.now(),
+            updatedAt: Date.now(),
+            metadata: { path: '/workspace/project', flavor: 'codex', name: 'HAPI idle task' },
+            todoProgress: null,
+            pendingRequestsCount: 0,
+            pendingRequestKinds: [],
+            pendingRequests: [],
+            backgroundTaskCount: 0,
+            futureScheduledMessageCount: 0,
+            nextScheduledAt: null,
+            model: null,
+            effort: null
+        } as SessionSummary
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    hapiSessions={[hapiSession]}
+                    onOpen={vi.fn()}
+                    onOpenHapi={vi.fn()}
+                    embedded
+                    hideHeader
+                    recentOnly
+                    viewMode="kanban"
+                />
+            </I18nProvider>
+        )
+
+        await screen.findByText('HAPI idle task')
+        expect(screen.getByTestId('session-kanban-board').querySelector('[data-kanban-date-group]')).not.toBeNull()
+        expect(screen.getByText('Today')).toBeInTheDocument()
+        const card = screen.getByText('HAPI idle task').closest('li')!
+        fireEvent.click(card.querySelector('[data-kanban-archive]')!)
+        const archiveButtons = screen.getAllByRole('button', { name: 'Archive' })
+        fireEvent.click(archiveButtons.at(-1)!)
+        await waitFor(() => expect(api.archiveSession).toHaveBeenCalledWith('hapi-idle'))
     })
 
     it('groups sessions by directory and shows only title and activity time', async () => {

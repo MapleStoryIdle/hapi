@@ -422,6 +422,90 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
             client.shutdown()
         }
     })
+
+    it('archives an idle native thread through Codex, evicts caches, and emits an invalidation', async () => {
+        const machine = makeMachine('machine-codex-archive')
+        const sessionId = '42345678-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        const transcript = join(transcriptDir, `rollout-${sessionId}.jsonl`)
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(transcript, [
+            JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: codexHome } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })
+        ].join('\n'), 'utf8')
+        const connect = vi.fn(async () => {})
+        const initialize = vi.fn(async () => ({}))
+        const archiveThread = vi.fn(async () => {
+            rmSync(transcript)
+            return {}
+        })
+        const disconnect = vi.fn(async () => {})
+        const client = new ApiMachineClient('cli-token', machine, undefined, undefined, () => ({
+            connect,
+            initialize,
+            archiveThread,
+            disconnect
+        }))
+        const emit = vi.fn()
+        ;(client as unknown as { socket: { emit: typeof emit; close: () => void } }).socket = { emit, close: () => {} }
+
+        try {
+            const result = await callMachineRpc(client, machine.id, 'archiveCodexLocalSession', { sessionId })
+            expect(result).toEqual({ success: true })
+            expect(connect).toHaveBeenCalledTimes(1)
+            expect(initialize).toHaveBeenCalledWith(expect.objectContaining({
+                clientInfo: expect.objectContaining({ name: 'hapi-native-session-archive' })
+            }))
+            expect(archiveThread).toHaveBeenCalledWith({ threadId: sessionId })
+            expect(disconnect).toHaveBeenCalledTimes(1)
+            expect(emit).toHaveBeenCalledWith('codex-session-updated', expect.objectContaining({
+                machineId: machine.id,
+                codexSessionId: sessionId
+            }))
+            expect(await callMachineRpc(client, machine.id, 'listCodexLocalSessions', { limit: 5 })).toEqual({
+                success: true,
+                sessions: []
+            })
+        } finally {
+            client.shutdown()
+        }
+    })
+
+    it('reports an unsupported native archive without clearing its transcript', async () => {
+        const machine = makeMachine('machine-codex-archive-unsupported')
+        const sessionId = '52345678-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        const transcript = join(transcriptDir, `rollout-${sessionId}.jsonl`)
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(transcript, [
+            JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: codexHome } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })
+        ].join('\n'), 'utf8')
+        const disconnect = vi.fn(async () => {})
+        const client = new ApiMachineClient('cli-token', machine, undefined, undefined, () => ({
+            connect: async () => {},
+            initialize: async () => ({}),
+            archiveThread: async () => { throw new Error('Method not found: thread/archive') },
+            disconnect
+        }))
+
+        try {
+            expect(await callMachineRpc(client, machine.id, 'archiveCodexLocalSession', { sessionId })).toEqual({
+                success: false,
+                code: 'archive_unsupported',
+                error: 'This Codex app-server does not support native session archive'
+            })
+            expect(disconnect).toHaveBeenCalledTimes(1)
+            expect(await callMachineRpc(client, machine.id, 'listCodexLocalSessions', { limit: 5 })).toMatchObject({
+                success: true,
+                sessions: [{ id: sessionId }]
+            })
+        } finally {
+            client.shutdown()
+        }
+    })
 })
 
 describe('ApiMachineClient runner metadata sync', () => {

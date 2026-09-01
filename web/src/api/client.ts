@@ -6,6 +6,7 @@ import type {
     CodexLocalSessionComposerCapabilitiesResponse,
     CodexLocalSessionSnapshotResponse,
     CodexLocalSessionStatusResponse,
+    ArchiveCodexLocalSessionResponse,
     DiscardCodexLocalSessionMessageResponse,
     ForkCodexLocalSessionResponse,
     SendCodexLocalSessionMessageResponse,
@@ -327,6 +328,19 @@ export class ApiClient {
         const queryParams = new URLSearchParams({ machineId })
         return await this.request<CodexLocalSessionStatusResponse>(
             `/api/codex/sessions/${encodeURIComponent(sessionId)}/status?${queryParams.toString()}`
+        )
+    }
+
+    async archiveCodexSession(
+        sessionId: string,
+        payload: { machineId: string }
+    ): Promise<ArchiveCodexLocalSessionResponse> {
+        return await this.request<ArchiveCodexLocalSessionResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/archive`,
+            {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            }
         )
     }
 

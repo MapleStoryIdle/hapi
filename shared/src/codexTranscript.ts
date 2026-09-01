@@ -304,6 +304,27 @@ export type DiscardCodexLocalSessionMessageRpcResponse = {
     code: 'session_not_found' | 'invalid_client_message_id' | 'launch_failed' | 'not_native_session'
 }
 
+/**
+ * Archives an original Codex thread through the Codex app-server. This is a
+ * destructive stop-and-archive action: the runner reserves it against HAPI
+ * delivery and protects saved HAPI queue receipts while Codex performs it.
+ */
+export type ArchiveCodexLocalSessionRpcResponse = {
+    success: true
+} | {
+    success: false
+    error: string
+    code:
+        | 'session_not_found'
+        | 'not_native_session'
+        | 'session_busy'
+        | 'session_status_unknown'
+        | 'session_queued'
+        | 'archive_in_progress'
+        | 'archive_unsupported'
+        | 'archive_failed'
+}
+
 export type CodexTranscriptFileCandidate = {
     file: string
     modifiedAt: number

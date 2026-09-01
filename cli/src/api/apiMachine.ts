@@ -25,6 +25,7 @@ import type { FileReadResponse, GitBranchResponse, GitCommandResponse, MachineDi
 import {
     type CodexLocalSessionListUpdate,
     type CodexLocalSessionComposerCapabilitiesRpcResponse,
+    type ArchiveCodexLocalSessionRpcResponse,
     type CodexLocalSessionDataRpcResponse,
     type DiscardCodexLocalSessionMessageRpcResponse,
     type CodexLocalSessionRealtimeSnapshot,
@@ -64,6 +65,8 @@ import { applyVersionedAck } from './versionedUpdate'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
 import { readGeneratedImageFileBytes, readSessionFileBytes } from '@/modules/common/handlers/files'
+
+type NativeCodexArchiveClient = Pick<CodexAppServerClient, 'connect' | 'initialize' | 'archiveThread' | 'disconnect'>
 
 type MachineRpcHandlers = {
     spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>
@@ -121,6 +124,10 @@ interface SendCodexLocalSessionMessageRequest {
 interface DiscardCodexLocalSessionMessageRequest {
     sessionId?: unknown
     clientMessageId?: unknown
+}
+
+interface ArchiveCodexLocalSessionRequest {
+    sessionId?: unknown
 }
 
 const MAX_NATIVE_CODEX_REALTIME_SNAPSHOT_BYTES = 96 * 1024
@@ -263,7 +270,8 @@ export class ApiMachineClient {
         private readonly token: string,
         private readonly machine: Machine,
         private readonly workspaceRoots?: string[],
-        private readonly advertisedMetadata?: MachineMetadata
+        private readonly advertisedMetadata?: MachineMetadata,
+        private readonly createNativeCodexArchiveClient: () => NativeCodexArchiveClient = () => new CodexAppServerClient()
     ) {
         // Realpath roots once so all subsequent comparisons are against
         // canonical, symlink-resolved locations. Falls back to lexical
@@ -487,6 +495,64 @@ export class ApiMachineClient {
                 }
                 this.observeNativeCodexSession(sessionId)
                 return this.nativeCodexSessionDirectSender.discard(sessionId, params?.clientMessageId)
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<
+            ArchiveCodexLocalSessionRequest,
+            ArchiveCodexLocalSessionRpcResponse
+        >(
+            RPC_METHODS.ArchiveCodexLocalSession,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                if (!sessionId) {
+                    return { success: false, code: 'session_not_found', error: 'sessionId is required' }
+                }
+
+                // A Kanban card has not necessarily opened the native drawer,
+                // so warm this exact transcript before checking ownership and
+                // reserving it against HAPI delivery. The cache is runner-local.
+                const read = this.nativeCodexTranscriptCache.read(sessionId, { limit: 1 })
+                if (!read) {
+                    return { success: false, code: 'session_not_found', error: 'Codex session not found' }
+                }
+                this.observeNativeCodexSession(sessionId)
+
+                return await this.nativeCodexSessionDirectSender.archive(sessionId, async () => {
+                    const appServer = this.createNativeCodexArchiveClient()
+                    try {
+                        await appServer.connect()
+                        await appServer.initialize({
+                            clientInfo: {
+                                name: 'hapi-native-session-archive',
+                                title: 'HAPI Native Session Archive',
+                                version: '1.0.0'
+                            },
+                            capabilities: { experimentalApi: true }
+                        })
+                        await appServer.archiveThread({ threadId: sessionId })
+
+                        // Codex owns the file move/state transition. Clear all
+                        // runner-derived views before notifying every browser so
+                        // no stale local transcript row is rendered as success.
+                        this.nativeCodexTranscriptCache.evict(sessionId)
+                        this.nativeCodexSessionListCache.invalidate()
+                        this.reportNativeCodexSessionUpdated(sessionId)
+                        return { success: true }
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : String(error)
+                        const unsupported = /(?:method not found|unknown method|thread\/archive.*(?:unsupported|not found)|-32601)/i.test(message)
+                        return {
+                            success: false,
+                            code: unsupported ? 'archive_unsupported' : 'archive_failed',
+                            error: unsupported
+                                ? 'This Codex app-server does not support native session archive'
+                                : message || 'Failed to archive native Codex session'
+                        }
+                    } finally {
+                        await appServer.disconnect()
+                    }
+                })
             }
         )
 

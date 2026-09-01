@@ -1016,6 +1016,114 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('archives a native Codex thread on its owning runner', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '56565656-5656-4656-8656-565656565657'
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const archiveCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            archiveCodexLocalSession: async (...args: unknown[]) => {
+                archiveCalls.push(args)
+                return { success: true as const }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${sessionId}/archive`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ machineId: 'mac-runner' })
+            })
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({ success: true })
+            expect(archiveCalls).toEqual([['mac-runner', sessionId]])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('does not archive a native thread that is already managed by a differently keyed HAPI session', async () => {
+        const store = new Store(':memory:')
+        const nativeSessionId = '56565656-5656-4656-8656-565656565658'
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const archiveCalls: unknown[][] = []
+        const managedSession = {
+            id: 'hapi-wrapper-session',
+            namespace: 'default',
+            active: true,
+            updatedAt: Date.now(),
+            metadata: {
+                machineId: 'mac-runner',
+                codexSessionId: nativeSessionId,
+                flavor: 'codex'
+            }
+        }
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            getSessionsByNamespace: () => [managedSession],
+            archiveCodexLocalSession: async (...args: unknown[]) => {
+                archiveCalls.push(args)
+                return { success: true as const }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${nativeSessionId}/archive`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ machineId: 'mac-runner' })
+            })
+
+            expect(response.status).toBe(409)
+            expect(await response.json()).toMatchObject({
+                success: false,
+                code: 'not_native_session'
+            })
+            expect(archiveCalls).toEqual([])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('maps native archive runner refusals to stable HTTP statuses', async () => {
+        const cases: Array<{ code: string; status: number }> = [
+            { code: 'session_busy', status: 409 },
+            { code: 'session_status_unknown', status: 409 },
+            { code: 'session_queued', status: 409 },
+            { code: 'archive_unsupported', status: 501 },
+            { code: 'archive_failed', status: 502 },
+            { code: 'session_not_found', status: 404 }
+        ]
+        for (const testCase of cases) {
+            const store = new Store(':memory:')
+            const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+            const engine = {
+                ...createImportSyncEngine(store, [machine]),
+                archiveCodexLocalSession: async () => ({
+                    success: false as const,
+                    code: testCase.code,
+                    error: `native ${testCase.code}`
+                })
+            } as unknown as SyncEngine
+            const app = createRoutesAppWithEngine('default', store, engine)
+
+            try {
+                const response = await app.request('/api/codex/sessions/native-thread/archive', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ machineId: 'mac-runner' })
+                })
+                expect(response.status).toBe(testCase.status)
+                expect(await response.json()).toMatchObject({ success: false, code: testCase.code })
+            } finally {
+                store.close()
+            }
+        }
+    })
+
     it('returns native composer custom prompts and Skills from the selected runner', async () => {
         const store = new Store(':memory:')
         const sessionId = '56565656-5656-4656-8656-565656565657'
@@ -1242,9 +1350,12 @@ describe('Codex Desktop import routes', () => {
         const normalSendCalls: unknown[][] = []
         const nativeSendCalls: unknown[][] = []
         const managedSession = {
-            id: sessionId,
+            id: 'hapi-managed-session',
             active: true,
-            metadata: { machineId: 'mac-runner' }
+            metadata: {
+                machineId: 'mac-runner',
+                codexSessionId: sessionId
+            }
         }
         const engine = {
             ...createImportSyncEngine(store, [machine]),
@@ -1268,7 +1379,7 @@ describe('Codex Desktop import routes', () => {
             expect(response.status).toBe(202)
             expect(await response.json()).toMatchObject({ success: true, status: 'processing' })
             expect(normalSendCalls).toEqual([[
-                sessionId,
+                'hapi-managed-session',
                 { text: 'Use the connected HAPI session', sentFrom: 'webapp' }
             ]])
             expect(nativeSendCalls).toEqual([])

@@ -60,7 +60,7 @@ export default {
   'sessions.view.list': 'Switch to list view',
   'sessions.kanban.pinned': 'Pinned',
   'sessions.kanban.pending': 'Needs confirmation',
-  'sessions.kanban.processing': 'In progress',
+  'sessions.kanban.processing': 'thinking',
   'sessions.kanban.completed': 'Completed',
   'sessions.kanban.pin': 'Pin session',
   'sessions.kanban.unpin': 'Unpin session',
@@ -288,6 +288,11 @@ export default {
   'recentCodex.fork.error.sessionMissing': 'This native Codex session is no longer available on the runner.',
   'recentCodex.fork.error.workspaceMissing': 'The original workspace is unavailable, so HAPI cannot create the new session.',
   'recentCodex.fork.error.generic': 'HAPI could not create a new session. Please try again.',
+  'recentCodex.archive.title': 'Archive session',
+  'recentCodex.archive.hapiDescription': 'Archive "{name}"? This disconnects the HAPI session.',
+  'recentCodex.archive.nativeDescription': 'Archive native Codex session "{name}"? This can stop current native work. HAPI messages being delivered or queued must be resolved first.',
+  'recentCodex.archive.confirm': 'Archive',
+  'recentCodex.archive.confirming': 'Archiving…',
 
   // Session list
   'session.item.path': 'path',

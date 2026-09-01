@@ -420,12 +420,17 @@ export default function SharesPage() {
 
                             {timelineGroups.length > 0 ? (
                                 <div className="relative pl-6">
-                                    <div aria-hidden="true" className="absolute bottom-0 left-[5px] top-1 w-px bg-[var(--app-border)]" />
+                                    <div aria-hidden="true" className="absolute bottom-2 left-[5px] top-2 w-px bg-gradient-to-b from-transparent via-[var(--app-divider)] to-transparent" />
                                     <div className="space-y-5">
                                         {timelineGroups.map((group) => (
                                             <section key={group.key} aria-labelledby={`share-timeline-${group.key}`} className="relative">
-                                                <span aria-hidden="true" className="absolute -left-6 top-1.5 h-3 w-3 rounded-full border-2 border-[var(--app-bg)] bg-[var(--app-link)]" />
-                                                <h2 id={`share-timeline-${group.key}`} className="text-xs font-semibold text-[var(--app-hint)]">{group.label}</h2>
+                                                <span aria-hidden="true" className="absolute -left-[25px] top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_1px_3px_rgba(15,23,42,0.12)]">
+                                                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--app-link)]" />
+                                                </span>
+                                                <div className="flex min-w-0 items-center gap-2">
+                                                    <h2 id={`share-timeline-${group.key}`} className="shrink-0 text-[11px] font-semibold tracking-[0.04em] text-[var(--app-hint)]">{group.label}</h2>
+                                                    <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-gradient-to-r from-[var(--app-divider)] to-transparent" />
+                                                </div>
                                                 <div className="mt-2 space-y-3">
                                                     {group.shares.map((share) => (
                                                         <div key={share.id}>

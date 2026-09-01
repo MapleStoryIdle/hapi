@@ -20,6 +20,7 @@ import {
     type CodexLocalSessionData as RunnerCodexLocalSessionData,
     type CodexLocalSessionReadTiming,
     type CodexLocalSessionStatusRpcResponse,
+    type ArchiveCodexLocalSessionRpcResponse,
     type DiscardCodexLocalSessionMessageRpcResponse,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
@@ -1110,6 +1111,13 @@ function parseDiscardCodexLocalSessionMessageRequest(value: unknown): {
     return { machineId, clientMessageId }
 }
 
+function parseArchiveCodexLocalSessionRequest(value: unknown): { machineId: string } | null {
+    const record = asRecord(value)
+    if (!record) return null
+    const machineId = typeof record.machineId === 'string' ? record.machineId.trim() : ''
+    return machineId ? { machineId } : null
+}
+
 function getOnlineCodexRunner(engine: SyncEngine, namespace: string, machineId: string): Machine | null {
     return engine.getOnlineMachinesByNamespace(namespace).find((machine) => machine.id === machineId) ?? null
 }
@@ -1185,6 +1193,21 @@ function resolveDirectCodexLocalSessionTarget(options: {
         }
     }
     return { type: 'success', machine }
+}
+
+function findHapiManagedCodexSession(
+    engine: SyncEngine,
+    namespace: string,
+    machineId: string,
+    codexSessionId: string
+) {
+    return engine.getSessionsByNamespace(namespace).find((session) => (
+        session.metadata?.machineId === machineId
+        && (
+            session.id === codexSessionId
+            || session.metadata?.codexSessionId === codexSessionId
+        )
+    ))
 }
 
 function resolveImportMachineId(
@@ -2380,6 +2403,60 @@ export function createCodexDesktopRoutes(options: {
         }
     })
 
+    app.post('/codex/sessions/:id/archive', async (c) => {
+        const request = parseArchiveCodexLocalSessionRequest(await c.req.json().catch(() => null))
+        if (!request) {
+            return c.json({ success: false, error: 'machineId is required' }, 400)
+        }
+
+        const engine = options.getSyncEngine()
+        const target = resolveDirectCodexLocalSessionTarget({
+            engine,
+            namespace: c.get('namespace'),
+            machineId: request.machineId
+        })
+        if (target.type === 'error') {
+            return c.json({ success: false, error: target.message }, target.status)
+        }
+
+        // A stale native page must never archive a HAPI-owned thread through
+        // the native path. Its card uses /sessions/:id/archive instead.
+        const managedSession = findHapiManagedCodexSession(
+            engine!,
+            c.get('namespace'),
+            target.machine.id,
+            c.req.param('id')
+        )
+        if (managedSession) {
+            return c.json({
+                success: false,
+                code: 'not_native_session',
+                error: 'This Codex session is managed by HAPI. Archive it from the HAPI session list.'
+            } satisfies ArchiveCodexLocalSessionRpcResponse, 409)
+        }
+
+        try {
+            const result = await engine!.archiveCodexLocalSession(target.machine.id, c.req.param('id'))
+            if (result.success === true) {
+                return c.json(result satisfies ArchiveCodexLocalSessionRpcResponse)
+            }
+            const status = result.code === 'session_not_found'
+                ? 404
+                : result.code === 'archive_unsupported'
+                    ? 501
+                    : result.code === 'archive_failed'
+                        ? 502
+                        : 409
+            return c.json(result satisfies ArchiveCodexLocalSessionRpcResponse, status)
+        } catch (error) {
+            return c.json({
+                success: false,
+                code: 'archive_failed',
+                error: error instanceof Error ? error.message : 'Failed to archive native Codex session'
+            } satisfies ArchiveCodexLocalSessionRpcResponse, 502)
+        }
+    })
+
     app.get('/codex/sessions/:id/composer-capabilities', async (c) => {
         const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
         if (!machineId) {
@@ -2478,10 +2555,12 @@ export function createCodexDesktopRoutes(options: {
             // `codex queue` would acknowledge into an unrelated global Codex
             // queue instead of reaching that session. Route the stale native
             // page to its actual HAPI session transport.
-            const managedSession = engine!.getSessionsByNamespace(c.get('namespace')).find((session) => (
-                session.id === c.req.param('id')
-                && session.metadata?.machineId === target.machine.id
-            ))
+            const managedSession = findHapiManagedCodexSession(
+                engine!,
+                c.get('namespace'),
+                target.machine.id,
+                c.req.param('id')
+            )
             if (managedSession) {
                 if (!managedSession.active) {
                     return c.json({

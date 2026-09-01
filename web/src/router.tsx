@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { LayoutGrid as LayoutGridIconNode, LayoutList as LayoutListIconNode } from 'lucide'
 import {
     Navigate,
     Outlet,
@@ -17,6 +18,7 @@ import { App } from '@/App'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
 import { RecentCodexSessions } from '@/components/RecentCodexSessions'
 import { CodexSessionContextPage } from '@/components/CodexSessionContextPage'
+import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
 import { SessionEntryLoading } from '@/components/SessionEntryLoading'
@@ -136,46 +138,18 @@ function SettingsIcon(props: { className?: string }) {
     )
 }
 
-function PlusIcon(props: { className?: string }) {
+function SessionViewIcon(props: {
+    className?: string
+    targetView: 'list' | 'kanban'
+}) {
     return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <MotionIcon
+            icon={toMotionIcon(props.targetView === 'kanban' ? LayoutGridIconNode : LayoutListIconNode)}
             className={props.className}
+            data-motion-icon={`sessions-${props.targetView}`}
+            strokeWidth={2}
             aria-hidden="true"
-        >
-            <path d="M12 5v14M5 12h14" />
-        </svg>
-    )
-}
-
-function SessionViewIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-            aria-hidden="true"
-        >
-            <rect x="4" y="4" width="6" height="6" rx="1" />
-            <rect x="14" y="4" width="6" height="6" rx="1" />
-            <rect x="4" y="14" width="6" height="6" rx="1" />
-            <rect x="14" y="14" width="6" height="6" rx="1" />
-        </svg>
+        />
     )
 }
 
@@ -955,29 +929,21 @@ function SessionsPage() {
                                     />
                                 ) : null}
                             </div>
-                        <div className="relative flex h-[52px] w-[52px] items-center justify-end">
-                            <div className="absolute right-0 flex items-center gap-1">
-                                <button
-                                    type="button"
-                                    onClick={goNewSession}
-                                    className="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--app-link)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                    title={t('sessions.new')}
-                                    aria-label={t('sessions.new')}
-                                >
-                                    <PlusIcon className="h-5 w-5" />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setSessionListViewMode(sessionListViewMode === 'kanban' ? 'list' : 'kanban')}
-                                    className="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                    title={t(sessionListViewMode === 'kanban' ? 'sessions.view.list' : 'sessions.view.kanban')}
-                                    aria-label={t(sessionListViewMode === 'kanban' ? 'sessions.view.list' : 'sessions.view.kanban')}
-                                    aria-pressed={sessionListViewMode === 'kanban'}
-                                    data-testid="sessions-view-toggle"
-                                >
-                                    <SessionViewIcon className="h-5 w-5" />
-                                </button>
-                            </div>
+                        <div className="flex h-[52px] w-[52px] items-center justify-center">
+                            <button
+                                type="button"
+                                onClick={() => setSessionListViewMode(sessionListViewMode === 'kanban' ? 'list' : 'kanban')}
+                                className="flex h-[52px] w-[52px] items-center justify-center rounded-xl text-[var(--app-fg)] transition-colors hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                title={t(sessionListViewMode === 'kanban' ? 'sessions.view.list' : 'sessions.view.kanban')}
+                                aria-label={t(sessionListViewMode === 'kanban' ? 'sessions.view.list' : 'sessions.view.kanban')}
+                                aria-pressed={sessionListViewMode === 'kanban'}
+                                data-testid="sessions-view-toggle"
+                            >
+                                <SessionViewIcon
+                                    className="h-6 w-6"
+                                    targetView={sessionListViewMode === 'kanban' ? 'list' : 'kanban'}
+                                />
+                            </button>
                         </div>
                     </div>
                 </div>

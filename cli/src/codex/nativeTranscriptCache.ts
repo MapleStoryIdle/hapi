@@ -141,6 +141,12 @@ export class NativeCodexTranscriptCache {
         return this.entries.has(sessionId)
     }
 
+    /** Evict a thread moved by Codex's native archive operation. */
+    evict(sessionId: string): void {
+        this.entries.delete(sessionId)
+        this.revisions.delete(sessionId)
+    }
+
     getSummary(sessionId: string): CodexLocalSessionSummary | null {
         return this.resolveEntry(sessionId)?.entry.session ?? null
     }

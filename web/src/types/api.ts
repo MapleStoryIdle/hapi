@@ -345,6 +345,14 @@ export type DiscardCodexLocalSessionMessageResponse =
         code?: string
     }
 
+export type ArchiveCodexLocalSessionResponse =
+    | { success: true }
+    | {
+        success: false
+        error: string
+        code?: string
+    }
+
 export type CodexLocalSessionQueuedMessage = {
     id: string
     text: string

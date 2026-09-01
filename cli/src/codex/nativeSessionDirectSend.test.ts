@@ -113,6 +113,93 @@ function writeTranscript(options: {
 }
 
 describe('NativeCodexSessionDirectSender', () => {
+    it('reserves an idle native thread so a new send and queue pump cannot race archive', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-archive-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789013'
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'idle' as const
+        })
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        let releaseArchive!: () => void
+        const archiveGate = new Promise<void>((resolve) => { releaseArchive = resolve })
+        const sender = new NativeCodexSessionDirectSender(spawn, () => 123, 1_000, { getSummary: lookup })
+
+        try {
+            const archive = sender.archive(sessionId, async () => {
+                await archiveGate
+                return { success: true as const }
+            })
+            await flushMicrotasks()
+
+            expect(sender.send(sessionId, 'Do not race archive')).toEqual({
+                success: false,
+                code: 'session_busy',
+                error: 'Native Codex session is being archived'
+            })
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            expect(spawn).not.toHaveBeenCalled()
+
+            releaseArchive()
+            await expect(archive).resolves.toEqual({ success: true })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('allows destructive archive of external work but protects HAPI hand-offs and queued receipts', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-archive-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789014'
+        let runState: 'idle' | 'processing' | 'unknown' = 'processing'
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState
+        })
+        const child = new FakeChildProcess()
+        const archiveAttempt = vi.fn(async () => ({ success: true as const }))
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(() => child as never),
+            () => 123,
+            1_000,
+            { getSummary: lookup }
+        )
+
+        try {
+            await expect(sender.archive(sessionId, archiveAttempt)).resolves.toEqual({ success: true })
+            runState = 'unknown'
+            await expect(sender.archive(sessionId, archiveAttempt)).resolves.toEqual({ success: true })
+            expect(archiveAttempt).toHaveBeenCalledTimes(2)
+
+            runState = 'idle'
+            expect(sender.send(sessionId, 'HAPI hand-off before archive')).toMatchObject({ success: true, status: 'processing' })
+            await expect(sender.archive(sessionId, archiveAttempt)).resolves.toMatchObject({
+                success: false,
+                code: 'session_busy'
+            })
+            child.emit('exit', 0, null)
+
+            runState = 'processing'
+            expect(sender.send(sessionId, 'Queued before archive')).toMatchObject({ success: true, status: 'queued' })
+            runState = 'idle'
+            await expect(sender.archive(sessionId, async () => ({ success: true as const }))).resolves.toMatchObject({
+                success: false,
+                code: 'session_queued'
+            })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('keeps an accepted untrusted Kanban review idempotent across a runner restart', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-review-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789012'

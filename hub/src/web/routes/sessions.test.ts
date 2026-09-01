@@ -1204,18 +1204,18 @@ describe('sessions routes', () => {
             expect(await response.json()).toEqual({ error: 'Session not found' })
         })
 
-        it('returns 409 for an inactive non-archived row whose lifecycle is not running', async () => {
-            let called = false
+        it('durably archives an inactive non-archived row', async () => {
+            const calls: string[] = []
             const session = createSession({ active: false })
             const { app } = createApp(session, {
-                archiveSession: async () => { called = true }
+                archiveSession: async (sessionId: string) => { calls.push(sessionId) }
             })
 
             const response = await app.request('/api/sessions/session-1/archive', { method: 'POST' })
 
-            expect(response.status).toBe(409)
-            expect(await response.json()).toEqual({ error: 'Session is inactive' })
-            expect(called).toBe(false)
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({ ok: true })
+            expect(calls).toEqual(['session-1'])
         })
 
         it('returns 2xx for an inactive split-brain row still marked lifecycleState=running', async () => {
