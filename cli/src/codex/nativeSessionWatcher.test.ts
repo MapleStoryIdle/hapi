@@ -39,6 +39,9 @@ describe('NativeCodexSessionWatcher', () => {
         expect(getCodexSessionIdFromTranscriptPath(
             '/Users/dev/.codex/sessions/2026/08/28/rollout-12345678-1234-4234-8234-123456789012.jsonl'
         )).toBe('12345678-1234-4234-8234-123456789012')
+        expect(getCodexSessionIdFromTranscriptPath(
+            '/Users/dev/.codex/sessions/2026/08/28/rollout-2026-08-28T10-20-30-abcdefab-cdef-4def-8def-abcdefabcdef.jsonl'
+        )).toBe('abcdefab-cdef-4def-8def-abcdefabcdef')
         expect(getCodexSessionIdFromTranscriptPath('/tmp/not-a-rollout.jsonl')).toBeNull()
     })
 
@@ -46,7 +49,7 @@ describe('NativeCodexSessionWatcher', () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-native-codex-watcher-'))
         cleanupPaths.push(root)
         const sessionId = '12345678-1234-4234-8234-123456789012'
-        const file = join(root, '2026', '08', '28', `rollout-${sessionId}.jsonl`)
+        const file = join(root, '2026', '08', '28', `rollout-2026-08-28T10-20-30-${sessionId}.jsonl`)
         mkdirSync(join(root, '2026', '08', '28'), { recursive: true })
         writeFileSync(file, '{"type":"session_meta"}\n', 'utf-8')
 
