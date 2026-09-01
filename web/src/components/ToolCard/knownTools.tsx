@@ -7,8 +7,8 @@ import { extractTodoChecklist, extractUpdatePlanChecklist } from '@/components/T
 import { basename, resolveDisplayPath } from '@/utils/path'
 import { getInputStringAny, truncate } from '@/lib/toolInputUtils'
 import { getCodexPatchChanges, getCodexPatchTotals } from '@/components/ToolCard/codexPatch'
-import { formatFileReadTarget, getMcpPatchTarget, getMcpReadTarget, getNativeReadTarget, type FilePatchTarget, type FileReadTarget } from '@/components/ToolCard/fileAccess'
-import { getTerminalCommandIntent, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
+import { formatFileReadTarget, getMcpPatchTarget, getMcpReadTarget, getNativeReadTarget, type FilePatchTarget } from '@/components/ToolCard/fileAccess'
+import { getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
 import {
     getCodexAgentActivity,
     getCodexAgentPrompt,
@@ -68,14 +68,6 @@ function formatPatchTarget(target: FilePatchTarget, metadata: SessionMetadataSum
     const fileSummary = target.fileCount > 1 ? `${name} (+${target.fileCount - 1})` : name
     if (target.additions === 0 && target.deletions === 0) return fileSummary
     return `${fileSummary} · +${target.additions} −${target.deletions}`
-}
-
-function formatReadTargets(targets: FileReadTarget[], metadata: SessionMetadataSummary | null): string {
-    const visible = targets.slice(0, 2).map((target) => (
-        formatFileReadTarget(target, resolveDisplayPath(target.path, metadata))
-    ))
-    const remaining = targets.length - visible.length
-    return remaining > 0 ? `${visible.join(' · ')} · +${remaining}` : visible.join(' · ')
 }
 
 function isCodexTerminalMinimal(result: unknown): boolean {
@@ -582,9 +574,7 @@ export function getToolPresentation(
                         ? <SearchIcon className={DEFAULT_ICON_CLASS} />
                         : <TerminalIcon className={DEFAULT_ICON_CLASS} />,
                 title: getTerminalCommandIntentLabel(opts.input, intent, t),
-                subtitle: intent.kind === 'read-request'
-                    ? formatReadTargets(intent.targets, opts.metadata)
-                    : null,
+                subtitle: getTerminalCommandIntentDetail(intent),
                 minimal: isCodexTerminalMinimal(opts.result)
             }
         }

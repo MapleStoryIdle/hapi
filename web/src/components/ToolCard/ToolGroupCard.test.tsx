@@ -375,7 +375,7 @@ describe('ToolGroupCard', () => {
         expect(terminalRow?.firstElementChild).toHaveClass('text-red-600')
     })
 
-    it('uses Terminal execution when a compact terminal row has no recognized action', () => {
+    it('uses a safe runtime title when a compact terminal row runs inline code', () => {
         const terminal = makeToolBlock('bash-unknown', 'CodexBash', {
             command: '/bin/zsh -lc "node -e \'process.exit(0)\'"'
         })
@@ -402,10 +402,10 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const toggle = within(view.container).getByRole('button', { name: /terminal execution 0s/i })
+        const toggle = within(view.container).getByRole('button', { name: /run node\.js 0s/i })
         fireEvent.click(toggle)
 
-        expect(within(view.container).getByText('Terminal execution')).toBeInTheDocument()
+        expect(within(view.container).getByText('Run Node.js')).toBeInTheDocument()
         expect(within(view.container).queryByText(/node -e/i)).not.toBeInTheDocument()
     })
 
@@ -436,14 +436,14 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const singleToggle = within(singleView.container).getByRole('button', { name: /read file 0s/i })
+        const singleToggle = within(singleView.container).getByRole('button', { name: /read file · App\.tsx · L12–80 0s/i })
         fireEvent.click(singleToggle)
 
         expect(within(singleView.container).getByText('Read file')).toBeInTheDocument()
-        expect(within(singleView.container).getByText('web/src/App.tsx · L12–80')).toBeInTheDocument()
+        expect(within(singleView.container).getByText('App.tsx · L12–80')).toBeInTheDocument()
         expect(singleView.container.querySelector('[data-tool-group-timeline]')).toHaveClass('left-0')
         const singleRow = within(singleView.container)
-            .getAllByRole('button', { name: /read file web\/src\/App\.tsx/i })
+            .getAllByRole('button', { name: /read file App\.tsx/i })
             .find((button) => !button.hasAttribute('aria-expanded'))
         expect(singleRow).toHaveClass('-ml-[7px]', 'px-0')
 

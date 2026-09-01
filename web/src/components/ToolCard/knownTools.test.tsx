@@ -61,7 +61,7 @@ describe('getToolPresentation — file access semantics', () => {
         })
 
         expect(presentation.title).toBe('Read file')
-        expect(presentation.subtitle).toBe('web/src/App.tsx · L12–80')
+        expect(presentation.subtitle).toBe('App.tsx · L12–80')
     })
 
     it('reduces compound Codex terminal commands to their key command', () => {
@@ -91,7 +91,47 @@ describe('getToolPresentation — file access semantics', () => {
         })
 
         expect(presentation.title).toBe('Read file')
-        expect(presentation.subtitle).toBe('/workspace/AGENT.md · web/src/App.tsx · L12–80')
+        expect(presentation.subtitle).toBe('AGENT.md · App.tsx · L12–80')
+    })
+
+    it('shows safe remote, SQL, request, and file targets without raw arguments', () => {
+        const cases = [
+            {
+                command: 'ssh deploy@192.0.2.18 systemctl status hapi-hub.service',
+                title: 'Inspect hapi-hub service',
+                subtitle: '192.0.2.18'
+            },
+            {
+                command: `mysql -D lingda_dev -e "SELECT * FROM sys_user WHERE token = 'secret'"`,
+                title: 'Execute SQL',
+                subtitle: 'lingda_dev.sys_user'
+            },
+            {
+                command: `curl -X POST 'https://user:password@example.com/api/status?token=secret'`,
+                title: 'Request URL · POST',
+                subtitle: 'example.com/api/status'
+            },
+            {
+                command: 'rm web/src/cache.json',
+                title: 'Manage files',
+                subtitle: 'cache.json'
+            }
+        ]
+
+        for (const item of cases) {
+            const presentation = getToolPresentation({
+                toolName: 'CodexBash',
+                input: { command: item.command },
+                result: null,
+                childrenCount: 0,
+                description: null,
+                metadata: null,
+            })
+            expect(presentation).toMatchObject({ title: item.title, subtitle: item.subtitle })
+            expect(`${presentation.title} ${presentation.subtitle}`).not.toContain('secret')
+            expect(`${presentation.title} ${presentation.subtitle}`).not.toContain('password')
+            expect(`${presentation.title} ${presentation.subtitle}`).not.toContain('web/src')
+        }
     })
 
     it('names clear non-file Codex terminal work without hiding its output', () => {
@@ -127,7 +167,7 @@ describe('getToolPresentation — file access semantics', () => {
         })
     })
 
-    it('uses Terminal execution when a Codex command cannot be summarized safely', () => {
+    it('uses a safe runtime title without exposing inline code', () => {
         const presentation = getToolPresentation({
             toolName: 'CodexBash',
             input: { command: '/bin/zsh -lc "node -e \'process.exit(0)\'"' },
@@ -138,9 +178,10 @@ describe('getToolPresentation — file access semantics', () => {
         })
 
         expect(presentation).toMatchObject({
-            title: 'Terminal execution',
+            title: 'Run Node.js',
             subtitle: null
         })
+        expect(presentation.title).not.toContain('process.exit')
     })
 
     it('semanticizes only structured MCP reads and patches', () => {

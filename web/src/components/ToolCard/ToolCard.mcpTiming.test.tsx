@@ -127,7 +127,7 @@ describe('Activity tool timing', () => {
         const view = renderMcpCard(makeTerminalReadBlock())
 
         expect(view.getByText('Read file')).toBeInTheDocument()
-        expect(view.getByText('web/src/App.tsx · L12–80')).toBeInTheDocument()
+        expect(view.getByText('App.tsx · L12–80')).toBeInTheDocument()
         const timing = view.container.querySelector('[data-activity-tool-timing]')
         expect(timing).toHaveTextContent('1.3s')
         expect(timing).toHaveAttribute('aria-label', 'Completed 1.3s')

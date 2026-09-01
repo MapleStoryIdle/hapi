@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getTerminalCommandIntent, getTerminalCommandIntentLabel, getTerminalCommandIntentTitle, getTerminalCommandSummary, usesTerminalCommandAsLabel } from '@/components/ToolCard/terminalCommandIntent'
+import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandIntentTitle, getTerminalCommandSummary, usesTerminalCommandAsLabel } from '@/components/ToolCard/terminalCommandIntent'
 
 describe('terminal command intent', () => {
     it('keeps shell file reads as requests and includes their explicit targets', () => {
@@ -22,12 +22,122 @@ describe('terminal command intent', () => {
         ['find web/src -type f | sort', 'browse-files'],
         ['bun run build', 'build-project']
     ] as const)('classifies %s as %s', (command, kind) => {
-        expect(getTerminalCommandIntent({ command })).toEqual({ kind })
+        expect(getTerminalCommandIntent({ command })).toMatchObject({ kind })
     })
 
-    it('leaves unknown or potentially mutating shell commands generic', () => {
-        expect(getTerminalCommandIntent({ command: 'node scripts/rewrite.mjs' })).toBeNull()
-        expect(getTerminalCommandIntent({ command: 'find . -name tmp -delete' })).toBeNull()
+    it('describes common real-world terminal work without exposing command arguments', () => {
+        expect(getTerminalCommandIntent({ command: "python3 - <<'PY'\ngit status\nPY" })).toEqual({
+            kind: 'run-program',
+            program: 'Python'
+        })
+        expect(getTerminalCommandIntent({ command: "node -e 'process.exit(0)'" })).toEqual({
+            kind: 'run-program',
+            program: 'Node.js'
+        })
+        expect(getTerminalCommandIntent({ command: 'curl -H "Authorization: Bearer secret" https://example.com' })).toEqual({
+            kind: 'request-url',
+            method: 'GET',
+            host: 'example.com',
+            path: null
+        })
+        expect(getTerminalCommandIntent({ command: 'ssh server-alias systemctl status app' })).toEqual({
+            kind: 'remote-command',
+            host: 'server-alias',
+            mode: 'execute',
+            action: { kind: 'manage-service', operation: 'inspect', service: 'app' },
+            files: []
+        })
+        expect(getTerminalCommandIntent({ command: 'ps aux | grep worker' })).toEqual({ kind: 'inspect-processes' })
+        expect(getTerminalCommandIntent({ command: 'sleep 5' })).toEqual({ kind: 'wait' })
+        expect(getTerminalCommandIntent({ command: 'project-dbcli query --password secret' })).toEqual({
+            kind: 'query-database',
+            database: null,
+            tables: []
+        })
+        expect(getTerminalCommandIntent({ command: 'tail -n 80 /var/log/app.log' })).toEqual({
+            kind: 'inspect-output',
+            files: ['app.log']
+        })
+        expect(getTerminalCommandIntent({ command: 'systemctl is-active app.service' })).toEqual({
+            kind: 'manage-service',
+            operation: 'inspect',
+            service: 'app'
+        })
+        expect(getTerminalCommandIntent({ command: '/opt/tools/upgrade_remote_hapi_hub.sh server-alias' })).toEqual({ kind: 'manage-hapi' })
+        expect(getTerminalCommandIntent({ command: 'kill 12345' })).toEqual({ kind: 'stop-process' })
+        expect(getTerminalCommandIntent({ command: 'find . -name tmp -delete' })).toEqual({
+            kind: 'manage-files',
+            files: ['tmp'],
+            move: null
+        })
+        expect(getTerminalCommandIntent({ command: 'gofmt -w ./internal' })).toEqual({ kind: 'format-code' })
+
+        const title = getTerminalCommandDisplayTitle({ command: '/opt/tools/reindex-cli --token must-not-render' })
+        expect(title).toBe('Run reindex-cli')
+        expect(title).not.toContain('must-not-render')
+        expect(getTerminalCommandDisplayTitle({ command: '$SECRET_TOOL --token must-not-render' })).toBeNull()
+    })
+
+    it('shows safe targets while omitting credentials, SQL values, and file directories', () => {
+        const request = getTerminalCommandIntent({
+            command: `curl -X POST -H 'Authorization: Bearer secret' 'https://user:password@192.0.2.18:8080/api/order/status?token=secret'`
+        })
+        expect(request).toEqual({
+            kind: 'request-url',
+            method: 'POST',
+            host: '192.0.2.18:8080',
+            path: '/api/order/status'
+        })
+        expect(request && getTerminalCommandIntentDetail(request)).toBe('192.0.2.18:8080/api/order/status')
+
+        const requestWithUrlBody = getTerminalCommandIntent({
+            command: `curl -d 'https://secret.example/payload' https://api.example/status`
+        })
+        expect(requestWithUrlBody && getTerminalCommandIntentDetail(requestWithUrlBody)).toBe('api.example/status')
+
+        const remote = getTerminalCommandIntent({
+            command: 'ssh deploy@192.0.2.18 systemctl restart hapi-hub.service'
+        })
+        expect(remote && getTerminalCommandIntentTitle(remote)).toBe('Restart hapi-hub service')
+        expect(remote && getTerminalCommandIntentDetail(remote)).toBe('192.0.2.18')
+        expect(getTerminalCommandDisplayTitle({
+            command: 'ssh deploy@192.0.2.18 systemctl restart hapi-hub.service'
+        })).toBe('Restart hapi-hub service · 192.0.2.18')
+        expect(getTerminalCommandDisplayTitle({
+            command: 'ssh 192.0.2.18 echo must-not-render'
+        })).toBe('Run shell · 192.0.2.18')
+        expect(getTerminalCommandDisplayTitle({
+            command: 'scp -i /credentials/private-key /build/hapi deploy@192.0.2.18:/tmp/hapi'
+        })).toBe('Transfer files · hapi · 192.0.2.18')
+
+        const database = getTerminalCommandIntent({
+            command: `mysql --database lingda_dev -e "SELECT password FROM sys_user WHERE token = 'must-not-render'"`
+        })
+        expect(database).toEqual({
+            kind: 'query-database',
+            database: 'lingda_dev',
+            tables: ['sys_user']
+        })
+        expect(database && getTerminalCommandIntentTitle(database)).toBe('Execute SQL')
+        expect(database && getTerminalCommandIntentDetail(database)).toBe('lingda_dev.sys_user')
+        expect(getTerminalCommandDisplayTitle({
+            command: `psql -d lingda_dev -c 'SELECT "from must_not_render"'`
+        })).toBe('Execute SQL · lingda_dev')
+
+        const moved = getTerminalCommandIntent({ command: 'mv web/src/old.ts web/src/new.ts' })
+        expect(moved && getTerminalCommandIntentDetail(moved)).toBe('old.ts → new.ts')
+        const searched = getTerminalCommandIntent({ command: 'rg -n ToolCard web/src/components/ToolCard/knownTools.tsx' })
+        expect(searched && getTerminalCommandIntentTitle(searched)).toBe('Search files')
+        expect(searched && getTerminalCommandIntentDetail(searched)).toBe('knownTools.tsx')
+
+        const rendered = [
+            request && getTerminalCommandDisplayTitle({ command: `curl -X POST 'https://user:password@192.0.2.18:8080/api/order/status?token=secret'` }),
+            database && getTerminalCommandIntentDetail(database),
+            moved && getTerminalCommandIntentDetail(moved)
+        ].join(' ')
+        expect(rendered).not.toContain('password')
+        expect(rendered).not.toContain('must-not-render')
+        expect(rendered).not.toContain('web/src')
     })
 
     it('uses clear fallback titles outside the translation provider', () => {

@@ -7,7 +7,7 @@ import { shouldUseFullScreenToolDetail, ToolDetailDialogContent, ToolStatusIcon,
 import { getTerminalExecutionToolState, isTerminalExecutionTool } from '@/components/ToolCard/terminalExecution'
 import { TerminalExecutionDrawer } from '@/components/ToolCard/TerminalExecutionDrawer'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
-import { getTerminalCommandIntent, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
+import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -196,7 +196,7 @@ export function formatToolGroupCompactTitle(
             const terminalLabel = terminalIntent?.kind === 'read-request' && terminalIntent.targets.length > 1
                 ? t('toolGroup.compact.row.readBatch')
                 : terminalIntent
-                    ? getTerminalCommandIntentLabel(displayTool.tool.input, terminalIntent, t)
+                    ? getTerminalCommandDisplayTitle(displayTool.tool.input, t)
                     : getTerminalCommandSummary(displayTool.tool.input)
             if (terminalLabel) return `${terminalLabel} ${renderedDuration}`.trim()
             return `${t('terminal.execution.title')} ${renderedDuration}`.trim()
@@ -412,8 +412,8 @@ function CompactRowLabel(props: { block: ToolCallBlock; metadata: SessionMetadat
     const detail = isUnknownTerminal
         ? null
         : terminalIntent || terminalCommandSummary
-        ? terminalIntent?.kind === 'read-request' && !isBatchRead
-            ? presentation.subtitle
+        ? terminalIntent && !isBatchRead
+            ? getTerminalCommandIntentDetail(terminalIntent)
             : null
         : presentation.subtitle ?? (kind === 'other' ? null : presentation.title)
 

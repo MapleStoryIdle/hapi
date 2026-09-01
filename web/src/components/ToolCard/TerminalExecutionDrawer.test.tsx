@@ -83,7 +83,7 @@ describe('TerminalExecutionDrawer', () => {
         )
         expect(drawer).not.toHaveClass('pt-[var(--app-safe-area-top)]')
         expect(drawer.className).not.toContain('backdrop-blur')
-        expect(drawer).toHaveTextContent('Terminal execution')
+        expect(drawer).toHaveTextContent('bun run test:web')
         expect(drawer).toHaveTextContent('Completed')
         expect(drawer).toHaveTextContent('2.3s')
         expect(drawer).toHaveTextContent('/bin/zsh -lc "bun run test:web"')
@@ -129,7 +129,7 @@ describe('TerminalExecutionDrawer', () => {
         const tabs = [outputTab, inputTab, environmentTab]
         const drawer = screen.getByTestId('terminal-execution-drawer')
 
-        expect(screen.getByRole('tablist', { name: 'Terminal execution' })).toBeInTheDocument()
+        expect(screen.getByRole('tablist', { name: 'bun run test:web' })).toBeInTheDocument()
         expect(outputTab).toHaveAttribute('aria-selected', 'true')
         expect(outputTab).toHaveAttribute('tabindex', '0')
         expect(outputTab).toHaveClass('min-h-11')
@@ -199,6 +199,23 @@ describe('TerminalExecutionDrawer', () => {
         fireEvent.keyDown(environmentTab, { key: 'ArrowLeft' })
         expect(inputTab).toHaveFocus()
         expect(inputTab).toHaveAttribute('aria-selected', 'true')
+    })
+
+    it('uses the remote action and host instead of the generic execution title', () => {
+        const block = makeBlock('remote-terminal')
+        block.tool.input = {
+            command: 'ssh deploy@192.0.2.18 systemctl status hapi-hub.service'
+        }
+
+        render(
+            <I18nProvider>
+                <TerminalExecutionDrawer block={block} open onOpenChange={() => undefined} />
+            </I18nProvider>
+        )
+
+        expect(screen.getByText('Inspect hapi-hub service · 192.0.2.18')).toBeInTheDocument()
+        expect(screen.queryByText('Terminal execution')).not.toBeInTheDocument()
+        expect(screen.queryByText('Run remotely')).not.toBeInTheDocument()
     })
 
     it('resets to output after closing and reopening', async () => {

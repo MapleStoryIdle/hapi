@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import type { ToolCallBlock } from '@/chat/types'
 import { CloseIcon } from '@/components/icons'
 import { TerminalIcon } from '@/components/ToolCard/icons'
+import { getTerminalCommandDisplayTitle } from '@/components/ToolCard/terminalCommandIntent'
 import {
     formatTerminalExecutionDuration,
     getTerminalExecutionDetails,
@@ -44,6 +45,7 @@ export function TerminalExecutionDrawer(props: {
     const details = getTerminalExecutionDetails(props.block)
     const state = getTerminalExecutionState(props.block, details)
     const duration = formatTerminalExecutionDuration(details.durationMs)
+    const title = getTerminalCommandDisplayTitle(props.block.tool.input, t) ?? t('terminal.execution.title')
     const [selectedTab, setSelectedTab] = useState<TerminalExecutionDrawerTab>('output')
     const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
     const instanceId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
@@ -117,7 +119,7 @@ export function TerminalExecutionDrawer(props: {
                         </span>
                         <div className="min-w-0 flex-1">
                             <Dialog.Title className="truncate text-sm font-bold text-[var(--app-fg)] sm:text-base">
-                                {t('terminal.execution.title')}
+                                {title}
                             </Dialog.Title>
                             <div className="mt-1 flex min-w-0 items-center gap-1.5">
                                 <span className={cn('inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold leading-none', stateColorClass(state))}>
@@ -151,7 +153,7 @@ export function TerminalExecutionDrawer(props: {
                     ) : null}
 
                     <div className="shrink-0 border-b border-[var(--app-border)] px-4 sm:px-6">
-                        <div aria-label={t('terminal.execution.title')} className="flex gap-1 overflow-x-auto py-2" role="tablist">
+                        <div aria-label={title} className="flex gap-1 overflow-x-auto py-2" role="tablist">
                             {DRAWER_TABS.map((tab, index) => {
                                 const tabId = `${idPrefix}-tab-${tab}`
                                 const panelId = `${idPrefix}-panel-${tab}`
