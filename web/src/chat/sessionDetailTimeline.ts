@@ -114,15 +114,45 @@ function canReuseTimelinePrefix(
         && cache.runActive === options.runActive
 }
 
+/**
+ * A running native Codex turn can emit many complete reasoning snapshots.
+ * They describe the same moving thought, so keep only the newest snapshot in
+ * the active turn. Completed turns retain their history inside result details.
+ */
+function compactActiveTurnReasoning(
+    blocks: VisibleChatBlock[],
+    runActive: boolean | undefined
+): VisibleChatBlock[] {
+    if (!runActive) return blocks
+
+    const latestBoundaryIndex = blocks.findLastIndex((block) => (
+        block.kind === 'user-text' || block.kind === 'question-answer'
+    ))
+    let latestReasoningIndex = -1
+    let reasoningCount = 0
+    for (let index = latestBoundaryIndex + 1; index < blocks.length; index += 1) {
+        if (blocks[index]?.kind !== 'agent-reasoning') continue
+        latestReasoningIndex = index
+        reasoningCount += 1
+    }
+    if (reasoningCount < 2) return blocks
+
+    return blocks.filter((block, index) => (
+        index <= latestBoundaryIndex
+        || block.kind !== 'agent-reasoning'
+        || index === latestReasoningIndex
+    ))
+}
+
 export function buildSessionDetailTimeline(
     blocks: readonly ChatBlock[],
     options: SessionDetailTimelineOptions
 ): SessionDetailTimeline {
-    const grouped = buildVisibleChatBlocks([...blocks], {
+    const grouped = compactActiveTurnReasoning(buildVisibleChatBlocks([...blocks], {
         hasMoreMessages: options.hasMoreMessages,
         previousGroups: options.previousGroups ? [...options.previousGroups] : undefined,
         terminalToolDisplayMode: options.terminalToolDisplayMode
-    })
+    }), options.runActive)
 
     return {
         grouped,

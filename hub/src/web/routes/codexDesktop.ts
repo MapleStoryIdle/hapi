@@ -5,17 +5,15 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { homedir, hostname, platform } from 'node:os'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import {
-    createCodexUserMessageMirrorDeduper,
     normalizeCodexUserMessageContent,
     normalizeCodexUserMessageText
 } from '@hapi/protocol/codexUserMessage'
 import {
     getLatestCodexSessionConfig,
     isHapiInitiatedCodexSession,
-    normalizeCodexCustomToolInput,
-    normalizeCodexCustomToolName,
-    normalizeCodexCustomToolOutput,
+    parseCodexTranscriptImportData,
     readLocalCodexSessionSummary,
+    type CodexImportedMessageContent,
     type CodexLocalSessionComposerCapabilitiesRpcResponse,
     type CodexLocalSessionData as RunnerCodexLocalSessionData,
     type CodexLocalSessionReadTiming,
@@ -24,7 +22,6 @@ import {
     type DiscardCodexLocalSessionMessageRpcResponse,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
-import { parseAutomationHeartbeatMessageContent } from '@hapi/protocol/messages'
 import { Hono } from 'hono'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { Store, StoredMessage } from '../../store'
@@ -139,28 +136,6 @@ type DirectCodexLocalSessionTarget = {
     type: 'error'
     status: 404 | 409 | 502 | 503
     message: string
-}
-
-type CodexImportedMessageContent = {
-    createdAt?: number
-    role: 'user'
-    content: {
-        type: 'text'
-        text: string
-    }
-    meta: {
-        sentFrom: 'cli'
-    }
-} | {
-    createdAt?: number
-    role: 'agent'
-    content: {
-        type: typeof AGENT_MESSAGE_PAYLOAD_TYPE
-        data: unknown
-    }
-    meta: {
-        sentFrom: 'cli'
-    }
 }
 
 type CodexTranscriptImportData = CodexLocalSessionSummary & {
@@ -391,85 +366,9 @@ function truncateText(value: string, maxLength: number): string {
     return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
 }
 
-function getCodexRolloutTimestampKey(value: string | null): string | null {
-    if (!value) return null
-    const milliseconds = Date.parse(value)
-    // event_msg and response_item are emitted by separate streams and can
-    // differ by a few milliseconds for the same user-visible turn.
-    return Number.isFinite(milliseconds) ? String(Math.round(milliseconds / 1_000)) : value
-}
-
 function inferSessionIdFromFileName(filePath: string): string | null {
     const match = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/.exec(filePath)
     return match?.[1] ?? null
-}
-
-function parseCodexFunctionArguments(value: unknown): unknown {
-    if (typeof value !== 'string') {
-        return value
-    }
-
-    const trimmed = value.trim()
-    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-        return value
-    }
-
-    try {
-        return JSON.parse(trimmed)
-    } catch {
-        return value
-    }
-}
-
-function extractCodexToolCallId(payload: Record<string, unknown>): string | null {
-    const candidates = ['call_id', 'callId', 'tool_call_id', 'toolCallId', 'id']
-    for (const key of candidates) {
-        const value = payload[key]
-        if (typeof value === 'string' && value.length > 0) {
-            return value
-        }
-    }
-    return null
-}
-
-/** Attach transcript timestamps so imported tool cards show real durations. */
-function enrichImportedToolTiming(messages: CodexImportedMessageContent[]): CodexImportedMessageContent[] {
-    const startedAtByCallId = new Map<string, number>()
-
-    for (const message of messages) {
-        if (message.role !== 'agent' || message.createdAt === undefined) continue
-        const data = asRecord(message.content.data)
-        if (data?.type !== 'tool-call') continue
-        const callId = asString(data.callId)
-        if (callId && !startedAtByCallId.has(callId)) {
-            startedAtByCallId.set(callId, message.createdAt)
-        }
-    }
-
-    return messages.map((message) => {
-        if (message.role !== 'agent' || message.createdAt === undefined) return message
-        const data = asRecord(message.content.data)
-        if (!data) return message
-        const callId = asString(data.callId)
-        if (!callId) return message
-
-        const startedAt = startedAtByCallId.get(callId)
-        const nextData: Record<string, unknown> = { ...data }
-        if (data.type === 'tool-call') {
-            if (nextData.startedAt === undefined && nextData.started_at === undefined) {
-                nextData.startedAt = message.createdAt
-            }
-            return { ...message, content: { ...message.content, data: nextData } }
-        }
-        if (data.type !== 'tool-call-result') return message
-        if (nextData.completedAt === undefined && nextData.completed_at === undefined) {
-            nextData.completedAt = message.createdAt
-        }
-        if (nextData.durationMs === undefined && nextData.duration_ms === undefined && startedAt !== undefined) {
-            nextData.durationMs = Math.max(0, message.createdAt - startedAt)
-        }
-        return { ...message, content: { ...message.content, data: nextData } }
-    })
 }
 
 function extractCodexChangedTitle(record: Record<string, unknown>): string | null {
@@ -704,262 +603,6 @@ function findLocalCodexSession(sessionId: string): CodexLocalSessionSummary | nu
         if (session?.id === sessionId) return session
     }
     return null
-}
-
-function getCodexRecordTimestamp(record: Record<string, unknown>): number | undefined {
-    const timestamp = asString(record.timestamp)
-    if (!timestamp) return undefined
-    const parsed = Date.parse(timestamp)
-    return Number.isFinite(parsed) ? parsed : undefined
-}
-
-function buildImportedUserMessage(text: string, createdAt?: number): CodexImportedMessageContent {
-    return {
-        ...(createdAt === undefined ? {} : { createdAt }),
-        role: 'user',
-        content: {
-            type: 'text',
-            text
-        },
-        meta: {
-            sentFrom: 'cli'
-        }
-    }
-}
-
-function buildImportedAgentMessage(data: unknown, createdAt?: number): CodexImportedMessageContent {
-    return {
-        ...(createdAt === undefined ? {} : { createdAt }),
-        role: 'agent',
-        content: {
-            type: AGENT_MESSAGE_PAYLOAD_TYPE,
-            data
-        },
-        meta: {
-            sentFrom: 'cli'
-        }
-    }
-}
-
-function convertCodexRecordToImportedMessage(record: Record<string, unknown>): CodexImportedMessageContent | null {
-    const type = asString(record.type)
-    const payload = asRecord(record.payload)
-    if (!type || !payload) {
-        return null
-    }
-
-    const createdAt = getCodexRecordTimestamp(record)
-
-    if (type === 'event_msg') {
-        const eventType = asString(payload.type)
-        if (!eventType) {
-            return null
-        }
-
-        if (eventType === 'user_message') {
-            const rawText = asString(payload.message)
-                ?? asString(payload.text)
-                ?? asString(payload.content)
-            const text = rawText ? normalizeCodexUserMessageText(rawText) : null
-            if (!text) {
-                return null
-            }
-            return buildImportedUserMessage(text, createdAt)
-        }
-
-        if (eventType === 'agent_message') {
-            const message = asString(payload.message)
-            return message ? buildImportedAgentMessage({ type: 'message', message, id: randomUUID() }, createdAt) : null
-        }
-
-        if (eventType === 'agent_reasoning') {
-            const message = asString(payload.text) ?? asString(payload.message)
-            return message ? buildImportedAgentMessage({ type: 'reasoning', message, id: randomUUID() }, createdAt) : null
-        }
-
-        if (eventType === 'agent_reasoning_delta') {
-            const delta = asString(payload.delta) ?? asString(payload.text) ?? asString(payload.message)
-            return delta ? buildImportedAgentMessage({ type: 'reasoning-delta', delta }, createdAt) : null
-        }
-
-        if (eventType === 'token_count') {
-            const info = asRecord(payload.info)
-            return info ? buildImportedAgentMessage({ type: 'token_count', info, id: randomUUID() }, createdAt) : null
-        }
-
-        if (eventType === 'context_compacted') {
-            return buildImportedAgentMessage({ type: 'context_compacted', id: randomUUID() }, createdAt)
-        }
-
-        return null
-    }
-
-    if (type === 'response_item') {
-        const itemType = asString(payload.type)
-        if (!itemType) {
-            return null
-        }
-
-        if (itemType === 'message') {
-            const role = asString(payload.role)
-            if (role === 'user') {
-                const text = normalizeCodexUserMessageContent(payload.content)
-                if (!text) return null
-                return buildImportedUserMessage(text, createdAt)
-            }
-            if (role === 'assistant') {
-                const text = extractCodexText(payload.content)
-                if (!text) return null
-                return buildImportedAgentMessage({ type: 'message', message: text, id: randomUUID() }, createdAt)
-            }
-            return null
-        }
-
-        if (itemType === 'custom_tool_call') {
-            const name = asString(payload.name)
-            const callId = extractCodexToolCallId(payload)
-            if (!name || !callId) {
-                return null
-            }
-            return buildImportedAgentMessage({
-                type: 'tool-call',
-                name: normalizeCodexCustomToolName(name),
-                callId,
-                input: normalizeCodexCustomToolInput(name, payload.input),
-                id: randomUUID()
-            }, createdAt)
-        }
-
-        if (itemType === 'custom_tool_call_output') {
-            const callId = extractCodexToolCallId(payload)
-            if (!callId) {
-                return null
-            }
-            return buildImportedAgentMessage({
-                type: 'tool-call-result',
-                callId,
-                output: normalizeCodexCustomToolOutput(payload.output),
-                id: randomUUID()
-            }, createdAt)
-        }
-
-        if (itemType === 'function_call') {
-            const name = asString(payload.name)
-            const callId = extractCodexToolCallId(payload)
-            if (!name || !callId) {
-                return null
-            }
-            return buildImportedAgentMessage({
-                type: 'tool-call',
-                name,
-                callId,
-                input: parseCodexFunctionArguments(payload.arguments),
-                id: randomUUID()
-            }, createdAt)
-        }
-
-        if (itemType === 'function_call_output') {
-            const callId = extractCodexToolCallId(payload)
-            if (!callId) {
-                return null
-            }
-            return buildImportedAgentMessage({
-                type: 'tool-call-result',
-                callId,
-                output: payload.output,
-                id: randomUUID()
-            }, createdAt)
-        }
-    }
-
-    return null
-}
-
-function importedChatMessageFingerprint(message: CodexImportedMessageContent): string | null {
-    if (message.role === 'user') {
-        return `user:${message.content.text.trim()}`
-    }
-
-    const data = asRecord(message.content.data)
-    if (data?.type !== 'message') {
-        return null
-    }
-    const text = asString(data.message)?.trim()
-    return text ? `assistant:${text}` : null
-}
-
-function getHeartbeatTimestamp(message: CodexImportedMessageContent): number | undefined {
-    const heartbeat = parseAutomationHeartbeatMessageContent(message.content)
-    if (!heartbeat?.currentTimeIso) return undefined
-    const timestamp = Date.parse(heartbeat.currentTimeIso)
-    return Number.isFinite(timestamp) ? timestamp : undefined
-}
-
-function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): CodexTranscriptImportData | null {
-    let content: string
-    try {
-        content = readFileSync(summary.file, 'utf-8')
-    } catch {
-        return null
-    }
-
-    const lines = content.split(/\r?\n/).filter(Boolean)
-    const messages: CodexImportedMessageContent[] = []
-    const canonicalChatMessageIndexByRolloutKey = new Map<string, number>()
-    const userMessageMirrorDeduper = createCodexUserMessageMirrorDeduper()
-    let pendingHeartbeatTimestamp: number | undefined
-
-    for (const line of lines) {
-        let parsed: unknown
-        try {
-            parsed = JSON.parse(line)
-        } catch {
-            continue
-        }
-
-        const record = asRecord(parsed)
-        if (!record) continue
-        let message = convertCodexRecordToImportedMessage(record)
-        const suppressUserMirror = userMessageMirrorDeduper.shouldSuppress(
-            record,
-            message?.role === 'user' ? message.content.text : ''
-        )
-        if (!message || suppressUserMirror) continue
-
-        const heartbeatTimestamp = getHeartbeatTimestamp(message)
-        if (message.role === 'user') {
-            pendingHeartbeatTimestamp = heartbeatTimestamp
-        }
-        if (heartbeatTimestamp !== undefined) {
-            message = { ...message, createdAt: heartbeatTimestamp }
-        } else if (message.role === 'agent' && pendingHeartbeatTimestamp !== undefined
-            && parseAutomationHeartbeatMessageContent(message.content)) {
-            message = { ...message, createdAt: pendingHeartbeatTimestamp }
-        }
-
-        const fingerprint = message.role === 'user' ? null : importedChatMessageFingerprint(message)
-        const timestamp = getCodexRolloutTimestampKey(asString(record.timestamp))
-        const rolloutKey = fingerprint && timestamp ? `${timestamp}\u0000${fingerprint}` : null
-        // Standard Codex rollouts write the same chat item in both formats at
-        // the same timestamp. Prefer response_item but do not globally dedupe
-        // identical text from separate turns.
-        if (rolloutKey) {
-            const existingIndex = canonicalChatMessageIndexByRolloutKey.get(rolloutKey)
-            if (existingIndex !== undefined) {
-                if (record.type === 'response_item') {
-                    messages[existingIndex] = message
-                }
-                continue
-            }
-            canonicalChatMessageIndexByRolloutKey.set(rolloutKey, messages.length)
-        }
-        messages.push(message)
-    }
-
-    return {
-        ...summary,
-        messages: enrichImportedToolTiming(messages)
-    }
 }
 
 function createCodexTranscriptContextMessages(

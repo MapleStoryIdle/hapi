@@ -179,28 +179,33 @@ export function formatToolGroupCompactTitle(
             : t('toolGroup.compact.skill.processed', { skill: skillName, duration: renderedDuration }).trim()
     }
 
-    const singleTool = !block.forceGenericCompactTitle && block.tools.length === 1 ? block.tools[0] : null
-    if (singleTool) {
-        const invocationTitle = getInputStringAny(singleTool.tool.input, ['title'])?.trim()
+    const latestActiveTool = active
+        ? block.tools.findLast((tool) => tool.tool.state === 'running' || tool.tool.state === 'pending') ?? null
+        : null
+    const displayTool = !block.forceGenericCompactTitle && block.tools.length === 1
+        ? block.tools[0]
+        : latestActiveTool
+    if (displayTool) {
+        const invocationTitle = getInputStringAny(displayTool.tool.input, ['title'])?.trim()
         if (invocationTitle) {
             return `${formatCompactRawText(invocationTitle)} ${renderedDuration}`.trim()
         }
 
-        if (isTerminalExecutionTool(singleTool.tool.name)) {
-            const terminalIntent = getTerminalCommandIntent(singleTool.tool.input)
+        if (isTerminalExecutionTool(displayTool.tool.name)) {
+            const terminalIntent = getTerminalCommandIntent(displayTool.tool.input)
             const terminalLabel = terminalIntent?.kind === 'read-request' && terminalIntent.targets.length > 1
                 ? t('toolGroup.compact.row.readBatch')
                 : terminalIntent
-                    ? getTerminalCommandIntentLabel(singleTool.tool.input, terminalIntent, t)
-                    : getTerminalCommandSummary(singleTool.tool.input)
+                    ? getTerminalCommandIntentLabel(displayTool.tool.input, terminalIntent, t)
+                    : getTerminalCommandSummary(displayTool.tool.input)
             if (terminalLabel) return `${terminalLabel} ${renderedDuration}`.trim()
             return `${t('terminal.execution.title')} ${renderedDuration}`.trim()
         }
 
         const status = active ? 'processing' : 'processed'
-        const kind = getToolGroupActionKind(singleTool)
+        const kind = getToolGroupActionKind(displayTool)
         if (kind === 'mutation') {
-            const fileTarget = getCompactFileTarget(singleTool)
+            const fileTarget = getCompactFileTarget(displayTool)
             if (fileTarget) {
                 return t(`toolGroup.compact.single.${status}.mutationTarget`, {
                     target: formatCompactRawText(fileTarget),
@@ -208,7 +213,7 @@ export function formatToolGroupCompactTitle(
                 }).trim()
             }
 
-            const command = getCompactRawCommand(singleTool)
+            const command = getCompactRawCommand(displayTool)
             if (command) {
                 return t(`toolGroup.compact.single.${status}.commandFallback`, {
                     command: formatCompactRawText(command),
@@ -221,11 +226,11 @@ export function formatToolGroupCompactTitle(
         }
 
         const presentation = getToolPresentation({
-            toolName: singleTool.tool.name,
-            input: singleTool.tool.input,
-            result: singleTool.tool.result,
-            childrenCount: singleTool.children.length,
-            description: singleTool.tool.description,
+            toolName: displayTool.tool.name,
+            input: displayTool.tool.input,
+            result: displayTool.tool.result,
+            childrenCount: displayTool.children.length,
+            description: displayTool.tool.description,
             metadata: null
         }, t)
         if (presentation.title) {

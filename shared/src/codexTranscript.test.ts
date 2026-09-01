@@ -3,6 +3,8 @@ import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+    appendCodexTranscriptImportLines,
+    createCodexTranscriptImportAccumulator,
     getCodexSessionDisplayTitle,
     getCodexTranscriptLifecycleEvents,
     getCodexTranscriptTailSummary,
@@ -37,6 +39,122 @@ describe('getCodexSessionDisplayTitle', () => {
 })
 
 describe('getLocalCodexSessionData', () => {
+    it('coalesces canonical reasoning summaries and suppresses same-turn mirrors', () => {
+        const accumulator = createCodexTranscriptImportAccumulator()
+        const line = (record: unknown) => JSON.stringify(record)
+
+        appendCodexTranscriptImportLines(accumulator, [
+            line({ type: 'event_msg', payload: { type: 'task_started' } }),
+            line({
+                timestamp: '2026-09-01T10:00:00.000Z',
+                type: 'event_msg',
+                payload: { type: 'agent_reasoning_delta', delta: 'partial text' }
+            }),
+            line({
+                timestamp: '2026-09-01T10:00:01.000Z',
+                type: 'event_msg',
+                payload: { type: 'agent_reasoning', text: 'Inspect the source' }
+            })
+        ])
+
+        expect(accumulator.messages).toHaveLength(1)
+
+        appendCodexTranscriptImportLines(accumulator, [
+            line({
+                timestamp: '2026-09-01T10:00:01.001Z',
+                type: 'event_msg',
+                payload: { type: 'agent_reasoning', text: 'Plan the smallest fix' }
+            }),
+            line({
+                timestamp: '2026-09-01T10:00:01.010Z',
+                type: 'response_item',
+                payload: {
+                    type: 'reasoning',
+                    id: 'reasoning-item-1',
+                    encrypted_content: 'not-for-display',
+                    summary: [
+                        { type: 'summary_text', text: 'Inspect the source' },
+                        { type: 'summary_text', text: 'Plan the smallest fix' }
+                    ]
+                }
+            })
+        ])
+
+        expect(accumulator.messages).toHaveLength(1)
+        expect(accumulator.messages[0]).toMatchObject({
+            role: 'agent',
+            content: {
+                data: {
+                    type: 'reasoning',
+                    id: 'reasoning-item-1',
+                    message: 'Inspect the source\n\nPlan the smallest fix'
+                }
+            }
+        })
+
+        appendCodexTranscriptImportLines(accumulator, [
+            line({
+                timestamp: '2026-09-01T10:00:02.000Z',
+                type: 'event_msg',
+                payload: { type: 'agent_reasoning', text: 'Inspect the source' }
+            }),
+            line({
+                timestamp: '2026-09-01T10:00:02.001Z',
+                type: 'event_msg',
+                payload: { type: 'agent_reasoning', text: 'Plan the smallest fix' }
+            }),
+            line({
+                timestamp: '2026-09-01T10:00:02.010Z',
+                type: 'response_item',
+                payload: {
+                    type: 'reasoning',
+                    id: 'reasoning-item-duplicate',
+                    summary: [
+                        { type: 'summary_text', text: 'Inspect the source' },
+                        { type: 'summary_text', text: 'Plan the smallest fix' }
+                    ]
+                }
+            }),
+            line({ type: 'event_msg', payload: { type: 'task_complete' } }),
+            line({ type: 'event_msg', payload: { type: 'task_started' } }),
+            line({
+                timestamp: '2026-09-01T10:01:00.000Z',
+                type: 'event_msg',
+                payload: { type: 'agent_reasoning', text: 'Inspect the source' }
+            }),
+            line({
+                timestamp: '2026-09-01T10:01:00.001Z',
+                type: 'event_msg',
+                payload: { type: 'agent_reasoning', text: 'Plan the smallest fix' }
+            }),
+            line({
+                timestamp: '2026-09-01T10:01:00.010Z',
+                type: 'response_item',
+                payload: {
+                    type: 'reasoning',
+                    id: 'reasoning-item-next-turn',
+                    summary: [
+                        { type: 'summary_text', text: 'Inspect the source' },
+                        { type: 'summary_text', text: 'Plan the smallest fix' }
+                    ]
+                }
+            })
+        ])
+
+        const reasoningMessages = accumulator.messages.filter((message) => (
+            message.role === 'agent'
+            && typeof message.content.data === 'object'
+            && message.content.data !== null
+            && (message.content.data as { type?: unknown }).type === 'reasoning'
+        ))
+        expect(reasoningMessages).toHaveLength(2)
+        expect(reasoningMessages.map((message) => (
+            message.role === 'agent'
+                ? (message.content.data as { id?: unknown }).id
+                : null
+        ))).toEqual(['reasoning-item-1', 'reasoning-item-next-turn'])
+    })
+
     it('uses normalized user text for titles, previews, context, and imports', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-user-normalization-test-'))
         const sessionId = '13131313-1313-4313-8313-131313131313'

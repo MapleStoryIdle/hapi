@@ -1017,10 +1017,43 @@ html[data-theme="oled"] .shiki span {
   animation: session-kanban-thinking-breathe 2.4s ease-in-out infinite;
 }
 
+/* Keep the label width stable while the ellipsis cycles through 1–3 dots. */
+@keyframes session-kanban-thinking-dot-second {
+  0%, 32% {
+    opacity: 0;
+  }
+  33%, 100% {
+    opacity: 1;
+  }
+}
+
+@keyframes session-kanban-thinking-dot-third {
+  0%, 65% {
+    opacity: 0;
+  }
+  66%, 100% {
+    opacity: 1;
+  }
+}
+
+.session-kanban-thinking-dot-second {
+  animation: session-kanban-thinking-dot-second 1.2s steps(1, end) infinite;
+}
+
+.session-kanban-thinking-dot-third {
+  animation: session-kanban-thinking-dot-third 1.2s steps(1, end) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-stop-button-breathe,
   .session-kanban-card-thinking {
     animation: none;
+  }
+
+  .session-kanban-thinking-dot-second,
+  .session-kanban-thinking-dot-third {
+    animation: none;
+    opacity: 1;
   }
 }
 

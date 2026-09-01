@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentTextBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
+import type { AgentReasoningBlock, AgentTextBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
 import {
     buildIncrementalSessionDetailTimeline,
     buildSessionDetailTimeline
@@ -47,6 +47,16 @@ function agentBlock(): AgentTextBlock {
     }
 }
 
+function reasoningBlock(id: string, createdAt: number, text: string): AgentReasoningBlock {
+    return {
+        kind: 'agent-reasoning',
+        id,
+        localId: null,
+        createdAt,
+        text
+    }
+}
+
 describe('buildSessionDetailTimeline', () => {
     it('uses the same compact result grouping policy for either detail source', () => {
         const blocks = [userBlock(), toolBlock(), agentBlock()]
@@ -77,6 +87,43 @@ describe('buildSessionDetailTimeline', () => {
             'agent-text',
             'agent-text'
         ])
+    })
+
+    it('shows only the latest reasoning trace while the current turn is running', () => {
+        const timeline = buildSessionDetailTimeline([
+            userBlock(),
+            reasoningBlock('reasoning-1', 2, 'Inspecting'),
+            toolBlock(),
+            reasoningBlock('reasoning-2', 4, 'Verifying')
+        ], { hasMoreMessages: false, runActive: true })
+
+        expect(timeline.visible.map((block) => block.id)).toEqual([
+            'user-1',
+            'tool-group:tool-1',
+            'reasoning-2'
+        ])
+    })
+
+    it('folds completed reasoning-only details before the final answer', () => {
+        const timeline = buildSessionDetailTimeline([
+            userBlock(),
+            reasoningBlock('reasoning-1', 2, 'Inspecting'),
+            reasoningBlock('reasoning-2', 3, 'Verifying'),
+            agentBlock()
+        ], { hasMoreMessages: false })
+
+        expect(timeline.visible.map((block) => block.kind)).toEqual([
+            'user-text',
+            'tool-group',
+            'agent-text'
+        ])
+        expect(timeline.visible[1]).toMatchObject({
+            kind: 'tool-group',
+            detailBlocks: [
+                { id: 'reasoning-1' },
+                { id: 'reasoning-2' }
+            ]
+        })
     })
 
     it('only rebuilds the stream tail after the latest user-message boundary', () => {

@@ -631,6 +631,52 @@ describe('ToolGroupCard', () => {
         expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
     })
 
+    it('uses the latest active action instead of Processing for aggregated groups', () => {
+        const now = Date.now()
+        const tools = [
+            makeToolBlock('read-1', 'Read', { file_path: 'src/old.ts' }, {
+                createdAt: now - 10_000,
+                startedAt: now - 10_000,
+                completedAt: now - 8_000,
+            }),
+            makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
+                state: 'running',
+                createdAt: now - 4_000,
+                startedAt: now - 4_000,
+                completedAt: null,
+            }),
+        ]
+        const view = renderCard(makeGroup({
+            tools,
+            forceGenericCompactTitle: true,
+            summary: {
+                totalTools: 2,
+                countsByKind: {
+                    read: 1,
+                    search: 0,
+                    command: 1,
+                    mutation: 0,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: ['src/old.ts'],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 1,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        const toggle = within(view.container)
+            .getAllByRole('button', { name: /bun test \d+s/i })
+            .find((button) => button.hasAttribute('aria-expanded'))
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
+    })
+
     it('treats running tools as active even when summary counts are stale', () => {
         const startedAt = Date.now() - 8_000
         const tools = [
@@ -907,11 +953,13 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const toggle = within(view.container).getByRole('button', { name: /processing/i })
+        const toggle = within(view.container)
+            .getAllByRole('button', { name: /bun test/i })
+            .find((button) => button.hasAttribute('aria-expanded'))
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
         expect(screen.getByText('bun test')).toBeInTheDocument()
 
-        fireEvent.click(toggle)
+        fireEvent.click(toggle!)
 
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByText('bun test')).not.toBeInTheDocument()
@@ -981,7 +1029,9 @@ describe('ToolGroupCard', () => {
         }
 
         const view = render(<Harness />)
-        let toggle = within(view.container).getByRole('button', { name: /processing/i })
+        let toggle = within(view.container)
+            .getAllByRole('button', { name: /bun test/i })
+            .find((button) => button.hasAttribute('aria-expanded'))!
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
         expect(screen.getByText('bun test')).toBeInTheDocument()
 

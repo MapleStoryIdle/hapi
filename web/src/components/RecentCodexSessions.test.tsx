@@ -242,6 +242,39 @@ describe('RecentCodexSessions', () => {
         ])
     })
 
+    it('sorts thinking cards by directory and stable identity instead of activity time', () => {
+        const session = (id: string, cwd: string, modifiedAt: number): MergedCodexSession => ({
+            key: `native:${id}`,
+            id,
+            title: id,
+            cwd,
+            modifiedAt,
+            source: 'native',
+            active: true,
+            nativeSession: {
+                id,
+                title: id,
+                cwd,
+                file: `/tmp/${id}.jsonl`,
+                modifiedAt,
+                runState: 'processing'
+            }
+        })
+        const groups = groupMergedCodexSessionsForKanban([
+            session('zeta', '/workspace/zeta', 400),
+            session('alpha-b', '/workspace/alpha', 300),
+            session('beta', '/workspace/beta', 200),
+            session('alpha-a', '/workspace/alpha', 100)
+        ])
+
+        expect(groups.find((group) => group.id === 'processing')?.sessions.map((item) => item.id)).toEqual([
+            'alpha-a',
+            'alpha-b',
+            'beta',
+            'zeta'
+        ])
+    })
+
     it('uses true work state for HAPI and native Kanban groups', () => {
         const now = 1_800_000_000_000
         const base = {
@@ -474,9 +507,14 @@ describe('RecentCodexSessions', () => {
         expect(board.querySelector('[data-kanban-group="pending"]')).toHaveTextContent('Needs confirmation')
         const processingGroup = board.querySelector('[data-kanban-group="processing"]')
         expect(processingGroup).toHaveTextContent('thinking')
+        expect(processingGroup?.querySelector('[data-kanban-thinking-label]')).toHaveTextContent('thinking...')
+        expect(processingGroup?.querySelector('.session-kanban-thinking-dot-second')).not.toBeNull()
+        expect(processingGroup?.querySelector('.session-kanban-thinking-dot-third')).not.toBeNull()
+        expect(processingGroup?.querySelector('[data-kanban-group-count]')).toBeNull()
         expect(processingGroup).toHaveTextContent('Thinking task')
         expect(processingGroup?.querySelector('.session-kanban-card-thinking')).not.toBeNull()
         expect(processingGroup?.querySelector('.motion-safe\\:animate-pulse')).not.toBeNull()
+        expect(processingGroup?.querySelector('[data-kanban-card-time]')).toBeNull()
         const completedGroup = board.querySelector('[data-kanban-group="completed"]')
         expect(completedGroup).toHaveTextContent('Completed Codex task')
         const completedDivider = completedGroup?.querySelector('[data-kanban-completed-divider]')

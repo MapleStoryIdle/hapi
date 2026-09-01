@@ -281,6 +281,22 @@ function compareKanbanSessions(
     return left.key.localeCompare(right.key)
 }
 
+function compareThinkingKanbanSessions(
+    left: MergedCodexSession,
+    right: MergedCodexSession
+): number {
+    const leftDirectory = getKanbanDirectoryLabel(left.cwd)
+    const rightDirectory = getKanbanDirectoryLabel(right.cwd)
+    if (leftDirectory && !rightDirectory) return -1
+    if (!leftDirectory && rightDirectory) return 1
+
+    const directory = (leftDirectory ?? '').localeCompare(rightDirectory ?? '')
+    if (directory !== 0) return directory
+    const fullPath = (left.cwd ?? '').localeCompare(right.cwd ?? '')
+    if (fullPath !== 0) return fullPath
+    return left.key.localeCompare(right.key)
+}
+
 export function groupMergedCodexSessionsForKanban(
     sessions: MergedCodexSession[],
     pinnedSessionKeys: ReadonlySet<string> = EMPTY_PINNED_SESSION_KEYS
@@ -301,7 +317,7 @@ export function groupMergedCodexSessionsForKanban(
     }
 
     for (const group of groups) {
-        group.sessions.sort(compareKanbanSessions)
+        group.sessions.sort(group.id === 'processing' ? compareThinkingKanbanSessions : compareKanbanSessions)
     }
 
     return groups
@@ -524,14 +540,16 @@ function KanbanSessionCard(props: {
 
     return (
         <li className="min-w-0">
-            <time
-                dateTime={new Date(modifiedAt).toISOString()}
-                className="mb-1 block px-1 text-xs tabular-nums text-[var(--app-hint)]"
-                title={formatTimestamp(session.modifiedAt)}
-                data-kanban-card-time
-            >
-                {formatKanbanSessionTime(modifiedAt, now, dateLocale, t)}
-            </time>
+            {status !== 'processing' ? (
+                <time
+                    dateTime={new Date(modifiedAt).toISOString()}
+                    className="mb-1 block px-1 text-xs tabular-nums text-[var(--app-hint)]"
+                    title={formatTimestamp(session.modifiedAt)}
+                    data-kanban-card-time
+                >
+                    {formatKanbanSessionTime(modifiedAt, now, dateLocale, t)}
+                </time>
+            ) : null}
             <div className="relative min-w-0">
                 <button
                     type="button"
@@ -646,6 +664,19 @@ function GitDirtyIndicator(props: { label: string }) {
             data-git-dirty
             className="h-2 w-2 shrink-0 rounded-full bg-[#F5A524] shadow-[0_0_0_2px_rgba(245,165,36,0.14)]"
         />
+    )
+}
+
+function ThinkingKanbanLabel(props: { label: string }) {
+    return (
+        <span className="inline-flex whitespace-nowrap" data-kanban-thinking-label>
+            {props.label}
+            <span className="inline-flex w-[1.35em]" aria-hidden="true">
+                <span>.</span>
+                <span className="session-kanban-thinking-dot-second">.</span>
+                <span className="session-kanban-thinking-dot-third">.</span>
+            </span>
+        </span>
     )
 }
 
@@ -1282,9 +1313,18 @@ export function RecentCodexSessions(props: {
                                         />
                                     )}
                                     <h2 className="text-xs font-semibold tracking-[0.04em] text-[var(--app-hint)]">
-                                        {t(presentation.labelKey)}
+                                        {group.id === 'processing' ? (
+                                            <ThinkingKanbanLabel label={t(presentation.labelKey)} />
+                                        ) : t(presentation.labelKey)}
                                     </h2>
-                                    <span className="text-xs tabular-nums text-[var(--app-hint)]">{group.sessions.length}</span>
+                                    {group.id !== 'processing' ? (
+                                        <span
+                                            className="text-xs tabular-nums text-[var(--app-hint)]"
+                                            data-kanban-group-count
+                                        >
+                                            {group.sessions.length}
+                                        </span>
+                                    ) : null}
                                 </div>
                                 <ul className="mt-2 flex flex-col gap-2.5 pl-5" data-kanban-card-column>
                                     {group.sessions.map((session) => (

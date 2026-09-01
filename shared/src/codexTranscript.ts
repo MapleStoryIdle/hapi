@@ -1122,6 +1122,38 @@ function buildImportedAgentMessage(data: unknown, createdAt?: number): CodexImpo
     }
 }
 
+function getCodexReasoningSummaryParts(payload: Record<string, unknown>): string[] {
+    const values = Array.isArray(payload.summary) ? payload.summary : []
+    const parts: string[] = []
+    for (const value of values) {
+        const record = asRecord(value)
+        const text = (typeof value === 'string' ? value : asString(record?.text))?.trim()
+        if (!text || parts[parts.length - 1] === text) continue
+        parts.push(text)
+    }
+    return parts
+}
+
+function getPendingReasoningText(accumulator: CodexTranscriptImportAccumulator): string | null {
+    return accumulator.pendingReasoningParts.length > 0
+        ? accumulator.pendingReasoningParts.join('\n\n')
+        : null
+}
+
+function buildCanonicalReasoningMessage(
+    record: Record<string, unknown>,
+    fallbackText: string | null
+): CodexImportedMessageContent | null {
+    if (record.type !== 'response_item') return null
+    const payload = asRecord(record.payload)
+    if (payload?.type !== 'reasoning') return null
+    const message = getCodexReasoningSummaryParts(payload).join('\n\n') || fallbackText?.trim()
+    if (!message) return null
+    const id = asString(payload.id)
+        ?? `codex-reasoning:${asString(record.timestamp) ?? message.length}`
+    return buildImportedAgentMessage({ type: 'reasoning', message, id }, getCodexRecordTimestamp(record))
+}
+
 function convertCodexRecordToImportedMessage(record: Record<string, unknown>): CodexImportedMessageContent | null {
     const type = asString(record.type)
     const payload = asRecord(record.payload)
@@ -1240,6 +1272,9 @@ export type CodexTranscriptImportAccumulator = {
     startedAtByCallId: Map<string, number>
     toolResultIndexesByCallId: Map<string, number[]>
     pendingHeartbeatTimestamp?: number
+    pendingReasoningIndex?: number
+    pendingReasoningParts: string[]
+    reasoningFingerprintsInCurrentTurn: Set<string>
 }
 
 export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportAccumulator {
@@ -1248,7 +1283,9 @@ export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportA
         canonicalChatMessageIndexByRolloutKey: new Map(),
         userMessageMirrorDeduper: createCodexUserMessageMirrorDeduper(),
         startedAtByCallId: new Map(),
-        toolResultIndexesByCallId: new Map()
+        toolResultIndexesByCallId: new Map(),
+        pendingReasoningParts: [],
+        reasoningFingerprintsInCurrentTurn: new Set()
     }
 }
 
@@ -1312,6 +1349,115 @@ function addImportedMessage(
     accumulator.messages.push(message)
 }
 
+function getImportedReasoningData(message: CodexImportedMessageContent): Record<string, unknown> | null {
+    const data = getImportedToolData(message)
+    return data?.type === 'reasoning' ? data : null
+}
+
+function appendPendingReasoningPart(
+    accumulator: CodexTranscriptImportAccumulator,
+    text: string,
+    createdAt: number | undefined,
+    timestamp: string | null
+): void {
+    const part = text.trim()
+    if (!part || accumulator.pendingReasoningParts[accumulator.pendingReasoningParts.length - 1] === part) {
+        return
+    }
+    accumulator.pendingReasoningParts.push(part)
+    const message = accumulator.pendingReasoningParts.join('\n\n')
+
+    if (accumulator.pendingReasoningIndex === undefined) {
+        accumulator.pendingReasoningIndex = accumulator.messages.length
+        addImportedMessage(accumulator, buildImportedAgentMessage({
+            type: 'reasoning',
+            message,
+            id: `codex-reasoning-event:${timestamp ?? accumulator.messages.length}`
+        }, createdAt))
+        return
+    }
+
+    const existing = accumulator.messages[accumulator.pendingReasoningIndex]
+    const data = existing ? getImportedReasoningData(existing) : null
+    if (!existing || !data || existing.role !== 'agent') return
+    accumulator.messages[accumulator.pendingReasoningIndex] = {
+        ...existing,
+        content: {
+            ...existing.content,
+            data: { ...data, message }
+        }
+    }
+}
+
+function resetPendingReasoning(accumulator: CodexTranscriptImportAccumulator): void {
+    accumulator.pendingReasoningIndex = undefined
+    accumulator.pendingReasoningParts = []
+}
+
+function finalizePendingReasoning(
+    accumulator: CodexTranscriptImportAccumulator,
+    canonicalMessage: CodexImportedMessageContent | null = null
+): void {
+    const pendingIndex = accumulator.pendingReasoningIndex
+    const pendingMessage = pendingIndex === undefined ? null : accumulator.messages[pendingIndex] ?? null
+    const resolvedMessage = canonicalMessage ?? pendingMessage
+    if (!resolvedMessage) {
+        resetPendingReasoning(accumulator)
+        return
+    }
+
+    const text = asString(getImportedReasoningData(resolvedMessage)?.message)?.trim()
+    if (!text) {
+        resetPendingReasoning(accumulator)
+        return
+    }
+
+    if (accumulator.reasoningFingerprintsInCurrentTurn.has(text)) {
+        if (pendingIndex !== undefined && pendingIndex === accumulator.messages.length - 1) {
+            accumulator.messages.pop()
+        }
+        resetPendingReasoning(accumulator)
+        return
+    }
+
+    accumulator.reasoningFingerprintsInCurrentTurn.add(text)
+    if (pendingIndex !== undefined) {
+        accumulator.messages[pendingIndex] = resolvedMessage
+    } else if (canonicalMessage) {
+        addImportedMessage(accumulator, canonicalMessage)
+    }
+    resetPendingReasoning(accumulator)
+}
+
+function getCodexRecordKinds(record: Record<string, unknown>): {
+    recordType: string | null
+    payloadType: string | null
+    payload: Record<string, unknown> | null
+} {
+    const payload = asRecord(record.payload)
+    return {
+        recordType: asString(record.type),
+        payloadType: asString(payload?.type),
+        payload
+    }
+}
+
+function startsReasoningTurn(recordType: string | null, payloadType: string | null, payload: Record<string, unknown> | null): boolean {
+    return (recordType === 'event_msg' && (payloadType === 'task_started' || payloadType === 'user_message'))
+        || (recordType === 'response_item' && payloadType === 'message' && payload?.role === 'user')
+}
+
+function endsReasoningTurn(recordType: string | null, payloadType: string | null): boolean {
+    return recordType === 'event_msg'
+        && (payloadType === 'task_complete' || payloadType === 'turn_aborted' || payloadType === 'task_failed')
+}
+
+function shouldClosePendingReasoning(message: CodexImportedMessageContent | null): boolean {
+    if (!message) return false
+    const data = getImportedToolData(message)
+    return data?.type !== 'token_count'
+}
+
 /** Append complete JSONL records to an existing native transcript import. */
 export function appendCodexTranscriptImportLines(
     accumulator: CodexTranscriptImportAccumulator,
@@ -1322,7 +1468,41 @@ export function appendCodexTranscriptImportLines(
         try {
             const record = asRecord(JSON.parse(line))
             if (!record) continue
+            const { recordType, payloadType, payload } = getCodexRecordKinds(record)
+
+            if (recordType === 'event_msg' && payloadType === 'agent_reasoning_delta') {
+                continue
+            }
+            if (recordType === 'event_msg' && payloadType === 'agent_reasoning') {
+                const text = asString(payload?.text) ?? asString(payload?.message)
+                if (text) {
+                    appendPendingReasoningPart(
+                        accumulator,
+                        text,
+                        getCodexRecordTimestamp(record),
+                        asString(record.timestamp)
+                    )
+                }
+                continue
+            }
+            if (recordType === 'response_item' && payloadType === 'reasoning') {
+                finalizePendingReasoning(
+                    accumulator,
+                    buildCanonicalReasoningMessage(record, getPendingReasoningText(accumulator))
+                )
+                continue
+            }
+
             let message = convertCodexRecordToImportedMessage(record)
+            if (shouldClosePendingReasoning(message) || startsReasoningTurn(recordType, payloadType, payload) || endsReasoningTurn(recordType, payloadType)) {
+                finalizePendingReasoning(accumulator)
+            }
+            if (startsReasoningTurn(recordType, payloadType, payload)) {
+                accumulator.reasoningFingerprintsInCurrentTurn.clear()
+            }
+            if (endsReasoningTurn(recordType, payloadType)) {
+                accumulator.reasoningFingerprintsInCurrentTurn.clear()
+            }
             const suppressUserMirror = accumulator.userMessageMirrorDeduper.shouldSuppress(
                 record,
                 message?.role === 'user' ? message.content.text : ''

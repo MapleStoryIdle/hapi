@@ -113,7 +113,8 @@ function transformAssistantGroup(group: VisibleChatBlock[]): VisibleChatBlock[] 
         flattenSourceBlock(block, tools, detailBlocks)
     }
 
-    if (tools.length === 0) {
+    const reasoningOnly = detailSourceBlocks.every((block) => block.kind === 'agent-reasoning')
+    if (tools.length === 0 && !reasoningOnly) {
         return group
     }
 
