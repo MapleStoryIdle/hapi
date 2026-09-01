@@ -72,8 +72,8 @@ function createDuplicatedChatTranscript(codexHome: string, sessionId: string): v
         { type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } },
         // User copies occur response_item then event_msg; assistant copies are
         // written in the opposite order by the current Codex CLI.
-        { timestamp: '2026-06-05T10:00:00.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'duplicate user message' }] } },
-        { timestamp: '2026-06-05T10:00:00.001Z', type: 'event_msg', payload: { type: 'user_message', message: 'duplicate user message' } },
+        { timestamp: '2026-06-05T10:00:00.499Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'duplicate user message' }] } },
+        { timestamp: '2026-06-05T10:00:00.501Z', type: 'event_msg', payload: { type: 'user_message', message: 'duplicate user message' } },
         { timestamp: '2026-06-05T10:00:01.001Z', type: 'event_msg', payload: { type: 'agent_message', message: 'duplicate assistant message' } },
         { timestamp: '2026-06-05T10:00:01.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'duplicate assistant message' }] } },
         // A second real turn with the same text must remain visible.
@@ -81,6 +81,50 @@ function createDuplicatedChatTranscript(codexHome: string, sessionId: string): v
         { timestamp: '2026-06-05T10:01:00.001Z', type: 'event_msg', payload: { type: 'user_message', message: 'duplicate user message' } },
         { timestamp: '2026-06-05T10:01:01.001Z', type: 'event_msg', payload: { type: 'agent_message', message: 'duplicate assistant message' } },
         { timestamp: '2026-06-05T10:01:01.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'duplicate assistant message' }] } }
+    ]
+    writeFileSync(transcriptPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf-8')
+}
+
+function createScaffoldedChatTranscript(codexHome: string, sessionId: string): void {
+    const sessionDir = join(codexHome, 'sessions', '2026', '08', '31')
+    mkdirSync(sessionDir, { recursive: true })
+    const transcriptPath = join(sessionDir, `rollout-${sessionId}.jsonl`)
+    const wrapper = [
+        '# Files mentioned by the user:',
+        '## brief.txt: /private/generated/brief.txt',
+        '## My request:',
+        'Summarize the attachment.'
+    ].join('\n')
+    const lines = [
+        { type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } },
+        {
+            timestamp: '2026-08-31T10:00:00.000Z',
+            type: 'response_item',
+            payload: {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: '<goal_context>internal</goal_context>' }]
+            }
+        },
+        {
+            timestamp: '2026-08-31T10:00:01.000Z',
+            type: 'response_item',
+            payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: wrapper }] }
+        },
+        {
+            timestamp: '2026-08-31T10:00:01.001Z',
+            type: 'event_msg',
+            payload: { type: 'user_message', message: wrapper }
+        },
+        {
+            timestamp: '2026-08-31T10:00:02.000Z',
+            type: 'response_item',
+            payload: {
+                type: 'message',
+                role: 'assistant',
+                content: [{ type: 'output_text', text: 'The Files mentioned marker is generated context.' }]
+            }
+        }
     ]
     writeFileSync(transcriptPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf-8')
 }
@@ -275,7 +319,7 @@ describe('Codex Desktop import routes', () => {
                 { role: 'agent', content: { type: AGENT_MESSAGE_PAYLOAD_TYPE, data: { type: 'message', message: 'duplicate assistant message' } } }
             ])
             expect(context.messages.map(({ id, createdAt, position }) => ({ id, createdAt, position }))).toEqual([
-                { id: `codex-local:${codexSessionId}:0`, createdAt: Date.parse('2026-06-05T10:00:00.000Z'), position: 0 },
+                { id: `codex-local:${codexSessionId}:0`, createdAt: Date.parse('2026-06-05T10:00:00.499Z'), position: 0 },
                 { id: `codex-local:${codexSessionId}:1`, createdAt: Date.parse('2026-06-05T10:00:01.000Z'), position: 1 },
                 { id: `codex-local:${codexSessionId}:2`, createdAt: Date.parse('2026-06-05T10:01:00.000Z'), position: 2 },
                 { id: `codex-local:${codexSessionId}:3`, createdAt: Date.parse('2026-06-05T10:01:01.000Z'), position: 3 }
@@ -290,6 +334,94 @@ describe('Codex Desktop import routes', () => {
             expect(result.success).toBe(true)
             const session = store.sessions.getSessionsByNamespace('default')[0]
             expect(store.messages.getAllMessages(session.id)).toHaveLength(4)
+        } finally {
+            store.close()
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('normalizes Codex-owned user scaffolding in the host-local parser', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-scaffold-test-'))
+        const codexSessionId = '14141414-1414-4414-8414-141414141414'
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            createScaffoldedChatTranscript(codexHome, codexSessionId)
+            const app = createRoutesApp('default')
+            const response = await app.request(`/api/codex/sessions/${codexSessionId}/context`)
+            const body = await response.json() as {
+                session: { title: string }
+                messages: Array<{ content: { role: string; content: { text?: string; data?: { message?: string } } } }>
+            }
+
+            expect(response.status).toBe(200)
+            expect(body.session.title).toBe('Summarize the attachment.')
+            expect(body.messages.map((message) => message.content)).toMatchObject([
+                { role: 'user', content: { text: 'Summarize the attachment.' } },
+                { role: 'agent', content: { data: { message: 'The Files mentioned marker is generated context.' } } }
+            ])
+            expect(JSON.stringify(body)).not.toContain('/private/generated/brief.txt')
+            expect(JSON.stringify(body)).not.toContain('<goal_context>')
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('reuses a previously imported session whose stored user message still has the raw scaffold', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-legacy-scaffold-reconcile-test-'))
+        const store = new Store(':memory:')
+        const codexSessionId = '16161616-1616-4616-8616-161616161616'
+        const rawWrapper = [
+            '# Files mentioned by the user:',
+            '## brief.txt: /private/generated/brief.txt',
+            '## My request:',
+            'Summarize the attachment.'
+        ].join('\n')
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            createScaffoldedChatTranscript(codexHome, codexSessionId)
+            const existing = store.sessions.getOrCreateSession('legacy-scaffold-session', {
+                path: '/workspace/project',
+                flavor: 'codex',
+                codexSessionId
+            }, {}, 'default')
+            store.messages.addMessage(existing.id, {
+                role: 'user',
+                content: { type: 'text', text: '<goal_context>internal</goal_context>' },
+                meta: { sentFrom: 'cli' }
+            })
+            store.messages.addMessage(existing.id, {
+                role: 'user',
+                content: { type: 'text', text: rawWrapper },
+                meta: { sentFrom: 'cli' }
+            })
+            store.messages.addMessage(existing.id, {
+                role: 'agent',
+                content: {
+                    type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                    data: {
+                        type: 'message',
+                        message: 'The Files mentioned marker is generated context.',
+                        id: 'legacy-assistant-message'
+                    }
+                },
+                meta: { sentFrom: 'cli' }
+            })
+
+            const result = await importSelectedCodexSessions({
+                codexSessionIds: [codexSessionId],
+                store,
+                namespace: 'default',
+                getSyncEngine: () => null
+            })
+
+            expect(result.success).toBe(true)
+            expect(result.output).toContain(`Hapi session: ${existing.id}`)
+            expect(result.output).toContain('Action: updated')
+            expect(result.output).toContain('Appended messages: 0')
+            expect(store.sessions.getSessionsByNamespace('default')).toHaveLength(1)
+            expect(store.messages.getAllMessages(existing.id)).toHaveLength(3)
         } finally {
             store.close()
             rmSync(codexHome, { recursive: true, force: true })

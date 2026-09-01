@@ -5,6 +5,11 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { homedir, hostname, platform } from 'node:os'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import {
+    createCodexUserMessageMirrorDeduper,
+    normalizeCodexUserMessageContent,
+    normalizeCodexUserMessageText
+} from '@hapi/protocol/codexUserMessage'
+import {
     getLatestCodexSessionConfig,
     isHapiInitiatedCodexSession,
     normalizeCodexCustomToolInput,
@@ -393,17 +398,6 @@ function getCodexRolloutTimestampKey(value: string | null): string | null {
     return Number.isFinite(milliseconds) ? String(Math.round(milliseconds / 1_000)) : value
 }
 
-function shouldIgnoreSyntheticUserMessage(text: string): boolean {
-    const normalized = text.trim()
-    return normalized.startsWith('# AGENTS.md instructions')
-        || normalized.startsWith('<environment_context>')
-        || normalized.startsWith('<app-context>')
-        || normalized.startsWith('<skills_instructions>')
-        || normalized.startsWith('<permissions instructions>')
-        || normalized.startsWith('<collaboration_mode>')
-        || normalized.startsWith('<plugins_instructions>')
-}
-
 function inferSessionIdFromFileName(filePath: string): string | null {
     const match = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/.exec(filePath)
     return match?.[1] ?? null
@@ -536,8 +530,8 @@ function getLatestCodexUserMessage(lines: string[]): string | null {
             if (!record || record.type !== 'response_item') continue
             const payload = asRecord(record.payload)
             if (payload?.type !== 'message' || payload.role !== 'user') continue
-            const text = extractCodexText(payload.content)
-            if (text && !shouldIgnoreSyntheticUserMessage(text)) {
+            const text = normalizeCodexUserMessageContent(payload.content)
+            if (text) {
                 return truncateText(text, 140)
             }
         } catch {
@@ -634,8 +628,8 @@ function parseCodexLocalSession(
         if (!firstUserMessage && type === 'response_item') {
             const payload = asRecord(record?.payload)
             if (payload?.type === 'message' && payload.role === 'user') {
-                const text = extractCodexText(payload.content)
-                if (text && !shouldIgnoreSyntheticUserMessage(text)) {
+                const text = normalizeCodexUserMessageContent(payload.content)
+                if (text) {
                     firstUserMessage = text
                 }
             }
@@ -762,10 +756,11 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
         }
 
         if (eventType === 'user_message') {
-            const text = asString(payload.message)
+            const rawText = asString(payload.message)
                 ?? asString(payload.text)
                 ?? asString(payload.content)
-            if (!text || shouldIgnoreSyntheticUserMessage(text)) {
+            const text = rawText ? normalizeCodexUserMessageText(rawText) : null
+            if (!text) {
                 return null
             }
             return buildImportedUserMessage(text, createdAt)
@@ -806,14 +801,14 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
 
         if (itemType === 'message') {
             const role = asString(payload.role)
-            const text = extractCodexText(payload.content)
-            if (!text || shouldIgnoreSyntheticUserMessage(text)) {
-                return null
-            }
             if (role === 'user') {
+                const text = normalizeCodexUserMessageContent(payload.content)
+                if (!text) return null
                 return buildImportedUserMessage(text, createdAt)
             }
             if (role === 'assistant') {
+                const text = extractCodexText(payload.content)
+                if (!text) return null
                 return buildImportedAgentMessage({ type: 'message', message: text, id: randomUUID() }, createdAt)
             }
             return null
@@ -910,6 +905,7 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
     const lines = content.split(/\r?\n/).filter(Boolean)
     const messages: CodexImportedMessageContent[] = []
     const canonicalChatMessageIndexByRolloutKey = new Map<string, number>()
+    const userMessageMirrorDeduper = createCodexUserMessageMirrorDeduper()
     let pendingHeartbeatTimestamp: number | undefined
 
     for (const line of lines) {
@@ -923,7 +919,11 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
         const record = asRecord(parsed)
         if (!record) continue
         let message = convertCodexRecordToImportedMessage(record)
-        if (!message) continue
+        const suppressUserMirror = userMessageMirrorDeduper.shouldSuppress(
+            record,
+            message?.role === 'user' ? message.content.text : ''
+        )
+        if (!message || suppressUserMirror) continue
 
         const heartbeatTimestamp = getHeartbeatTimestamp(message)
         if (message.role === 'user') {
@@ -936,7 +936,7 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
             message = { ...message, createdAt: pendingHeartbeatTimestamp }
         }
 
-        const fingerprint = importedChatMessageFingerprint(message)
+        const fingerprint = message.role === 'user' ? null : importedChatMessageFingerprint(message)
         const timestamp = getCodexRolloutTimestampKey(asString(record.timestamp))
         const rolloutKey = fingerprint && timestamp ? `${timestamp}\u0000${fingerprint}` : null
         // Standard Codex rollouts write the same chat item in both formats at
@@ -1285,9 +1285,14 @@ function normalizeComparableContent(content: unknown): string | null {
         if (body?.type !== 'text' || typeof body.text !== 'string') {
             return null
         }
+        // Sessions imported before Codex scaffold normalization can still
+        // contain the raw wrapper. Compare its visible request so a later
+        // sync reuses the same HAPI session instead of creating a fork.
+        const text = normalizeCodexUserMessageText(body.text)
+        if (!text) return null
         return stableSerialize({
             role: 'user',
-            text: body.text
+            text
         })
     }
 

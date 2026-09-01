@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
+import {
+    createCodexUserMessageMirrorDeduper,
+    normalizeCodexUserMessageContent,
+    normalizeCodexUserMessageText
+} from './codexUserMessage'
 import { parseAutomationHeartbeatMessageContent } from './messages'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
 import type { SlashCommand } from './apiTypes'
@@ -421,17 +426,6 @@ function getCodexRolloutTimestampKey(value: string | null): string | null {
     return Number.isFinite(milliseconds) ? String(Math.round(milliseconds / 1_000)) : value
 }
 
-function shouldIgnoreSyntheticUserMessage(text: string): boolean {
-    const normalized = text.trim()
-    return normalized.startsWith('# AGENTS.md instructions')
-        || normalized.startsWith('<environment_context>')
-        || normalized.startsWith('<app-context>')
-        || normalized.startsWith('<skills_instructions>')
-        || normalized.startsWith('<permissions instructions>')
-        || normalized.startsWith('<collaboration_mode>')
-        || normalized.startsWith('<plugins_instructions>')
-}
-
 function inferSessionIdFromFileName(filePath: string): string | null {
     const match = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/.exec(filePath)
     return match?.[1] ?? null
@@ -633,8 +627,8 @@ function getLatestCodexUserMessage(lines: string[]): string | null {
             if (!record || record.type !== 'response_item') continue
             const payload = asRecord(record.payload)
             if (payload?.type !== 'message' || payload.role !== 'user') continue
-            const text = extractCodexText(payload.content)
-            if (text && !shouldIgnoreSyntheticUserMessage(text)) return truncateText(text, 140)
+            const text = normalizeCodexUserMessageContent(payload.content)
+            if (text) return truncateText(text, 140)
         } catch {
             // Ignore malformed transcript records.
         }
@@ -753,8 +747,8 @@ function getCodexSessionHeader(lines: readonly string[]): CodexSessionHeader {
             if (!firstUserMessage && type === 'response_item') {
                 const payload = asRecord(record?.payload)
                 if (payload?.type === 'message' && payload.role === 'user') {
-                    const text = extractCodexText(payload.content)
-                    if (text && !shouldIgnoreSyntheticUserMessage(text)) firstUserMessage = text
+                    const text = normalizeCodexUserMessageContent(payload.content)
+                    if (text) firstUserMessage = text
                 }
             }
         } catch {
@@ -1017,8 +1011,8 @@ export function getCodexTranscriptTailSummary(lines: readonly string[]): CodexTr
             if (record.type === 'response_item') {
                 const payload = asRecord(record.payload)
                 if (payload?.type === 'message' && payload.role === 'user') {
-                    const text = extractCodexText(payload.content)
-                    if (text && !shouldIgnoreSyntheticUserMessage(text)) {
+                    const text = normalizeCodexUserMessageContent(payload.content)
+                    if (text) {
                         summary.lastUserMessage = truncateText(text, 140)
                     }
                 }
@@ -1076,8 +1070,9 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
         const eventType = asString(payload.type)
         if (!eventType) return null
         if (eventType === 'user_message') {
-            const text = asString(payload.message) ?? asString(payload.text) ?? asString(payload.content)
-            return text && !shouldIgnoreSyntheticUserMessage(text) ? buildImportedUserMessage(text, createdAt) : null
+            const rawText = asString(payload.message) ?? asString(payload.text) ?? asString(payload.content)
+            const text = rawText ? normalizeCodexUserMessageText(rawText) : null
+            return text ? buildImportedUserMessage(text, createdAt) : null
         }
         if (eventType === 'agent_message') {
             const message = asString(payload.message)
@@ -1106,9 +1101,12 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
     if (!itemType) return null
     if (itemType === 'message') {
         const role = asString(payload.role)
+        if (role === 'user') {
+            const text = normalizeCodexUserMessageContent(payload.content)
+            return text ? buildImportedUserMessage(text, createdAt) : null
+        }
         const text = extractCodexText(payload.content)
-        if (!text || shouldIgnoreSyntheticUserMessage(text)) return null
-        if (role === 'user') return buildImportedUserMessage(text, createdAt)
+        if (!text) return null
         if (role === 'assistant') return buildImportedAgentMessage({ type: 'message', message: text, id: randomUUID() }, createdAt)
         return null
     }
@@ -1175,6 +1173,7 @@ function getHeartbeatTimestamp(message: CodexImportedMessageContent): number | u
 export type CodexTranscriptImportAccumulator = {
     messages: CodexImportedMessageContent[]
     canonicalChatMessageIndexByRolloutKey: Map<string, number>
+    userMessageMirrorDeduper: ReturnType<typeof createCodexUserMessageMirrorDeduper>
     startedAtByCallId: Map<string, number>
     toolResultIndexesByCallId: Map<string, number[]>
     pendingHeartbeatTimestamp?: number
@@ -1184,6 +1183,7 @@ export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportA
     return {
         messages: [],
         canonicalChatMessageIndexByRolloutKey: new Map(),
+        userMessageMirrorDeduper: createCodexUserMessageMirrorDeduper(),
         startedAtByCallId: new Map(),
         toolResultIndexesByCallId: new Map()
     }
@@ -1260,7 +1260,11 @@ export function appendCodexTranscriptImportLines(
             const record = asRecord(JSON.parse(line))
             if (!record) continue
             let message = convertCodexRecordToImportedMessage(record)
-            if (!message) continue
+            const suppressUserMirror = accumulator.userMessageMirrorDeduper.shouldSuppress(
+                record,
+                message?.role === 'user' ? message.content.text : ''
+            )
+            if (!message || suppressUserMirror) continue
 
             const heartbeatTimestamp = getHeartbeatTimestamp(message)
             if (message.role === 'user') {
@@ -1273,7 +1277,7 @@ export function appendCodexTranscriptImportLines(
                 message = { ...message, createdAt: accumulator.pendingHeartbeatTimestamp }
             }
 
-            const fingerprint = importedChatMessageFingerprint(message)
+            const fingerprint = message.role === 'user' ? null : importedChatMessageFingerprint(message)
             const timestamp = getCodexRolloutTimestampKey(asString(record.timestamp))
             const rolloutKey = fingerprint && timestamp ? `${timestamp}\u0000${fingerprint}` : null
             if (rolloutKey) {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { NativeCodexSessionTitleCache } from './nativeSessionTitleCache'
+import { getNativeCodexThreadDisplayTitle, NativeCodexSessionTitleCache } from './nativeSessionTitleCache'
 
 const cleanupPaths: string[] = []
 
@@ -20,6 +20,28 @@ function createStateDatabaseFile(root: string): string {
 }
 
 describe('NativeCodexSessionTitleCache', () => {
+    it('uses the real request from a raw scaffold title and omits helper-only titles', () => {
+        const wrappedTitle = [
+            '# Files mentioned by the user:',
+            '',
+            '## brief.txt: /private/generated/brief.txt',
+            '',
+            '## My request:',
+            'Summarize the attachment.'
+        ].join('\n')
+        const helperOnlyTitle = [
+            '# Files mentioned by the user:',
+            '',
+            '## brief.txt: /private/generated/brief.txt',
+            '',
+            '## My request:'
+        ].join('\n')
+
+        expect(getNativeCodexThreadDisplayTitle(null, wrappedTitle)).toBe('Summarize the attachment.')
+        expect(getNativeCodexThreadDisplayTitle(null, helperOnlyTitle)).toBeNull()
+        expect(getNativeCodexThreadDisplayTitle('Explicit native name', wrappedTitle)).toBe('Explicit native name')
+    })
+
     it('uses the cached Codex state title and does not request a preview field', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-codex-title-'))
         cleanupPaths.push(codexHome)

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
     getCodexSessionDisplayTitle,
+    getCodexTranscriptTailSummary,
     getLocalCodexSessionData,
     getLocalCodexSessionRunState,
     listLocalCodexSessions,
@@ -35,6 +36,83 @@ describe('getCodexSessionDisplayTitle', () => {
 })
 
 describe('getLocalCodexSessionData', () => {
+    it('uses normalized user text for titles, previews, context, and imports', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-user-normalization-test-'))
+        const sessionId = '13131313-1313-4313-8313-131313131313'
+        const sessionDir = join(codexHome, 'sessions', '2026', '08', '31')
+        mkdirSync(sessionDir, { recursive: true })
+        const file = join(sessionDir, `rollout-${sessionId}.jsonl`)
+        const firstWrapper = [
+            '# Files mentioned by the user:',
+            '## brief.txt: /private/generated/brief.txt',
+            '## My request:',
+            'Summarize the attachment.'
+        ].join('\n')
+        const latestWrapper = [
+            '<in-app-browser-context source="ambient-ui-state">',
+            'private page metadata',
+            '</in-app-browser-context>',
+            '## My request for Codex:',
+            'Fix the visible form.'
+        ].join('\n')
+        const records = [
+            { type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } },
+            {
+                timestamp: '2026-08-31T10:00:00.000Z',
+                type: 'response_item',
+                payload: {
+                    type: 'message',
+                    role: 'user',
+                    content: [{ type: 'input_text', text: '<environment_context>internal</environment_context>' }]
+                }
+            },
+            {
+                timestamp: '2026-08-31T10:00:01.499Z',
+                type: 'response_item',
+                payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: firstWrapper }] }
+            },
+            {
+                timestamp: '2026-08-31T10:00:01.501Z',
+                type: 'event_msg',
+                payload: { type: 'user_message', message: firstWrapper }
+            },
+            {
+                timestamp: '2026-08-31T10:00:02.000Z',
+                type: 'response_item',
+                payload: {
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'The Files mentioned marker is generated context.' }]
+                }
+            },
+            {
+                timestamp: '2026-08-31T10:00:03.000Z',
+                type: 'response_item',
+                payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: latestWrapper }] }
+            }
+        ]
+        writeFileSync(file, `${records.map((record) => JSON.stringify(record)).join('\n')}\n`, 'utf-8')
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            const data = getLocalCodexSessionData(sessionId, { limit: 50 })
+            expect(data?.session).toMatchObject({
+                title: 'Summarize the attachment.',
+                lastUserMessage: 'Fix the visible form.'
+            })
+            expect(data?.context).toEqual([
+                { role: 'user', text: 'Summarize the attachment.' },
+                { role: 'assistant', text: 'The Files mentioned marker is generated context.' },
+                { role: 'user', text: 'Fix the visible form.' }
+            ])
+            expect(data?.importedMessages.filter((message) => message.role === 'user').map((message) => (
+                message.role === 'user' ? message.content.text : ''
+            ))).toEqual(['Summarize the attachment.', 'Fix the visible form.'])
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
     it('keeps heartbeat timestamps from the trigger for its final status response', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-heartbeat-test-'))
         const sessionId = '99999999-9999-4999-8999-999999999999'
@@ -405,5 +483,28 @@ describe('getLocalCodexSessionRunState', () => {
         } finally {
             rmSync(codexHome, { recursive: true, force: true })
         }
+    })
+})
+
+describe('getCodexTranscriptTailSummary', () => {
+    it('uses the extracted request for the latest user preview', () => {
+        const wrapper = [
+            '# Applications mentioned by the user:',
+            'Application metadata: private-app-id',
+            '## My request:',
+            'Open the selected application.'
+        ].join('\n')
+        const summary = getCodexTranscriptTailSummary([
+            JSON.stringify({
+                type: 'response_item',
+                payload: {
+                    type: 'message',
+                    role: 'user',
+                    content: [{ type: 'input_text', text: wrapper }]
+                }
+            })
+        ])
+
+        expect(summary.lastUserMessage).toBe('Open the selected application.')
     })
 })

@@ -5,6 +5,7 @@ import type { ReasoningEffort } from './appServerTypes';
 import { CodexSession } from './session';
 import { createCodexSessionScanner, type CodexSessionScanner } from './utils/codexSessionScanner';
 import { convertCodexEvent } from './utils/codexEventConverter';
+import { createCodexUserMessageMirrorDeduper } from './utils/codexUserMessageMirror';
 import { buildHapiMcpBridge } from './utils/buildHapiMcpBridge';
 import { stripCodexCliOverrides } from './utils/codexCliOverrides';
 import { buildCodexPermissionModeCliArgs } from './utils/permissionModeConfig';
@@ -19,6 +20,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     let hookReady = false;
     let shuttingDown = false;
     let pendingScannerSetup: Promise<void> | null = null;
+    const userMessageMirrorDeduper = createCodexUserMessageMirrorDeduper();
     const permissionMode = session.getPermissionMode();
     const managedPermissionMode = permissionMode === 'read-only' || permissionMode === 'safe-yolo' || permissionMode === 'yolo'
         ? permissionMode
@@ -63,6 +65,9 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
             return;
         }
         primarySessionId = sessionId;
+        if (primaryTranscriptPath !== transcriptPath) {
+            userMessageMirrorDeduper.reset();
+        }
         primaryTranscriptPath = transcriptPath;
         session.onSessionFound(sessionId);
         hookReady = true;
@@ -95,6 +100,10 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
             },
             onEvent: (event) => {
                 const converted = convertCodexEvent(event);
+                const suppressUserMessage = userMessageMirrorDeduper.shouldSuppress(
+                    event,
+                    converted?.userMessage ?? ''
+                );
                 if (converted?.sessionId) {
                     if (!isPrimarySessionId(converted.sessionId)) {
                         logger.debug(`[codex-local]: Ignoring converted session id ${converted.sessionId}; primary is ${primarySessionId}`);
@@ -102,7 +111,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                     }
                     session.onSessionFound(converted.sessionId);
                 }
-                if (converted?.userMessage) {
+                if (converted?.userMessage && !suppressUserMessage) {
                     session.sendUserMessage(converted.userMessage);
                 }
                 if (converted?.message) {

@@ -442,6 +442,48 @@ describe('codexLocalLauncher', () => {
         });
     });
 
+    it('emits one user message for response_item and event_msg mirrors', async () => {
+        const transcriptPath = join(tempDir, 'codex-import-mirrored-user-transcript.jsonl');
+        const { session, userMessages } = createSessionStub('default', undefined, '/tmp/worktree', null, true);
+        let releaseRunBarrier: (() => void) | undefined;
+        harness.runBarrier = new Promise((resolve) => {
+            releaseRunBarrier = resolve;
+        });
+
+        await writeFile(
+            transcriptPath,
+            [
+                JSON.stringify({ type: 'session_meta', payload: { id: 'codex-thread-import-mirror' } }),
+                JSON.stringify({
+                    timestamp: '2026-08-31T10:00:00.000Z',
+                    type: 'response_item',
+                    payload: {
+                        type: 'message',
+                        role: 'user',
+                        content: [{ type: 'input_text', text: 'mirrored user message' }]
+                    }
+                }),
+                JSON.stringify({
+                    timestamp: '2026-08-31T10:00:00.005Z',
+                    type: 'event_msg',
+                    payload: { type: 'user_message', message: 'mirrored user message' }
+                })
+            ].join('\n') + '\n'
+        );
+
+        const launcherPromise = codexLocalLauncher(session as never);
+        await wait(50);
+        harness.sessionHookHandlers[0]?.('codex-thread-import-mirror', {
+            transcript_path: transcriptPath
+        });
+        await wait(300);
+
+        releaseRunBarrier?.();
+        await launcherPromise;
+
+        expect(userMessages).toEqual(['mirrored user message']);
+    });
+
     it('does not let a later non-clear hook replace the primary session', async () => {
         const primaryTranscriptPath = await writeTranscriptMeta('primary-later-hook.jsonl', 'primary-thread');
         const otherTranscriptPath = await writeTranscriptMeta('later-other-transcript.jsonl', 'other-thread');

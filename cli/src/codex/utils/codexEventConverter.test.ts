@@ -32,6 +32,23 @@ describe('convertCodexEvent', () => {
         expect(result?.userMessage).toBe('hello user');
     });
 
+    it('unwraps generated user_message scaffolding', () => {
+        const result = convertCodexEvent({
+            type: 'event_msg',
+            payload: {
+                type: 'user_message',
+                message: [
+                    '# Files mentioned by the user:',
+                    '## brief.txt: /private/generated/brief.txt',
+                    '## My request:',
+                    'Summarize the attachment.'
+                ].join('\n')
+            }
+        });
+
+        expect(result?.userMessage).toBe('Summarize the attachment.');
+    });
+
     it('converts response_item user messages', () => {
         const result = convertCodexEvent({
             type: 'response_item',
@@ -45,6 +62,36 @@ describe('convertCodexEvent', () => {
         expect(result).toEqual({
             userMessage: 'hello from response_item user'
         });
+    });
+
+    it('drops internal and legacy image parts from response_item user messages', () => {
+        const result = convertCodexEvent({
+            type: 'response_item',
+            payload: {
+                type: 'message',
+                role: 'user',
+                content: [
+                    { type: 'input_text', text: '<environment_context>internal</environment_context>' },
+                    { type: 'input_text', text: '<image name=[Image #1] path="/private/generated/image.png">' },
+                    { type: 'input_image', image_url: 'data:image/png;base64,example' },
+                    { type: 'input_text', text: '</image>' },
+                    { type: 'input_text', text: 'Describe this image.' }
+                ]
+            }
+        });
+
+        expect(result).toEqual({ userMessage: 'Describe this image.' });
+    });
+
+    it('omits response_item messages that contain only internal context', () => {
+        expect(convertCodexEvent({
+            type: 'response_item',
+            payload: {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: '<goal_context>internal</goal_context>' }]
+            }
+        })).toBeNull();
     });
 
     it('converts response_item assistant messages', () => {
@@ -61,6 +108,20 @@ describe('convertCodexEvent', () => {
             type: 'message',
             message: 'hello from response_item assistant'
         });
+    });
+
+    it('does not filter assistant discussion of a scaffold marker', () => {
+        const assistantText = 'The marker # Files mentioned by the user: came from generated context.';
+        const result = convertCodexEvent({
+            type: 'response_item',
+            payload: {
+                type: 'message',
+                role: 'assistant',
+                content: [{ type: 'output_text', text: assistantText }]
+            }
+        });
+
+        expect(result?.message).toMatchObject({ type: 'message', message: assistantText });
     });
 
     it('converts reasoning events', () => {

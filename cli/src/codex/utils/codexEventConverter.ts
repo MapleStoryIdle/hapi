@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { normalizeCodexUserMessageContent, normalizeCodexUserMessageText } from '@hapi/protocol/codexUserMessage';
 import { logger } from '@/ui/logger';
 
 const CodexSessionEventSchema = z.object({
@@ -143,9 +144,10 @@ export function convertCodexEvent(rawEvent: unknown): CodexConversionResult | nu
         }
 
         if (eventType === 'user_message') {
-            const message = asString(payloadRecord.message)
+            const rawMessage = asString(payloadRecord.message)
                 ?? asString(payloadRecord.text)
                 ?? asString(payloadRecord.content);
+            const message = rawMessage ? normalizeCodexUserMessageText(rawMessage) : null;
             if (!message) {
                 return null;
             }
@@ -220,14 +222,18 @@ export function convertCodexEvent(rawEvent: unknown): CodexConversionResult | nu
 
         if (itemType === 'message') {
             const role = asString(payloadRecord.role);
-            const text = extractCodexText(payloadRecord.content);
-            if (!text) {
-                return null;
-            }
             if (role === 'user') {
+                const text = normalizeCodexUserMessageContent(payloadRecord.content);
+                if (!text) {
+                    return null;
+                }
                 return { userMessage: text };
             }
             if (role === 'assistant') {
+                const text = extractCodexText(payloadRecord.content);
+                if (!text) {
+                    return null;
+                }
                 return {
                     message: {
                         type: 'message',

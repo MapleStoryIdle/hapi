@@ -2,6 +2,7 @@ import { readdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import type { Database } from 'bun:sqlite'
+import { normalizeCodexUserMessageText } from '@hapi/protocol/codexUserMessage'
 import { getCodexSessionDisplayTitle } from '@hapi/protocol/codexTranscript'
 import { getCodexHomePath } from './codexHome'
 
@@ -78,6 +79,15 @@ function normalizeTitle(value: unknown): string | null {
     return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+export function getNativeCodexThreadDisplayTitle(nameValue: unknown, rawTitleValue: unknown): string | null {
+    const name = normalizeTitle(nameValue)
+    if (name) return name
+
+    const rawTitle = normalizeTitle(rawTitleValue)
+    const userTitle = rawTitle ? normalizeCodexUserMessageText(rawTitle) : null
+    return userTitle ? getCodexSessionDisplayTitle(userTitle) : null
+}
+
 function readCodexThreadTitles(databasePath: string, sessionIds: readonly string[]): Map<string, string> | null {
     if (sessionIds.length === 0) return new Map()
 
@@ -109,9 +119,7 @@ function readCodexThreadTitles(databasePath: string, sessionIds: readonly string
             // optional `name` is Codex's short, generated session name. Keep
             // that short name when it exists; otherwise compact the raw
             // prompt so links and multi-line input never become a list label.
-            const name = normalizeTitle(row.name)
-            const rawTitle = normalizeTitle(row.title)
-            const title = name ?? (rawTitle ? getCodexSessionDisplayTitle(rawTitle) : null)
+            const title = getNativeCodexThreadDisplayTitle(row.name, row.title)
             if (title) titles.set(row.id, title)
         }
         return titles

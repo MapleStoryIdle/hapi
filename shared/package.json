@@ -11,6 +11,7 @@
         "./messages": "./src/messages.ts",
         "./slashCommands": "./src/slashCommands.ts",
         "./buildInfo": "./src/buildInfo.ts",
+        "./codexUserMessage": "./src/codexUserMessage.ts",
         "./codexTranscript": "./src/codexTranscript.ts",
         "./modes": "./src/modes.ts",
         "./rpcMethods": "./src/rpcMethods.ts",
