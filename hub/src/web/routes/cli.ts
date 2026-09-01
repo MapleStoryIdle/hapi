@@ -7,7 +7,7 @@ import {
     CursorMigrateToAcpRequestSchema,
     PROTOCOL_VERSION
 } from '@hapi/protocol'
-import type { ShareSource } from '@hapi/protocol/apiTypes'
+import type { ShareSource, ShareSourceContext } from '@hapi/protocol/apiTypes'
 import { isHapiInitiatedCodexSession } from '@hapi/protocol/codexTranscript'
 import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -27,7 +27,7 @@ export function decodeShareHeaderText(raw: string | undefined, maxBytes: number)
         const bytes = Buffer.from(raw, 'base64url')
         if (bytes.length === 0 || bytes.length > maxBytes || bytes.toString('base64url') !== raw) return null
         const value = new TextDecoder('utf-8', { fatal: true }).decode(bytes).normalize('NFC')
-        return /[\u0000-\u001f\u007f]/.test(value) ? null : value
+        return Buffer.byteLength(value, 'utf8') > maxBytes || /[\u0000-\u001f\u007f]/.test(value) ? null : value
     } catch {
         return null
     }
@@ -37,6 +37,16 @@ export function decodeShareFilename(raw: string | undefined): string | null {
     const filename = decodeShareHeaderText(raw, MAX_SHARE_FILENAME_BYTES)
     if (!filename || filename !== basename(filename) || filename === '.' || filename === '..' || /[\\/\\\\]/.test(filename)) return null
     return filename
+}
+
+export function decodeShareSourceDirectoryName(raw: string | undefined): string | null {
+    const directoryName = decodeShareHeaderText(raw, MAX_SHARE_FILENAME_BYTES)
+    if (!directoryName || directoryName === '.' || directoryName === '..' || /[\\/]/.test(directoryName)) return null
+    return directoryName
+}
+
+export function decodeShareSourceGitBranch(raw: string | undefined): string | null {
+    return decodeShareHeaderText(raw, MAX_SHARE_FILENAME_BYTES)
 }
 
 export async function readShareBody(body: ReadableStream<Uint8Array> | null): Promise<Uint8Array | null> {
@@ -230,13 +240,17 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         const sourceSessionId = sourceHeader ? decodeShareHeaderText(sourceHeader, 255) : null
         const sourceMachineHeader = c.req.header('x-hapi-share-source-machine')
         const sourceMachineId = sourceMachineHeader ? decodeShareHeaderText(sourceMachineHeader, 200) : null
+        const sourceDirectoryHeader = c.req.header('x-hapi-share-source-directory')
+        const sourceDirectoryName = sourceDirectoryHeader === undefined ? null : decodeShareSourceDirectoryName(sourceDirectoryHeader)
+        const sourceBranchHeader = c.req.header('x-hapi-share-source-branch')
+        const sourceGitBranch = sourceBranchHeader === undefined ? null : decodeShareSourceGitBranch(sourceBranchHeader)
         const feedbackHeader = c.req.header('x-hapi-share-feedback')
         const feedback = feedbackHeader === '1'
         const feedbackRequestHeader = c.req.header('x-hapi-share-feedback-request')
         const feedbackRequest = feedbackRequestHeader ? decodeShareHeaderText(feedbackRequestHeader, 2000) : null
         const expires = Number(c.req.header('x-hapi-share-expires'))
         const length = Number(c.req.header('content-length'))
-        if (!filename || (sourceHeader && !sourceSessionId) || (sourceMachineHeader && !sourceMachineId) || (sourceMachineId && !sourceSessionId) || (feedbackHeader && !feedback) || (feedbackRequestHeader && !feedbackRequest) || !Number.isInteger(expires) || expires < 300 || expires > 604800 || (!Number.isNaN(length) && (length < 0 || length > MAX_ARTIFACT_BYTES))) {
+        if (!filename || (sourceHeader && !sourceSessionId) || (sourceMachineHeader && !sourceMachineId) || (sourceMachineId && !sourceSessionId) || (sourceDirectoryHeader !== undefined && !sourceDirectoryName) || (sourceBranchHeader !== undefined && !sourceGitBranch) || (sourceGitBranch && !sourceDirectoryName) || (feedbackHeader && !feedback) || (feedbackRequestHeader && !feedbackRequest) || !Number.isInteger(expires) || expires < 300 || expires > 604800 || (!Number.isNaN(length) && (length < 0 || length > MAX_ARTIFACT_BYTES))) {
             return c.json({ error: 'Invalid share upload' }, 400)
         }
         if (feedback && (!sourceSessionId || !isMarkdownShare(filename))) {
@@ -250,6 +264,9 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
             if (!resolved.ok) return c.json({ error: resolved.error, code: resolved.code }, resolved.status)
             source = resolved.source
         }
+        const sourceContext: ShareSourceContext | null = sourceDirectoryName
+            ? { directoryName: sourceDirectoryName, gitBranch: sourceGitBranch }
+            : null
         const bytes = await readShareBody(c.req.raw.body)
         if (!bytes) return c.json({ error: 'Share exceeds 10 MiB' }, 413)
         if (feedback) {
@@ -269,6 +286,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
                 bytes,
                 makePublicUrl,
                 source,
+                sourceContext,
                 feedback: feedback ? {
                     request: feedbackRequest,
                     makeFeedbackUrl: (artifactId: string): string => `${base}/f/${artifactId}`

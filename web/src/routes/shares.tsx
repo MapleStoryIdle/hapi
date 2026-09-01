@@ -13,6 +13,8 @@ import { type ToastInput, useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { useLocalDayKey } from '@/hooks/useLocalDayKey'
+import { formatShareTimelineTime, groupShareTimeline } from '@/lib/shareTimeline'
 import { useShares } from '@/hooks/queries/useShares'
 import type { ShareSummary } from '@/types/api'
 
@@ -169,7 +171,6 @@ export function ShareCard(props: {
     onOpenDetails: (share: ShareSummary) => void
     onRevoke: (share: ShareSummary) => void
     labels: {
-        createdAt: string
         expiresAt: string
         copyLink: string
         sourceSession: string
@@ -182,6 +183,7 @@ export function ShareCard(props: {
     }
 }) {
     const source = props.share.source
+    const sourceContext = props.share.sourceContext
     const canDeliver = Boolean(source && props.share.status === 'feedback_received')
     const deliveryLabel = props.share.status === 'review_sent'
         ? props.labels.delivered
@@ -202,18 +204,27 @@ export function ShareCard(props: {
                 aria-label={`${props.labels.details}: ${props.share.filename}`}
                 className="block w-full min-w-0 p-4 pb-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--app-link)]"
             >
-                <div className="min-w-0">
-                    <h2 className="truncate text-[15px] font-semibold leading-5 text-[var(--app-fg)]" title={props.share.filename}>
-                        {props.share.filename}
-                    </h2>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--app-hint)]">
-                        <span>{formatBytes(props.share.size)}</span>
-                        <span aria-hidden="true">·</span>
-                        <span>{props.labels.createdAt} {formatTimestamp(props.share.createdAt, props.locale)}</span>
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <h2 className="truncate text-[15px] font-semibold leading-5 text-[var(--app-fg)]" title={props.share.filename}>
+                            {props.share.filename}
+                        </h2>
+                        {sourceContext ? (
+                            <p data-testid="share-source-context" className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs text-[var(--app-hint)]">
+                                <span className="truncate" title={sourceContext.directoryName}>{sourceContext.directoryName}</span>
+                                {sourceContext.gitBranch ? (
+                                    <>
+                                        <span aria-hidden="true">·</span>
+                                        <span className="truncate" title={sourceContext.gitBranch}>{sourceContext.gitBranch}</span>
+                                    </>
+                                ) : null}
+                            </p>
+                        ) : null}
+                        <p className="mt-1 truncate text-xs text-[var(--app-hint)]">
+                            {props.labels.expiresAt} {formatTimestamp(props.share.expiresAt, props.locale)}
+                        </p>
                     </div>
-                    <p className="mt-1 truncate text-xs text-[var(--app-hint)]">
-                        {props.labels.expiresAt} {formatTimestamp(props.share.expiresAt, props.locale)}
-                    </p>
+                    <span data-testid="share-size" className="shrink-0 text-xs text-[var(--app-hint)]">{formatBytes(props.share.size)}</span>
                 </div>
             </button>
 
@@ -266,6 +277,12 @@ export default function SharesPage() {
     const [pendingShareId, setPendingShareId] = useState<string | null>(null)
     const [revokeTarget, setRevokeTarget] = useState<ShareSummary | null>(null)
     const dateLocale = locale === 'zh-CN' ? 'zh-CN' : 'en-US'
+    const localDay = useLocalDayKey()
+    const timelineGroups = useMemo(() => groupShareTimeline(shares, new Date(), dateLocale, {
+        today: t('shares.timeline.today'),
+        yesterday: t('shares.timeline.yesterday'),
+        daysAgo: (days) => t('shares.timeline.daysAgo', { days })
+    }), [dateLocale, localDay, shares, t])
 
     const openSourceSession = useCallback((source: NonNullable<ShareSummary['source']>) => {
         if (source.type === 'hapi') {
@@ -401,31 +418,49 @@ export default function SharesPage() {
                                 </div>
                             ) : null}
 
-                            {shares.map((share) => (
-                                <ShareCard
-                                    key={share.id}
-                                    share={share}
-                                    locale={dateLocale}
-                                    pending={pendingShareId === share.id}
-                                    onCopyLink={copyLink}
-                                    onOpenSourceSession={openSourceSession}
-                                    onDeliverToSourceSession={deliverToSourceSession}
-                                    onOpenDetails={openDetails}
-                                    onRevoke={requestRevoke}
-                                    labels={{
-                                        createdAt: t('shares.createdAt'),
-                                        expiresAt: t('shares.expiresAt'),
-                                        copyLink: t('shares.actions.copyLink'),
-                                        sourceSession: t('shares.sourceSession'),
-                                        sourceSessionUnavailable: t('shares.actions.sourceUnavailable'),
-                                        deliverToSource: t('shares.actions.deliverToSource'),
-                                        deliverUnavailable: t('shares.actions.deliverUnavailable'),
-                                        delivered: t('shares.actions.delivered'),
-                                        details: t('shares.actions.details'),
-                                        revoke: t('shares.revoke')
-                                    }}
-                                />
-                            ))}
+                            {timelineGroups.length > 0 ? (
+                                <div className="relative pl-6">
+                                    <div aria-hidden="true" className="absolute bottom-0 left-[5px] top-1 w-px bg-[var(--app-border)]" />
+                                    <div className="space-y-5">
+                                        {timelineGroups.map((group) => (
+                                            <section key={group.key} aria-labelledby={`share-timeline-${group.key}`} className="relative">
+                                                <span aria-hidden="true" className="absolute -left-6 top-1.5 h-3 w-3 rounded-full border-2 border-[var(--app-bg)] bg-[var(--app-link)]" />
+                                                <h2 id={`share-timeline-${group.key}`} className="text-xs font-semibold text-[var(--app-hint)]">{group.label}</h2>
+                                                <div className="mt-2 space-y-3">
+                                                    {group.shares.map((share) => (
+                                                        <div key={share.id}>
+                                                            <time dateTime={new Date(share.createdAt).toISOString()} className="mb-1 block text-xs tabular-nums text-[var(--app-hint)]">
+                                                                {formatShareTimelineTime(share.createdAt, dateLocale)}
+                                                            </time>
+                                                            <ShareCard
+                                                                share={share}
+                                                                locale={dateLocale}
+                                                                pending={pendingShareId === share.id}
+                                                                onCopyLink={copyLink}
+                                                                onOpenSourceSession={openSourceSession}
+                                                                onDeliverToSourceSession={deliverToSourceSession}
+                                                                onOpenDetails={openDetails}
+                                                                onRevoke={requestRevoke}
+                                                                labels={{
+                                                                    expiresAt: t('shares.expiresAt'),
+                                                                    copyLink: t('shares.actions.copyLink'),
+                                                                    sourceSession: t('shares.sourceSession'),
+                                                                    sourceSessionUnavailable: t('shares.actions.sourceUnavailable'),
+                                                                    deliverToSource: t('shares.actions.deliverToSource'),
+                                                                    deliverUnavailable: t('shares.actions.deliverUnavailable'),
+                                                                    delivered: t('shares.actions.delivered'),
+                                                                    details: t('shares.actions.details'),
+                                                                    revoke: t('shares.revoke')
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </section>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : null}
                         </div>
                     </main>
                 </MotionConfig>

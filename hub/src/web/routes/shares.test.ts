@@ -16,12 +16,13 @@ async function setup() {
 describe('public share route', () => {
     test('serves GET and HEAD with private safe headers and no CORS', async () => {
         const { app, service, store } = await setup()
-        const made = service.publish({ namespace: 'one', filename: 'note.md', expiresSeconds: 300, bytes: new TextEncoder().encode('# safe') })
+        const made = service.publish({ namespace: 'one', filename: 'note.md', expiresSeconds: 300, bytes: new TextEncoder().encode('# safe'), sourceContext: { directoryName: 'private-workspace', gitBranch: 'feature/private' } })
         const get = await app.request(`http://hub/${made.token}`)
         expect(get.status).toBe(200); expect(await get.text()).toBe('# safe')
         expect(get.headers.get('content-type')).toBe('text/plain; charset=utf-8')
         expect(get.headers.get('cache-control')).toBe('no-store'); expect(get.headers.get('cdn-cache-control')).toBe('no-store')
         expect(get.headers.get('x-content-type-options')).toBe('nosniff'); expect(get.headers.get('referrer-policy')).toBe('no-referrer')
+        expect(get.headers.get('x-hapi-share-source-directory')).toBeNull(); expect(get.headers.get('x-hapi-share-source-branch')).toBeNull()
         expect(get.headers.get('x-frame-options')).toBe('DENY'); expect(get.headers.get('content-security-policy')).toContain('sandbox')
         expect(get.headers.get('access-control-allow-origin')).toBeNull()
         const head = await app.request(`http://hub/${made.token}`, { method: 'HEAD' })

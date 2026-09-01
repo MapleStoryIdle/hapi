@@ -1,12 +1,19 @@
 import { constants } from 'node:fs'
 import { lstat, open, realpath } from 'node:fs/promises'
 import { basename, isAbsolute, relative, resolve } from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { configuration } from '@/configuration'
 import { initializeToken } from '@/ui/tokenInit'
+import { getInvokedCwd } from '@/utils/invokedCwd'
+import type { ShareSourceContext } from '@hapi/protocol/apiTypes'
 import type { CommandDefinition } from './types'
 
 const MAX_BYTES = 10 * 1024 * 1024
 const DEFAULT_EXPIRES = 86400
+const MAX_SOURCE_CONTEXT_BYTES = 255
+const GIT_BRANCH_TIMEOUT_MS = 1000
+const execFileAsync = promisify(execFile)
 
 function fail(message: string): never {
     throw new Error(message)
@@ -53,6 +60,53 @@ export async function readShareSource(input: string, cwd = process.cwd()): Promi
         return { filename: basename(canonical).normalize('NFC'), bytes }
     } finally {
         await handle.close()
+    }
+}
+
+function isSafeSourceContextText(value: string): boolean {
+    return value.length > 0
+        && Buffer.byteLength(value, 'utf8') <= MAX_SOURCE_CONTEXT_BYTES
+        && !/[\u0000-\u001f\u007f]/.test(value)
+}
+
+async function getGitBranch(cwd: string): Promise<string | null> {
+    try {
+        const env = { ...process.env }
+        delete env.GIT_DIR
+        delete env.GIT_COMMON_DIR
+        delete env.GIT_WORK_TREE
+        delete env.GIT_PREFIX
+        delete env.GIT_CEILING_DIRECTORIES
+        const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
+            cwd,
+            env,
+            encoding: 'utf8',
+            timeout: GIT_BRANCH_TIMEOUT_MS,
+            maxBuffer: MAX_SOURCE_CONTEXT_BYTES + 2
+        })
+        const branch = stdout.trim().normalize('NFC')
+        return isSafeSourceContextText(branch) ? branch : null
+    } catch {
+        return null
+    }
+}
+
+export async function getShareSourceContext(cwd = getInvokedCwd()): Promise<ShareSourceContext | null> {
+    const directoryName = basename(cwd).normalize('NFC')
+    if (!isSafeSourceContextText(directoryName) || /[\\/]/.test(directoryName) || directoryName === '.' || directoryName === '..') {
+        return null
+    }
+    return { directoryName, gitBranch: await getGitBranch(cwd) }
+}
+
+export function encodeShareSourceContextHeaders(sourceContext: ShareSourceContext): Record<string, string> {
+    const directory = Buffer.from(sourceContext.directoryName, 'utf8').toString('base64url')
+    const branch = sourceContext.gitBranch
+        ? Buffer.from(sourceContext.gitBranch, 'utf8').toString('base64url')
+        : null
+    return {
+        'x-hapi-share-source-directory': directory,
+        ...(branch ? { 'x-hapi-share-source-branch': branch } : {})
     }
 }
 
@@ -134,7 +188,9 @@ export const shareCommand: CommandDefinition = {
             const verb = commandArgs[0]
             if (verb === 'publish') {
                 const parsed = parseSharePublishOptions(commandArgs.slice(1), process.env.HAPI_SESSION_ID)
-                const source = await readShareSource(parsed.path)
+                const invokedCwd = getInvokedCwd()
+                const source = await readShareSource(parsed.path, invokedCwd)
+                const sourceContext = await getShareSourceContext(invokedCwd)
                 if (parsed.feedback && !/\.(?:md|markdown)$/i.test(source.filename)) {
                     fail('--feedback is only supported for Markdown files.')
                 }
@@ -154,6 +210,7 @@ export const shareCommand: CommandDefinition = {
                         'content-type': 'application/octet-stream',
                         'x-hapi-share-filename': filename,
                         'x-hapi-share-expires': String(parsed.expires),
+                        ...(sourceContext ? encodeShareSourceContextHeaders(sourceContext) : {}),
                         ...(sourceSession ? { 'x-hapi-share-source-session': sourceSession } : {}),
                         ...(sourceMachine ? { 'x-hapi-share-source-machine': sourceMachine } : {}),
                         ...(parsed.feedback ? { 'x-hapi-share-feedback': '1' } : {}),

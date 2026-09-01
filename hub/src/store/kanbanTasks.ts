@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Database } from 'bun:sqlite'
-import type { ShareSource } from '@hapi/protocol/apiTypes'
+import type { ShareSource, ShareSourceContext } from '@hapi/protocol/apiTypes'
 import type { FeedbackMetadata, KanbanTaskStatus, StoredKanbanTask } from './types'
 
 type KanbanTaskRow = {
@@ -10,6 +10,8 @@ type KanbanTaskRow = {
     source_type: 'hapi' | 'native-codex' | null
     source_machine_id: string | null
     source_codex_session_id: string | null
+    source_directory_name: string | null
+    source_git_branch: string | null
     status: KanbanTaskStatus
     feedback_request: string | null
     feedback_token_hash: string | null
@@ -51,6 +53,9 @@ function row(value: KanbanTaskRow): StoredKanbanTask {
         artifactId: value.artifact_id,
         namespace: value.namespace,
         source,
+        sourceContext: value.source_directory_name
+            ? { directoryName: value.source_directory_name, gitBranch: value.source_git_branch }
+            : null,
         status: value.status,
         feedbackRequest: value.feedback_request,
         feedbackTokenHash: value.feedback_token_hash,
@@ -71,6 +76,7 @@ export type CreateKanbanTaskInput = {
     artifactId: string
     namespace: string
     source?: ShareSource | null
+    sourceContext?: ShareSourceContext | null
     feedbackRequest?: string | null
     feedbackTokenHash?: string | null
     createdAt?: number
@@ -92,11 +98,12 @@ export class KanbanTaskStore {
         this.db.query(
             `INSERT INTO kanban_tasks (
                 artifact_id, namespace, source_session_id, source_type, source_machine_id, source_codex_session_id,
+                source_directory_name, source_git_branch,
                 status, feedback_request,
                 feedback_token_hash, feedback_lease_id, feedback_lease_expires_at,
                 feedback_filename, feedback_size, feedback_sha256, feedback_metadata,
                 feedback_received_at, review_delivered_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
         ).run(
             input.artifactId,
             input.namespace,
@@ -104,6 +111,8 @@ export class KanbanTaskStore {
             input.source?.type ?? null,
             input.source?.type === 'native-codex' ? input.source.machineId : null,
             input.source?.type === 'native-codex' ? input.source.codexSessionId : null,
+            input.sourceContext?.directoryName ?? null,
+            input.sourceContext?.gitBranch ?? null,
             status,
             input.feedbackRequest ?? null,
             input.feedbackTokenHash ?? null,

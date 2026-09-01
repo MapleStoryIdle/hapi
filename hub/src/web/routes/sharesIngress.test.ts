@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { decodeShareFilename, readShareBody } from './cli'
+import { decodeShareFilename, decodeShareHeaderText, readShareBody } from './cli'
 
 function stream(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
     return new ReadableStream({
@@ -17,6 +17,11 @@ describe('public share upload ingress helpers', () => {
         expect(decodeShareFilename(Buffer.from('../bad', 'utf8').toString('base64url'))).toBeNull()
         expect(decodeShareFilename(Buffer.from('a\n', 'utf8').toString('base64url'))).toBeNull()
         expect(decodeShareFilename('not+base64')).toBeNull()
+    })
+
+    test('rechecks the byte limit after Unicode normalization', () => {
+        const expandsDuringNfc = Buffer.from('\u0344', 'utf8').toString('base64url')
+        expect(decodeShareHeaderText(expandsDuringNfc, 2)).toBeNull()
     })
 
     test('reads chunks incrementally and caps before assembling an oversized body', async () => {

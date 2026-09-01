@@ -115,7 +115,13 @@ export type ShareSource =
     | { type: 'hapi'; sessionId: string }
     | { type: 'native-codex'; machineId: string; codexSessionId: string }
 
-/** Safe metadata for a currently active Kanban task / public share. */
+/** Owner-only source snapshot captured when a Kanban task is published. */
+export type ShareSourceContext = {
+    directoryName: string
+    gitBranch: string | null
+}
+
+/** Owner-only metadata for a currently active Kanban task. */
 export type ShareSummary = {
     id: string
     filename: string
@@ -123,6 +129,7 @@ export type ShareSummary = {
     createdAt: number
     expiresAt: number
     source: ShareSource | null
+    sourceContext: ShareSourceContext | null
     status: KanbanTaskStatus
     feedback: ShareFeedbackSummary | null
 }

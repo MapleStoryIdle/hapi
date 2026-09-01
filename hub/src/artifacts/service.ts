@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { StoredArtifact, Store } from '../store'
-import type { ShareSource } from '@hapi/protocol/apiTypes'
+import type { ShareSource, ShareSourceContext } from '@hapi/protocol/apiTypes'
 import { feedbackBlobPath } from '../kanban/feedback'
 
 export const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024
@@ -53,6 +53,7 @@ export class ArtifactService {
         bytes: Uint8Array
         makePublicUrl?: (token: string) => string
         source?: ShareSource | null
+        sourceContext?: ShareSourceContext | null
         feedback?: {
             request?: string | null
             makeFeedbackUrl: (artifactId: string) => string
@@ -102,6 +103,7 @@ export class ArtifactService {
                     artifactId: id,
                     namespace: input.namespace,
                     source: input.source ?? null,
+                    sourceContext: input.sourceContext ?? null,
                     feedbackRequest: input.feedback?.request ?? null,
                     feedbackTokenHash: feedbackToken ? sha256(feedbackToken) : null,
                     createdAt: stored.createdAt

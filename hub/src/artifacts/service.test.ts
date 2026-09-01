@@ -44,6 +44,23 @@ describe('ArtifactService', () => {
         store.close()
     })
 
+    test('persists an owner-only source context with the Kanban task', async () => {
+        const dir = await mkdtemp(join(tmpdir(), 'hapi-artifact-')); dirs.push(dir)
+        const store = new Store(':memory:'); const artifacts = new ArtifactService(store, dir)
+        const made = artifacts.publish({
+            namespace: 'one',
+            filename: 'note.md',
+            expiresSeconds: 300,
+            bytes: new TextEncoder().encode('safe'),
+            sourceContext: { directoryName: 'hapi', gitBranch: 'feature/kanban-timeline' }
+        })
+        expect(store.kanbanTasks.find(made.artifact.id)?.sourceContext).toEqual({
+            directoryName: 'hapi',
+            gitBranch: 'feature/kanban-timeline'
+        })
+        store.close()
+    })
+
     test('removes the share blob, feedback blob, and cascaded Kanban task on owner revocation', async () => {
         const dir = await mkdtemp(join(tmpdir(), 'hapi-artifact-')); dirs.push(dir)
         const store = new Store(':memory:'); const artifacts = new ArtifactService(store, dir)

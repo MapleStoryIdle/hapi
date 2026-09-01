@@ -47,6 +47,7 @@ describe('share management routes', () => {
                 filename: 'later.md',
                 expiresSeconds: 600,
                 bytes: new TextEncoder().encode('later'),
+                sourceContext: { directoryName: 'hapi', gitBranch: 'feature/kanban-timeline' },
                 makePublicUrl: (token) => `https://example.test/s/${token}`
             })
             const sooner = service.publish({ namespace: 'one', filename: 'sooner.md', expiresSeconds: 300, bytes: new TextEncoder().encode('sooner') })
@@ -66,6 +67,7 @@ describe('share management routes', () => {
                         createdAt: sooner.artifact.createdAt,
                         expiresAt: sooner.artifact.expiresAt,
                         source: null,
+                        sourceContext: null,
                         status: 'published',
                         feedback: null
                     },
@@ -76,6 +78,7 @@ describe('share management routes', () => {
                         createdAt: later.artifact.createdAt,
                         expiresAt: later.artifact.expiresAt,
                         source: null,
+                        sourceContext: { directoryName: 'hapi', gitBranch: 'feature/kanban-timeline' },
                         status: 'published',
                         feedback: null
                     }
@@ -101,6 +104,7 @@ describe('share management routes', () => {
                 filename: 'stored.md',
                 expiresSeconds: 300,
                 bytes: new TextEncoder().encode('stored'),
+                sourceContext: { directoryName: 'hapi', gitBranch: null },
                 makePublicUrl: (token) => `https://example.test/s/${token}`
             })
             const legacy = service.publish({ namespace: 'one', filename: 'legacy.md', expiresSeconds: 300, bytes: new TextEncoder().encode('legacy') })
@@ -127,6 +131,7 @@ describe('share management routes', () => {
                         createdAt: stored.artifact.createdAt,
                         expiresAt: stored.artifact.expiresAt,
                         source: null,
+                        sourceContext: { directoryName: 'hapi', gitBranch: null },
                         status: 'published',
                         feedback: null,
                         url: `https://example.test/s/${stored.token}`

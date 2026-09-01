@@ -46,6 +46,7 @@ export type {
     ShareFeedbackResponse,
     ShareFeedbackSummary,
     ShareFeedbackMetadata,
+    ShareSourceContext,
     KanbanTaskStatus,
     ShareDetails,
     ShareResponse,

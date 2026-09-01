@@ -10,6 +10,7 @@ import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import {
     RECENT_CODEX_WINDOW_MS,
     RecentCodexSessions,
+    groupMergedCodexSessionsForKanban,
     groupRecentCodexSessionsByDirectory,
     mergeRecentCodexSessions
 } from './RecentCodexSessions'
@@ -119,6 +120,56 @@ describe('RecentCodexSessions', () => {
         ])
     })
 
+    it('groups the board as pinned, confirmation, processing, then completed', () => {
+        const now = 1_800_000_000_000
+        const pending = {
+            id: 'hapi-pending',
+            active: true,
+            thinking: false,
+            activeAt: now,
+            updatedAt: now - 10,
+            metadata: { path: '/workspace/project', flavor: 'codex', name: 'Needs confirmation' },
+            todoProgress: null,
+            pendingRequestsCount: 1,
+            pendingRequestKinds: ['permission'],
+            pendingRequests: [],
+            backgroundTaskCount: 0,
+            futureScheduledMessageCount: 0,
+            nextScheduledAt: null,
+            model: null,
+            effort: null
+        } as SessionSummary
+        const processing = {
+            ...pending,
+            id: 'hapi-processing',
+            updatedAt: now - 20,
+            metadata: { path: '/workspace/project', flavor: 'codex', name: 'Processing' },
+            pendingRequestsCount: 0,
+            pendingRequestKinds: []
+        } as SessionSummary
+        const rows = mergeRecentCodexSessions(
+            [pending, processing],
+            [{
+                id: 'native-completed',
+                title: 'Completed',
+                cwd: '/workspace/project',
+                file: '/tmp/completed.jsonl',
+                modifiedAt: now - 30,
+                runState: 'idle'
+            }],
+            { now }
+        )
+
+        const groups = groupMergedCodexSessionsForKanban(rows, new Set(['native:native-completed']))
+
+        expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
+            ['pinned', ['native-completed']],
+            ['pending', ['hapi-pending']],
+            ['processing', ['hapi-processing']],
+            ['completed', []]
+        ])
+    })
+
     it('renders managed and native rows from the selected runner in one list', async () => {
         const api = createApi()
         api.getCodexSessions = vi.fn(async () => ({
@@ -185,6 +236,68 @@ describe('RecentCodexSessions', () => {
         expect(nativeIcon?.querySelector('[title="Codex"]')).toHaveClass('text-[var(--app-fg)]')
         expect(hapiIcon?.querySelector('[data-session-running-indicator]')).toHaveClass('bg-[#34C759]', 'motion-safe:animate-pulse')
         expect(nativeIcon?.querySelector('[data-session-running-indicator]')).toHaveClass('bg-[#34C759]', 'motion-safe:animate-pulse')
+    })
+
+    it('renders status cards with a worktree icon, right-aligned time, and a pin control', async () => {
+        const api = createApi()
+        api.getMachineGitBranch = vi.fn(async () => ({
+            success: true as const,
+            stdout: '# branch.oid abc123\n# branch.head feature/kanban\n',
+            stderr: '',
+            exitCode: 0,
+            isWorktree: true
+        }))
+        const onTogglePin = vi.fn()
+        const hapiSession = {
+            id: 'hapi-pending',
+            active: true,
+            thinking: false,
+            activeAt: Date.now(),
+            updatedAt: Date.now(),
+            metadata: {
+                path: '/workspace/project',
+                flavor: 'codex',
+                name: 'Needs confirmation'
+            },
+            todoProgress: null,
+            pendingRequestsCount: 1,
+            pendingRequestKinds: ['permission'],
+            pendingRequests: [],
+            backgroundTaskCount: 0,
+            futureScheduledMessageCount: 0,
+            nextScheduledAt: null,
+            model: null,
+            effort: null
+        } as SessionSummary
+
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    hapiSessions={[hapiSession]}
+                    onOpen={vi.fn()}
+                    onOpenHapi={vi.fn()}
+                    embedded
+                    hideHeader
+                    recentOnly
+                    viewMode="kanban"
+                    pinnedSessionKeys={new Set(['native:codex-thread-1'])}
+                    onTogglePin={onTogglePin}
+                />
+            </I18nProvider>
+        )
+
+        const board = await screen.findByTestId('session-kanban-board')
+        expect(board.querySelector('[data-kanban-group="pinned"]')).toHaveTextContent('Recent Codex task')
+        expect(board.querySelector('[data-kanban-group="pending"]')).toHaveTextContent('Needs confirmation')
+        expect(board.querySelector('[data-kanban-group="completed"]')).toBeNull()
+        expect(board.querySelector('[data-kanban-card-status="pending"] time')).toHaveClass('text-right')
+        expect(board.querySelector('[data-git-kind="worktree"]')).toHaveAttribute('title', 'worktree · feature/kanban')
+        expect(board.querySelector('[data-git-kind="worktree"] [data-motion-icon="worktree"]')).not.toBeNull()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Unpin session' }))
+        expect(onTogglePin).toHaveBeenCalledWith('native:codex-thread-1')
     })
 
     it('groups sessions by directory and shows only title and activity time', async () => {

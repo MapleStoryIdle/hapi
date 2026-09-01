@@ -12,6 +12,7 @@ const share: ShareSummary = {
     createdAt: 1,
     expiresAt: 2,
     source: { type: 'hapi', sessionId: 'source-session' },
+    sourceContext: { directoryName: 'hapi', gitBranch: 'feature/kanban-timeline' },
     status: 'feedback_received',
     feedback: {
         filename: 'feedback.md',
@@ -27,7 +28,6 @@ const share: ShareSummary = {
 }
 
 const labels = {
-    createdAt: 'Created',
     expiresAt: 'Expires',
     copyLink: 'Copy public link',
     sourceSession: 'Open source session',
@@ -75,6 +75,11 @@ describe('ShareCard', () => {
         const detailsButton = screen.getByRole('button', { name: 'View details: note.md' })
         expect(detailsButton.parentElement).toHaveClass('border-l-emerald-500')
         expect(screen.queryByText('Feedback received')).toBeNull()
+        expect(screen.queryByText('Created')).toBeNull()
+        expect(screen.getByTestId('share-size')).toHaveTextContent('4 B')
+        expect(screen.getByTestId('share-size').parentElement).toHaveClass('justify-between')
+        expect(screen.getByTestId('share-source-context')).toHaveTextContent('hapi')
+        expect(screen.getByTestId('share-source-context')).toHaveTextContent('feature/kanban-timeline')
         fireEvent.click(detailsButton)
         fireEvent.click(screen.getByRole('button', { name: 'Copy public link' }))
         fireEvent.click(screen.getByRole('button', { name: 'Open source session' }))
@@ -87,6 +92,7 @@ describe('ShareCard', () => {
         expect(handlers.onDeliverToSourceSession).toHaveBeenCalledWith(share)
         expect(handlers.onRevoke).toHaveBeenCalledWith(share)
         expect(screen.queryByRole('button', { name: /^View details$/ })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Open source session' }).querySelector('path[d^="M20.25 12"]')).not.toBeNull()
     })
 
     it('clearly disables source-dependent actions when the task cannot use them', () => {
@@ -94,6 +100,7 @@ describe('ShareCard', () => {
             share: {
                 ...share,
                 source: null,
+                sourceContext: null,
                 status: 'awaiting_feedback',
                 feedback: null,
             },
@@ -102,6 +109,19 @@ describe('ShareCard', () => {
         expect(screen.getByRole('button', { name: 'No source session' })).toBeDisabled()
         expect(screen.getByRole('button', { name: 'Delivery unavailable' })).toBeDisabled()
         expect(screen.getByRole('button', { name: 'View details: note.md' }).parentElement).not.toHaveClass('border-l-emerald-500')
+        expect(screen.queryByTestId('share-source-context')).toBeNull()
+    })
+
+    it('shows only the directory name when Git is unavailable', () => {
+        renderShareCard({
+            share: {
+                ...share,
+                sourceContext: { directoryName: 'hapi', gitBranch: null }
+            }
+        })
+
+        expect(screen.getByTestId('share-source-context')).toHaveTextContent('hapi')
+        expect(screen.getByTestId('share-source-context')).toHaveTextContent(/^hapi$/)
     })
 
     it('maps an unsafe source permission error to a source-session toast', () => {

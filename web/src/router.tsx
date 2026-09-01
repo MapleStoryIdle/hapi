@@ -25,6 +25,7 @@ import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
+import { useSessionListViewMode } from '@/hooks/useSessionListViewMode'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useSession } from '@/hooks/queries/useSession'
@@ -131,6 +132,49 @@ function SettingsIcon(props: { className?: string }) {
         >
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+    )
+}
+
+function PlusIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <path d="M12 5v14M5 12h14" />
+        </svg>
+    )
+}
+
+function SessionViewIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <rect x="4" y="4" width="6" height="6" rx="1" />
+            <rect x="14" y="4" width="6" height="6" rx="1" />
+            <rect x="4" y="14" width="6" height="6" rx="1" />
+            <rect x="14" y="14" width="6" height="6" rx="1" />
         </svg>
     )
 }
@@ -403,6 +447,12 @@ function SessionsPage() {
     const { sessions, isLoading, error, refetch } = useSessions(api)
     const { spawnSession, isPending: isQuickSessionPending } = useSpawnSession(api)
     const { addRecentPath, setLastUsedMachineId } = useRecentPaths()
+    const {
+        sessionListViewMode,
+        setSessionListViewMode,
+        pinnedSessionKeys,
+        togglePinnedSessionKey
+    } = useSessionListViewMode()
     const { machines } = useMachines(api, true)
     const [isSyncingCodexSession, setIsSyncingCodexSession] = useState(false)
     const [codexSessions, setCodexSessions] = useState<CodexLocalSessionSummary[]>([])
@@ -905,7 +955,30 @@ function SessionsPage() {
                                     />
                                 ) : null}
                             </div>
-                        <div aria-hidden="true" />
+                        <div className="relative flex h-[52px] w-[52px] items-center justify-end">
+                            <div className="absolute right-0 flex items-center gap-1">
+                                <button
+                                    type="button"
+                                    onClick={goNewSession}
+                                    className="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--app-link)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                    title={t('sessions.new')}
+                                    aria-label={t('sessions.new')}
+                                >
+                                    <PlusIcon className="h-5 w-5" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setSessionListViewMode(sessionListViewMode === 'kanban' ? 'list' : 'kanban')}
+                                    className="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                    title={t(sessionListViewMode === 'kanban' ? 'sessions.view.list' : 'sessions.view.kanban')}
+                                    aria-label={t(sessionListViewMode === 'kanban' ? 'sessions.view.list' : 'sessions.view.kanban')}
+                                    aria-pressed={sessionListViewMode === 'kanban'}
+                                    data-testid="sessions-view-toggle"
+                                >
+                                    <SessionViewIcon className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -930,6 +1003,9 @@ function SessionsPage() {
                             limit={100}
                             onNewSessionInDirectory={selectedRunnerMachine ? createSessionInDirectory : undefined}
                             isNewSessionPending={isQuickSessionPending}
+                            viewMode={sessionListViewMode}
+                            pinnedSessionKeys={pinnedSessionKeys}
+                            onTogglePin={togglePinnedSessionKey}
                             realtimeAvailable={selectedRunnerMachine?.active === true
                                 && selectedRunnerMachine.metadata?.nativeCodexRealtime === true}
                         />

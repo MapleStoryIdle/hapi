@@ -51,6 +51,7 @@ function toShareSummary(artifact: StoredArtifact, task: StoredKanbanTask | null)
         createdAt: artifact.createdAt,
         expiresAt: artifact.expiresAt,
         source: task?.source ?? null,
+        sourceContext: task?.sourceContext ?? null,
         status: task?.status ?? 'published',
         feedback: toFeedbackSummary(task)
     }

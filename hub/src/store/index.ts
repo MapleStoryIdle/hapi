@@ -31,7 +31,7 @@ export { UserStore } from './userStore'
 export { ArtifactStore } from './artifacts'
 export { KanbanTaskStore } from './kanbanTasks'
 
-const SCHEMA_VERSION: number = 17
+const SCHEMA_VERSION: number = 18
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -145,6 +145,7 @@ export class Store {
             14: () => this.migrateFromV14ToV15(),
             15: () => this.migrateFromV15ToV16(),
             16: () => this.migrateFromV16ToV17(),
+            17: () => this.migrateFromV17ToV18(),
         })
 
         if (currentVersion === 0) {
@@ -289,6 +290,8 @@ export class Store {
                 source_type TEXT,
                 source_machine_id TEXT,
                 source_codex_session_id TEXT,
+                source_directory_name TEXT,
+                source_git_branch TEXT,
                 status TEXT NOT NULL,
                 feedback_request TEXT,
                 feedback_token_hash TEXT UNIQUE,
@@ -568,6 +571,13 @@ export class Store {
         if (!columns.has('source_codex_session_id')) this.db.exec('ALTER TABLE kanban_tasks ADD COLUMN source_codex_session_id TEXT')
         // V16 only knew HAPI session ids. Retain their exact routing meaning.
         this.db.exec("UPDATE kanban_tasks SET source_type = 'hapi' WHERE source_type IS NULL AND source_session_id IS NOT NULL")
+    }
+
+    private migrateFromV17ToV18(): void {
+        const columns = this.getColumnNames('kanban_tasks')
+        if (columns.size === 0) return
+        if (!columns.has('source_directory_name')) this.db.exec('ALTER TABLE kanban_tasks ADD COLUMN source_directory_name TEXT')
+        if (!columns.has('source_git_branch')) this.db.exec('ALTER TABLE kanban_tasks ADD COLUMN source_git_branch TEXT')
     }
 
     private getUserVersion(): number {

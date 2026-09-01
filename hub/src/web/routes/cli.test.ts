@@ -144,12 +144,72 @@ describe('cli public share routes', () => {
             expect(token).toBeTruthy()
             expect(service.readPublic(token!)).not.toBeNull()
             expect(store.artifacts.findActive(value.id, 'default')?.publicUrl).toBe(value.url)
+            expect(store.kanbanTasks.find(value.id)?.sourceContext).toBeNull()
 
             const revoked = await app.request(`/cli/shares/${value.id}`, { method: 'DELETE', headers: authHeaders() })
             expect(revoked.status).toBe(200)
             expect(await revoked.json()).toEqual({ ok: true })
             expect(service.readPublic(token!)).toBeNull()
             expect((await app.request('/cli/artifacts', { method: 'POST', headers })).status).toBe(404)
+        } finally {
+            store.close()
+            await rm(dir, { recursive: true, force: true })
+        }
+    })
+
+    it('validates and stores the optional owner-only source context headers', async () => {
+        const { mkdtemp, rm } = await import('node:fs/promises')
+        const { tmpdir } = await import('node:os')
+        const { join } = await import('node:path')
+        const { Store } = await import('../../store')
+        const { ArtifactService } = await import('../../artifacts/service')
+        const dir = await mkdtemp(join(tmpdir(), 'hapi-share-source-context-route-'))
+        const store = new Store(':memory:')
+        const service = new ArtifactService(store, dir)
+        const app = new Hono()
+        app.route('/cli', createCliRoutes(() => ({}) as SyncEngine, undefined, service))
+        const baseHeaders = {
+            ...authHeaders(),
+            'content-type': 'application/octet-stream',
+            'x-hapi-share-filename': Buffer.from('note.md', 'utf8').toString('base64url'),
+            'x-hapi-share-expires': '300'
+        }
+        try {
+            const response = await app.request('/cli/shares', {
+                method: 'POST',
+                headers: {
+                    ...baseHeaders,
+                    'x-hapi-share-source-directory': Buffer.from('cafe\u0301', 'utf8').toString('base64url'),
+                    'x-hapi-share-source-branch': Buffer.from('feature/kanban-timeline', 'utf8').toString('base64url')
+                },
+                body: '# safe'
+            })
+            expect(response.status).toBe(201)
+            const { id } = await response.json() as { id: string }
+            expect(store.kanbanTasks.find(id)?.sourceContext).toEqual({
+                directoryName: 'café',
+                gitBranch: 'feature/kanban-timeline'
+            })
+
+            const branchWithoutDirectory = await app.request('/cli/shares', {
+                method: 'POST',
+                headers: {
+                    ...baseHeaders,
+                    'x-hapi-share-source-branch': Buffer.from('feature/allowed-slash', 'utf8').toString('base64url')
+                },
+                body: '# safe'
+            })
+            expect(branchWithoutDirectory.status).toBe(400)
+
+            const invalidDirectory = await app.request('/cli/shares', {
+                method: 'POST',
+                headers: {
+                    ...baseHeaders,
+                    'x-hapi-share-source-directory': Buffer.from('nested/path', 'utf8').toString('base64url')
+                },
+                body: '# safe'
+            })
+            expect(invalidDirectory.status).toBe(400)
         } finally {
             store.close()
             await rm(dir, { recursive: true, force: true })

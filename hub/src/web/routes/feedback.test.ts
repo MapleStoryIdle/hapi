@@ -25,6 +25,7 @@ async function setup(pushService?: Pick<PushService, 'sendToNamespace'>) {
         filename: 'task.md',
         expiresSeconds: 300,
         source: { type: 'hapi', sessionId: 'source-session' },
+        sourceContext: { directoryName: 'private-workspace', gitBranch: 'feature/private' },
         bytes: new TextEncoder().encode('# Task'),
         makePublicUrl: (token) => `https://example.test/s/${token}`,
         feedback: {
@@ -34,6 +35,8 @@ async function setup(pushService?: Pick<PushService, 'sendToNamespace'>) {
     const shared = shares.readPublic(published.token)
     if (!shared) throw new Error('Shared Markdown missing')
     const sharedText = new TextDecoder().decode(shared.bytes)
+    expect(sharedText).not.toContain('private-workspace')
+    expect(sharedText).not.toContain('feature/private')
     const token = /Authorization: Bearer ([A-Za-z0-9_-]+)/.exec(sharedText)?.[1]
     if (!token) throw new Error('Feedback contract token missing from shared Markdown')
     return {
@@ -84,6 +87,7 @@ describe('public Kanban feedback route', () => {
             })
             expect(response.status).toBe(201)
             expect(response.headers.get('cache-control')).toBe('no-store')
+            expect(await response.json()).toEqual({ ok: true })
             expect(store.kanbanTasks.find(artifactId)?.feedbackTokenHash).not.toBe(token)
             expect(feedback.read(artifactId)).toEqual(expect.objectContaining({
                 filename: 'review.md',

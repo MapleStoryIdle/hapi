@@ -368,6 +368,20 @@ export default function KanbanTaskPage() {
                                         <dt className="text-xs text-[var(--app-hint)]">{t('shares.details.status')}</dt>
                                         <dd className="mt-1 text-[var(--app-fg)]">{t(`shares.status.${details.status}`)}</dd>
                                     </div>
+                                    {details.sourceContext ? (
+                                        <>
+                                            <div className="sm:col-span-2">
+                                                <dt className="text-xs text-[var(--app-hint)]">{t('shares.sourceContext.directory')}</dt>
+                                                <dd data-testid="share-detail-directory" className="mt-1 break-words text-[var(--app-fg)]">{details.sourceContext.directoryName}</dd>
+                                            </div>
+                                            {details.sourceContext.gitBranch ? (
+                                                <div className="sm:col-span-2">
+                                                    <dt className="text-xs text-[var(--app-hint)]">{t('shares.sourceContext.gitBranch')}</dt>
+                                                    <dd data-testid="share-detail-git-branch" className="mt-1 break-words text-[var(--app-fg)]">{details.sourceContext.gitBranch}</dd>
+                                                </div>
+                                            ) : null}
+                                        </>
+                                    ) : null}
                                 </dl>
                             </section>
 
