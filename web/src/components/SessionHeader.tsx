@@ -371,13 +371,29 @@ export function SessionConnectionStatusControl(props: {
         offline: props.labels?.offline ?? t('session.connection.offline'),
         recover: props.labels?.recover ?? t('session.connection.recover')
     }
+    const [initialRecoveryGraceElapsed, setInitialRecoveryGraceElapsed] = useState(
+        () => connection?.health !== 'recovering'
+    )
+    useEffect(() => {
+        if (initialRecoveryGraceElapsed) return
+        if (connection?.health !== 'recovering') {
+            setInitialRecoveryGraceElapsed(true)
+            return
+        }
+        const timer = window.setTimeout(() => setInitialRecoveryGraceElapsed(true), 3_000)
+        return () => window.clearTimeout(timer)
+    }, [connection?.health, initialRecoveryGraceElapsed])
     const recover = useCallback(() => {
         if (!connection || connection.health === 'recovering') {
             return
         }
         void connection.recover()
     }, [connection])
-    if (!connection || connection.health === 'connected') {
+    if (
+        !connection
+        || connection.health === 'connected'
+        || (connection.health === 'recovering' && !initialRecoveryGraceElapsed)
+    ) {
         return null
     }
 

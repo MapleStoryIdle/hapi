@@ -64,7 +64,7 @@ export default {
   'sessions.kanban.completed': 'Completed',
   'sessions.kanban.pin': 'Pin session',
   'sessions.kanban.unpin': 'Unpin session',
-  'shares.nav': 'Kanban',
+  'shares.nav': 'Shares',
   'shares.title': 'Kanban',
   'shares.back': 'Back to sessions',
   'shares.loading': 'Loading Kanban tasks…',

@@ -130,6 +130,12 @@ export type CodexLocalSessionDataRpcResponse = {
  */
 export type CodexLocalSessionRunState = 'idle' | 'processing' | 'unknown'
 
+/** Turn-scoped native records used by the runner's local lifecycle overlay. */
+export type CodexTranscriptLifecycleEvent = {
+    type: 'task_started' | 'task_complete' | 'turn_aborted'
+    turnId?: string
+}
+
 /**
  * Runner-owned progress for a prompt sent into an original native Codex
  * thread. The stages deliberately describe the hand-off, not model output.
@@ -976,6 +982,42 @@ export function getLocalCodexSessionRunState(sessionId: string): CodexLocalSessi
     const session = findLocalCodexSession(sessionId)
     if (!session) return null
     return session.runState ?? 'unknown'
+}
+
+/**
+ * Read only lifecycle routing metadata from JSONL records. Callers must not
+ * infer a turn identity from an unscoped legacy record.
+ */
+export function getCodexTranscriptLifecycleEvents(lines: readonly string[]): CodexTranscriptLifecycleEvent[] {
+    const events: CodexTranscriptLifecycleEvent[] = []
+    for (const line of lines) {
+        if (!line) continue
+        try {
+            const record = asRecord(JSON.parse(line))
+            if (record?.type !== 'event_msg') continue
+            const payload = asRecord(record.payload)
+            const type = asString(payload?.type)
+            if (type !== 'task_started' && type !== 'task_complete' && type !== 'turn_aborted') continue
+            const turn = asRecord(payload?.turn)
+            const scope = asRecord(payload?.scope)
+            const turnId = asString(
+                payload?.turn_id
+                ?? payload?.turnId
+                ?? turn?.id
+                ?? turn?.turn_id
+                ?? turn?.turnId
+                ?? scope?.turn_id
+                ?? scope?.turnId
+                ?? record.turn_id
+                ?? record.turnId
+            )
+            events.push({ type, ...(turnId ? { turnId } : {}) })
+        } catch {
+            // A runner can observe the transcript while Codex is appending a
+            // partial final line. Earlier complete records remain useful.
+        }
+    }
+    return events
 }
 
 function getCodexTranscriptRunState(content: string): CodexLocalSessionRunState {

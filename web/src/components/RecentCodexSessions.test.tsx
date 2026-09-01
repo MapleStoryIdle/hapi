@@ -8,8 +8,12 @@ import { publishNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-ev
 import type { ApiClient } from '@/api/client'
 import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import {
+    COMPLETED_SESSION_DIRECTORY_COLORS,
     RECENT_CODEX_WINDOW_MS,
     RecentCodexSessions,
+    assignCompletedSessionDirectoryColors,
+    formatKanbanSessionTime,
+    getCompletedSessionDirectoryColor,
     getMergedCodexKanbanStatus,
     groupMergedCodexCompletedTimeline,
     groupMergedCodexSessionsForKanban,
@@ -18,7 +22,10 @@ import {
     type MergedCodexSession
 } from './RecentCodexSessions'
 
-afterEach(() => cleanup())
+afterEach(() => {
+    cleanup()
+    localStorage.removeItem('hapi-lang')
+})
 
 function render(ui: ReactElement) {
     const queryClient = new QueryClient({
@@ -73,6 +80,41 @@ function createApi() {
 }
 
 describe('RecentCodexSessions', () => {
+    it('assigns completed cards a stable color from their directory', () => {
+        const projectColor = getCompletedSessionDirectoryColor('/workspace/project/')
+        expect(projectColor).toBe(getCompletedSessionDirectoryColor('/workspace/project'))
+        expect(COMPLETED_SESSION_DIRECTORY_COLORS).toContain(projectColor)
+        expect(getCompletedSessionDirectoryColor(null)).toBeNull()
+        expect(getCompletedSessionDirectoryColor('   ')).toBeNull()
+
+        const assignments = assignCompletedSessionDirectoryColors([
+            '/workspace/project',
+            '/workspace/other',
+            '/workspace/project/'
+        ])
+        expect(assignments.size).toBe(2)
+        expect(assignments.get('/workspace/project')).not.toBe(assignments.get('/workspace/other'))
+    })
+
+    it('uses localized relative labels for today and clock time for earlier dates', () => {
+        const now = new Date(2026, 8, 1, 12, 0, 0).getTime()
+        const english = (key: string, params?: Record<string, string | number>) => ({
+            'session.time.justNow': 'just now',
+            'session.time.minutesAgo': `${params?.n}m ago`,
+            'session.time.hoursAgo': `${params?.n}h ago`
+        })[key] ?? key
+        const chinese = (key: string, params?: Record<string, string | number>) => ({
+            'session.time.justNow': '刚刚',
+            'session.time.minutesAgo': `${params?.n} 分钟前`,
+            'session.time.hoursAgo': `${params?.n} 小时前`
+        })[key] ?? key
+
+        expect(formatKanbanSessionTime(now - 20_000, now, 'en-US', english)).toBe('just now')
+        expect(formatKanbanSessionTime(now - 5 * 60_000, now, 'zh-CN', chinese)).toBe('5 分钟前')
+        expect(formatKanbanSessionTime(now - 3 * 60 * 60_000, now, 'en-US', english)).toBe('3h ago')
+        expect(formatKanbanSessionTime(new Date(2026, 7, 31, 9, 15, 0).getTime(), now, 'en-US', english)).toBe('09:15:00')
+    })
+
     it('merges recent HAPI and native Codex rows, filters older/non-Codex rows, and de-duplicates managed transcripts', () => {
         const now = 1_800_000_000_000
         const recent = now - 60_000
@@ -139,7 +181,7 @@ describe('RecentCodexSessions', () => {
         ])
     })
 
-    it('keeps pinning independent from status and sorts pinned cards first inside a status', () => {
+    it('moves pinned cards into a page-level group while preserving every other status', () => {
         const now = 1_800_000_000_000
         const pending = {
             id: 'hapi-pending',
@@ -193,9 +235,10 @@ describe('RecentCodexSessions', () => {
         const groups = groupMergedCodexSessionsForKanban(rows, new Set(['native:native-completed']))
 
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
+            ['pinned', ['native-completed']],
             ['pending', ['hapi-pending']],
             ['processing', ['hapi-processing']],
-            ['completed', ['native-completed', 'native-newer-completed']]
+            ['completed', ['native-newer-completed']]
         ])
     })
 
@@ -263,10 +306,10 @@ describe('RecentCodexSessions', () => {
             today: 'Today',
             yesterday: 'Yesterday',
             daysAgo: (days) => `${days} days ago`
-        }, new Set(['native:today-seconds']))
+        })
 
         expect(groups.map((group) => [group.label, group.shares.map((item) => item.id)])).toEqual([
-            ['Today', ['today-seconds', 'today-newer']],
+            ['Today', ['today-newer', 'today-seconds']],
             ['Yesterday', ['yesterday-ms']],
             ['3 days ago', ['three-days']],
             [new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' }).format(new Date(localAt(8))), ['old']]
@@ -341,8 +384,29 @@ describe('RecentCodexSessions', () => {
         expect(nativeIcon?.querySelector('[data-session-running-indicator]')).toHaveClass('bg-[#34C759]', 'motion-safe:animate-pulse')
     })
 
-    it('keeps a pinned card in its real status group with time above and a persistent pin control', async () => {
+    it('renders a page-level pinned group, aligned card columns, and a quiet thinking animation', async () => {
         const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({
+            success: true as const,
+            sessions: [
+                {
+                    id: 'codex-thread-1',
+                    title: 'Pinned Codex task',
+                    cwd: '/workspace/project',
+                    file: '/tmp/pinned-rollout.jsonl',
+                    modifiedAt: Date.now(),
+                    runState: 'idle' as const
+                },
+                {
+                    id: 'codex-thread-2',
+                    title: 'Completed Codex task',
+                    cwd: '/workspace/other',
+                    file: '/tmp/completed-rollout.jsonl',
+                    modifiedAt: Date.now() - 1,
+                    runState: 'idle' as const
+                }
+            ]
+        }))
         api.getMachineGitBranch = vi.fn(async () => ({
             success: true as const,
             stdout: '# branch.oid abc123\n# branch.head feature/kanban\n',
@@ -372,13 +436,24 @@ describe('RecentCodexSessions', () => {
             model: null,
             effort: null
         } as SessionSummary
+        const thinkingSession = {
+            ...hapiSession,
+            id: 'hapi-thinking',
+            metadata: {
+                ...hapiSession.metadata,
+                name: 'Thinking task'
+            },
+            pendingRequestsCount: 0,
+            pendingRequestKinds: [],
+            thinking: true
+        } as SessionSummary
 
         render(
             <I18nProvider>
                 <RecentCodexSessions
                     api={api}
                     machineId="machine-1"
-                    hapiSessions={[hapiSession]}
+                    hapiSessions={[hapiSession, thinkingSession]}
                     onOpen={vi.fn()}
                     onOpenHapi={vi.fn()}
                     embedded
@@ -392,12 +467,34 @@ describe('RecentCodexSessions', () => {
         )
 
         const board = await screen.findByTestId('session-kanban-board')
-        expect(board.querySelector('[data-kanban-group="pinned"]')).toBeNull()
+        const pinnedGroup = board.querySelector('[data-kanban-group="pinned"]')
+        expect(pinnedGroup).toHaveTextContent('Pinned')
+        expect(pinnedGroup).toHaveTextContent('Pinned Codex task')
         expect(board.querySelector('[data-kanban-group="pending"]')).toHaveTextContent('Needs confirmation')
-        expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Recent Codex task')
+        const processingGroup = board.querySelector('[data-kanban-group="processing"]')
+        expect(processingGroup).toHaveTextContent('thinking')
+        expect(processingGroup).toHaveTextContent('Thinking task')
+        expect(processingGroup?.querySelector('.session-kanban-card-thinking')).not.toBeNull()
+        expect(processingGroup?.querySelector('.motion-safe\\:animate-pulse')).not.toBeNull()
+        const completedGroup = board.querySelector('[data-kanban-group="completed"]')
+        expect(completedGroup).toHaveTextContent('Completed Codex task')
+        const completedDivider = completedGroup?.querySelector('[data-kanban-completed-divider]')
+        expect(completedDivider).toHaveAttribute('role', 'separator')
+        expect(completedDivider).toHaveTextContent('Completed·1')
+        expect(completedDivider?.querySelectorAll('[data-kanban-divider-line]')).toHaveLength(2)
+        expect(completedDivider?.querySelector('[data-motion-icon="completed"]')).not.toBeNull()
+        expect(board.querySelectorAll('[data-kanban-card-column]')).toHaveLength(4)
+        for (const column of board.querySelectorAll('[data-kanban-card-column]')) {
+            expect(column).toHaveClass('pl-5')
+        }
         const pendingCard = board.querySelector('[data-kanban-card-status="pending"]')
         expect(pendingCard?.querySelector('time')).toBeNull()
         expect(pendingCard?.closest('li')?.querySelector('[data-kanban-card-time]')).not.toBeNull()
+        expect(pendingCard).not.toHaveAttribute('data-kanban-directory-color')
+        const completedCard = board.querySelector('[data-kanban-card-status="completed"]')
+        const projectColor = getCompletedSessionDirectoryColor('/workspace/project')
+        expect(completedCard).toHaveAttribute('data-kanban-directory-color', projectColor)
+        expect(completedCard).toHaveStyle({ borderLeftColor: projectColor })
         expect(board.querySelector('[data-git-kind="worktree"]')).toHaveAttribute('title', 'worktree · feature/kanban')
         expect(board.querySelector('[data-git-kind="worktree"] [data-motion-icon="worktree"]')).not.toBeNull()
 
@@ -437,7 +534,7 @@ describe('RecentCodexSessions', () => {
         expect(directoryRow).toHaveTextContent('project')
         expect(directoryRow?.querySelector('[data-kanban-directory]')).toHaveClass('font-normal')
         const cardTime = board.querySelector('[data-kanban-card-time]')
-        expect(cardTime).toHaveTextContent(/^\d{2}:\d{2}:\d{2}$/)
+        expect(cardTime).toHaveTextContent('just now')
         expect(cardTime?.nextElementSibling?.querySelector('.session-kanban-card')).toBe(card)
         expect(card?.querySelector('.text-\\[17px\\]')).toHaveTextContent('Recent Codex task')
         expect(screen.getByRole('button', { name: 'Pin session' })).toBeInTheDocument()

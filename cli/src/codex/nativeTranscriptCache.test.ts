@@ -167,6 +167,107 @@ describe('NativeCodexTranscriptCache', () => {
         }
     })
 
+    it('exposes bounded turn-scoped lifecycle records without putting them in RPC data', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-lifecycle-'))
+        const sessionId = 'd1234567-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        const file = join(transcriptDir, `rollout-${sessionId}.jsonl`)
+        writeFileSync(file, [
+            transcriptRecord({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-a' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-a' } })
+        ].join(''), 'utf8')
+        process.env.CODEX_HOME = codexHome
+        const cache = new NativeCodexTranscriptCache()
+
+        try {
+            expect(cache.read(sessionId, { limit: 1 })?.lifecycleEvents).toEqual([
+                { type: 'task_started', turnId: 'turn-a' },
+                { type: 'task_complete', turnId: 'turn-a' }
+            ])
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps cold lifecycle checks summary-only and inside the latest 16 KiB', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-summary-'))
+        const sessionId = 'e1234567-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        const file = join(transcriptDir, `rollout-${sessionId}.jsonl`)
+        writeFileSync(file, [
+            transcriptRecord({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-old' } }),
+            transcriptRecord({
+                type: 'response_item',
+                payload: {
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'x'.repeat(32 * 1024) }]
+                }
+            }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-live' } })
+        ].join(''), 'utf8')
+        process.env.CODEX_HOME = codexHome
+        const cache = new NativeCodexTranscriptCache()
+
+        try {
+            expect(cache.readSummary(sessionId)).toMatchObject({
+                session: { id: sessionId, runState: 'processing' },
+                lifecycleEvents: [{ type: 'task_started', turnId: 'turn-live' }]
+            })
+            const entries = (cache as unknown as {
+                entries: Map<string, { importedMessages: unknown[] | null }>
+            }).entries
+            expect(entries.get(sessionId)?.importedMessages).toBeNull()
+            expect(cache.readCached(sessionId, { limit: 1 })).toBeNull()
+            expect(cache.refreshCached(sessionId, { limit: 1 })).toBeNull()
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('reconstructs a lifecycle record split across a cold summary read', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-summary-partial-'))
+        const sessionId = 'f1234567-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        const file = join(transcriptDir, `rollout-${sessionId}.jsonl`)
+        const terminalRecord = transcriptRecord({
+            type: 'event_msg',
+            payload: { type: 'task_complete', turn_id: 'turn-a' }
+        })
+        const midpoint = Math.floor(terminalRecord.length / 2)
+        writeFileSync(file, [
+            transcriptRecord({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-a' } }),
+            terminalRecord.slice(0, midpoint)
+        ].join(''), 'utf8')
+        process.env.CODEX_HOME = codexHome
+        const cache = new NativeCodexTranscriptCache()
+
+        try {
+            expect(cache.readSummary(sessionId)).toMatchObject({
+                session: { id: sessionId, runState: 'processing' },
+                lifecycleEvents: [{ type: 'task_started', turnId: 'turn-a' }]
+            })
+
+            appendFileSync(file, terminalRecord.slice(midpoint), 'utf8')
+
+            expect(cache.refreshSummary(sessionId)).toMatchObject({
+                session: { id: sessionId, runState: 'idle' },
+                lifecycleEvents: [
+                    { type: 'task_started', turnId: 'turn-a' },
+                    { type: 'task_complete', turnId: 'turn-a' }
+                ]
+            })
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
     it('keeps native tool timing when a result arrives in a later append', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-tool-tail-'))
         const sessionId = 'c1234567-1234-4234-8234-123456789012'

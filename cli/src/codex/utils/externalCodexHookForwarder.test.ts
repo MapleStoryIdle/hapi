@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
     parseExternalCodexHookForwarderOptions,
-    parseExternalCodexHookRequest
+    parseExternalCodexHookRequest,
+    parseExternalCodexLifecycleHookEvent,
+    parseExternalCodexLifecycleHookForwarderOptions
 } from './externalCodexHookForwarder'
 
 describe('external Codex hook forwarder', () => {
@@ -16,6 +18,11 @@ describe('external Codex hook forwarder', () => {
             kind: 'permission',
             runnerStatePath: '/tmp/hapi-runner.state.json'
         })
+        expect(parseExternalCodexLifecycleHookForwarderOptions([
+            '--external-codex-lifecycle',
+            '--runner-state',
+            '/tmp/hapi-runner.state.json'
+        ])).toEqual({ runnerStatePath: '/tmp/hapi-runner.state.json' })
     })
 
     it('reduces a permission hook to non-sensitive routing metadata', () => {
@@ -46,8 +53,29 @@ describe('external Codex hook forwarder', () => {
         })
     })
 
+    it('reduces UserPromptSubmit to local lifecycle metadata without prompt fields', () => {
+        const event = parseExternalCodexLifecycleHookEvent({
+            session_id: 'codex-session-3',
+            turn_id: 'turn-3',
+            prompt: 'TOP_SECRET',
+            cwd: '/private/workspace',
+            model: 'private-model',
+            transcript_path: '/private/transcript.jsonl'
+        }, () => 1_725_000_000_000)
+
+        expect(event).toEqual({
+            codexSessionId: 'codex-session-3',
+            turnId: 'turn-3',
+            event: 'turn_started',
+            observedAt: 1_725_000_000_000
+        })
+        expect(JSON.stringify(event)).not.toContain('TOP_SECRET')
+        expect(JSON.stringify(event)).not.toContain('/private')
+    })
+
     it('ignores malformed hook payloads', () => {
         expect(parseExternalCodexHookRequest('permission', { tool_name: 'Bash' })).toBeNull()
         expect(parseExternalCodexHookForwarderOptions(['--external-codex-request', '--kind', 'bad'])).toBeNull()
+        expect(parseExternalCodexLifecycleHookEvent({ session_id: 'codex-session-4' })).toBeNull()
     })
 })

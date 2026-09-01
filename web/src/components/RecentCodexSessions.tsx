@@ -23,7 +23,7 @@ import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { useNativeCodexRealtime } from '@/lib/native-codex-realtime-context'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useLocalDayKey } from '@/hooks/useLocalDayKey'
-import { formatShareTimelineTime, groupShareTimeline } from '@/lib/shareTimeline'
+import { formatShareTimelineTime, groupShareTimeline, localDateKey } from '@/lib/shareTimeline'
 import { queryKeys } from '@/lib/query-keys'
 import {
     getNativeCodexSessionListUpdate,
@@ -83,6 +83,19 @@ function formatTimestamp(value: number): string {
     return new Date(toEpochMilliseconds(value)).toLocaleString()
 }
 
+export function formatKanbanSessionTime(
+    value: number,
+    now: number,
+    locale: string,
+    t: (key: string, params?: Record<string, string | number>) => string
+): string {
+    const timestamp = toEpochMilliseconds(value)
+    if (localDateKey(new Date(timestamp)) === localDateKey(new Date(now))) {
+        return formatRelativeTime(timestamp, t, now) ?? formatShareTimelineTime(timestamp, locale)
+    }
+    return formatShareTimelineTime(timestamp, locale)
+}
+
 export type RecentCodexDirectoryGroup = {
     directory: string | null
     sessions: CodexLocalSessionSummary[]
@@ -112,18 +125,102 @@ export type MergedCodexDirectoryGroup = {
 
 export type MergedCodexKanbanStatus = 'pending' | 'processing' | 'completed'
 
+export type MergedCodexKanbanGroupId = 'pinned' | MergedCodexKanbanStatus
+
 export type MergedCodexKanbanGroup = {
-    id: MergedCodexKanbanStatus
+    id: MergedCodexKanbanGroupId
     sessions: MergedCodexSession[]
 }
 
 const EMPTY_PINNED_SESSION_KEYS: ReadonlySet<string> = new Set()
 
-const KANBAN_STATUS_PRESENTATION: Record<MergedCodexKanbanStatus, {
+/**
+ * Completed cards use directory color as a quiet project identity. Keep these
+ * away from the amber/green status colors used by pending and processing.
+ */
+export const COMPLETED_SESSION_DIRECTORY_COLORS = [
+    '#4E7CF5',
+    '#7367E8',
+    '#9862C7',
+    '#C35E92',
+    '#337FA8',
+    '#258C91',
+    '#647AA3',
+    '#8A6F9E',
+    '#496FAF',
+    '#A06478'
+] as const
+
+function normalizeDirectoryColorKey(directory: string | null): string | null {
+    return directory?.trim().replace(/\/+$/, '') || null
+}
+
+function getCompletedSessionDirectoryColorIndex(normalizedDirectory: string): number {
+    let hash = 2_166_136_261
+    for (let index = 0; index < normalizedDirectory.length; index += 1) {
+        hash ^= normalizedDirectory.charCodeAt(index)
+        hash = Math.imul(hash, 16_777_619)
+    }
+    return (hash >>> 0) % COMPLETED_SESSION_DIRECTORY_COLORS.length
+}
+
+export function getCompletedSessionDirectoryColor(directory: string | null): string | null {
+    const normalized = normalizeDirectoryColorKey(directory)
+    if (!normalized) return null
+    return COMPLETED_SESSION_DIRECTORY_COLORS[getCompletedSessionDirectoryColorIndex(normalized)]
+}
+
+/** Avoid color collisions among the first palette-sized set of visible directories. */
+export function assignCompletedSessionDirectoryColors(
+    directories: readonly (string | null)[]
+): ReadonlyMap<string, string> {
+    const normalizedDirectories = [...new Set(
+        directories
+            .map(normalizeDirectoryColorKey)
+            .filter((directory): directory is string => directory !== null)
+    )].sort()
+    const assignments = new Map<string, string>()
+    const usedColors = new Set<string>()
+
+    for (const directory of normalizedDirectories) {
+        const preferredIndex = getCompletedSessionDirectoryColorIndex(directory)
+        const preferredColor = COMPLETED_SESSION_DIRECTORY_COLORS[preferredIndex]
+        let color = preferredColor
+        if (usedColors.size < COMPLETED_SESSION_DIRECTORY_COLORS.length) {
+            for (let offset = 0; offset < COMPLETED_SESSION_DIRECTORY_COLORS.length; offset += 1) {
+                const candidate = COMPLETED_SESSION_DIRECTORY_COLORS[
+                    (preferredIndex + offset) % COMPLETED_SESSION_DIRECTORY_COLORS.length
+                ]
+                if (!usedColors.has(candidate)) {
+                    color = candidate
+                    break
+                }
+            }
+        }
+        assignments.set(directory, color)
+        usedColors.add(color)
+    }
+    return assignments
+}
+
+function getAssignedCompletedSessionDirectoryColor(
+    assignments: ReadonlyMap<string, string>,
+    directory: string | null
+): string | null {
+    const key = normalizeDirectoryColorKey(directory)
+    return key ? assignments.get(key) ?? null : null
+}
+
+const KANBAN_GROUP_PRESENTATION: Record<MergedCodexKanbanGroupId, {
     labelKey: string
     dotClassName: string
     borderClassName: string
 }> = {
+    pinned: {
+        labelKey: 'sessions.kanban.pinned',
+        dotClassName: 'text-[var(--app-hint)]',
+        borderClassName: 'border-l-[var(--app-divider)]'
+    },
     pending: {
         labelKey: 'sessions.kanban.pending',
         dotClassName: 'bg-[#F59E0B]',
@@ -162,8 +259,7 @@ export function groupMergedCodexCompletedTimeline(
         today: string
         yesterday: string
         daysAgo: (days: number) => string
-    },
-    pinnedSessionKeys: ReadonlySet<string> = EMPTY_PINNED_SESSION_KEYS
+    }
 ) {
     return groupShareTimeline(
         sessions.map((session) => ({ ...session, createdAt: toEpochMilliseconds(session.modifiedAt) })),
@@ -172,17 +268,14 @@ export function groupMergedCodexCompletedTimeline(
         labels
     ).map((group) => ({
         ...group,
-        shares: [...group.shares].sort((left, right) => compareKanbanSessions(left, right, pinnedSessionKeys))
+        shares: [...group.shares].sort(compareKanbanSessions)
     }))
 }
 
 function compareKanbanSessions(
     left: MergedCodexSession,
-    right: MergedCodexSession,
-    pinnedSessionKeys: ReadonlySet<string>
+    right: MergedCodexSession
 ): number {
-    const pinOrder = Number(pinnedSessionKeys.has(right.key)) - Number(pinnedSessionKeys.has(left.key))
-    if (pinOrder !== 0) return pinOrder
     const activity = toEpochMilliseconds(right.modifiedAt) - toEpochMilliseconds(left.modifiedAt)
     if (activity !== 0) return activity
     return left.key.localeCompare(right.key)
@@ -193,6 +286,7 @@ export function groupMergedCodexSessionsForKanban(
     pinnedSessionKeys: ReadonlySet<string> = EMPTY_PINNED_SESSION_KEYS
 ): MergedCodexKanbanGroup[] {
     const groups: MergedCodexKanbanGroup[] = [
+        { id: 'pinned', sessions: [] },
         { id: 'pending', sessions: [] },
         { id: 'processing', sessions: [] },
         { id: 'completed', sessions: [] }
@@ -200,12 +294,14 @@ export function groupMergedCodexSessionsForKanban(
     const groupsById = new Map(groups.map((group) => [group.id, group]))
 
     for (const session of sessions) {
-        const groupId = getMergedCodexKanbanStatus(session)
+        const groupId = pinnedSessionKeys.has(session.key)
+            ? 'pinned'
+            : getMergedCodexKanbanStatus(session)
         groupsById.get(groupId)!.sessions.push(session)
     }
 
     for (const group of groups) {
-        group.sessions.sort((left, right) => compareKanbanSessions(left, right, pinnedSessionKeys))
+        group.sessions.sort(compareKanbanSessions)
     }
 
     return groups
@@ -390,14 +486,17 @@ function KanbanSessionCard(props: {
     onTogglePin?: () => void
     onArchived: (session: MergedCodexSession) => void
     dateLocale: string
+    now: number
+    directoryColor: string | null
     t: (key: string, params?: Record<string, string | number>) => string
 }) {
-    const { api, machineId, session, selected = false, pinned, onOpen, onTogglePin, onArchived, dateLocale, t } = props
+    const { api, machineId, session, selected = false, pinned, onOpen, onTogglePin, onArchived, dateLocale, now, directoryColor, t } = props
     const queryClient = useQueryClient()
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [isArchiving, setIsArchiving] = useState(false)
     const status = getMergedCodexKanbanStatus(session)
-    const presentation = KANBAN_STATUS_PRESENTATION[status]
+    const presentation = KANBAN_GROUP_PRESENTATION[status]
+    const completedDirectoryColor = status === 'completed' ? directoryColor : null
     const modifiedAt = toEpochMilliseconds(session.modifiedAt)
     const directoryLabel = getKanbanDirectoryLabel(session.cwd) ?? t('recentCodex.noDirectory')
     const { branch, isWorktree } = useMachineGitBranch(api, machineId, session.cwd)
@@ -431,16 +530,18 @@ function KanbanSessionCard(props: {
                 title={formatTimestamp(session.modifiedAt)}
                 data-kanban-card-time
             >
-                {formatShareTimelineTime(modifiedAt, dateLocale)}
+                {formatKanbanSessionTime(modifiedAt, now, dateLocale, t)}
             </time>
             <div className="relative min-w-0">
                 <button
                     type="button"
                     onClick={onOpen}
-                    className={`session-kanban-card flex min-h-24 w-full min-w-0 flex-col rounded-[14px] border border-l-[3px] border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5 pr-12 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[background-color,box-shadow] hover:bg-[var(--app-subtle-bg)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${presentation.borderClassName} ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
+                    className={`session-kanban-card flex min-h-24 w-full min-w-0 flex-col rounded-[14px] border border-l-[3px] border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5 pr-12 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[background-color,box-shadow] hover:bg-[var(--app-subtle-bg)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${presentation.borderClassName} ${status === 'processing' ? 'session-kanban-card-thinking' : ''} ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
+                    style={completedDirectoryColor ? { borderLeftColor: completedDirectoryColor } : undefined}
                     aria-label={t('recentCodex.open', { title: session.title })}
                     aria-current={selected ? 'page' : undefined}
                     data-kanban-card-status={status}
+                    data-kanban-directory-color={completedDirectoryColor ?? undefined}
                 >
                     <span className="flex w-full min-w-0 items-center gap-2 pr-2" data-kanban-card-top-row>
                         <CodexSourceIcon source={session.source} active={status === 'processing'} />
@@ -761,6 +862,7 @@ export function RecentCodexSessions(props: {
     const { locale, t } = useTranslation()
     const localDay = useLocalDayKey()
     const dateLocale = locale === 'zh-CN' ? 'zh-CN' : 'en-US'
+    const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now())
     const nativeRealtime = useNativeCodexRealtime()
     const hasRealtimeUpdates = props.realtimeAvailable === true && nativeRealtime?.connected === true
     const embedded = props.embedded ?? false
@@ -786,6 +888,16 @@ export function RecentCodexSessions(props: {
     const hasInitializedRealtimeStateRef = useRef(false)
     const [manualRefreshFeedback, setManualRefreshFeedback] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const [archivedSessionKeys, setArchivedSessionKeys] = useState<Set<string>>(() => new Set())
+
+    useEffect(() => {
+        const updateRelativeTime = () => setRelativeTimeNow(Date.now())
+        const interval = window.setInterval(updateRelativeTime, 30_000)
+        document.addEventListener('visibilitychange', updateRelativeTime)
+        return () => {
+            window.clearInterval(interval)
+            document.removeEventListener('visibilitychange', updateRelativeTime)
+        }
+    }, [])
     const visibleSessions = useMemo(
         () => onlyProcessing ? sessions.filter((session) => session.runState === 'processing') : sessions,
         [onlyProcessing, sessions]
@@ -807,6 +919,14 @@ export function RecentCodexSessions(props: {
             : [],
         [archivedSessionKeys, isMerged, props.hapiSessions, recentNativeSessions]
     )
+    const completedDirectoryColors = useMemo(
+        () => assignCompletedSessionDirectoryColors(
+            mergedSessions
+                .filter((session) => getMergedCodexKanbanStatus(session) === 'completed')
+                .map((session) => session.cwd)
+        ),
+        [mergedSessions]
+    )
     const mergedDirectoryGroups = useMemo(
         () => groupMergedCodexSessionsByDirectory(mergedSessions),
         [mergedSessions]
@@ -821,8 +941,8 @@ export function RecentCodexSessions(props: {
             today: t('shares.timeline.today'),
             yesterday: t('shares.timeline.yesterday'),
             daysAgo: (days) => t('shares.timeline.daysAgo', { days })
-        }, props.pinnedSessionKeys)
-    }, [dateLocale, kanbanGroups, localDay, props.pinnedSessionKeys, t])
+        })
+    }, [dateLocale, kanbanGroups, localDay, t])
 
     const directoryGroupsForDisclosure = isMerged ? mergedDirectoryGroups : directoryGroups
 
@@ -1127,17 +1247,24 @@ export function RecentCodexSessions(props: {
                     {kanbanGroups
                         .filter((group) => group.id !== 'completed' && group.sessions.length > 0)
                         .map((group) => {
-                        const presentation = KANBAN_STATUS_PRESENTATION[group.id]
+                        const presentation = KANBAN_GROUP_PRESENTATION[group.id]
                         return (
                             <section key={group.id} className="min-w-0" data-kanban-group={group.id}>
                                 <div className="flex items-center gap-2 px-1">
-                                    <span className={`h-2 w-2 shrink-0 rounded-full ${presentation.dotClassName}`} aria-hidden="true" />
+                                    {group.id === 'pinned' ? (
+                                        <Pin className={`h-3.5 w-3.5 shrink-0 ${presentation.dotClassName}`} fill="currentColor" aria-hidden="true" />
+                                    ) : (
+                                        <span
+                                            className={`h-2 w-2 shrink-0 rounded-full ${presentation.dotClassName} ${group.id === 'processing' ? 'motion-safe:animate-pulse' : ''}`}
+                                            aria-hidden="true"
+                                        />
+                                    )}
                                     <h2 className="text-xs font-semibold tracking-[0.04em] text-[var(--app-hint)]">
                                         {t(presentation.labelKey)}
                                     </h2>
                                     <span className="text-xs tabular-nums text-[var(--app-hint)]">{group.sessions.length}</span>
                                 </div>
-                                <ul className="mt-2 flex flex-col gap-2.5">
+                                <ul className="mt-2 flex flex-col gap-2.5 pl-5" data-kanban-card-column>
                                     {group.sessions.map((session) => (
                                         <KanbanSessionCard
                                             key={session.key}
@@ -1147,6 +1274,8 @@ export function RecentCodexSessions(props: {
                                             selected={session.source === 'hapi' && session.id === props.selectedSessionId}
                                             pinned={props.pinnedSessionKeys?.has(session.key) ?? false}
                                             dateLocale={dateLocale}
+                                            now={relativeTimeNow}
+                                            directoryColor={getAssignedCompletedSessionDirectoryColor(completedDirectoryColors, session.cwd)}
                                             t={t}
                                             onTogglePin={props.onTogglePin ? () => props.onTogglePin?.(session.key) : undefined}
                                             onArchived={handleArchived}
@@ -1165,16 +1294,37 @@ export function RecentCodexSessions(props: {
                     })}
                     {completedTimelineGroups.length > 0 ? (
                         <section className="min-w-0" data-kanban-group="completed">
-                            <div className="flex items-center gap-2 px-1">
-                                <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--app-hint)]" aria-hidden="true" />
-                                <h2 className="text-xs font-semibold tracking-[0.04em] text-[var(--app-hint)]">
+                            <div
+                                className="flex items-center gap-2 px-1"
+                                role="separator"
+                                aria-label={`${t('sessions.kanban.completed')} ${completedTimelineGroups.reduce((count, group) => count + group.shares.length, 0)}`}
+                                data-kanban-completed-divider
+                            >
+                                <span
+                                    className="h-px min-w-3 flex-1 bg-[color-mix(in_srgb,var(--app-border)_72%,transparent)]"
+                                    aria-hidden="true"
+                                    data-kanban-divider-line
+                                />
+                                <h2 className="inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-[var(--app-hint)]">
+                                    <MotionIcon
+                                        icon={toMotionIcon(CircleCheck)}
+                                        className="h-3.5 w-3.5 shrink-0 text-[#34C759]"
+                                        data-motion-icon="completed"
+                                        aria-hidden="true"
+                                    />
                                     {t('sessions.kanban.completed')}
+                                    <span aria-hidden="true">·</span>
+                                    <span className="tabular-nums">
+                                        {completedTimelineGroups.reduce((count, group) => count + group.shares.length, 0)}
+                                    </span>
                                 </h2>
-                                <span className="text-xs tabular-nums text-[var(--app-hint)]">
-                                    {completedTimelineGroups.reduce((count, group) => count + group.shares.length, 0)}
-                                </span>
+                                <span
+                                    className="h-px min-w-3 flex-1 bg-[color-mix(in_srgb,var(--app-border)_72%,transparent)]"
+                                    aria-hidden="true"
+                                    data-kanban-divider-line
+                                />
                             </div>
-                            <div className="relative mt-3 pl-5">
+                            <div className="relative mt-3 pl-5" data-kanban-card-column>
                                 <div aria-hidden="true" className="absolute bottom-2 left-[5px] top-2 w-px bg-gradient-to-b from-transparent via-[var(--app-divider)] to-transparent" />
                                 <div className="space-y-5">
                                     {completedTimelineGroups.map((group) => (
@@ -1201,6 +1351,8 @@ export function RecentCodexSessions(props: {
                                                         selected={session.source === 'hapi' && session.id === props.selectedSessionId}
                                                         pinned={props.pinnedSessionKeys?.has(session.key) ?? false}
                                                         dateLocale={dateLocale}
+                                                        now={relativeTimeNow}
+                                                        directoryColor={getAssignedCompletedSessionDirectoryColor(completedDirectoryColors, session.cwd)}
                                                         t={t}
                                                         onTogglePin={props.onTogglePin ? () => props.onTogglePin?.(session.key) : undefined}
                                                         onArchived={handleArchived}

@@ -5,8 +5,9 @@ import { configuration } from '@/configuration'
 import { getHappyCliCommand } from '@/utils/spawnHappyCLI'
 
 const EXTERNAL_CODEX_REQUEST_FLAG = '--external-codex-request'
+const EXTERNAL_CODEX_LIFECYCLE_FLAG = '--external-codex-lifecycle'
 
-type HookKind = 'permission' | 'user-input'
+type HookKind = 'permission' | 'user-input' | 'turn-started'
 
 type InstallOptions = {
     hooksPath?: string
@@ -49,11 +50,11 @@ export function buildExternalCodexNotificationHookCommand(
     kind: HookKind,
     runnerStatePath: string = configuration.runnerStateFile
 ): string {
+    const lifecycle = kind === 'turn-started'
     const { command, args } = getHappyCliCommand([
         'hook-forwarder',
-        EXTERNAL_CODEX_REQUEST_FLAG,
-        '--kind',
-        kind,
+        lifecycle ? EXTERNAL_CODEX_LIFECYCLE_FLAG : EXTERNAL_CODEX_REQUEST_FLAG,
+        ...(lifecycle ? [] : ['--kind', kind]),
         '--runner-state',
         runnerStatePath
     ])
@@ -63,12 +64,14 @@ export function buildExternalCodexNotificationHookCommand(
 function isOurHandler(value: unknown, kind: HookKind): boolean {
     const handler = asRecord(value)
     const command = typeof handler?.command === 'string' ? handler.command : ''
-    return command.includes(EXTERNAL_CODEX_REQUEST_FLAG) && command.includes(`--kind ${kind}`)
+    return kind === 'turn-started'
+        ? command.includes(EXTERNAL_CODEX_LIFECYCLE_FLAG)
+        : command.includes(EXTERNAL_CODEX_REQUEST_FLAG) && command.includes(`--kind ${kind}`)
 }
 
 function ensureEventHooks(
     hooks: Record<string, unknown>,
-    eventName: 'PermissionRequest' | 'PreToolUse'
+    eventName: 'PermissionRequest' | 'PreToolUse' | 'UserPromptSubmit'
 ): Array<Record<string, unknown>> {
     const existing = hooks[eventName]
     if (existing === undefined) {
@@ -114,6 +117,16 @@ function removeUnsupportedAsyncFlags(groups: Array<Record<string, unknown>>, kin
 }
 
 function buildHookGroup(kind: HookKind, command: string): Record<string, unknown> {
+    if (kind === 'turn-started') {
+        // UserPromptSubmit has no useful matcher: Codex ignores it there.
+        return {
+            hooks: [{
+                type: 'command',
+                command,
+                timeout: 10
+            }]
+        }
+    }
     return {
         matcher: kind === 'permission' ? '*' : '^request_user_input$',
         hooks: [{
@@ -152,11 +165,12 @@ async function writeJsonAtomically(path: string, value: Record<string, unknown>)
 }
 
 /**
- * Adds two additive user-level Codex hooks:
+ * Adds three additive user-level Codex hooks:
  * - PermissionRequest catches native approval prompts.
  * - PreToolUse catches the explicit request_user_input primitive.
+ * - UserPromptSubmit marks a native turn as locally processing.
  *
- * Both only signal the local runner and never approve, deny, or alter Codex.
+ * All only signal the local runner and never approve, deny, or alter Codex.
  */
 export async function installExternalCodexNotificationHooks(
     options: InstallOptions = {}
@@ -192,7 +206,14 @@ export async function installExternalCodexNotificationHooks(
         addedKinds.push('user-input')
     }
 
-    if (addedKinds.length > 0 || migratedPermissionHook || migratedUserInputHook) {
+    const turnStartGroups = ensureEventHooks(hooks, 'UserPromptSubmit')
+    const migratedTurnStartHook = removeUnsupportedAsyncFlags(turnStartGroups, 'turn-started')
+    if (!hasHandler(turnStartGroups, 'turn-started')) {
+        turnStartGroups.push(buildHookGroup('turn-started', commandForKind('turn-started', runnerStatePath)))
+        addedKinds.push('turn-started')
+    }
+
+    if (addedKinds.length > 0 || migratedPermissionHook || migratedUserInputHook || migratedTurnStartHook) {
         await writeJsonAtomically(hooksPath, root)
     }
 

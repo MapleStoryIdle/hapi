@@ -16,6 +16,7 @@ import { getCliArgs } from '@/utils/cliArgs';
 import { isProcessAlive, isWindows, killProcess, killProcessByChildProcess } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
 import type { ExternalCodexRequestPayload } from '@hapi/protocol';
+import type { ExternalCodexLifecycleEvent } from '@/codex/nativeTurnLifecycle';
 import { withRetry } from '@/utils/time';
 import { isRetryableConnectionError } from '@/utils/errorUtils';
 
@@ -207,6 +208,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     type ExternalCodexRequest = Omit<ExternalCodexRequestPayload, 'machineId'>;
     let reportExternalCodexRequestToHub: ((request: ExternalCodexRequest) => void) | null = null;
     const pendingExternalCodexRequests: ExternalCodexRequest[] = [];
+    let applyExternalCodexLifecycle: ((event: ExternalCodexLifecycleEvent) => void) | null = null;
+    const pendingExternalCodexLifecycles: ExternalCodexLifecycleEvent[] = [];
+    const pendingExternalCodexLifecycleKeys = new Set<string>();
+    const MAX_PENDING_EXTERNAL_CODEX_LIFECYCLES = 64;
     const formatSpawnError = (error: unknown): string => {
       if (error instanceof Error) {
         return error.message;
@@ -297,6 +302,29 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       if (pendingExternalCodexRequests.length < 20) {
         pendingExternalCodexRequests.push(request);
       }
+    };
+
+    const onExternalCodexLifecycle = (event: ExternalCodexLifecycleEvent) => {
+      if (applyExternalCodexLifecycle) {
+        applyExternalCodexLifecycle(event);
+        return;
+      }
+
+      // Hooks can arrive while the runner is still registering its machine.
+      // Retain one start per turn only; a duplicate must not extend the local
+      // safety lease when replayed.
+      const key = `${event.codexSessionId}\u0000${event.turnId}`;
+      if (pendingExternalCodexLifecycleKeys.has(key)) {
+        return;
+      }
+      if (pendingExternalCodexLifecycles.length >= MAX_PENDING_EXTERNAL_CODEX_LIFECYCLES) {
+        const evicted = pendingExternalCodexLifecycles.shift();
+        if (evicted) {
+          pendingExternalCodexLifecycleKeys.delete(`${evicted.codexSessionId}\u0000${evicted.turnId}`);
+        }
+      }
+      pendingExternalCodexLifecycles.push(event);
+      pendingExternalCodexLifecycleKeys.add(key);
     };
 
     // Spawn a new session (sessionId reserved for future --resume functionality)
@@ -709,7 +737,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       spawnSession,
       requestShutdown: () => requestShutdown('hapi-cli'),
       onHappySessionWebhook,
-      onExternalCodexRequest
+      onExternalCodexRequest,
+      onExternalCodexLifecycle
     });
 
     // Baseline mtime at runner-process start. Immutable: per Codex review #814
@@ -819,6 +848,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     for (const request of pendingExternalCodexRequests.splice(0)) {
       reportExternalCodexRequestToHub(request);
     }
+    applyExternalCodexLifecycle = (event) => {
+      apiMachine.observeExternalCodexLifecycle(event);
+    };
+    for (const event of pendingExternalCodexLifecycles.splice(0)) {
+      applyExternalCodexLifecycle(event);
+    }
+    pendingExternalCodexLifecycleKeys.clear();
     scheduleCursorModelsPrewarm();
 
     // Visible startup banner. Use console.log so it always appears on stdout,

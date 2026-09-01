@@ -46,6 +46,7 @@ import { NativeCodexSessionListCache } from '@/codex/nativeSessionListCache'
 import { NativeCodexSessionTitleCache } from '@/codex/nativeSessionTitleCache'
 import { NativeCodexTranscriptCache, type NativeCodexTranscriptRead } from '@/codex/nativeTranscriptCache'
 import { NativeCodexSessionWatcher } from '@/codex/nativeSessionWatcher'
+import { NativeCodexTurnLifecycleTracker, type ExternalCodexLifecycleEvent } from '@/codex/nativeTurnLifecycle'
 import type { RunnerState, Machine, MachineMetadata } from './types'
 import { RunnerStateSchema, MachineMetadataSchema } from './types'
 import { backoff } from '@/utils/time'
@@ -247,9 +248,15 @@ export class ApiMachineClient {
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
     private rpcHandlerManager: RpcHandlerManager
     private readonly nativeCodexSessionTitleCache = new NativeCodexSessionTitleCache()
-    private readonly nativeCodexTranscriptCache = new NativeCodexTranscriptCache()
+    private readonly nativeCodexTurnLifecycle = new NativeCodexTurnLifecycleTracker({
+        onUnconfirmedLeaseExpired: (codexSessionId) => this.handleNativeCodexLifecycleChange(codexSessionId)
+    })
+    private readonly nativeCodexTranscriptCache = new NativeCodexTranscriptCache({
+        applyLifecycle: (session) => this.nativeCodexTurnLifecycle.applyToSummary(session)
+    })
     private readonly nativeCodexSessionListCache = new NativeCodexSessionListCache({
-        resolveTitles: (sessionIds, options) => this.nativeCodexSessionTitleCache.resolve(sessionIds, options)
+        resolveTitles: (sessionIds, options) => this.nativeCodexSessionTitleCache.resolve(sessionIds, options),
+        applyLifecycle: (session) => this.nativeCodexTurnLifecycle.applyToSummary(session)
     })
     private readonly nativeCodexSessionDirectSender: NativeCodexSessionDirectSender
     private readonly nativeKanbanFeedbackStore = new NativeKanbanFeedbackStore(
@@ -257,6 +264,10 @@ export class ApiMachineClient {
     )
     private readonly nativeCodexSessionWatcher = new NativeCodexSessionWatcher({
         onChange: ({ codexSessionId, filePath, modifiedAt }) => {
+            const summaryRead = this.nativeCodexTranscriptCache.refreshSummary(codexSessionId)
+            if (summaryRead) {
+                this.nativeCodexTurnLifecycle.observeTranscriptEvents(codexSessionId, summaryRead.lifecycleEvents)
+            }
             const listSession = this.nativeCodexSessionListCache.update(filePath, modifiedAt)
             const read = this.nativeCodexTranscriptCache.refreshCached(codexSessionId, { limit: 50 })
             this.nativeCodexSessionDirectSender.notifyTranscriptChanged(codexSessionId)
@@ -281,7 +292,7 @@ export class ApiMachineClient {
             undefined,
             undefined,
             undefined,
-            { getSummary: (sessionId) => this.nativeCodexTranscriptCache.getSummary(sessionId) },
+            { getSummary: (sessionId) => this.getNativeCodexSessionSummary(sessionId) },
             // One short-lived bridge per native hand-off. Never reuse this
             // client across original Codex sessions: their local owner can
             // continue editing the transcript outside HAPI.
@@ -361,8 +372,7 @@ export class ApiMachineClient {
                 if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100)) {
                     return { success: false, error: 'limit must be an integer between 1 and 100' }
                 }
-                const cachedRead = this.nativeCodexTranscriptCache.read(sessionId, { before, limit })
-                const read = cachedRead ? this.withNativeCodexTitle(cachedRead) : null
+                const read = this.readNativeCodexTranscript(sessionId, { before, limit })
                 if (read) {
                     this.observeNativeCodexSession(sessionId)
                 }
@@ -388,8 +398,7 @@ export class ApiMachineClient {
                     return { success: false, error: 'limit must be an integer between 1 and 100' }
                 }
 
-                const cachedRead = this.nativeCodexTranscriptCache.read(sessionId, { before, limit })
-                const read = cachedRead ? this.withNativeCodexTitle(cachedRead) : null
+                const read = this.readNativeCodexTranscript(sessionId, { before, limit })
                 if (!read) {
                     return { success: false, error: 'Codex session not found' }
                 }
@@ -417,8 +426,11 @@ export class ApiMachineClient {
                 if (!sessionId) {
                     return { success: false, error: 'sessionId is required' }
                 }
-                this.observeNativeCodexSession(sessionId)
-                return this.nativeCodexSessionDirectSender.getStatus(sessionId)
+                const summary = this.getNativeCodexSessionSummary(sessionId)
+                if (summary) {
+                    this.observeNativeCodexSession(sessionId)
+                }
+                return this.nativeCodexSessionDirectSender.getStatus(sessionId, summary ?? undefined)
             }
         )
 
@@ -433,7 +445,7 @@ export class ApiMachineClient {
                     return { success: false, error: 'sessionId is required' }
                 }
 
-                const summary = this.nativeCodexTranscriptCache.getSummary(sessionId)
+                const summary = this.getNativeCodexSessionSummary(sessionId)
                 if (!summary) {
                     return { success: false, error: 'Codex session not found' }
                 }
@@ -470,7 +482,10 @@ export class ApiMachineClient {
                 if (params?.reviewGuard !== undefined && (params.deliveryPolicy !== 'untrusted-review' || !params.reviewGuard || typeof params.reviewGuard !== 'object')) {
                     return { success: false, code: 'invalid_message', error: 'reviewGuard is only valid for an untrusted review' }
                 }
-                this.observeNativeCodexSession(sessionId)
+                const summary = this.getNativeCodexSessionSummary(sessionId)
+                if (summary) {
+                    this.observeNativeCodexSession(sessionId)
+                }
                 return this.nativeCodexSessionDirectSender.send(
                     sessionId,
                     params?.message,
@@ -510,10 +525,10 @@ export class ApiMachineClient {
                 }
 
                 // A Kanban card has not necessarily opened the native drawer,
-                // so warm this exact transcript before checking ownership and
-                // reserving it against HAPI delivery. The cache is runner-local.
-                const read = this.nativeCodexTranscriptCache.read(sessionId, { limit: 1 })
-                if (!read) {
+                // so warm this exact summary before checking ownership and
+                // reserving it against HAPI delivery. Message bodies stay cold.
+                const summary = this.getNativeCodexSessionSummary(sessionId)
+                if (!summary) {
                     return { success: false, code: 'session_not_found', error: 'Codex session not found' }
                 }
                 this.observeNativeCodexSession(sessionId)
@@ -865,8 +880,77 @@ export class ApiMachineClient {
         return true
     }
 
+    /** Apply a local UserPromptSubmit turn start without emitting an alert. */
+    observeExternalCodexLifecycle(event: ExternalCodexLifecycleEvent): boolean {
+        // Read existing transcript terminals before accepting the asynchronous
+        // hook. A completed turn must never be resurrected by late delivery.
+        const initialSummary = this.nativeCodexTranscriptCache.readSummary(event.codexSessionId)
+        const transcriptChanged = initialSummary
+            ? this.nativeCodexTurnLifecycle.observeTranscriptEvents(event.codexSessionId, initialSummary.lifecycleEvents)
+            : false
+        const hookChanged = this.nativeCodexTurnLifecycle.observeHookStart(event)
+        if (!transcriptChanged && !hookChanged) {
+            return false
+        }
+
+        const summary = this.nativeCodexTranscriptCache.readSummary(event.codexSessionId)?.session ?? null
+        if (summary) {
+            this.observeNativeCodexSession(event.codexSessionId)
+        }
+        this.nativeCodexSessionDirectSender.notifyTranscriptChanged(event.codexSessionId)
+        this.reportNativeCodexSessionUpdated(event.codexSessionId, event.observedAt, null, summary)
+        return true
+    }
+
+    private readNativeCodexTranscript(
+        sessionId: string,
+        options: Parameters<NativeCodexTranscriptCache['read']>[1] = {}
+    ): NativeCodexTranscriptRead | null {
+        const initialRead = this.nativeCodexTranscriptCache.read(sessionId, options)
+        if (!initialRead) return null
+
+        const lifecycleChanged = this.nativeCodexTurnLifecycle.observeTranscriptEvents(
+            sessionId,
+            initialRead.lifecycleEvents
+        )
+        if (lifecycleChanged) {
+            this.nativeCodexSessionDirectSender.notifyTranscriptChanged(sessionId)
+        }
+        const read = lifecycleChanged
+            ? this.nativeCodexTranscriptCache.readCached(sessionId, options) ?? initialRead
+            : initialRead
+        return this.withNativeCodexTitle(read)
+    }
+
+    /**
+     * The direct-send queue reads this path outside watcher callbacks. Consume
+     * any newly appended terminal before it decides whether a queued prompt is
+     * safe to deliver. This method deliberately does not emit: the watcher or
+     * caller owns browser notification, while the local state must be current.
+     */
+    private getNativeCodexSessionSummary(sessionId: string): CodexLocalSessionSummary | null {
+        const initialRead = this.nativeCodexTranscriptCache.readSummary(sessionId)
+        if (!initialRead) return null
+
+        const lifecycleChanged = this.nativeCodexTurnLifecycle.observeTranscriptEvents(
+            sessionId,
+            initialRead.lifecycleEvents
+        )
+        return lifecycleChanged
+            ? this.nativeCodexTranscriptCache.readSummary(sessionId)?.session ?? initialRead.session
+            : initialRead.session
+    }
+
+    private handleNativeCodexLifecycleChange(sessionId: string): void {
+        // The expiry callback runs after the tracker has switched its overlay
+        // to unknown, so a waiting direct-send queue cannot treat this as idle.
+        const summary = this.nativeCodexTranscriptCache.readSummary(sessionId)?.session ?? null
+        this.nativeCodexSessionDirectSender.notifyTranscriptChanged(sessionId)
+        this.reportNativeCodexSessionUpdated(sessionId, Date.now(), null, summary)
+    }
+
     private observeNativeCodexSession(sessionId: string): void {
-        const session = this.nativeCodexTranscriptCache.getSummary(sessionId)
+        const session = this.getNativeCodexSessionSummary(sessionId)
         if (!session) {
             return
         }
@@ -883,7 +967,9 @@ export class ApiMachineClient {
         if (!socket) {
             return false
         }
-        const cachedRead = transcriptRead ?? this.nativeCodexTranscriptCache.readCached(codexSessionId, { limit: 50 })
+        const cachedRead = transcriptRead === undefined
+            ? this.nativeCodexTranscriptCache.readCached(codexSessionId, { limit: 50 })
+            : transcriptRead
         const read = cachedRead ? this.withNativeCodexTitle(cachedRead) : null
         // The watcher also monitors recently active local transcripts that no
         // browser has opened. Do not turn those lightweight invalidations
@@ -1015,7 +1101,7 @@ export class ApiMachineClient {
             'native-kanban-feedback:stage',
             (data: NativeKanbanFeedbackStageRequest, callback: (response: NativeKanbanFeedbackStageResponse) => void) => {
                 const sessionId = typeof data?.codexSessionId === 'string' ? data.codexSessionId.trim() : ''
-                const summary = sessionId ? this.nativeCodexTranscriptCache.getSummary(sessionId) : null
+                const summary = sessionId ? this.getNativeCodexSessionSummary(sessionId) : null
                 if (!summary || isHapiInitiatedCodexSession(summary)) {
                     callback({ success: false, error: 'Only an original native Codex session may receive feedback' })
                     return
@@ -1109,6 +1195,7 @@ export class ApiMachineClient {
         this.stopKeepAlive()
         this.nativeCodexSessionWatcher.stop()
         this.nativeCodexSessionDirectSender.dispose()
+        this.nativeCodexTurnLifecycle.dispose()
         if (this.socket) {
             this.socket.close()
         }

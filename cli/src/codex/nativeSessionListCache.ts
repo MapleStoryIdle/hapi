@@ -18,6 +18,7 @@ export type NativeCodexSessionListCacheOptions = {
     listFiles?: () => CodexTranscriptFileCandidate[]
     readSummary?: (filePath: string, modifiedAt?: number, size?: number) => CodexLocalSessionSummary | null
     resolveTitles?: (sessionIds: readonly string[], options: { forceRefresh?: boolean }) => ReadonlyMap<string, string>
+    applyLifecycle?: (session: CodexLocalSessionSummary) => CodexLocalSessionSummary
 }
 
 /**
@@ -62,7 +63,7 @@ export class NativeCodexSessionListCache {
             if (!session || seenSessionIds.has(session.id)) continue
             if (options.excludeHapiInitiated && isHapiInitiatedCodexSession(session)) continue
             seenSessionIds.add(session.id)
-            sessions.push(session)
+            sessions.push(this.applyLifecycle(session))
             if (sessions.length >= limit) break
         }
         return this.applyCodexTitles(sessions, cacheOptions.forceRefresh)
@@ -93,7 +94,7 @@ export class NativeCodexSessionListCache {
             size: candidate.size,
             session
         })
-        return session ? this.applyCodexTitles([session])[0] ?? session : null
+        return session ? this.applyLifecycle(this.applyCodexTitles([session])[0] ?? session) : null
     }
 
     private ensureInitialized(): void {
@@ -154,6 +155,10 @@ export class NativeCodexSessionListCache {
             const title = titles.get(session.id)
             return title && title !== session.title ? { ...session, title } : session
         })
+    }
+
+    private applyLifecycle(session: CodexLocalSessionSummary): CodexLocalSessionSummary {
+        return this.options.applyLifecycle?.(session) ?? session
     }
 
     private getListFiles(): CodexTranscriptFileCandidate[] {

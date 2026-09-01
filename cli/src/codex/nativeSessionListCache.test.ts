@@ -121,4 +121,29 @@ describe('NativeCodexSessionListCache', () => {
         expect(cache.list(1)).toMatchObject([{ id: sessionId, title: 'Codex own title' }])
         expect(resolveTitles).toHaveBeenCalledWith([sessionId], { forceRefresh: undefined })
     })
+
+    it('applies the current runner-local lifecycle overlay to cached rows', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-native-codex-list-cache-'))
+        cleanupPaths.push(root)
+        const sessionId = '66666666-6666-4666-8666-666666666666'
+        const file = join(root, `rollout-${sessionId}.jsonl`)
+        writeFileSync(file, '{"type":"session_meta"}\n', 'utf8')
+        let runState: 'idle' | 'processing' = 'idle'
+        const cache = new NativeCodexSessionListCache({
+            listFiles: () => [candidate(file)],
+            readSummary: (filePath, modifiedAt) => ({
+                id: sessionId,
+                title: 'Native task',
+                cwd: '/work/project',
+                file: filePath,
+                modifiedAt: modifiedAt ?? 0,
+                runState: 'idle'
+            }),
+            applyLifecycle: (session) => ({ ...session, runState })
+        })
+
+        expect(cache.list(1)[0]?.runState).toBe('idle')
+        runState = 'processing'
+        expect(cache.list(1)[0]?.runState).toBe('processing')
+    })
 })

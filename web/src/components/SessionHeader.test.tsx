@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nContext, I18nProvider } from '@/lib/i18n-context'
 import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
@@ -515,7 +515,8 @@ describe('SessionHeader connection recovery', () => {
         expect(recover).toHaveBeenCalledTimes(1)
     })
 
-    it('shows a non-clickable recovery state while the refresh is running', () => {
+    it('waits three seconds before showing the initial recovery state', () => {
+        vi.useFakeTimers()
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -534,6 +535,11 @@ describe('SessionHeader connection recovery', () => {
                 </ToastProvider>
             </QueryClientProvider>
         )
+
+        expect(screen.queryByTestId('session-connection-recovery')).not.toBeInTheDocument()
+        act(() => vi.advanceTimersByTime(2_999))
+        expect(screen.queryByTestId('session-connection-recovery')).not.toBeInTheDocument()
+        act(() => vi.advanceTimersByTime(1))
 
         const button = screen.getByTestId('session-connection-recovery')
         expect(button).toBeDisabled()

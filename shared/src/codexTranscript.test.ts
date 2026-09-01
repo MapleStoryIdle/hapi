@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
     getCodexSessionDisplayTitle,
+    getCodexTranscriptLifecycleEvents,
     getCodexTranscriptTailSummary,
     getLocalCodexSessionData,
     getLocalCodexSessionRunState,
@@ -506,5 +507,20 @@ describe('getCodexTranscriptTailSummary', () => {
         ])
 
         expect(summary.lastUserMessage).toBe('Open the selected application.')
+    })
+})
+
+describe('getCodexTranscriptLifecycleEvents', () => {
+    it('retains only turn-scoped task lifecycle routing metadata', () => {
+        expect(getCodexTranscriptLifecycleEvents([
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-a', prompt: 'TOP_SECRET' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', turnId: 'turn-a' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'turn_aborted' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'ignore' } })
+        ])).toEqual([
+            { type: 'task_started', turnId: 'turn-a' },
+            { type: 'task_complete', turnId: 'turn-a' },
+            { type: 'turn_aborted' }
+        ])
     })
 })

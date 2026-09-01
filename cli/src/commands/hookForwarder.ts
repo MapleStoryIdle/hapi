@@ -4,6 +4,11 @@ export const hookForwarderCommand: CommandDefinition = {
     name: 'hook-forwarder',
     requiresRuntimeAssets: false,
     run: async ({ commandArgs }) => {
+        if (commandArgs.includes('--external-codex-lifecycle')) {
+            const { runExternalCodexLifecycleHookForwarder } = await import('@/codex/utils/externalCodexHookForwarder')
+            await runExternalCodexLifecycleHookForwarder(commandArgs)
+            return
+        }
         if (commandArgs.includes('--external-codex-request')) {
             const { runExternalCodexHookForwarder } = await import('@/codex/utils/externalCodexHookForwarder')
             await runExternalCodexHookForwarder(commandArgs)

@@ -4,13 +4,15 @@ import {
     createCodexTranscriptImportAccumulator,
     createLocalCodexSessionData,
     findLocalCodexSession,
+    getCodexTranscriptLifecycleEvents,
     getCodexTranscriptTailSummary,
     type CodexImportedMessageContent,
     type CodexLocalSessionData,
     type CodexLocalSessionReadOptions,
     type CodexLocalSessionReadTiming,
     type CodexLocalSessionSummary,
-    type CodexTranscriptImportAccumulator
+    type CodexTranscriptImportAccumulator,
+    type CodexTranscriptLifecycleEvent
 } from '@hapi/protocol/codexTranscript'
 
 type FileFingerprint = {
@@ -27,6 +29,7 @@ type CacheEntry = {
     trailingBytes: Buffer
     fileSize: number
     fingerprint: FileFingerprint | null
+    lifecycleEvents: CodexTranscriptLifecycleEvent[]
 }
 
 type ResolvedEntry = {
@@ -39,11 +42,34 @@ type CompleteLines = {
     trailingBytes: Buffer
 }
 
+type RecentLifecycleTail = {
+    lifecycleEvents: CodexTranscriptLifecycleEvent[]
+    trailingBytes: Buffer
+}
+
 export type NativeCodexTranscriptRead = {
     data: CodexLocalSessionData
     revision: number
     timing: CodexLocalSessionReadTiming
+    /** Bounded raw lifecycle records for the runner-local turn tracker. */
+    lifecycleEvents: readonly CodexTranscriptLifecycleEvent[]
 }
+
+export type NativeCodexTranscriptSummaryRead = {
+    session: CodexLocalSessionSummary
+    lifecycleEvents: readonly CodexTranscriptLifecycleEvent[]
+}
+
+export type NativeCodexTranscriptCacheOptions = {
+    maxEntries?: number
+    now?: () => number
+    applyLifecycle?: (session: CodexLocalSessionSummary) => CodexLocalSessionSummary
+}
+
+const MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT = 128
+// A cold session only needs the latest turn terminal/start records. Full
+// message history is loaded later, when the user actually opens the detail.
+const LIFECYCLE_TAIL_READ_BYTES = 16 * 1024
 
 function getFileFingerprint(file: string): FileFingerprint | null {
     try {
@@ -129,13 +155,17 @@ function applyTailSummary(session: CodexLocalSessionSummary, lines: readonly str
 export class NativeCodexTranscriptCache {
     private readonly entries = new Map<string, CacheEntry>()
     private readonly revisions = new Map<string, number>()
+    private readonly maxEntries: number
+    private readonly now: () => number
+    private readonly applyLifecycle: ((session: CodexLocalSessionSummary) => CodexLocalSessionSummary) | null
 
-    constructor(
+    constructor(options: NativeCodexTranscriptCacheOptions = {}) {
         // Match the watcher’s observed-thread window so parsed message bodies
         // cannot accumulate for every historical Codex transcript.
-        private readonly maxEntries = 16,
-        private readonly now: () => number = Date.now
-    ) {}
+        this.maxEntries = options.maxEntries ?? 16
+        this.now = options.now ?? Date.now
+        this.applyLifecycle = options.applyLifecycle ?? null
+    }
 
     has(sessionId: string): boolean {
         return this.entries.has(sessionId)
@@ -148,7 +178,35 @@ export class NativeCodexTranscriptCache {
     }
 
     getSummary(sessionId: string): CodexLocalSessionSummary | null {
-        return this.resolveEntry(sessionId)?.entry.session ?? null
+        return this.readSummary(sessionId)?.session ?? null
+    }
+
+    /**
+     * Read only the row summary and recent turn lifecycle. This path must stay
+     * bounded because hooks and queue checks run on the runner's event loop;
+     * message bodies are loaded only by read()/readCached().
+     */
+    readSummary(sessionId: string): NativeCodexTranscriptSummaryRead | null {
+        return this.readSummaryInternal(sessionId, false, true)
+    }
+
+    /** Advance a watcher-observed summary without loading message bodies. */
+    refreshSummary(sessionId: string): NativeCodexTranscriptSummaryRead | null {
+        if (!this.entries.has(sessionId)) return null
+        return this.readSummaryInternal(sessionId, true, false)
+    }
+
+    private readSummaryInternal(
+        sessionId: string,
+        forceRefresh: boolean,
+        allowColdLoad: boolean
+    ): NativeCodexTranscriptSummaryRead | null {
+        const entry = this.resolveEntry(sessionId, { forceRefresh, allowColdLoad })?.entry
+        if (!entry) return null
+        return {
+            session: this.applyLifecycleToSummary(entry.session),
+            lifecycleEvents: entry.lifecycleEvents
+        }
     }
 
     read(sessionId: string, options: CodexLocalSessionReadOptions = {}): NativeCodexTranscriptRead | null {
@@ -156,7 +214,8 @@ export class NativeCodexTranscriptCache {
     }
 
     readCached(sessionId: string, options: CodexLocalSessionReadOptions = {}): NativeCodexTranscriptRead | null {
-        if (!this.entries.has(sessionId)) {
+        const entry = this.entries.get(sessionId)
+        if (!entry || entry.importedMessages === null) {
             return null
         }
         return this.readInternal(sessionId, options, false, false)
@@ -167,7 +226,8 @@ export class NativeCodexTranscriptCache {
      * browser/direct-send path has already made it hot in this cache.
      */
     refreshCached(sessionId: string, options: CodexLocalSessionReadOptions = {}): NativeCodexTranscriptRead | null {
-        if (!this.entries.has(sessionId)) {
+        const entry = this.entries.get(sessionId)
+        if (!entry || entry.importedMessages === null) {
             return null
         }
         return this.readInternal(sessionId, options, true, false)
@@ -195,13 +255,18 @@ export class NativeCodexTranscriptCache {
             cacheMiss = true
         }
 
+        const data = createLocalCodexSessionData(entry.session, entry.importedMessages ?? [], options)
         return {
-            data: createLocalCodexSessionData(entry.session, entry.importedMessages ?? [], options),
+            data: {
+                ...data,
+                session: this.applyLifecycleToSummary(data.session)
+            },
             revision: this.revisions.get(sessionId) ?? 1,
             timing: {
                 cache: cacheMiss ? 'miss' : 'hit',
                 durationMs: Math.max(0, this.now() - startedAt)
-            }
+            },
+            lifecycleEvents: entry.lifecycleEvents
         }
     }
 
@@ -249,13 +314,17 @@ export class NativeCodexTranscriptCache {
             return null
         }
         const nextFingerprint = getFileFingerprint(session.file)
+        const lifecycleTail = nextFingerprint
+            ? readRecentLifecycleTail(session.file, nextFingerprint.size)
+            : { lifecycleEvents: [], trailingBytes: Buffer.alloc(0) }
         const entry: CacheEntry = {
             session: nextFingerprint ? { ...session, modifiedAt: nextFingerprint.modifiedAt } : session,
             importedMessages: null,
             accumulator: null,
-            trailingBytes: Buffer.alloc(0),
+            trailingBytes: lifecycleTail.trailingBytes,
             fileSize: nextFingerprint?.size ?? 0,
-            fingerprint: nextFingerprint
+            fingerprint: nextFingerprint,
+            lifecycleEvents: lifecycleTail.lifecycleEvents
         }
         this.setEntry(sessionId, entry)
         this.bumpRevision(sessionId)
@@ -278,7 +347,8 @@ export class NativeCodexTranscriptCache {
             importedMessages: entry.accumulator?.messages ?? null,
             trailingBytes: parsed.trailingBytes,
             fileSize: entry.fileSize + appendedBytes.length,
-            fingerprint
+            fingerprint,
+            lifecycleEvents: appendLifecycleEvents(entry.lifecycleEvents, parsed.lines)
         }
     }
 
@@ -291,7 +361,8 @@ export class NativeCodexTranscriptCache {
                 ...entry,
                 importedMessages: [],
                 accumulator: createCodexTranscriptImportAccumulator(),
-                trailingBytes: Buffer.alloc(0)
+                trailingBytes: Buffer.alloc(0),
+                lifecycleEvents: []
             }
             this.setEntry(sessionId, empty)
             return empty
@@ -308,7 +379,8 @@ export class NativeCodexTranscriptCache {
             accumulator,
             trailingBytes: parsed.trailingBytes,
             fileSize: contents.length,
-            fingerprint
+            fingerprint,
+            lifecycleEvents: takeRecentLifecycleEvents(parsed.lines)
         }
         this.setEntry(sessionId, next)
         return next
@@ -331,5 +403,52 @@ export class NativeCodexTranscriptCache {
     private touch(sessionId: string, entry: CacheEntry): void {
         this.entries.delete(sessionId)
         this.entries.set(sessionId, entry)
+    }
+
+    private applyLifecycleToSummary(session: CodexLocalSessionSummary): CodexLocalSessionSummary {
+        return this.applyLifecycle?.(session) ?? session
+    }
+}
+
+function appendLifecycleEvents(
+    existing: readonly CodexTranscriptLifecycleEvent[],
+    lines: readonly string[]
+): CodexTranscriptLifecycleEvent[] {
+    const next = [...existing, ...getCodexTranscriptLifecycleEvents(lines)]
+    return next.length <= MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT
+        ? next
+        : next.slice(-MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT)
+}
+
+function takeRecentLifecycleEvents(lines: readonly string[]): CodexTranscriptLifecycleEvent[] {
+    const events = getCodexTranscriptLifecycleEvents(lines)
+    return events.length <= MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT
+        ? events
+        : events.slice(-MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT)
+}
+
+function readRecentLifecycleTail(file: string, fileSize: number): RecentLifecycleTail {
+    const empty: RecentLifecycleTail = {
+        lifecycleEvents: [],
+        trailingBytes: Buffer.alloc(0)
+    }
+    if (fileSize <= 0) return empty
+    const offset = Math.max(0, fileSize - LIFECYCLE_TAIL_READ_BYTES)
+    const bytes = readFileRange(file, offset, fileSize - offset)
+    if (!bytes) return empty
+
+    let completeTail = bytes
+    // A bounded tail can begin inside a JSONL record. Ignore that fragment so
+    // arbitrary message text cannot hide later complete lifecycle records.
+    if (offset > 0) {
+        const firstNewline = completeTail.indexOf(0x0a)
+        if (firstNewline === -1) return empty
+        completeTail = completeTail.subarray(firstNewline + 1)
+    }
+
+    const parsed = splitCompleteJsonlLines(completeTail)
+    return {
+        lifecycleEvents: takeRecentLifecycleEvents(parsed.lines),
+        trailingBytes: parsed.trailingBytes
     }
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, rmSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -298,7 +298,8 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
         const sessionId = '12345678-1234-4234-8234-123456789012'
         const transcriptDir = join(codexHome, 'sessions', '2026', '08', '13')
         mkdirSync(transcriptDir, { recursive: true })
-        writeFileSync(join(transcriptDir, `rollout-${sessionId}.jsonl`), [
+        const transcript = join(transcriptDir, `rollout-${sessionId}.jsonl`)
+        writeFileSync(transcript, [
             JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
             JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'developer instruction that must stay hidden' }] } }),
             JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '# AGENTS.md instructions for /workspace/project\n\n<INSTRUCTIONS>Injected context</INSTRUCTIONS>' }] } }),
@@ -385,6 +386,84 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
                 success: true,
                 snapshot: { revision: first.snapshot?.revision, timing: { cache: 'hit' } }
             })
+        } finally {
+            client.shutdown()
+        }
+    })
+
+    it('overlays a UserPromptSubmit start across native list, detail, snapshot, and status before emitting', async () => {
+        const machine = makeMachine('machine-codex-hook-lifecycle')
+        const sessionId = '92345678-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        const transcript = join(transcriptDir, `rollout-${sessionId}.jsonl`)
+        writeFileSync(transcript, [
+            JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'old-turn' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'old-turn' } })
+        ].join('\n'), 'utf8')
+        const client = new ApiMachineClient('cli-token', machine)
+        const emit = vi.fn()
+        const observedAt = Date.now()
+        ;(client as unknown as { socket: { emit: typeof emit; close: () => void } }).socket = { emit, close: () => {} }
+
+        try {
+            expect(client.observeExternalCodexLifecycle({
+                codexSessionId: sessionId,
+                turnId: 'turn-a',
+                event: 'turn_started',
+                observedAt
+            })).toBe(true)
+
+            const listed = await callMachineRpc(client, machine.id, 'listCodexLocalSessions', { limit: 5 }) as {
+                success: boolean
+                sessions?: Array<{ runState?: string }>
+            }
+            const detail = await callMachineRpc(client, machine.id, 'readCodexLocalSession', { sessionId }) as {
+                success: boolean
+                data?: { session: { runState?: string } }
+            }
+            const snapshot = await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', { sessionId }) as {
+                success: boolean
+                snapshot?: { data: { session: { runState?: string } }; status: { status: string } }
+            }
+            const status = await callMachineRpc(client, machine.id, 'getCodexLocalSessionStatus', { sessionId }) as {
+                success: boolean
+                status?: string
+            }
+
+            expect(listed.sessions?.[0]?.runState).toBe('processing')
+            expect(detail.data?.session.runState).toBe('processing')
+            expect(snapshot.snapshot?.data.session.runState).toBe('processing')
+            expect(snapshot.snapshot?.status.status).toBe('processing')
+            expect(status.status).toBe('processing')
+            expect(emit).toHaveBeenCalledWith('codex-session-updated', expect.objectContaining({
+                codexSessionId: sessionId,
+                summary: expect.objectContaining({ runState: 'processing' })
+            }))
+
+            const emissions = emit.mock.calls.length
+            expect(client.observeExternalCodexLifecycle({
+                codexSessionId: sessionId,
+                turnId: 'turn-a',
+                event: 'turn_started',
+                observedAt: observedAt + 100
+            })).toBe(false)
+            expect(emit).toHaveBeenCalledTimes(emissions)
+
+            appendFileSync(transcript, [
+                '',
+                JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-a' } }),
+                JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-a' } })
+            ].join('\n'), 'utf8')
+            const readNative = (client as unknown as {
+                readNativeCodexTranscript: (id: string, options: { limit: number }) => { data: { session: { runState?: string } } } | null
+            }).readNativeCodexTranscript.bind(client)
+            expect(readNative(sessionId, { limit: 1 })?.data.session.runState).toBe('idle')
+            expect((await callMachineRpc(client, machine.id, 'getCodexLocalSessionStatus', { sessionId }) as {
+                success: boolean
+                status?: string
+            }).status).toBe('idle')
         } finally {
             client.shutdown()
         }

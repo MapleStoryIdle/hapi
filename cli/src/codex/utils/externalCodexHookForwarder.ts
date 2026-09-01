@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { ExternalCodexRequestKind, ExternalCodexRequestPayload } from '@hapi/protocol'
+import type { ExternalCodexLifecycleEvent } from '@/codex/nativeTurnLifecycle'
 import { isProcessAlive } from '@/utils/process'
 
 type ExternalCodexRequest = Omit<ExternalCodexRequestPayload, 'machineId'>
@@ -9,10 +10,16 @@ type ExternalCodexHookForwarderOptions = {
     runnerStatePath: string
 }
 
+type ExternalCodexLifecycleHookForwarderOptions = {
+    runnerStatePath: string
+}
+
 type RunnerControlState = {
     pid: number
     httpPort: number
 }
+
+const LIFECYCLE_HOOK_TIMEOUT_MS = 500
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -61,6 +68,22 @@ export function parseExternalCodexHookForwarderOptions(args: string[]): External
     return kind && runnerStatePath ? { kind, runnerStatePath } : null
 }
 
+export function parseExternalCodexLifecycleHookForwarderOptions(
+    args: string[]
+): ExternalCodexLifecycleHookForwarderOptions | null {
+    if (!args.includes('--external-codex-lifecycle')) {
+        return null
+    }
+
+    let runnerStatePath: string | null = null
+    for (let index = 0; index < args.length; index += 1) {
+        if (args[index] !== '--runner-state') continue
+        runnerStatePath = asNonEmptyString(args[index + 1], 4_000)
+        index += 1
+    }
+    return runnerStatePath ? { runnerStatePath } : null
+}
+
 /**
  * Convert the stable, documented subset of Codex hook input into an alert.
  * Do not forward tool_input: it may contain a shell command or other secret.
@@ -87,6 +110,31 @@ export function parseExternalCodexHookRequest(
         requestId,
         kind,
         ...(toolName ? { toolName } : {})
+    }
+}
+
+/**
+ * Reduce UserPromptSubmit input to turn routing metadata. In particular, do
+ * not leak the prompt, cwd, model, transcript path, or any raw hook field.
+ */
+export function parseExternalCodexLifecycleHookEvent(
+    value: unknown,
+    now: () => number = () => Date.now()
+): ExternalCodexLifecycleEvent | null {
+    const record = asRecord(value)
+    if (!record) return null
+
+    const codexSessionId = asNonEmptyString(valueFrom(record, 'session_id', 'sessionId'), 200)
+    const turnId = asNonEmptyString(valueFrom(record, 'turn_id', 'turnId'), 200)
+    if (!codexSessionId || !turnId) return null
+
+    const observedAt = Math.floor(now())
+    if (!Number.isFinite(observedAt) || observedAt < 0) return null
+    return {
+        codexSessionId,
+        turnId,
+        event: 'turn_started',
+        observedAt
     }
 }
 
@@ -147,6 +195,35 @@ export async function runExternalCodexHookForwarder(args: string[]): Promise<voi
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),
             signal: AbortSignal.timeout(2_500)
+        }).catch(() => undefined)
+    } catch {
+        // This is an advisory hook. Never surface a hook failure to Codex.
+    }
+}
+
+/**
+ * Invoked by UserPromptSubmit. It is separate from external-codex-request so
+ * a native turn start never creates an approval/request push notification.
+ */
+export async function runExternalCodexLifecycleHookForwarder(args: string[]): Promise<void> {
+    try {
+        const options = parseExternalCodexLifecycleHookForwarderOptions(args)
+        if (!options) return
+
+        const event = parseExternalCodexLifecycleHookEvent(await readHookInput())
+        if (!event) return
+
+        const runnerState = await readRunnerControlState(options.runnerStatePath)
+        if (!runnerState || !isProcessAlive(runnerState.pid)) return
+
+        await fetch(`http://127.0.0.1:${runnerState.httpPort}/codex-external-lifecycle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(event),
+            // UserPromptSubmit is on the interactive path. A delayed local
+            // signal is safe (the turn/tombstone logic handles it), but it
+            // must not make entering a prompt feel blocked.
+            signal: AbortSignal.timeout(LIFECYCLE_HOOK_TIMEOUT_MS)
         }).catch(() => undefined)
     } catch {
         // This is an advisory hook. Never surface a hook failure to Codex.

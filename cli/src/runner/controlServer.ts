@@ -11,8 +11,15 @@ import { logger } from '@/ui/logger';
 import { Metadata } from '@/api/types';
 import { TrackedSession } from './types';
 import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/rpcTypes';
+import type { ExternalCodexLifecycleEvent } from '@/codex/nativeTurnLifecycle';
 
 const externalCodexRequestSchema = ExternalCodexRequestPayloadSchema.omit({ machineId: true });
+const externalCodexLifecycleSchema = z.object({
+  codexSessionId: z.string().min(1).max(200),
+  turnId: z.string().min(1).max(200),
+  event: z.literal('turn_started'),
+  observedAt: z.number().int().nonnegative()
+}).strict();
 
 export function startRunnerControlServer({
   getChildren,
@@ -20,7 +27,8 @@ export function startRunnerControlServer({
   spawnSession,
   requestShutdown,
   onHappySessionWebhook,
-  onExternalCodexRequest
+  onExternalCodexRequest,
+  onExternalCodexLifecycle
 }: {
   getChildren: () => TrackedSession[];
   stopSession: (sessionId: string) => boolean;
@@ -28,6 +36,7 @@ export function startRunnerControlServer({
   requestShutdown: () => void;
   onHappySessionWebhook: (sessionId: string, metadata: Metadata) => void;
   onExternalCodexRequest: (request: Omit<ExternalCodexRequestPayload, 'machineId'>) => void;
+  onExternalCodexLifecycle: (event: ExternalCodexLifecycleEvent) => void;
 }): Promise<{ port: number; stop: () => Promise<void> }> {
   return new Promise((resolve) => {
     const app = fastify({
@@ -75,6 +84,23 @@ export function startRunnerControlServer({
       }
     }, async (request) => {
       onExternalCodexRequest(request.body);
+      return { status: 'ok' as const };
+    });
+
+    // UserPromptSubmit is a lifecycle signal only. It deliberately has no
+    // relation to permission/request notifications and accepts no raw hook
+    // payload fields.
+    typed.post('/codex-external-lifecycle', {
+      schema: {
+        body: externalCodexLifecycleSchema,
+        response: {
+          200: z.object({
+            status: z.literal('ok')
+          })
+        }
+      }
+    }, async (request) => {
+      onExternalCodexLifecycle(request.body);
       return { status: 'ok' as const };
     });
 

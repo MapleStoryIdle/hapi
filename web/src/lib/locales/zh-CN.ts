@@ -64,7 +64,7 @@ export default {
   'sessions.kanban.completed': '已完成',
   'sessions.kanban.pin': '置顶会话',
   'sessions.kanban.unpin': '取消置顶会话',
-  'shares.nav': '中文看板',
+  'shares.nav': 'Shares',
   'shares.title': '中文看板',
   'shares.back': '返回会话列表',
   'shares.loading': '正在读取看板任务…',

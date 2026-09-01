@@ -1003,8 +1003,23 @@ html[data-theme="oled"] .shiki span {
   animation: stop-button-breathe 1.7s ease-in-out infinite;
 }
 
+/* A running Kanban task stays readable while its card quietly breathes. */
+@keyframes session-kanban-thinking-breathe {
+  0%, 100% {
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+  50% {
+    box-shadow: 0 4px 14px rgba(52, 199, 89, 0.16);
+  }
+}
+
+.session-kanban-card-thinking {
+  animation: session-kanban-thinking-breathe 2.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-stop-button-breathe {
+  .animate-stop-button-breathe,
+  .session-kanban-card-thinking {
     animation: none;
   }
 }
