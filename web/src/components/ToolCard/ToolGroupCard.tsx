@@ -3,14 +3,14 @@ import { getToolGroupActionKind, type ToolGroupBlock } from '@/chat/toolGroups'
 import type { ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
-import { shouldUseFullScreenToolDetail, ToolDetailDialogContent, ToolStatusIcon, toolStatusColorClass } from '@/components/ToolCard/ToolCard'
+import { shouldUseFullScreenToolDetail, ToolDetailDialogContent, ToolDetailDialogHeader, ToolStatusIcon, toolStatusColorClass } from '@/components/ToolCard/ToolCard'
 import { getTerminalExecutionToolState, isTerminalExecutionTool } from '@/components/ToolCard/terminalExecution'
 import { TerminalExecutionDrawer } from '@/components/ToolCard/TerminalExecutionDrawer'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { getEventPresentation } from '@/chat/presentation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
@@ -488,9 +488,7 @@ function ToolGroupDetailSurface(props: {
             if (!nextOpen) props.onClose()
         }}>
             <DialogContent fullScreenOnMobile={shouldUseFullScreenToolDetail(props.selectedTool.tool.name)} className="max-w-2xl" aria-describedby={undefined}>
-                <DialogHeader className={shouldUseFullScreenToolDetail(props.selectedTool.tool.name) ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
-                    <DialogTitle>{props.title}</DialogTitle>
-                </DialogHeader>
+                <ToolDetailDialogHeader block={props.selectedTool} metadata={props.metadata} fallbackTitle={props.title} />
                 <ToolDetailDialogContent block={props.selectedTool} metadata={props.metadata} />
             </DialogContent>
         </Dialog>

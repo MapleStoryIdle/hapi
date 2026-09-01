@@ -81,6 +81,11 @@ function getNativeMutationPath(input: unknown): string | null {
     return getInputStringAny(input, ['file_path', 'path', 'file', 'filePath', 'notebook_path'])?.trim() || null
 }
 
+function isNativeReadFileToolName(toolName: string): boolean {
+    const normalized = toolName.toLowerCase()
+    return normalized === 'read' || normalized === 'readfile' || normalized === 'read_file'
+}
+
 type ToolOpts = {
     toolName: string
     input: unknown
@@ -551,13 +556,13 @@ export function getToolPresentation(
     opts: Omit<ToolOpts, 'metadata'> & { metadata: SessionMetadataSummary | null },
     t?: Translator
 ): ToolPresentation {
-    if (opts.toolName === 'Read') {
+    if (isNativeReadFileToolName(opts.toolName)) {
         const target = getNativeReadTarget(opts.input)
         if (target) {
             return {
                 icon: <EyeIcon className={DEFAULT_ICON_CLASS} />,
                 title: t ? t('tool.semanticTitle.readFile') : 'Read file',
-                subtitle: formatFileReadTarget(target, resolveDisplayPath(target.path, opts.metadata)),
+                subtitle: formatFileReadTarget(target, basename(resolveDisplayPath(target.path, opts.metadata))),
                 minimal: true
             }
         }
@@ -633,7 +638,7 @@ export function getToolPresentation(
             return {
                 icon: <EyeIcon className={DEFAULT_ICON_CLASS} />,
                 title: t ? t('tool.semanticTitle.readFile') : 'Read file',
-                subtitle: formatFileReadTarget(readTarget, resolveDisplayPath(readTarget.path, opts.metadata)),
+                subtitle: formatFileReadTarget(readTarget, basename(resolveDisplayPath(readTarget.path, opts.metadata))),
                 minimal: true
             }
         }

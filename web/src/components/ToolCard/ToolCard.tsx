@@ -26,6 +26,7 @@ import { isSubagentToolName } from '@/chat/subagentTool'
 import { formatTerminalExecutionDuration, getTerminalExecutionToolState, isTerminalExecutionTool, TerminalExecutionDetail } from '@/components/ToolCard/terminalExecution'
 import { TerminalExecutionDrawer } from '@/components/ToolCard/TerminalExecutionDrawer'
 import { getTerminalReadRequest } from '@/components/ToolCard/fileAccess'
+import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutationDetail'
 
 const ELAPSED_INTERVAL_MS = 1000
 
@@ -287,6 +288,17 @@ export function ToolDetailDialogContent(props: {
     }
     const FullToolView = getToolFullViewComponent(toolName)
     const ResultToolView = getToolResultViewComponent(toolName)
+    const fileMutationSummary = getFileMutationDialogSummary(props.block, props.metadata)
+    if (fileMutationSummary && FullToolView) {
+        return (
+            <div className={cn(
+                'mt-3 max-h-[75vh] overflow-auto',
+                toolName === 'CodexPatch' ? 'max-sm:mt-0 max-sm:max-h-none max-sm:flex-1 max-sm:px-5 max-sm:pb-5' : null
+            )}>
+                <FullToolView block={props.block} metadata={props.metadata} surface="dialog" />
+            </div>
+        )
+    }
     const permission = props.block.tool.permission
     const isAskUserQuestion = isAskUserQuestionToolName(toolName)
     const isRequestUserInput = isRequestUserInputToolName(toolName)
@@ -318,6 +330,33 @@ export function ToolDetailDialogContent(props: {
                 </div>
             ) : null}
         </div>
+    )
+}
+
+export function ToolDetailDialogHeader(props: {
+    block: ToolCallBlock
+    metadata: SessionMetadataSummary | null
+    fallbackTitle: string
+}) {
+    const summary = getFileMutationDialogSummary(props.block, props.metadata)
+    const fullScreenOnMobile = shouldUseFullScreenToolDetail(props.block.tool.name)
+
+    return (
+        <DialogHeader className={fullScreenOnMobile ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
+            {summary ? (
+                <div className="flex min-w-0 items-center gap-3" data-file-mutation-dialog-header>
+                    <DialogTitle className="min-w-0 flex-1 truncate font-mono" title={summary.fileNames.join(', ')}>
+                        {summary.title}
+                    </DialogTitle>
+                    <span className="inline-flex shrink-0 items-center gap-2 font-mono text-xs">
+                        <span className="text-emerald-600">+{summary.additions}</span>
+                        <span className="text-red-600">−{summary.deletions}</span>
+                    </span>
+                </div>
+            ) : (
+                <DialogTitle>{props.fallbackTitle}</DialogTitle>
+            )}
+        </DialogHeader>
     )
 }
 
@@ -461,9 +500,7 @@ function ToolCardInner(props: ToolCardProps) {
                             </button>
                         </DialogTrigger>
                         <DialogContent fullScreenOnMobile={useFullScreenToolDetail} className="max-w-2xl" aria-describedby={undefined}>
-                            <DialogHeader className={useFullScreenToolDetail ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
-                                <DialogTitle>{toolTitle}</DialogTitle>
-                            </DialogHeader>
+                            <ToolDetailDialogHeader block={props.block} metadata={props.metadata} fallbackTitle={toolTitle} />
                             <ToolDetailDialogContent block={props.block} metadata={props.metadata} />
                         </DialogContent>
                     </Dialog>

@@ -17,6 +17,7 @@ export function EditView(props: ToolViewProps) {
             variant="inline"
             size={props.surface === 'dialog' ? 'comfortable' : undefined}
             scrollY={props.surface === 'dialog'}
+            showHeader={props.surface !== 'dialog'}
         />
     )
 }

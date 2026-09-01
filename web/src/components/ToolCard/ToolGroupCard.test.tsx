@@ -202,7 +202,7 @@ describe('ToolGroupCard', () => {
         expect(groupToggle).toHaveAttribute('aria-expanded', 'true')
         expect(view.container.querySelector('svg[data-state="open"]')).toBeInTheDocument()
         expect(screen.getByText('2 actions')).toBeInTheDocument()
-        expect(screen.getByText('src/a.ts')).toBeInTheDocument()
+        expect(screen.getByText('a.ts')).toBeInTheDocument()
         expect(screen.getByText('Terminal')).toBeInTheDocument()
         expect(screen.getByText('bun test')).toBeInTheDocument()
 
@@ -217,7 +217,7 @@ describe('ToolGroupCard', () => {
             expect(screen.getByRole('dialog')).toBeInTheDocument()
         })
         const dialog = screen.getByRole('dialog')
-        expect(screen.getAllByText('src/a.ts')[0]).toBeInTheDocument()
+        expect(within(dialog).getByRole('heading', { name: 'Read file' })).toBeInTheDocument()
         expect(within(dialog).getAllByText('Input').length).toBeGreaterThan(0)
         expect(within(dialog).getAllByText('Result').length).toBeGreaterThan(0)
     })

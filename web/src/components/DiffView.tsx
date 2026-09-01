@@ -49,6 +49,7 @@ export function DiffView(props: {
     size?: 'compact' | 'comfortable'
     scrollY?: boolean
     maxHeight?: number
+    showHeader?: boolean
 }) {
     const { t } = useTranslation()
     const variant = props.variant ?? 'preview'
@@ -74,7 +75,7 @@ export function DiffView(props: {
             filePath={props.filePath}
             additions={stats.additions}
             deletions={stats.deletions}
-            showHeader
+            showHeader={props.showHeader ?? true}
             size={props.size}
             scrollY={props.scrollY}
             maxHeight={props.maxHeight}

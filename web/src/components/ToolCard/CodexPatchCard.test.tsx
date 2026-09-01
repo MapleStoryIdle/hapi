@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react'
+import { fireEvent, render, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
 import type { ToolCallBlock } from '@/chat/types'
@@ -53,5 +53,33 @@ describe('Codex patch card', () => {
         expect(view.getByText('+2')).toBeInTheDocument()
         expect(view.getByText('−1')).toBeInTheDocument()
         expect(view.getByText('L32–33 → L32–34')).toBeInTheDocument()
+    })
+
+    it('opens a focused change dialog with the file, stats, and patch content', () => {
+        const view = render(
+            <I18nProvider>
+                <ToolCard
+                    api={{} as ApiClient}
+                    sessionId="session-1"
+                    metadata={null}
+                    terminalToolDisplayMode="compact"
+                    disabled={false}
+                    onDone={vi.fn()}
+                    block={makePatchBlock()}
+                />
+            </I18nProvider>
+        )
+
+        fireEvent.click(within(view.container).getByText('Modify file').closest('button')!)
+
+        const dialog = within(view.getByRole('dialog'))
+        expect(dialog.getByRole('heading', { name: 'App.tsx' })).toBeInTheDocument()
+        expect(dialog.getByText('+2')).toBeInTheDocument()
+        expect(dialog.getByText('−1')).toBeInTheDocument()
+        expect(dialog.getByText('+new value')).toBeInTheDocument()
+        expect(dialog.getByText('-old value')).toBeInTheDocument()
+        expect(dialog.queryByText('Input')).not.toBeInTheDocument()
+        expect(dialog.queryByText('Result')).not.toBeInTheDocument()
+        expect(dialog.queryByText('Patch')).not.toBeInTheDocument()
     })
 })

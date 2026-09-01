@@ -47,7 +47,20 @@ describe('getToolPresentation — file access semantics', () => {
         })
 
         expect(presentation.title).toBe('Read file')
-        expect(presentation.subtitle).toBe('web/src/App.tsx · L12–80')
+        expect(presentation.subtitle).toBe('App.tsx · L12–80')
+    })
+
+    it('normalizes ReadFile aliases to a basename-only file message', () => {
+        const presentation = getToolPresentation({
+            toolName: 'read_file',
+            input: { file_path: '/workspace/web/src/App.tsx' },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation).toMatchObject({ title: 'Read file', subtitle: 'App.tsx' })
     })
 
     it('labels only simple Codex shell reads as a request', () => {
@@ -212,7 +225,7 @@ describe('getToolPresentation — file access semantics', () => {
             metadata: null,
         })
 
-        expect(read).toMatchObject({ title: 'Read file', subtitle: 'web/src/App.tsx · L12–80' })
+        expect(read).toMatchObject({ title: 'Read file', subtitle: 'App.tsx · L12–80' })
         expect(patch).toMatchObject({ title: 'Modify file', subtitle: 'App.tsx · +1 −1' })
         expect(generic).toMatchObject({ title: 'Inspect file', subtitle: 'MCP: Filesystem Inspect' })
     })
