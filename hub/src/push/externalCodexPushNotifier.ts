@@ -22,6 +22,9 @@ export class ExternalCodexPushNotifier {
     ) {}
 
     async send(request: ExternalCodexPushRequest): Promise<boolean> {
+        if (request.phase === 'resolved') {
+            return false
+        }
         const now = this.now()
         const dedupeKey = [
             request.namespace,

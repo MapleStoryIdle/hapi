@@ -6,6 +6,7 @@ import {
     createLocalCodexSessionData,
     findLocalCodexSession,
     getCodexTranscriptLifecycleEvents,
+    getCodexTranscriptUserInputEvents,
     getCodexTranscriptTailSummary,
     type CodexImportedMessageContent,
     type CodexLocalSessionData,
@@ -14,7 +15,8 @@ import {
     type CodexLocalSessionSummary,
     type CodexLocalSessionSnapshotVersion,
     type CodexTranscriptImportAccumulator,
-    type CodexTranscriptLifecycleEvent
+    type CodexTranscriptLifecycleEvent,
+    type CodexTranscriptUserInputEvent
 } from '@hapi/protocol/codexTranscript'
 
 type FileFingerprint = {
@@ -32,6 +34,7 @@ type CacheEntry = {
     fileSize: number
     fingerprint: FileFingerprint | null
     lifecycleEvents: CodexTranscriptLifecycleEvent[]
+    userInputEvents: CodexTranscriptUserInputEvent[]
 }
 
 type ResolvedEntry = {
@@ -46,6 +49,7 @@ type CompleteLines = {
 
 type RecentLifecycleTail = {
     lifecycleEvents: CodexTranscriptLifecycleEvent[]
+    userInputEvents: CodexTranscriptUserInputEvent[]
     trailingBytes: Buffer
 }
 
@@ -58,6 +62,8 @@ export type NativeCodexTranscriptRead = {
     timing: CodexLocalSessionReadTiming
     /** Bounded raw lifecycle records for the runner-local turn tracker. */
     lifecycleEvents: readonly CodexTranscriptLifecycleEvent[]
+    /** Bounded, argument-free native local-input lifecycle records. */
+    userInputEvents: readonly CodexTranscriptUserInputEvent[]
 }
 
 export type NativeCodexTranscriptSummaryRead = {
@@ -65,6 +71,7 @@ export type NativeCodexTranscriptSummaryRead = {
     version: CodexLocalSessionSnapshotVersion
     revision: number
     lifecycleEvents: readonly CodexTranscriptLifecycleEvent[]
+    userInputEvents: readonly CodexTranscriptUserInputEvent[]
 }
 
 export type NativeCodexTranscriptCacheOptions = {
@@ -151,7 +158,8 @@ function applyTailSummary(session: CodexLocalSessionSummary, lines: readonly str
         ...(tail.lastUserMessage === undefined ? {} : { lastUserMessage: tail.lastUserMessage }),
         ...(tail.model === undefined ? {} : { model: tail.model }),
         ...(tail.modelReasoningEffort === undefined ? {} : { modelReasoningEffort: tail.modelReasoningEffort }),
-        ...(tail.runState === undefined ? {} : { runState: tail.runState })
+        ...(tail.runState === undefined ? {} : { runState: tail.runState }),
+        ...(tail.waitingForUserInput === undefined ? {} : { waitingForUserInput: tail.waitingForUserInput })
     }
 }
 
@@ -220,7 +228,8 @@ export class NativeCodexTranscriptCache {
             session: this.applyLifecycleToSummary(entry.session),
             version: this.getVersion(revision),
             revision,
-            lifecycleEvents: entry.lifecycleEvents
+            lifecycleEvents: entry.lifecycleEvents,
+            userInputEvents: entry.userInputEvents
         }
     }
 
@@ -283,7 +292,8 @@ export class NativeCodexTranscriptCache {
                 cache: cacheMiss ? 'miss' : 'hit',
                 durationMs: Math.max(0, this.now() - startedAt)
             },
-            lifecycleEvents: entry.lifecycleEvents
+            lifecycleEvents: entry.lifecycleEvents,
+            userInputEvents: entry.userInputEvents
         }
     }
 
@@ -333,7 +343,7 @@ export class NativeCodexTranscriptCache {
         const nextFingerprint = getFileFingerprint(session.file)
         const lifecycleTail = nextFingerprint
             ? readRecentLifecycleTail(session.file, nextFingerprint.size)
-            : { lifecycleEvents: [], trailingBytes: Buffer.alloc(0) }
+            : { lifecycleEvents: [], userInputEvents: [], trailingBytes: Buffer.alloc(0) }
         const entry: CacheEntry = {
             session: nextFingerprint ? { ...session, modifiedAt: nextFingerprint.modifiedAt } : session,
             importedMessages: null,
@@ -341,7 +351,8 @@ export class NativeCodexTranscriptCache {
             trailingBytes: lifecycleTail.trailingBytes,
             fileSize: nextFingerprint?.size ?? 0,
             fingerprint: nextFingerprint,
-            lifecycleEvents: lifecycleTail.lifecycleEvents
+            lifecycleEvents: lifecycleTail.lifecycleEvents,
+            userInputEvents: lifecycleTail.userInputEvents
         }
         this.setEntry(sessionId, entry)
         this.bumpRevision(sessionId)
@@ -358,14 +369,21 @@ export class NativeCodexTranscriptCache {
         if (entry.accumulator) {
             appendCodexTranscriptImportLines(entry.accumulator, parsed.lines)
         }
+        const lifecycleEvents = appendLifecycleEvents(entry.lifecycleEvents, parsed.lines)
+        const userInputEvents = appendUserInputEvents(entry.userInputEvents, parsed.lines)
+        const waitingForUserInput = getIncrementalUserInputWaitingState(userInputEvents)
         return {
             ...entry,
-            session: applyTailSummary(entry.session, parsed.lines, fingerprint),
+            session: {
+                ...applyTailSummary(entry.session, parsed.lines, fingerprint),
+                waitingForUserInput
+            },
             importedMessages: entry.accumulator?.messages ?? null,
             trailingBytes: parsed.trailingBytes,
             fileSize: entry.fileSize + appendedBytes.length,
             fingerprint,
-            lifecycleEvents: appendLifecycleEvents(entry.lifecycleEvents, parsed.lines)
+            lifecycleEvents,
+            userInputEvents
         }
     }
 
@@ -379,7 +397,8 @@ export class NativeCodexTranscriptCache {
                 importedMessages: [],
                 accumulator: createCodexTranscriptImportAccumulator(),
                 trailingBytes: Buffer.alloc(0),
-                lifecycleEvents: []
+                lifecycleEvents: [],
+                userInputEvents: []
             }
             this.setEntry(sessionId, empty)
             return empty
@@ -397,7 +416,8 @@ export class NativeCodexTranscriptCache {
             trailingBytes: parsed.trailingBytes,
             fileSize: contents.length,
             fingerprint,
-            lifecycleEvents: takeRecentLifecycleEvents(parsed.lines)
+            lifecycleEvents: takeRecentLifecycleEvents(parsed.lines),
+            userInputEvents: takeRecentUserInputEvents(parsed.lines)
         }
         this.setEntry(sessionId, next)
         return next
@@ -457,9 +477,48 @@ function takeRecentLifecycleEvents(lines: readonly string[]): CodexTranscriptLif
         : events.slice(-MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT)
 }
 
+function appendUserInputEvents(
+    existing: readonly CodexTranscriptUserInputEvent[],
+    lines: readonly string[]
+): CodexTranscriptUserInputEvent[] {
+    const next = [...existing, ...getCodexTranscriptUserInputEvents(lines)]
+    return next.length <= MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT
+        ? next
+        : next.slice(-MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT)
+}
+
+function takeRecentUserInputEvents(lines: readonly string[]): CodexTranscriptUserInputEvent[] {
+    const events = getCodexTranscriptUserInputEvents(lines)
+    return events.length <= MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT
+        ? events
+        : events.slice(-MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT)
+}
+
+function getIncrementalUserInputWaitingState(
+    events: readonly CodexTranscriptUserInputEvent[]
+): boolean {
+    let active: Extract<CodexTranscriptUserInputEvent, { requestId: string }> | null = null
+    for (const event of events) {
+        if (event.type === 'requested') {
+            active = event
+        } else if (event.type === 'resolved') {
+            if (active?.requestId === event.requestId) active = null
+        } else if (event.type === 'turn_started' && active) {
+            if (!event.turnId || !active.turnId || event.turnId !== active.turnId) {
+                active = null
+            }
+        } else if (event.type === 'turn_terminal' && active
+            && (!event.turnId || !active.turnId || event.turnId === active.turnId)) {
+            active = null
+        }
+    }
+    return active !== null
+}
+
 function readRecentLifecycleTail(file: string, fileSize: number): RecentLifecycleTail {
     const empty: RecentLifecycleTail = {
         lifecycleEvents: [],
+        userInputEvents: [],
         trailingBytes: Buffer.alloc(0)
     }
     if (fileSize <= 0) return empty
@@ -479,6 +538,7 @@ function readRecentLifecycleTail(file: string, fileSize: number): RecentLifecycl
     const parsed = splitCompleteJsonlLines(completeTail)
     return {
         lifecycleEvents: takeRecentLifecycleEvents(parsed.lines),
+        userInputEvents: takeRecentUserInputEvents(parsed.lines),
         trailingBytes: parsed.trailingBytes
     }
 }

@@ -280,6 +280,37 @@ export const UploadFileRequestSchema = z.object({
 
 export type UploadFileRequest = z.infer<typeof UploadFileRequestSchema>
 
+export type UploadFileStartRequest = {
+    sessionId: string
+    uploadId: string
+    filename: string
+    mimeType: string
+    size: number
+}
+
+export type UploadFileChunkRequest = {
+    sessionId: string
+    uploadId: string
+    offset: number
+    content: string
+}
+
+export type UploadFileFinishRequest = {
+    sessionId: string
+    uploadId: string
+}
+
+export type UploadFileCancelRequest = UploadFileFinishRequest
+
+export type CleanupUploadSessionRequest = {
+    sessionId: string
+}
+
+export type UploadFileOperationResponse = {
+    success: boolean
+    error?: string
+}
+
 export const DeleteUploadRequestSchema = z.object({
     path: z.string().min(1)
 })

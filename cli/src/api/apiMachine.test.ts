@@ -836,6 +836,7 @@ describe('ApiMachineClient external Codex requests', () => {
             codexSessionId: 'codex-thread-1',
             requestId: 'turn-1:Bash',
             kind: 'permission',
+            phase: 'requested',
             toolName: 'Bash'
         })).toBe(true)
 
@@ -844,8 +845,37 @@ describe('ApiMachineClient external Codex requests', () => {
             codexSessionId: 'codex-thread-1',
             requestId: 'turn-1:Bash',
             kind: 'permission',
+            phase: 'requested',
             toolName: 'Bash'
         })
+    })
+
+    it('does not emit a late local-input request after that request was resolved', () => {
+        const machine = makeMachine('machine-external-codex-late-input')
+        const client = new ApiMachineClient('cli-token', machine)
+        const emit = vi.fn()
+        ;(client as unknown as { socket: { emit: typeof emit; close: () => void } }).socket = {
+            emit,
+            close: vi.fn()
+        } as never
+
+        expect(client.reportExternalCodexRequest({
+            codexSessionId: 'codex-thread-late-input',
+            requestId: 'call-1',
+            kind: 'user-input',
+            phase: 'resolved',
+            turnId: 'turn-a'
+        })).toBe(true)
+        expect(client.reportExternalCodexRequest({
+            codexSessionId: 'codex-thread-late-input',
+            requestId: 'call-1',
+            kind: 'user-input',
+            phase: 'requested',
+            turnId: 'turn-a'
+        })).toBe(true)
+
+        expect(emit).not.toHaveBeenCalledWith('external-codex-request', expect.anything())
+        client.shutdown()
     })
 
     it('emits native transcript invalidations through the authenticated machine socket', () => {

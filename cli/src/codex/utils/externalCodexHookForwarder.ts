@@ -7,6 +7,7 @@ type ExternalCodexRequest = Omit<ExternalCodexRequestPayload, 'machineId'>
 
 type ExternalCodexHookForwarderOptions = {
     kind: ExternalCodexRequestKind
+    phase: 'requested' | 'resolved'
     runnerStatePath: string
 }
 
@@ -48,6 +49,7 @@ export function parseExternalCodexHookForwarderOptions(args: string[]): External
     }
 
     let kind: ExternalCodexRequestKind | null = null
+    let phase: 'requested' | 'resolved' = 'requested'
     let runnerStatePath: string | null = null
     for (let index = 0; index < args.length; index += 1) {
         const arg = args[index]
@@ -62,10 +64,18 @@ export function parseExternalCodexHookForwarderOptions(args: string[]): External
         if (arg === '--runner-state') {
             runnerStatePath = asNonEmptyString(args[index + 1], 4_000)
             index += 1
+            continue
+        }
+        if (arg === '--phase') {
+            const value = args[index + 1]
+            if (value === 'requested' || value === 'resolved') {
+                phase = value
+            }
+            index += 1
         }
     }
 
-    return kind && runnerStatePath ? { kind, runnerStatePath } : null
+    return kind && runnerStatePath ? { kind, phase, runnerStatePath } : null
 }
 
 export function parseExternalCodexLifecycleHookForwarderOptions(
@@ -91,7 +101,8 @@ export function parseExternalCodexLifecycleHookForwarderOptions(
 export function parseExternalCodexHookRequest(
     kind: ExternalCodexRequestKind,
     value: unknown,
-    now: () => number = () => Date.now()
+    now: () => number = () => Date.now(),
+    phase: 'requested' | 'resolved' = 'requested'
 ): ExternalCodexRequest | null {
     const record = asRecord(value)
     if (!record) return null
@@ -102,14 +113,19 @@ export function parseExternalCodexHookRequest(
     const toolName = asNonEmptyString(valueFrom(record, 'tool_name', 'toolName'), 200) ?? undefined
     const toolUseId = asNonEmptyString(valueFrom(record, 'tool_use_id', 'toolUseId'), 200)
     const turnId = asNonEmptyString(valueFrom(record, 'turn_id', 'turnId'), 200)
+    const observedAt = Math.floor(now())
+    if (!Number.isFinite(observedAt) || observedAt < 0) return null
     const requestId = toolUseId
-        ?? (turnId ? `${turnId}:${toolName ?? kind}` : `${kind}:${toolName ?? 'unknown'}:${now()}`)
+        ?? (turnId ? `${turnId}:${toolName ?? kind}` : `${kind}:${toolName ?? 'unknown'}:${observedAt}`)
 
     return {
         codexSessionId,
         requestId,
         kind,
-        ...(toolName ? { toolName } : {})
+        phase,
+        ...(toolName ? { toolName } : {}),
+        ...(turnId ? { turnId } : {}),
+        observedAt
     }
 }
 
@@ -184,7 +200,12 @@ export async function runExternalCodexHookForwarder(args: string[]): Promise<voi
         const options = parseExternalCodexHookForwarderOptions(args)
         if (!options) return
 
-        const request = parseExternalCodexHookRequest(options.kind, await readHookInput())
+        const request = parseExternalCodexHookRequest(
+            options.kind,
+            await readHookInput(),
+            () => Date.now(),
+            options.phase
+        )
         if (!request) return
 
         const runnerState = await readRunnerControlState(options.runnerStatePath)

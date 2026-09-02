@@ -71,6 +71,7 @@ type ApiClientOptions = {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000
+const UPLOAD_REQUEST_TIMEOUT_MS = 5 * 60 * 1000
 
 type ErrorPayload = {
     error?: unknown
@@ -141,7 +142,8 @@ export class ApiClient {
         path: string,
         init?: RequestInit,
         attempt: number = 0,
-        overrideToken?: string | null
+        overrideToken?: string | null,
+        timeoutMs: number = this.requestTimeoutMs
     ): Promise<T> {
         const headers = new Headers(init?.headers)
         const liveToken = this.getToken ? this.getToken() : null
@@ -161,7 +163,7 @@ export class ApiClient {
         const timeoutId = setTimeout(() => {
             timedOut = true
             controller.abort()
-        }, this.requestTimeoutMs)
+        }, timeoutMs)
         const callerSignal = init?.signal
         const abortFromCaller = () => controller.abort()
         if (callerSignal) {
@@ -184,7 +186,7 @@ export class ApiClient {
                     const refreshed = await this.onUnauthorized()
                     if (refreshed) {
                         this.token = refreshed
-                        const retryResult = await this.request<T>(path, init, attempt + 1, refreshed)
+                        const retryResult = await this.request<T>(path, init, attempt + 1, refreshed, timeoutMs)
                         if (timedOut) {
                             throw new ApiError('Request timed out. Please try again.', 408, 'request_timeout')
                         }
@@ -622,10 +624,16 @@ export class ApiClient {
         form.set('file', file, filename)
         form.set('filename', filename)
         form.set('mimeType', mimeType)
-        return await this.request<UploadFileResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/upload`, {
-            method: 'POST',
-            body: form
-        })
+        return await this.request<UploadFileResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/upload`,
+            {
+                method: 'POST',
+                body: form
+            },
+            0,
+            undefined,
+            UPLOAD_REQUEST_TIMEOUT_MS
+        )
     }
 
     async deleteUploadFile(sessionId: string, path: string): Promise<DeleteUploadResponse> {

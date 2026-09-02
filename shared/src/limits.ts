@@ -1,4 +1,5 @@
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+export const MAX_UPLOAD_CHUNK_BYTES = 512 * 1024
 
 export const SAFE_RASTER_IMAGE_MIME_TYPES = [
     'image/png',

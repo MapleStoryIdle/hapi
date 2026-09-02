@@ -7,7 +7,8 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { AGENT_MESSAGE_PAYLOAD_TYPE, isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
+import { AGENT_MESSAGE_PAYLOAD_TYPE, isKnownFlavor, MAX_UPLOAD_BYTES, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type {
     CreateSideSessionResponse,
     CursorMigrateOutcome,
@@ -154,6 +155,22 @@ function asString(value: unknown): string | null {
 
 function asFiniteNumber(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function decodeBase64UploadContent(content: string): Uint8Array | null {
+    if (
+        !content
+        || content.length % 4 !== 0
+        || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content)
+    ) {
+        return null
+    }
+
+    const bytes = Buffer.from(content, 'base64')
+    if (bytes.byteLength > MAX_UPLOAD_BYTES || bytes.toString('base64') !== content) {
+        return null
+    }
+    return bytes
 }
 
 type StoredGeneratedImageReference = RpcGeneratedImageFileReference & {
@@ -332,6 +349,14 @@ export class SyncEngine {
         return this.sessionCache.getSession(sessionId) ?? this.sessionCache.refreshSession(sessionId) ?? undefined
     }
 
+    private getUploadMachineId(sessionId: string): string {
+        const machineId = this.getSession(sessionId)?.metadata?.machineId?.trim()
+        if (!machineId) {
+            throw new RpcTargetMissingError(RPC_METHODS.UploadFileStart, 'handler-not-registered')
+        }
+        return machineId
+    }
+
     getSessionByNamespace(sessionId: string, namespace: string): Session | undefined {
         const session = this.sessionCache.getSessionByNamespace(sessionId, namespace)
             ?? this.sessionCache.refreshSession(sessionId)
@@ -476,6 +501,14 @@ export class SyncEngine {
             this.triggerDedupIfNeeded(payload.sid)
         }
         this.sessionReadyIds.delete(payload.sid)
+
+        const machineId = before?.metadata?.machineId?.trim()
+        if (machineId) {
+            // Uploads are owned by the runner, not by the session process. Do
+            // not make session end wait for cleanup, but leave no runner-side
+            // temporary upload directory behind when the session is gone.
+            void this.rpcGateway.cleanupUploadSession(machineId, payload.sid).catch(() => undefined)
+        }
     }
 
     handleBackgroundTaskDelta(sessionId: string, delta: { started: number; completed: number }): void {
@@ -1957,7 +1990,7 @@ export class SyncEngine {
     }
 
     async readUploadedFileBytes(sessionId: string, path: string): Promise<RpcFileBytesResponse> {
-        return await this.rpcGateway.readUploadedFileBytes(sessionId, path)
+        return await this.rpcGateway.readUploadedFileBytes(this.getUploadMachineId(sessionId), sessionId, path)
     }
 
     async listDirectory(sessionId: string, path: string): Promise<RpcListDirectoryResponse> {
@@ -1965,15 +1998,19 @@ export class SyncEngine {
     }
 
     async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {
-        return await this.rpcGateway.uploadFile(sessionId, filename, content, mimeType)
+        const bytes = decodeBase64UploadContent(content)
+        if (!bytes) {
+            return { success: false, error: 'Invalid base64 upload content' }
+        }
+        return await this.uploadFileBytes(sessionId, filename, bytes, mimeType)
     }
 
     async uploadFileBytes(sessionId: string, filename: string, bytes: Uint8Array, mimeType: string): Promise<RpcUploadFileResponse> {
-        return await this.rpcGateway.uploadFileBytes(sessionId, filename, bytes, mimeType)
+        return await this.rpcGateway.uploadFileBytes(this.getUploadMachineId(sessionId), sessionId, filename, bytes, mimeType)
     }
 
     async deleteUploadFile(sessionId: string, path: string): Promise<RpcDeleteUploadResponse> {
-        return await this.rpcGateway.deleteUploadFile(sessionId, path)
+        return await this.rpcGateway.deleteUploadFile(this.getUploadMachineId(sessionId), sessionId, path)
     }
 
     async runRipgrep(sessionId: string, args: string[], cwd?: string): Promise<RpcCommandResponse> {

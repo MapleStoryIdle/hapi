@@ -21,6 +21,7 @@ import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { SlashCommand } from '@hapi/protocol/apiTypes'
 import { Hono, type Context } from 'hono'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
+import { RpcTargetMissingError } from '../../sync/rpcGateway'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
@@ -76,6 +77,27 @@ function inlineContentDisposition(fileName: string | null | undefined, fallback:
         .trim() || fallback
     const encoded = encodeURIComponent(resolved)
     return `inline; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`
+}
+
+function uploadRpcFailure(c: Context<WebAppEnv>, error: unknown, fallback: string): Response {
+    if (error instanceof RpcTargetMissingError) {
+        return c.json({
+            success: false,
+            error: 'Upload target is unavailable',
+            code: 'upload_target_unavailable'
+        }, 503)
+    }
+
+    const message = error instanceof Error ? error.message : fallback
+    if (/timed out|timeout/i.test(message)) {
+        return c.json({
+            success: false,
+            error: 'Upload target timed out',
+            code: 'upload_timeout'
+        }, 504)
+    }
+
+    return c.json({ success: false, error: message }, 500)
 }
 
 export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
@@ -328,10 +350,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 )
                 return c.json(result)
             } catch (error) {
-                return c.json({
-                    success: false,
-                    error: error instanceof Error ? error.message : 'Failed to upload file'
-                }, 500)
+                return uploadRpcFailure(c, error, 'Failed to upload file')
             }
         }
 
@@ -355,10 +374,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             )
             return c.json(result)
         } catch (error) {
-            return c.json({
-                success: false,
-                error: error instanceof Error ? error.message : 'Failed to upload file'
-            }, 500)
+            return uploadRpcFailure(c, error, 'Failed to upload file')
         }
     })
 
@@ -378,7 +394,12 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Invalid file path' }, 400)
         }
 
-        const result = await engine.readUploadedFileBytes(sessionResult.sessionId, parsed.data.path)
+        let result
+        try {
+            result = await engine.readUploadedFileBytes(sessionResult.sessionId, parsed.data.path)
+        } catch (error) {
+            return uploadRpcFailure(c, error, 'Failed to read upload')
+        }
         if (!result.success) {
             const status = /invalid/i.test(result.error) ? 400 : 404
             return c.json({ success: false, error: result.error }, status)
@@ -412,10 +433,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             const result = await engine.deleteUploadFile(sessionResult.sessionId, parsed.data.path)
             return c.json(result)
         } catch (error) {
-            return c.json({
-                success: false,
-                error: error instanceof Error ? error.message : 'Failed to delete upload'
-            }, 500)
+            return uploadRpcFailure(c, error, 'Failed to delete upload')
         }
     })
 

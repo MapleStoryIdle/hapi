@@ -13,8 +13,6 @@ import { AGENT_MESSAGE_PAYLOAD_TYPE } from "@hapi/protocol"
 import type {
     BinaryFileReadRequest,
     BinaryFileReadResponse,
-    BinaryFileUploadRequest,
-    BinaryFileUploadResponse,
     GeneratedImageStoreResponse,
     SessionEndReason,
 } from '@hapi/protocol'
@@ -41,7 +39,7 @@ import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
 import { readGeneratedImageBytes, readGeneratedImageFileBytes, readSessionFileBytes } from '../modules/common/handlers/files'
 import type { GeneratedImageMetadata } from '../modules/common/generatedImages'
-import { cleanupUploadDir, readUploadFileBytes, uploadFileBytes } from '../modules/common/handlers/uploads'
+import { readUploadFileBytes } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
@@ -267,19 +265,6 @@ export class ApiSessionClient extends EventEmitter {
                 }
 
                 callback(await readSessionFileBytes(data.path, workingDirectory))
-            } catch (error) {
-                callback({ success: false, error: error instanceof Error ? error.message : String(error) })
-            }
-        })
-
-        this.socket.on('file:upload-bytes', async (data: BinaryFileUploadRequest, callback: (response: BinaryFileUploadResponse) => void) => {
-            try {
-                callback(await uploadFileBytes({
-                    sessionId: this.sessionId,
-                    filename: data.filename,
-                    mimeType: data.mimeType,
-                    bytes: data.bytes
-                }) as BinaryFileUploadResponse)
             } catch (error) {
                 callback({ success: false, error: error instanceof Error ? error.message : String(error) })
             }
@@ -708,7 +693,6 @@ export class ApiSessionClient extends EventEmitter {
     }
 
     sendSessionDeath(reason?: SessionEndReason): void {
-        void cleanupUploadDir(this.sessionId)
         this.socket.emit('session-end', { sid: this.sessionId, time: Date.now(), reason })
     }
 

@@ -224,6 +224,105 @@ describe('NativeCodexTurnLifecycleTracker', () => {
         }
     })
 
+    it('keeps a transcript-confirmed local input wait until its matching output resolves it', () => {
+        let now = 1_000
+        const tracker = new NativeCodexTurnLifecycleTracker({ now: () => now, unconfirmedLeaseMs: 100 })
+        try {
+            expect(tracker.observeExternalUserInput({
+                codexSessionId: sessionId, requestId: 'call-1', phase: 'requested', turnId: 'turn-a', observedAt: now
+            })).toBe(true)
+            expect(tracker.applyToSummary(summary()).waitingForUserInput).toBe(true)
+            now += 1_000
+            expect(tracker.observeTranscriptUserInputEvents(sessionId, [
+                { type: 'requested', requestId: 'call-1', turnId: 'turn-a' }
+            ])).toBe(true)
+            expect(tracker.applyToSummary(summary()).waitingForUserInput).toBe(true)
+            expect(tracker.observeTranscriptUserInputEvents(sessionId, [
+                { type: 'resolved', requestId: 'call-1', turnId: 'turn-a' }
+            ])).toBe(true)
+            expect(tracker.applyToSummary(summary()).waitingForUserInput).not.toBe(true)
+        } finally {
+            tracker.dispose()
+        }
+    })
+
+    it('keeps the current request when a bounded transcript tail is replayed', () => {
+        const tracker = new NativeCodexTurnLifecycleTracker({ now: () => 1_000 })
+        const events = [
+            { type: 'turn_started' as const, turnId: 'turn-old' },
+            { type: 'turn_terminal' as const, turnId: 'turn-old' },
+            { type: 'turn_started' as const, turnId: 'turn-current' },
+            { type: 'requested' as const, requestId: 'call-current', turnId: 'turn-current' }
+        ]
+        try {
+            expect(tracker.observeTranscriptUserInputEvents(sessionId, events)).toBe(true)
+            expect(tracker.applyToSummary(summary()).waitingForUserInput).toBe(true)
+            expect(tracker.observeTranscriptUserInputEvents(sessionId, events)).toBe(false)
+            expect(tracker.applyToSummary(summary()).waitingForUserInput).toBe(true)
+        } finally {
+            tracker.dispose()
+        }
+    })
+
+    it('does not resurrect a request when a bounded tail shifts from its call to its output', () => {
+        const tracker = new NativeCodexTurnLifecycleTracker({ now: () => 1_000 })
+        try {
+            expect(tracker.observeTranscriptUserInputEvents(sessionId, [
+                { type: 'requested', requestId: 'call-shifted', turnId: 'turn-a' }
+            ])).toBe(true)
+            expect(tracker.observeTranscriptUserInputEvents(sessionId, [
+                { type: 'resolved', requestId: 'call-shifted', turnId: 'turn-a' }
+            ])).toBe(true)
+            expect(tracker.observeExternalUserInput({
+                codexSessionId: sessionId,
+                requestId: 'call-shifted',
+                phase: 'requested',
+                turnId: 'turn-a'
+            })).toBe(false)
+            expect(tracker.applyToSummary(summary()).waitingForUserInput).not.toBe(true)
+        } finally {
+            tracker.dispose()
+        }
+    })
+
+    it('does not let a late requested hook reopen a locally resolved request', () => {
+        const tracker = new NativeCodexTurnLifecycleTracker({ now: () => 1_000 })
+        try {
+            expect(tracker.observeExternalUserInput({
+                codexSessionId: sessionId,
+                requestId: 'call-1',
+                phase: 'resolved'
+            })).toBe(false)
+            expect(tracker.observeExternalUserInput({
+                codexSessionId: sessionId,
+                requestId: 'call-1',
+                phase: 'requested'
+            })).toBe(false)
+            expect(tracker.applyToSummary(summary()).waitingForUserInput).not.toBe(true)
+        } finally {
+            tracker.dispose()
+        }
+    })
+
+    it('does not let a late requested hook reopen a completed turn', () => {
+        const tracker = new NativeCodexTurnLifecycleTracker({ now: () => 1_000 })
+        try {
+            expect(tracker.observeTranscriptEvents(sessionId, [
+                { type: 'task_complete', turnId: 'turn-a' }
+            ])).toBe(false)
+            expect(tracker.observeExternalUserInput({
+                codexSessionId: sessionId,
+                requestId: 'call-late',
+                phase: 'requested',
+                turnId: 'turn-a'
+            })).toBe(false)
+            expect(tracker.isActiveUserInputRequest(sessionId, 'call-late')).toBe(false)
+            expect(tracker.applyToSummary(summary()).waitingForUserInput).not.toBe(true)
+        } finally {
+            tracker.dispose()
+        }
+    })
+
     it('ignores an older hook start that arrives after a newer turn', () => {
         const tracker = new NativeCodexTurnLifecycleTracker({ now: () => 1_000 })
         try {

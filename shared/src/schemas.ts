@@ -417,7 +417,8 @@ export const CodexLocalSessionListUpdateSchema = z.object({
     cliVersion: z.string().nullable().optional(),
     model: z.string().nullable().optional(),
     modelReasoningEffort: z.string().nullable().optional(),
-    runState: z.enum(['idle', 'processing', 'unknown']).optional()
+    runState: z.enum(['idle', 'processing', 'unknown']).optional(),
+    waitingForUserInput: z.boolean().optional()
 }).strict()
 
 export type CodexLocalSessionListUpdate = z.infer<typeof CodexLocalSessionListUpdateSchema>
@@ -464,6 +465,7 @@ const CodexLocalSessionRealtimeQueuedMessageSchema = z.object({
 export const CodexLocalSessionRealtimeStatusSchema = z.object({
     success: z.literal(true),
     status: z.enum(['idle', 'processing', 'unknown']),
+    waitingForUserInput: z.boolean().optional(),
     stalledSince: z.number().finite().optional(),
     startedAt: z.number().finite().optional(),
     progress: CodexLocalSessionDirectSendProgressSchema.optional(),

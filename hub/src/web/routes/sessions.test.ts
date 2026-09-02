@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import type { Session, SyncEngine } from '../../sync/syncEngine'
+import { RpcTargetMissingError } from '../../sync/rpcGateway'
 import type { WebAppEnv } from '../middleware/auth'
 import { createSessionsRoutes } from './sessions'
 
@@ -209,6 +210,29 @@ describe('sessions routes', () => {
         expect(upload.filename).toBe('shot.png')
         expect(upload.mimeType).toBe('image/png')
         expect(Array.from(upload.bytes)).toEqual([1, 2, 3])
+    })
+
+    it('reports an unavailable upload runner as a retryable target error', async () => {
+        const session = createSession()
+        const { app } = createApp(session, {
+            uploadFileBytes: async () => {
+                throw new RpcTargetMissingError('machine-1:uploadFileStart', 'handler-not-registered')
+            }
+        })
+        const form = new FormData()
+        form.set('file', new Blob([new Uint8Array([1])], { type: 'application/octet-stream' }), 'upload.bin')
+
+        const response = await app.request('/api/sessions/session-1/upload', {
+            method: 'POST',
+            body: form
+        })
+
+        expect(response.status).toBe(503)
+        expect(await response.json()).toEqual({
+            success: false,
+            error: 'Upload target is unavailable',
+            code: 'upload_target_unavailable'
+        })
     })
 
     it('serves uploaded attachment previews as blob bytes', async () => {

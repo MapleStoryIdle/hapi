@@ -28,6 +28,12 @@ export type CodexLocalSessionSummary = {
     modelReasoningEffort?: string | null
     /** Last native turn lifecycle observed while scanning this transcript. */
     runState?: CodexLocalSessionRunState
+    /**
+     * A local Codex `request_user_input` call is still awaiting an answer on
+     * the originating machine. This is deliberately parallel to runState:
+     * native delivery must continue to treat the session as processing.
+     */
+    waitingForUserInput?: boolean
 }
 
 /** Runner-to-browser list update; the local transcript path stays private. */
@@ -151,6 +157,25 @@ export type CodexTranscriptLifecycleEvent = {
 }
 
 /**
+ * Minimal routing state for the native `request_user_input` primitive. The
+ * parser intentionally never retains arguments or tool output.
+ */
+export type CodexTranscriptUserInputEvent = {
+    type: 'requested' | 'resolved'
+    requestId: string
+    turnId?: string
+} | {
+    /** Ordered turn boundaries prevent a completed cold tail from reopening a wait. */
+    type: 'turn_started' | 'turn_terminal'
+    turnId?: string
+}
+
+export type CodexTranscriptUserInputState = {
+    seen: boolean
+    waiting: boolean
+}
+
+/**
  * Runner-owned progress for a prompt sent into an original native Codex
  * thread. The stages deliberately describe the hand-off, not model output.
  */
@@ -185,6 +210,8 @@ export type CodexLocalSessionDirectSendRecoveryReason =
 export type CodexLocalSessionStatusRpcResponse = {
     success: true
     status: CodexLocalSessionRunState
+    /** Native Codex is blocked on an answer in its own local UI. */
+    waitingForUserInput?: boolean
     /**
      * The native transcript still says a turn is running but has not changed
      * for a long time. This is only a recovery hint: HAPI never retries a
@@ -513,6 +540,26 @@ function extractCodexToolCallId(payload: Record<string, unknown>): string | null
         if (typeof value === 'string' && value.length > 0) return value
     }
     return null
+}
+
+/** Read only a turn routing id; never retain surrounding tool content. */
+function extractCodexTurnId(record: Record<string, unknown>, payload: Record<string, unknown>): string | null {
+    const turn = asRecord(payload.turn)
+    const scope = asRecord(payload.scope)
+    const passthrough = asRecord(payload.internal_chat_message_metadata_passthrough)
+    return asString(
+        payload.turn_id
+        ?? payload.turnId
+        ?? turn?.id
+        ?? turn?.turn_id
+        ?? turn?.turnId
+        ?? scope?.turn_id
+        ?? scope?.turnId
+        ?? passthrough?.turn_id
+        ?? passthrough?.turnId
+        ?? record.turn_id
+        ?? record.turnId
+    )
 }
 
 /**
@@ -879,6 +926,7 @@ function buildCodexLocalSessionSummary(
         lastUserMessage: string | null
         config: CodexLocalSessionConfig
         runState: CodexLocalSessionRunState
+        waitingForUserInput?: boolean
     }
 ): CodexLocalSessionSummary | null {
     if (header.isSubagent) return null
@@ -897,7 +945,10 @@ function buildCodexLocalSessionSummary(
         cliVersion: header.cliVersion,
         model: latest.config.model,
         modelReasoningEffort: latest.config.modelReasoningEffort,
-        runState: latest.runState
+        runState: latest.runState,
+        ...(latest.waitingForUserInput === undefined ? {} : {
+            waitingForUserInput: latest.waitingForUserInput
+        })
     }
 }
 
@@ -940,7 +991,8 @@ export function readLocalCodexSessionSummary(
             changedTitle: getLatestCodexChangedTitle(allLines),
             lastUserMessage: getLatestCodexUserMessage(allLines),
             config: getLatestCodexSessionConfig(allLines),
-            runState: getCodexTranscriptRunState(content)
+            runState: getCodexTranscriptRunState(content),
+            waitingForUserInput: getCodexTranscriptUserInputState(allLines).waiting
         })
     }
 
@@ -970,7 +1022,10 @@ export function readLocalCodexSessionSummary(
         },
         // Unknown is deliberately conservative: direct sends will queue until
         // a live transcript append proves the native turn is idle.
-        runState: tail.runState ?? 'unknown'
+        runState: tail.runState ?? 'unknown',
+        ...(tail.waitingForUserInput === undefined ? {} : {
+            waitingForUserInput: tail.waitingForUserInput
+        })
     })
 }
 
@@ -1035,19 +1090,7 @@ export function getCodexTranscriptLifecycleEvents(lines: readonly string[]): Cod
             const payload = asRecord(record.payload)
             const type = asString(payload?.type)
             if (type !== 'task_started' && type !== 'task_complete' && type !== 'turn_aborted') continue
-            const turn = asRecord(payload?.turn)
-            const scope = asRecord(payload?.scope)
-            const turnId = asString(
-                payload?.turn_id
-                ?? payload?.turnId
-                ?? turn?.id
-                ?? turn?.turn_id
-                ?? turn?.turnId
-                ?? scope?.turn_id
-                ?? scope?.turnId
-                ?? record.turn_id
-                ?? record.turnId
-            )
+            const turnId = payload ? extractCodexTurnId(record, payload) : null
             events.push({ type, ...(turnId ? { turnId } : {}) })
         } catch {
             // A runner can observe the transcript while Codex is appending a
@@ -1055,6 +1098,84 @@ export function getCodexTranscriptLifecycleEvents(lines: readonly string[]): Cod
         }
     }
     return events
+}
+
+/**
+ * Extract only the lifecycle identity of native local-input calls. Function
+ * outputs are intentionally emitted as candidates and are matched against a
+ * known request id by the lifecycle tracker; this keeps a bounded tail read
+ * useful even when the request record lies before the tail window.
+ */
+export function getCodexTranscriptUserInputEvents(lines: readonly string[]): CodexTranscriptUserInputEvent[] {
+    const events: CodexTranscriptUserInputEvent[] = []
+    for (const line of lines) {
+        if (!line) continue
+        try {
+            const record = asRecord(JSON.parse(line))
+            if (!record) continue
+            const payload = asRecord(record.payload)
+            if (!payload) continue
+            if (record.type === 'event_msg') {
+                const eventType = asString(payload.type)
+                const turnId = extractCodexTurnId(record, payload)
+                if (eventType === 'task_started') {
+                    events.push({ type: 'turn_started', ...(turnId ? { turnId } : {}) })
+                } else if (eventType === 'task_complete' || eventType === 'turn_aborted') {
+                    events.push({ type: 'turn_terminal', ...(turnId ? { turnId } : {}) })
+                }
+                continue
+            }
+            if (record.type !== 'response_item') continue
+            const itemType = asString(payload.type)
+            const requestId = extractCodexToolCallId(payload)
+            if (!requestId) continue
+            const turnId = extractCodexTurnId(record, payload)
+            if (
+                (itemType === 'function_call' || itemType === 'custom_tool_call')
+                && payload.name === 'request_user_input'
+            ) {
+                events.push({ type: 'requested', requestId, ...(turnId ? { turnId } : {}) })
+            } else if (itemType === 'function_call_output' || itemType === 'custom_tool_call_output') {
+                events.push({ type: 'resolved', requestId, ...(turnId ? { turnId } : {}) })
+            }
+        } catch {
+            // A live native transcript can expose a partial final JSONL line.
+        }
+    }
+    return events
+}
+
+/**
+ * Raw transcript fallback for cold list rows. The runner tracker adds
+ * stronger hook/tombstone semantics for hot sessions; this only gives a
+ * bounded cold read enough information to surface a genuine waiting state.
+ */
+export function getCodexTranscriptUserInputState(lines: readonly string[]): CodexTranscriptUserInputState {
+    let active: { requestId: string; turnId?: string } | null = null
+    let seen = false
+
+    for (const event of getCodexTranscriptUserInputEvents(lines)) {
+        if (event.type === 'requested') {
+            seen = true
+            active = {
+                requestId: event.requestId,
+                ...(event.turnId ? { turnId: event.turnId } : {})
+            }
+        } else if (event.type === 'resolved') {
+            if (active?.requestId === event.requestId) {
+                seen = true
+                active = null
+            }
+        } else if (event.type === 'turn_started') {
+            if (active && (!event.turnId || !active.turnId || active.turnId !== event.turnId)) {
+                active = null
+            }
+        } else if (active && (!event.turnId || !active.turnId || active.turnId === event.turnId)) {
+            active = null
+        }
+    }
+
+    return { seen, waiting: active !== null }
 }
 
 function getCodexTranscriptRunState(content: string): CodexLocalSessionRunState {
@@ -1091,6 +1212,7 @@ export type CodexTranscriptTailSummary = {
     model?: string
     modelReasoningEffort?: string
     runState?: CodexLocalSessionRunState
+    waitingForUserInput?: boolean
 }
 
 export function getCodexTranscriptTailSummary(lines: readonly string[]): CodexTranscriptTailSummary {
@@ -1130,6 +1252,10 @@ export function getCodexTranscriptTailSummary(lines: readonly string[]): CodexTr
         } catch {
             // A live writer can expose an incomplete final JSONL record.
         }
+    }
+    const userInput = getCodexTranscriptUserInputState(lines)
+    if (userInput.seen) {
+        summary.waitingForUserInput = userInput.waiting
     }
     return summary
 }
@@ -1306,6 +1432,8 @@ export type CodexTranscriptImportAccumulator = {
     messages: CodexImportedMessageContent[]
     canonicalChatMessageIndexByRolloutKey: Map<string, number>
     userMessageMirrorDeduper: ReturnType<typeof createCodexUserMessageMirrorDeduper>
+    /** Tool calls whose questions and answers must remain on the native client. */
+    localOnlyCallIds: Set<string>
     startedAtByCallId: Map<string, number>
     toolResultIndexesByCallId: Map<string, number[]>
     pendingHeartbeatTimestamp?: number
@@ -1319,6 +1447,7 @@ export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportA
         messages: [],
         canonicalChatMessageIndexByRolloutKey: new Map(),
         userMessageMirrorDeduper: createCodexUserMessageMirrorDeduper(),
+        localOnlyCallIds: new Set(),
         startedAtByCallId: new Map(),
         toolResultIndexesByCallId: new Map(),
         pendingReasoningParts: [],
@@ -1506,6 +1635,27 @@ export function appendCodexTranscriptImportLines(
             const record = asRecord(JSON.parse(line))
             if (!record) continue
             const { recordType, payloadType, payload } = getCodexRecordKinds(record)
+
+            if (
+                recordType === 'response_item'
+                && (payloadType === 'function_call' || payloadType === 'custom_tool_call')
+                && payload?.name === 'request_user_input'
+            ) {
+                const callId = extractCodexToolCallId(payload)
+                if (callId) accumulator.localOnlyCallIds.add(callId)
+                finalizePendingReasoning(accumulator)
+                continue
+            }
+            if (
+                recordType === 'response_item'
+                && (payloadType === 'function_call_output' || payloadType === 'custom_tool_call_output')
+            ) {
+                const callId = payload ? extractCodexToolCallId(payload) : null
+                if (callId && accumulator.localOnlyCallIds.has(callId)) {
+                    finalizePendingReasoning(accumulator)
+                    continue
+                }
+            }
 
             if (recordType === 'event_msg' && payloadType === 'agent_reasoning_delta') {
                 continue

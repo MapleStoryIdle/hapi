@@ -32,6 +32,7 @@ describe('runner control server external Codex requests', () => {
                 codexSessionId: 'codex-thread-1',
                 requestId: 'turn-1:Bash',
                 kind: 'permission',
+                phase: 'requested',
                 toolName: 'Bash'
             }])
         } finally {

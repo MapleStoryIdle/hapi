@@ -52,7 +52,8 @@ import { NativeCodexSessionWatcher } from '@/codex/nativeSessionWatcher'
 import {
     NativeCodexTurnLifecycleTracker,
     normalizeNativeCodexSessionForDisplay,
-    type ExternalCodexLifecycleEvent
+    type ExternalCodexLifecycleEvent,
+    type ExternalCodexUserInputEvent
 } from '@/codex/nativeTurnLifecycle'
 import type { RunnerState, Machine, MachineMetadata } from './types'
 import { RunnerStateSchema, MachineMetadataSchema } from './types'
@@ -73,6 +74,7 @@ import { applyVersionedAck } from './versionedUpdate'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
 import { readGeneratedImageFileBytes, readSessionFileBytes } from '@/modules/common/handlers/files'
+import { readUploadFileBytes } from '@/modules/common/handlers/uploads'
 
 type NativeCodexArchiveClient = Pick<CodexAppServerClient, 'connect' | 'initialize' | 'archiveThread' | 'disconnect'>
 
@@ -269,6 +271,7 @@ export class ApiMachineClient {
     private readonly nativeCodexSessionTitleCache = new NativeCodexSessionTitleCache()
     private readonly nativeCodexTurnLifecycle = new NativeCodexTurnLifecycleTracker({
         onUnconfirmedLeaseExpired: (codexSessionId) => this.handleNativeCodexLifecycleChange(codexSessionId),
+        onUserInputLeaseExpired: (codexSessionId) => this.handleNativeCodexLifecycleChange(codexSessionId),
         onProcessingStale: (codexSessionId) => this.handleNativeCodexLifecycleChange(codexSessionId)
     })
     private readonly nativeCodexTranscriptCache = new NativeCodexTranscriptCache({
@@ -277,7 +280,9 @@ export class ApiMachineClient {
     private readonly nativeCodexSessionListCache = new NativeCodexSessionListCache({
         resolveTitles: (sessionIds, options) => this.nativeCodexSessionTitleCache.resolve(sessionIds, options),
         applyLifecycle: (session) => normalizeNativeCodexSessionForDisplay(
-            this.nativeCodexTurnLifecycle.applyToSummary(session)
+            this.maskRunnerOwnedNativeUserInput(
+                this.nativeCodexTurnLifecycle.applyToSummary(session)
+            )
         )
     })
     private readonly nativeCodexSessionDirectSender: NativeCodexSessionDirectSender
@@ -289,6 +294,11 @@ export class ApiMachineClient {
             const summaryRead = this.nativeCodexTranscriptCache.refreshSummary(codexSessionId)
             if (summaryRead) {
                 this.nativeCodexTurnLifecycle.observeTranscriptEvents(codexSessionId, summaryRead.lifecycleEvents)
+                if (this.nativeCodexSessionDirectSender.ownsActiveDelivery(codexSessionId)) {
+                    this.nativeCodexTurnLifecycle.suppressUserInputWait(codexSessionId)
+                } else {
+                    this.nativeCodexTurnLifecycle.observeTranscriptUserInputEvents(codexSessionId, summaryRead.userInputEvents)
+                }
             }
             const listSession = this.nativeCodexSessionListCache.update(filePath, modifiedAt)
             const read = this.nativeCodexTranscriptCache.refreshCached(codexSessionId, { limit: 50 })
@@ -911,17 +921,74 @@ export class ApiMachineClient {
      * session. This is intentionally best-effort, but Socket.IO may queue a
      * request during the runner's initial connection handshake.
      */
-    reportExternalCodexRequest(request: Omit<ExternalCodexRequestPayload, 'machineId'>): boolean {
+    reportExternalCodexRequest(
+        request: Omit<ExternalCodexRequestPayload, 'machineId' | 'phase'> & { phase?: 'requested' | 'resolved' }
+    ): boolean {
         const socket = this.socket as Socket<ServerToClientEvents, ClientToServerEvents> | undefined
         if (!socket) {
             logger.debug('[API MACHINE] Dropping external Codex request before socket setup')
             return false
         }
 
-        socket.emit('external-codex-request', {
-            machineId: this.machine.id,
-            ...request
-        })
+        const normalizedRequest: Omit<ExternalCodexRequestPayload, 'machineId'> = {
+            ...request,
+            phase: request.phase ?? 'requested'
+        }
+        const runnerOwnsUserInput = normalizedRequest.kind === 'user-input'
+            && this.nativeCodexSessionDirectSender.ownsActiveDelivery(normalizedRequest.codexSessionId)
+        const initialSummary = this.nativeCodexTranscriptCache.readSummary(normalizedRequest.codexSessionId)
+        let transcriptChanged = false
+        let transcriptUserInputChanged = false
+        if (initialSummary) {
+            transcriptChanged = this.nativeCodexTurnLifecycle.observeTranscriptEvents(
+                request.codexSessionId,
+                initialSummary.lifecycleEvents
+            )
+            transcriptUserInputChanged = runnerOwnsUserInput
+                ? this.nativeCodexTurnLifecycle.suppressUserInputWait(request.codexSessionId)
+                : this.nativeCodexTurnLifecycle.observeTranscriptUserInputEvents(
+                    request.codexSessionId,
+                    initialSummary.userInputEvents
+                )
+        }
+        const summary = initialSummary?.session ?? null
+        const shouldTrackLocalInput = normalizedRequest.kind === 'user-input'
+            && !runnerOwnsUserInput
+            && (summary === null || !isHapiInitiatedCodexSession(summary))
+        const hookChanged = shouldTrackLocalInput
+            ? this.nativeCodexTurnLifecycle.observeExternalUserInput(normalizedRequest as ExternalCodexUserInputEvent)
+            : false
+        const localChanged = transcriptChanged || transcriptUserInputChanged || hookChanged
+
+        const shouldForwardRequest = !runnerOwnsUserInput && (
+            normalizedRequest.kind !== 'user-input'
+            || (
+                normalizedRequest.phase === 'requested'
+                && shouldTrackLocalInput
+                && this.nativeCodexTurnLifecycle.isActiveUserInputRequest(
+                    normalizedRequest.codexSessionId,
+                    normalizedRequest.requestId
+                )
+            )
+        )
+        if (shouldForwardRequest) {
+            socket.emit('external-codex-request', {
+                machineId: this.machine.id,
+                ...normalizedRequest
+            })
+        }
+        if (localChanged) {
+            this.observeNativeCodexSession(normalizedRequest.codexSessionId)
+            this.nativeCodexSessionDirectSender.notifyTranscriptChanged(normalizedRequest.codexSessionId)
+            const updatedSummary = this.nativeCodexTranscriptCache
+                .readSummary(normalizedRequest.codexSessionId)?.session ?? summary
+            this.reportNativeCodexSessionUpdated(
+                normalizedRequest.codexSessionId,
+                normalizedRequest.observedAt ?? Date.now(),
+                null,
+                updatedSummary
+            )
+        }
         return true
     }
 
@@ -933,8 +1000,11 @@ export class ApiMachineClient {
         const transcriptChanged = initialSummary
             ? this.nativeCodexTurnLifecycle.observeTranscriptEvents(event.codexSessionId, initialSummary.lifecycleEvents)
             : false
+        const userInputChanged = initialSummary
+            ? this.nativeCodexTurnLifecycle.observeTranscriptUserInputEvents(event.codexSessionId, initialSummary.userInputEvents)
+            : false
         const hookChanged = this.nativeCodexTurnLifecycle.observeHookStart(event)
-        if (!transcriptChanged && !hookChanged) {
+        if (!transcriptChanged && !userInputChanged && !hookChanged) {
             return false
         }
 
@@ -958,10 +1028,17 @@ export class ApiMachineClient {
             sessionId,
             initialRead.lifecycleEvents
         )
-        if (lifecycleChanged) {
+        const runnerOwnsDelivery = this.nativeCodexSessionDirectSender.ownsActiveDelivery(sessionId)
+        const userInputChanged = runnerOwnsDelivery
+            ? this.nativeCodexTurnLifecycle.suppressUserInputWait(sessionId)
+            : this.nativeCodexTurnLifecycle.observeTranscriptUserInputEvents(
+                sessionId,
+                initialRead.userInputEvents
+            )
+        if (lifecycleChanged || userInputChanged) {
             this.nativeCodexSessionDirectSender.notifyTranscriptChanged(sessionId)
         }
-        const read = lifecycleChanged
+        const read = lifecycleChanged || userInputChanged
             ? this.nativeCodexTranscriptCache.readCached(sessionId, options) ?? initialRead
             : initialRead
         return this.withNativeCodexTitle(read)
@@ -981,9 +1058,17 @@ export class ApiMachineClient {
             sessionId,
             initialRead.lifecycleEvents
         )
-        return lifecycleChanged
+        const runnerOwnsDelivery = this.nativeCodexSessionDirectSender.ownsActiveDelivery(sessionId)
+        const userInputChanged = runnerOwnsDelivery
+            ? this.nativeCodexTurnLifecycle.suppressUserInputWait(sessionId)
+            : this.nativeCodexTurnLifecycle.observeTranscriptUserInputEvents(
+                sessionId,
+                initialRead.userInputEvents
+            )
+        const session = lifecycleChanged || userInputChanged
             ? this.nativeCodexTranscriptCache.readSummary(sessionId)?.session ?? initialRead.session
             : initialRead.session
+        return this.maskRunnerOwnedNativeUserInput(session)
     }
 
     private handleNativeCodexLifecycleChange(sessionId: string): void {
@@ -1031,7 +1116,8 @@ export class ApiMachineClient {
         const snapshot = read && status?.success === true
             ? buildNativeCodexRealtimeSnapshot(read, status)
             : undefined
-        const summary = read?.data.session ?? listSession
+        const rawSummary = read?.data.session ?? listSession
+        const summary = rawSummary ? this.maskRunnerOwnedNativeUserInput(rawSummary) : null
         socket.emit('codex-session-updated', {
             machineId: this.machine.id,
             codexSessionId,
@@ -1044,18 +1130,26 @@ export class ApiMachineClient {
 
     private withNativeCodexTitle(read: NativeCodexTranscriptRead): NativeCodexTranscriptRead {
         const title = this.nativeCodexSessionTitleCache.resolve([read.data.session.id]).get(read.data.session.id)
-        if (!title || title === read.data.session.title) return read
+        const session = this.maskRunnerOwnedNativeUserInput(read.data.session)
+        if ((!title || title === session.title) && session === read.data.session) return read
 
         return {
             ...read,
             data: {
                 ...read.data,
                 session: {
-                    ...read.data.session,
-                    title
+                    ...session,
+                    ...(title ? { title } : {})
                 }
             }
         }
+    }
+
+    private maskRunnerOwnedNativeUserInput(session: CodexLocalSessionSummary): CodexLocalSessionSummary {
+        return session.waitingForUserInput === true
+            && this.nativeCodexSessionDirectSender.ownsActiveDelivery(session.id)
+            ? { ...session, waitingForUserInput: false }
+            : session
     }
 
     connect(): void {
@@ -1128,6 +1222,16 @@ export class ApiMachineClient {
                     }
 
                     callback(await readSessionFileBytes(path, cwd))
+                    return
+                }
+
+                if (data.type === 'uploaded-file') {
+                    const sessionId = typeof data.sessionId === 'string' ? data.sessionId.trim() : ''
+                    if (!sessionId) {
+                        callback({ success: false, error: 'sessionId is required' })
+                        return
+                    }
+                    callback(await readUploadFileBytes(data.path, sessionId))
                     return
                 }
 

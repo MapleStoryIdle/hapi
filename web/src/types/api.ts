@@ -204,6 +204,7 @@ export type CodexLocalSessionSummary = {
     model?: string | null
     modelReasoningEffort?: string | null
     runState?: CodexLocalSessionRunState
+    waitingForUserInput?: boolean
 }
 
 export type CodexLocalSessionsResponse = {
@@ -264,6 +265,7 @@ export type CodexLocalSessionStatusResponse =
     | {
         success: true
         status: CodexLocalSessionRunState
+        waitingForUserInput?: boolean
         stalledSince?: number
         startedAt?: number
         progress?: CodexLocalSessionDirectSendProgress

@@ -8,6 +8,8 @@ import {
     getCodexSessionDisplayTitle,
     getCodexTranscriptLifecycleEvents,
     getCodexTranscriptTailSummary,
+    getCodexTranscriptUserInputEvents,
+    getCodexTranscriptUserInputState,
     getLocalCodexSessionData,
     getLocalCodexSessionRunState,
     listLocalCodexSessions,
@@ -640,5 +642,54 @@ describe('getCodexTranscriptLifecycleEvents', () => {
             { type: 'task_complete', turnId: 'turn-a' },
             { type: 'turn_aborted' }
         ])
+    })
+})
+
+describe('native request_user_input lifecycle', () => {
+    const request = JSON.stringify({
+        type: 'response_item',
+        turn_id: 'turn-a',
+        payload: {
+            type: 'function_call',
+            name: 'request_user_input',
+            call_id: 'call-a',
+            arguments: '{"question":"PRIVATE"}'
+        }
+    })
+    const unrelatedOutput = JSON.stringify({
+        type: 'response_item',
+        payload: { type: 'function_call_output', call_id: 'call-other', output: 'PRIVATE' }
+    })
+    const answer = JSON.stringify({
+        type: 'response_item',
+        turn_id: 'turn-a',
+        payload: { type: 'function_call_output', call_id: 'call-a', output: 'PRIVATE' }
+    })
+
+    it('retains only request routing metadata and matches the answer by call id', () => {
+        expect(getCodexTranscriptUserInputEvents([request, unrelatedOutput, answer])).toEqual([
+            { type: 'requested', requestId: 'call-a', turnId: 'turn-a' },
+            { type: 'resolved', requestId: 'call-other' },
+            { type: 'resolved', requestId: 'call-a', turnId: 'turn-a' }
+        ])
+        expect(getCodexTranscriptUserInputState([request, unrelatedOutput])).toEqual({
+            seen: true,
+            waiting: true
+        })
+        expect(getCodexTranscriptUserInputState([request, unrelatedOutput, answer])).toEqual({
+            seen: true,
+            waiting: false
+        })
+
+        const accumulator = createCodexTranscriptImportAccumulator()
+        appendCodexTranscriptImportLines(accumulator, [request, answer])
+        expect(accumulator.messages).toEqual([])
+    })
+
+    it('clears a pending request when its turn terminates', () => {
+        expect(getCodexTranscriptUserInputState([
+            request,
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-a' } })
+        ])).toEqual({ seen: true, waiting: false })
     })
 })

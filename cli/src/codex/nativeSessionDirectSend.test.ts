@@ -663,8 +663,10 @@ describe('NativeCodexSessionDirectSender', () => {
                     transport: 'app-server'
                 }
             })
+            expect(sender.ownsActiveDelivery(sessionId)).toBe(false)
 
             await flushAsyncWork()
+            expect(sender.ownsActiveDelivery(sessionId)).toBe(true)
             expect(client.connectCalls).toBe(1)
             expect(client.initializeCalls).toEqual([{
                 clientInfo: {

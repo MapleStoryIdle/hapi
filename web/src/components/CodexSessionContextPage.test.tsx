@@ -154,6 +154,29 @@ describe('CodexSessionContextPage', () => {
         expect(getNativeContextRefreshInterval({ success: true, status: 'idle' })).toBe(5_000)
     })
 
+    it('shows a local-only input wait while keeping the native turn busy', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            waitingForUserInput: true
+        })
+        ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockImplementation(async (sessionId, machineId, options) => ({
+            ...(await api.getCodexSessionContext(sessionId, machineId, options)),
+            status: await api.getCodexSessionStatus(sessionId, machineId),
+            version: { runnerEpoch: 'runner-a', revision: 1 },
+            revision: 1,
+            timing: { cache: 'hit', durationMs: 1 }
+        }))
+
+        renderPage({ api })
+
+        expect(await screen.findByTestId('codex-native-waiting-for-local-input')).toHaveTextContent('Waiting for local input')
+        expect(screen.getByTestId('codex-native-waiting-for-local-input')).toHaveTextContent('Return to the local Codex session')
+        openNativeSessionMenu()
+        expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeDisabled()
+    })
+
     it('describes each native direct-send hand-off phase', () => {
         const echo = {
             id: 'native-local-1',

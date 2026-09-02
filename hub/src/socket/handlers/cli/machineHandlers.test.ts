@@ -38,6 +38,7 @@ describe('external Codex machine socket events', () => {
             codexSessionId: 'codex-thread-1',
             requestId: 'turn-1:Bash',
             kind: 'permission',
+            phase: 'requested',
             toolName: 'Bash'
         })
 
@@ -47,6 +48,7 @@ describe('external Codex machine socket events', () => {
             codexSessionId: 'codex-thread-1',
             requestId: 'turn-1:Bash',
             kind: 'permission',
+            phase: 'requested',
             toolName: 'Bash'
         }])
     })

@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { join } from 'node:path'
@@ -178,7 +178,11 @@ function createGeminiProxyWebSocketHandler() {
 // (requires Authorization header). Implementation extracted to `./qwenProxyHandler` so
 // the ack-gating behaviour is unit-testable; `createQwenProxyWebSocketHandler` is imported above.
 
-function findWebappDistDir(): { distDir: string; indexHtmlPath: string } {
+function findWebappDistDir(webappDistDir?: string): { distDir: string; indexHtmlPath: string } {
+    if (webappDistDir) {
+        return { distDir: webappDistDir, indexHtmlPath: join(webappDistDir, 'index.html') }
+    }
+
     const candidates = [
         join(process.cwd(), '..', 'web', 'dist'),
         join(import.meta.dir, '..', '..', '..', 'web', 'dist'),
@@ -196,18 +200,47 @@ function findWebappDistDir(): { distDir: string; indexHtmlPath: string } {
     return { distDir, indexHtmlPath: join(distDir, 'index.html') }
 }
 
+const IMMUTABLE_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+const FONT_CACHE_CONTROL = 'public, max-age=2592000'
+const NO_CACHE_CONTROL = 'no-cache'
+
+function getWebAssetCacheControl(path: string): string | undefined {
+    if (path === '/sw.js' || path.endsWith('.html')) {
+        return NO_CACHE_CONTROL
+    }
+
+    if (path.startsWith('/assets/')) {
+        return IMMUTABLE_ASSET_CACHE_CONTROL
+    }
+
+    if (path.startsWith('/fonts/')) {
+        return FONT_CACHE_CONTROL
+    }
+
+    return undefined
+}
+
+function applyStaticCacheControl(c: Context, filePath: string): void {
+    const cacheControl = getWebAssetCacheControl(c.req.path)
+        ?? (filePath.endsWith('.html') ? NO_CACHE_CONTROL : undefined)
+
+    if (cacheControl) {
+        c.header('Cache-Control', cacheControl)
+    }
+}
+
 function serveEmbeddedAsset(asset: EmbeddedWebAsset): Response {
+    const cacheControl = getWebAssetCacheControl(asset.path)
+
     return new Response(Bun.file(asset.sourcePath), {
         headers: {
             'Content-Type': asset.mimeType,
-            // The browser must revalidate the fixed service-worker URL on
-            // every registration, otherwise a deployed PWA can stay stale.
-            ...(asset.path === '/sw.js' ? { 'Cache-Control': 'no-cache' } : {})
+            ...(cacheControl ? { 'Cache-Control': cacheControl } : {})
         }
     })
 }
 
-function createWebApp(options: {
+export function createWebApp(options: {
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
     getVisibilityTracker: () => VisibilityTracker | null
@@ -217,6 +250,7 @@ function createWebApp(options: {
     pushService: PushService
     corsOrigins?: string[]
     embeddedAssetMap: Map<string, EmbeddedWebAsset> | null
+    webappDistDir?: string
     relayMode?: boolean
     officialWebUrl?: string
 }): Hono<WebAppEnv> {
@@ -323,6 +357,9 @@ from GitHub Pages instead of through the relay tunnel.
             return await next()
         })
 
+        app.all('/assets', (c) => c.notFound())
+        app.all('/assets/*', (c) => c.notFound())
+
         app.get('*', async (c, next) => {
             if (c.req.path.startsWith('/api')) {
                 await next()
@@ -335,7 +372,7 @@ from GitHub Pages instead of through the relay tunnel.
         return app
     }
 
-    const { distDir, indexHtmlPath } = findWebappDistDir()
+    const { distDir, indexHtmlPath } = findWebappDistDir(options.webappDistDir)
 
     if (!existsSync(indexHtmlPath)) {
         app.get('/', (c) => {
@@ -347,7 +384,19 @@ from GitHub Pages instead of through the relay tunnel.
         return app
     }
 
-    app.use('/assets/*', serveStatic({ root: distDir }))
+    const staticFiles = serveStatic({
+        root: distDir,
+        onFound: (path, c) => applyStaticCacheControl(c, path)
+    })
+    const indexHtml = serveStatic({
+        root: distDir,
+        path: 'index.html',
+        onFound: (path, c) => applyStaticCacheControl(c, path)
+    })
+
+    app.use('/assets/*', staticFiles)
+    app.all('/assets', (c) => c.notFound())
+    app.all('/assets/*', (c) => c.notFound())
 
     app.use('*', async (c, next) => {
         if (c.req.path.startsWith('/api')) {
@@ -355,7 +404,7 @@ from GitHub Pages instead of through the relay tunnel.
             return
         }
 
-        return await serveStatic({ root: distDir })(c, next)
+        return await staticFiles(c, next)
     })
 
     app.get('*', async (c, next) => {
@@ -364,7 +413,7 @@ from GitHub Pages instead of through the relay tunnel.
             return
         }
 
-        return await serveStatic({ root: distDir, path: 'index.html' })(c, next)
+        return await indexHtml(c, next)
     })
 
     return app

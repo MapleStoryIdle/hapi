@@ -42,12 +42,14 @@ describe('installExternalCodexNotificationHooks', () => {
             runnerStatePath: '/tmp/runner.state.json',
             commandForKind: (kind) => kind === 'turn-started'
                 ? 'hapi hook-forwarder --external-codex-lifecycle'
-                : `hapi hook-forwarder --external-codex-request --kind ${kind}`
+                : kind === 'user-input-resolved'
+                    ? 'hapi hook-forwarder --external-codex-request --kind user-input --phase resolved'
+                    : `hapi hook-forwarder --external-codex-request --kind ${kind}`
         })
 
         expect(result).toEqual({
             hooksPath,
-            addedKinds: ['permission', 'user-input', 'turn-started']
+            addedKinds: ['permission', 'user-input', 'user-input-resolved', 'turn-started']
         })
 
         const written = JSON.parse(await readFile(hooksPath, 'utf-8')) as {
@@ -76,6 +78,14 @@ describe('installExternalCodexNotificationHooks', () => {
                 }]
             }
         ])
+        expect(written.hooks.PostToolUse).toEqual([{
+            matcher: '^request_user_input$',
+            hooks: [{
+                type: 'command',
+                command: 'hapi hook-forwarder --external-codex-request --kind user-input --phase resolved',
+                timeout: 10
+            }]
+        }])
         expect(written.hooks.UserPromptSubmit).toEqual([{
             hooks: [{
                 type: 'command',
@@ -114,10 +124,12 @@ describe('installExternalCodexNotificationHooks', () => {
             hooksPath,
             commandForKind: (kind) => kind === 'turn-started'
                 ? 'hapi hook-forwarder --external-codex-lifecycle'
-                : `hapi hook-forwarder --external-codex-request --kind ${kind}`
+                : kind === 'user-input-resolved'
+                    ? 'hapi hook-forwarder --external-codex-request --kind user-input --phase resolved'
+                    : `hapi hook-forwarder --external-codex-request --kind ${kind}`
         })
 
-        expect(result.addedKinds).toEqual(['turn-started'])
+        expect(result.addedKinds).toEqual(['user-input-resolved', 'turn-started'])
         const written = JSON.parse(await readFile(hooksPath, 'utf-8')) as {
             hooks: Record<string, Array<{ hooks: Array<Record<string, unknown>> }>>
         }
@@ -131,6 +143,14 @@ describe('installExternalCodexNotificationHooks', () => {
             command: 'hapi hook-forwarder --external-codex-request --kind user-input',
             timeout: 10
         })
+        expect(written.hooks.PostToolUse).toEqual([{
+            matcher: '^request_user_input$',
+            hooks: [{
+                type: 'command',
+                command: 'hapi hook-forwarder --external-codex-request --kind user-input --phase resolved',
+                timeout: 10
+            }]
+        }])
         expect(written.hooks.UserPromptSubmit).toEqual([{
             hooks: [{
                 type: 'command',
@@ -143,9 +163,11 @@ describe('installExternalCodexNotificationHooks', () => {
     it('is idempotent when HAPI hooks already exist', async () => {
         const options = {
             hooksPath,
-            commandForKind: (kind: 'permission' | 'user-input' | 'turn-started') => kind === 'turn-started'
+            commandForKind: (kind: 'permission' | 'user-input' | 'user-input-resolved' | 'turn-started') => kind === 'turn-started'
                 ? 'hapi hook-forwarder --external-codex-lifecycle'
-                : `hapi hook-forwarder --external-codex-request --kind ${kind}`
+                : kind === 'user-input-resolved'
+                    ? 'hapi hook-forwarder --external-codex-request --kind user-input --phase resolved'
+                    : `hapi hook-forwarder --external-codex-request --kind ${kind}`
         }
         await installExternalCodexNotificationHooks(options)
         const before = await readFile(hooksPath, 'utf-8')

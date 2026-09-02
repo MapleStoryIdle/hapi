@@ -194,6 +194,55 @@ describe('NativeCodexTranscriptCache', () => {
         }
     })
 
+    it('tracks native local-input waits from the bounded summary tail without retaining content', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-input-'))
+        const sessionId = 'd2234567-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        const file = join(transcriptDir, `rollout-${sessionId}.jsonl`)
+        writeFileSync(file, [
+            transcriptRecord({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-a' } }),
+            transcriptRecord({
+                type: 'response_item',
+                turn_id: 'turn-a',
+                payload: {
+                    type: 'function_call',
+                    name: 'request_user_input',
+                    call_id: 'call-a',
+                    arguments: '{"question":"PRIVATE"}'
+                }
+            })
+        ].join(''), 'utf8')
+        process.env.CODEX_HOME = codexHome
+        const cache = new NativeCodexTranscriptCache()
+
+        try {
+            expect(cache.readSummary(sessionId)).toMatchObject({
+                session: { id: sessionId, runState: 'processing', waitingForUserInput: true },
+                userInputEvents: [
+                    { type: 'turn_started', turnId: 'turn-a' },
+                    { type: 'requested', requestId: 'call-a', turnId: 'turn-a' }
+                ]
+            })
+
+            appendFileSync(file, transcriptRecord({
+                type: 'response_item',
+                payload: { type: 'function_call_output', call_id: 'call-other', output: 'PRIVATE' }
+            }), 'utf8')
+            expect(cache.refreshSummary(sessionId)?.session.waitingForUserInput).toBe(true)
+
+            appendFileSync(file, transcriptRecord({
+                type: 'response_item',
+                turn_id: 'turn-a',
+                payload: { type: 'function_call_output', call_id: 'call-a', output: 'PRIVATE' }
+            }), 'utf8')
+            expect(cache.refreshSummary(sessionId)?.session.waitingForUserInput).toBe(false)
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
     it('keeps cold lifecycle checks summary-only and inside the latest 16 KiB', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-summary-'))
         const sessionId = 'e1234567-1234-4234-8234-123456789012'

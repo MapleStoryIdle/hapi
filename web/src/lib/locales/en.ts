@@ -290,6 +290,8 @@ export default {
   'recentCodex.direct.error.deliveryUnconfirmed': 'The connection timed out. Checking whether this message was delivered.',
   'recentCodex.direct.error.generic': 'The message could not be sent. Try again.',
   'recentCodex.status.processing': 'Native Codex is running',
+  'recentCodex.status.waitingForLocalInput': 'Waiting for local input',
+  'recentCodex.status.waitingForLocalInput.detail': 'Return to the local Codex session to continue.',
   'recentCodex.status.queued': 'Waiting to send',
   'recentCodex.status.checking': 'Checking native Codex status',
   'recentCodex.status.unknown': 'Native Codex status is unknown',

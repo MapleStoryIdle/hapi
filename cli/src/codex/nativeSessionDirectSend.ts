@@ -34,6 +34,7 @@ export type NativeCodexAppServerClient = {
     startTurn: (params: TurnStartParams, options?: { signal?: AbortSignal }) => Promise<TurnStartResponse>
     disconnect: () => Promise<void>
     setNotificationHandler: (handler: ((method: string, params: unknown) => void) | null) => void
+    registerRequestHandler?: (method: string, handler: (params: unknown) => unknown) => void
 }
 
 export type CreateNativeCodexAppServerClient = () => NativeCodexAppServerClient
@@ -652,6 +653,13 @@ export class NativeCodexSessionDirectSender {
         )
     }
 
+    /** True only after this runner has crossed the native turn ownership edge. */
+    ownsActiveDelivery(sessionId: string): boolean {
+        const active = this.activeSends.get(sessionId)
+        return active?.kind === 'exec-resume'
+            || active?.turnStartAttempted === true
+    }
+
     /**
      * Reserve an exact native thread while the caller performs Codex's
      * destructive archive operation. Archiving may stop work owned by another
@@ -766,6 +774,7 @@ export class NativeCodexSessionDirectSender {
             // Keep the raw processing marker internally for guarded recovery,
             // but stop presenting an abandoned transcript as live thinking.
             status: stalledSince === null ? (session.runState ?? 'unknown') : 'unknown',
+            ...(session.waitingForUserInput === true ? { waitingForUserInput: true } : {}),
             ...(stalledSince === null ? {} : { stalledSince }),
             ...(recentFailure
                 ? {
@@ -782,7 +791,7 @@ export class NativeCodexSessionDirectSender {
     }
 
     private getStalledSince(session: CodexLocalSessionSummary | null): number | null {
-        if (!session || session.runState !== 'processing') return null
+        if (!session || session.waitingForUserInput === true || session.runState !== 'processing') return null
         const elapsed = this.now() - session.modifiedAt
         return elapsed >= NATIVE_CODEX_PROCESSING_STALE_AFTER_MS ? session.modifiedAt : null
     }
@@ -1352,6 +1361,10 @@ export class NativeCodexSessionDirectSender {
             client.setNotificationHandler((method, params) => {
                 this.handleBridgeNotification(sessionId, active, method, params)
             })
+            // A short-lived HAPI bridge has no local choice UI. Cancel this
+            // primitive so it cannot become a fake "return to local Codex"
+            // wait; native Desktop-owned turns remain untouched.
+            client.registerRequestHandler?.('item/tool/requestUserInput', () => ({ decision: 'cancel' }))
         } catch {
             this.activeSends.delete(sessionId)
             this.disposeBridge(active)

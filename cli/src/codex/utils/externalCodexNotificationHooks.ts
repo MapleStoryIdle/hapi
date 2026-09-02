@@ -7,7 +7,7 @@ import { getHappyCliCommand } from '@/utils/spawnHappyCLI'
 const EXTERNAL_CODEX_REQUEST_FLAG = '--external-codex-request'
 const EXTERNAL_CODEX_LIFECYCLE_FLAG = '--external-codex-lifecycle'
 
-type HookKind = 'permission' | 'user-input' | 'turn-started'
+type HookKind = 'permission' | 'user-input' | 'user-input-resolved' | 'turn-started'
 
 type InstallOptions = {
     hooksPath?: string
@@ -51,10 +51,12 @@ export function buildExternalCodexNotificationHookCommand(
     runnerStatePath: string = configuration.runnerStateFile
 ): string {
     const lifecycle = kind === 'turn-started'
+    const userInputResolved = kind === 'user-input-resolved'
     const { command, args } = getHappyCliCommand([
         'hook-forwarder',
         lifecycle ? EXTERNAL_CODEX_LIFECYCLE_FLAG : EXTERNAL_CODEX_REQUEST_FLAG,
-        ...(lifecycle ? [] : ['--kind', kind]),
+        ...(lifecycle ? [] : ['--kind', userInputResolved ? 'user-input' : kind]),
+        ...(userInputResolved ? ['--phase', 'resolved'] : []),
         '--runner-state',
         runnerStatePath
     ])
@@ -64,14 +66,20 @@ export function buildExternalCodexNotificationHookCommand(
 function isOurHandler(value: unknown, kind: HookKind): boolean {
     const handler = asRecord(value)
     const command = typeof handler?.command === 'string' ? handler.command : ''
-    return kind === 'turn-started'
-        ? command.includes(EXTERNAL_CODEX_LIFECYCLE_FLAG)
-        : command.includes(EXTERNAL_CODEX_REQUEST_FLAG) && command.includes(`--kind ${kind}`)
+    if (kind === 'turn-started') return command.includes(EXTERNAL_CODEX_LIFECYCLE_FLAG)
+    if (kind === 'user-input-resolved') {
+        return command.includes(EXTERNAL_CODEX_REQUEST_FLAG)
+            && command.includes('--kind user-input')
+            && command.includes('--phase resolved')
+    }
+    return command.includes(EXTERNAL_CODEX_REQUEST_FLAG)
+        && command.includes(`--kind ${kind}`)
+        && !command.includes('--phase resolved')
 }
 
 function ensureEventHooks(
     hooks: Record<string, unknown>,
-    eventName: 'PermissionRequest' | 'PreToolUse' | 'UserPromptSubmit'
+    eventName: 'PermissionRequest' | 'PreToolUse' | 'PostToolUse' | 'UserPromptSubmit'
 ): Array<Record<string, unknown>> {
     const existing = hooks[eventName]
     if (existing === undefined) {
@@ -165,9 +173,10 @@ async function writeJsonAtomically(path: string, value: Record<string, unknown>)
 }
 
 /**
- * Adds three additive user-level Codex hooks:
+ * Adds four additive user-level Codex hooks:
  * - PermissionRequest catches native approval prompts.
  * - PreToolUse catches the explicit request_user_input primitive.
+ * - PostToolUse clears that local-input state once Codex receives the answer.
  * - UserPromptSubmit marks a native turn as locally processing.
  *
  * All only signal the local runner and never approve, deny, or alter Codex.
@@ -206,6 +215,16 @@ export async function installExternalCodexNotificationHooks(
         addedKinds.push('user-input')
     }
 
+    const userInputResolvedGroups = ensureEventHooks(hooks, 'PostToolUse')
+    const migratedUserInputResolvedHook = removeUnsupportedAsyncFlags(userInputResolvedGroups, 'user-input-resolved')
+    if (!hasHandler(userInputResolvedGroups, 'user-input-resolved')) {
+        userInputResolvedGroups.push(buildHookGroup(
+            'user-input-resolved',
+            commandForKind('user-input-resolved', runnerStatePath)
+        ))
+        addedKinds.push('user-input-resolved')
+    }
+
     const turnStartGroups = ensureEventHooks(hooks, 'UserPromptSubmit')
     const migratedTurnStartHook = removeUnsupportedAsyncFlags(turnStartGroups, 'turn-started')
     if (!hasHandler(turnStartGroups, 'turn-started')) {
@@ -213,7 +232,13 @@ export async function installExternalCodexNotificationHooks(
         addedKinds.push('turn-started')
     }
 
-    if (addedKinds.length > 0 || migratedPermissionHook || migratedUserInputHook || migratedTurnStartHook) {
+    if (
+        addedKinds.length > 0
+        || migratedPermissionHook
+        || migratedUserInputHook
+        || migratedUserInputResolvedHook
+        || migratedTurnStartHook
+    ) {
         await writeJsonAtomically(hooksPath, root)
     }
 

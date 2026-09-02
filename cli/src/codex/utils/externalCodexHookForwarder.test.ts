@@ -16,6 +16,7 @@ describe('external Codex hook forwarder', () => {
             '/tmp/hapi-runner.state.json'
         ])).toEqual({
             kind: 'permission',
+            phase: 'requested',
             runnerStatePath: '/tmp/hapi-runner.state.json'
         })
         expect(parseExternalCodexLifecycleHookForwarderOptions([
@@ -32,11 +33,14 @@ describe('external Codex hook forwarder', () => {
             tool_use_id: 'tool-use-1',
             tool_name: 'Bash',
             tool_input: { command: 'contains-a-secret-and-must-not-leave-the-machine' }
-        })).toEqual({
+        }, () => 100)).toEqual({
             codexSessionId: 'codex-session-1',
             requestId: 'tool-use-1',
             kind: 'permission',
-            toolName: 'Bash'
+            phase: 'requested',
+            toolName: 'Bash',
+            turnId: 'turn-1',
+            observedAt: 100
         })
     })
 
@@ -45,12 +49,26 @@ describe('external Codex hook forwarder', () => {
             session_id: 'codex-session-2',
             turn_id: 'turn-2',
             tool_name: 'request_user_input'
-        })).toEqual({
+        }, () => 200)).toEqual({
             codexSessionId: 'codex-session-2',
             requestId: 'turn-2:request_user_input',
             kind: 'user-input',
-            toolName: 'request_user_input'
+            phase: 'requested',
+            toolName: 'request_user_input',
+            turnId: 'turn-2',
+            observedAt: 200
         })
+    })
+
+    it('marks a PostToolUse user-input hook as resolved without forwarding its output', () => {
+        expect(parseExternalCodexHookForwarderOptions([
+            '--external-codex-request', '--kind', 'user-input', '--phase', 'resolved', '--runner-state', '/tmp/state'
+        ])).toEqual({ kind: 'user-input', phase: 'resolved', runnerStatePath: '/tmp/state' })
+        const request = parseExternalCodexHookRequest('user-input', {
+            session_id: 'codex-session-2', tool_use_id: 'call-1', tool_response: { answer: 'private' }
+        }, () => 300, 'resolved')
+        expect(request).toMatchObject({ requestId: 'call-1', phase: 'resolved', observedAt: 300 })
+        expect(JSON.stringify(request)).not.toContain('private')
     })
 
     it('reduces UserPromptSubmit to local lifecycle metadata without prompt fields', () => {

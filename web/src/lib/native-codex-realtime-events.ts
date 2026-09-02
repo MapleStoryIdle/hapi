@@ -76,6 +76,7 @@ export function getNativeCodexRealtimeSnapshot(
         || value.revision !== value.version.revision
         || status?.success !== true
         || !['idle', 'processing', 'unknown'].includes(status.status as string)
+        || (status.waitingForUserInput !== undefined && typeof status.waitingForUserInput !== 'boolean')
         || 'queuedMessages' in (status ?? {})
         || !validQueuedMessageRefs
         || (timing?.cache !== 'hit' && timing?.cache !== 'miss')

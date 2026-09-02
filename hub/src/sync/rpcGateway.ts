@@ -1,4 +1,6 @@
 import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import { randomUUID } from 'node:crypto'
+import { MAX_UPLOAD_CHUNK_BYTES } from '@hapi/protocol'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type {
     CodexLocalSessionComposerCapabilitiesRpcResponse,
@@ -16,8 +18,6 @@ import type {
 import type {
     BinaryFileReadRequest,
     BinaryFileReadResponse,
-    BinaryFileUploadRequest,
-    BinaryFileUploadResponse,
     NativeKanbanFeedbackDeleteRequest,
     NativeKanbanFeedbackDeleteResponse,
     NativeKanbanFeedbackStageRequest,
@@ -51,6 +51,11 @@ import type {
     OpencodeReasoningEffortResponse,
     PathExistsResponse,
     SlashCommandsResponse,
+    UploadFileCancelRequest,
+    UploadFileChunkRequest,
+    UploadFileFinishRequest,
+    UploadFileOperationResponse,
+    UploadFileStartRequest,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { Server, Socket } from 'socket.io'
@@ -59,6 +64,7 @@ import type { RpcRegistry } from '../socket/rpcRegistry'
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
 const MODEL_LIST_RPC_TIMEOUT_MS = 120_000
 const SIDE_SESSION_FORK_RPC_TIMEOUT_MS = 90_000
+const UPLOAD_CANCEL_TIMEOUT_MS = 5_000
 
 /**
  * tiann/hapi#916: thrown by {@link RpcGateway.rpcCall} when the target CLI is
@@ -126,6 +132,36 @@ export type RpcFileBytesResponse = {
 } | {
     success: false
     error: string
+}
+
+function normalizeUploadOperation(value: unknown, fallback: string): UploadFileOperationResponse {
+    if (!value || typeof value !== 'object') {
+        return { success: false, error: `Unexpected upload response: ${fallback}` }
+    }
+
+    const record = value as Record<string, unknown>
+    if (record.success === true) {
+        return { success: true }
+    }
+
+    return {
+        success: false,
+        error: typeof record.error === 'string' ? record.error : fallback
+    }
+}
+
+function normalizeUploadResponse(value: unknown, fallback: string): RpcUploadFileResponse {
+    const operation = normalizeUploadOperation(value, fallback)
+    if (!operation.success) {
+        return operation
+    }
+
+    const path = (value as Record<string, unknown>).path
+    if (typeof path !== 'string' || !path) {
+        return { success: false, error: `Unexpected upload response: ${fallback}` }
+    }
+
+    return { success: true, path }
 }
 
 export type RpcGeneratedImageFileReference = {
@@ -459,9 +495,10 @@ export class RpcGateway {
         })
     }
 
-    async readUploadedFileBytes(sessionId: string, path: string): Promise<RpcFileBytesResponse> {
-        return await this.binaryFileCallForSession(sessionId, `${sessionId}:${RPC_METHODS.UploadFile}`, {
+    async readUploadedFileBytes(machineId: string, sessionId: string, path: string): Promise<RpcFileBytesResponse> {
+        return await this.binaryFileCallForMachine(machineId, `${machineId}:${RPC_METHODS.DeleteUpload}`, {
             type: 'uploaded-file',
+            sessionId,
             path
         })
     }
@@ -470,20 +507,77 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, RPC_METHODS.ListDirectory, { path }) as RpcListDirectoryResponse
     }
 
-    async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {
-        return await this.sessionRpc(sessionId, RPC_METHODS.UploadFile, { sessionId, filename, content, mimeType }) as RpcUploadFileResponse
+    async uploadFileBytes(
+        machineId: string,
+        sessionId: string,
+        filename: string,
+        bytes: Uint8Array,
+        mimeType: string
+    ): Promise<RpcUploadFileResponse> {
+        const uploadId = randomUUID()
+        let cancelRequired = true
+
+        try {
+            const startRequest: UploadFileStartRequest = {
+                sessionId,
+                uploadId,
+                filename,
+                mimeType,
+                size: bytes.byteLength
+            }
+            const started = normalizeUploadOperation(
+                await this.machineRpc(machineId, RPC_METHODS.UploadFileStart, startRequest),
+                'Failed to start upload'
+            )
+            if (!started.success) {
+                return started
+            }
+
+            for (let offset = 0; offset < bytes.byteLength; offset += MAX_UPLOAD_CHUNK_BYTES) {
+                const chunk = bytes.subarray(offset, Math.min(offset + MAX_UPLOAD_CHUNK_BYTES, bytes.byteLength))
+                const chunkRequest: UploadFileChunkRequest = {
+                    sessionId,
+                    uploadId,
+                    offset,
+                    content: Buffer.from(chunk).toString('base64')
+                }
+                const appended = normalizeUploadOperation(
+                    await this.machineRpc(machineId, RPC_METHODS.UploadFileChunk, chunkRequest),
+                    'Failed to append upload chunk'
+                )
+                if (!appended.success) {
+                    return appended
+                }
+            }
+
+            const finishedRequest: UploadFileFinishRequest = { sessionId, uploadId }
+            const finished = normalizeUploadResponse(
+                await this.machineRpc(machineId, RPC_METHODS.UploadFileFinish, finishedRequest),
+                'Failed to finish upload'
+            )
+            if (finished.success) {
+                cancelRequired = false
+            }
+            return finished
+        } finally {
+            if (cancelRequired) {
+                const cancelRequest: UploadFileCancelRequest = { sessionId, uploadId }
+                await this.machineRpc(
+                    machineId,
+                    RPC_METHODS.UploadFileCancel,
+                    cancelRequest,
+                    UPLOAD_CANCEL_TIMEOUT_MS
+                ).catch(() => undefined)
+            }
+        }
     }
 
-    async uploadFileBytes(sessionId: string, filename: string, bytes: Uint8Array, mimeType: string): Promise<RpcUploadFileResponse> {
-        return await this.binaryUploadCallForSession(sessionId, `${sessionId}:${RPC_METHODS.UploadFile}`, {
-            filename,
-            mimeType,
-            bytes
-        })
+    async deleteUploadFile(machineId: string, sessionId: string, path: string): Promise<RpcDeleteUploadResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.DeleteUpload, { sessionId, path }) as RpcDeleteUploadResponse
     }
 
-    async deleteUploadFile(sessionId: string, path: string): Promise<RpcDeleteUploadResponse> {
-        return await this.sessionRpc(sessionId, RPC_METHODS.DeleteUpload, { sessionId, path }) as RpcDeleteUploadResponse
+    async cleanupUploadSession(machineId: string, sessionId: string): Promise<void> {
+        await this.machineRpc(machineId, RPC_METHODS.CleanupUploadSession, { sessionId })
     }
 
     async runRipgrep(sessionId: string, args: string[], cwd?: string): Promise<RpcCommandResponse> {
@@ -709,40 +803,6 @@ export class RpcGateway {
             fileName: typeof record.fileName === 'string' ? record.fileName : null,
             size: typeof record.size === 'number' ? record.size : undefined,
             mtimeMs: typeof record.mtimeMs === 'number' ? record.mtimeMs : undefined
-        }
-    }
-
-    private async binaryUploadCallForSession(
-        sessionId: string,
-        method: string,
-        request: BinaryFileUploadRequest,
-        timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS
-    ): Promise<RpcUploadFileResponse> {
-        const socket = this.getSocketForSession(sessionId, method)
-        return await this.emitBinaryUpload(socket, request, timeoutMs)
-    }
-
-    private async emitBinaryUpload(
-        socket: Socket,
-        request: BinaryFileUploadRequest,
-        timeoutMs: number
-    ): Promise<RpcUploadFileResponse> {
-        const response = await socket.timeout(timeoutMs).emitWithAck('file:upload-bytes', request) as BinaryFileUploadResponse | unknown
-        if (!response || typeof response !== 'object') {
-            return { success: false, error: 'Unexpected binary upload response' }
-        }
-
-        const record = response as Record<string, unknown>
-        if (record.success !== true || typeof record.path !== 'string') {
-            return {
-                success: false,
-                error: typeof record.error === 'string' ? record.error : 'Failed to upload file bytes'
-            }
-        }
-
-        return {
-            success: true,
-            path: record.path
         }
     }
 

@@ -290,6 +290,8 @@ export default {
   'recentCodex.direct.error.deliveryUnconfirmed': '连接超时，正在核对这条消息是否已送达。',
   'recentCodex.direct.error.generic': '消息发送失败，请重试。',
   'recentCodex.status.processing': '原生 Codex 正在运行',
+  'recentCodex.status.waitingForLocalInput': '等待本机输入',
+  'recentCodex.status.waitingForLocalInput.detail': '请回到本机 Codex 会话继续操作。',
   'recentCodex.status.queued': '等待投递',
   'recentCodex.status.checking': '正在确认原生 Codex 状态',
   'recentCodex.status.unknown': '原生 Codex 状态未知',

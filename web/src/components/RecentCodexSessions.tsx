@@ -250,6 +250,9 @@ export function getMergedCodexKanbanStatus(session: MergedCodexSession): MergedC
             ? 'processing'
             : 'completed'
     }
+    if (session.nativeSession?.waitingForUserInput === true) {
+        return 'pending'
+    }
     return session.nativeSession?.runState === 'processing' ? 'processing' : 'completed'
 }
 
@@ -453,7 +456,9 @@ export function mergeRecentCodexSessions(
             cwd: session.cwd?.trim() || null,
             modifiedAt: session.modifiedAt,
             source: 'native',
-            active: session.runState === 'processing',
+            // Native local-input waits remain `processing` for safe queueing,
+            // but visually belong in the pending/attention lane.
+            active: session.runState === 'processing' && session.waitingForUserInput !== true,
             nativeSession: session
         }))
 

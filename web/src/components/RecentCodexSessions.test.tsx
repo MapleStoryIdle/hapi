@@ -308,6 +308,7 @@ describe('RecentCodexSessions', () => {
             { ...base, id: 'pending', thinking: true, pendingRequestsCount: 1 }
         ], [
             { id: 'native-processing', title: 'Native processing', cwd: '/workspace', file: '/tmp/1', modifiedAt: now, runState: 'processing' as const },
+            { id: 'native-waiting', title: 'Native waiting', cwd: '/workspace', file: '/tmp/4', modifiedAt: now, runState: 'processing' as const, waitingForUserInput: true },
             { id: 'native-idle', title: 'Native idle', cwd: '/workspace', file: '/tmp/2', modifiedAt: now - 1, runState: 'idle' as const },
             { id: 'native-unknown', title: 'Native unknown', cwd: '/workspace', file: '/tmp/3', modifiedAt: now - 2, runState: 'unknown' as const }
         ], { now })
@@ -318,6 +319,7 @@ describe('RecentCodexSessions', () => {
             background: 'processing',
             pending: 'pending',
             'native-processing': 'processing',
+            'native-waiting': 'pending',
             'native-idle': 'completed',
             'native-unknown': 'completed'
         })

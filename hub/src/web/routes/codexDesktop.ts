@@ -10,6 +10,7 @@ import {
 } from '@hapi/protocol/codexUserMessage'
 import {
     getLatestCodexSessionConfig,
+    getCodexTranscriptUserInputState,
     isHapiInitiatedCodexSession,
     parseCodexTranscriptImportData,
     readLocalCodexSessionSummary,
@@ -84,6 +85,7 @@ type CodexLocalSessionSummary = {
     model?: string | null
     modelReasoningEffort?: string | null
     runState?: 'idle' | 'processing' | 'unknown'
+    waitingForUserInput?: boolean
 }
 
 type CodexTranscriptFileCandidate = {
@@ -578,7 +580,8 @@ function parseCodexLocalSession(
         cliVersion,
         model: config.model,
         modelReasoningEffort: config.modelReasoningEffort,
-        runState: getCodexTranscriptRunState(content)
+        runState: getCodexTranscriptRunState(content),
+        waitingForUserInput: getCodexTranscriptUserInputState(allLines).waiting
     }
 }
 

@@ -1072,6 +1072,10 @@ export function CodexSessionContextPage(props: {
         capabilities: { terminal: true }
     }), [context?.session.cwd])
     const directStatus = statusQuery.data?.success === true ? statusQuery.data.status : null
+    // This remains a processing run state so every web prompt is safely
+    // queued. The actual question and its answer never leave local Codex.
+    const nativeWaitingForUserInput = statusQuery.data?.success === true
+        && statusQuery.data.waitingForUserInput === true
     const rawDirectStatusError = statusQuery.data?.success === true ? statusQuery.data.lastError ?? null : null
     const directStatusErrorCode = statusQuery.data?.success === true ? statusQuery.data.lastErrorCode ?? null : null
     const directStatusErrorClientMessageId = statusQuery.data?.success === true
@@ -1433,7 +1437,9 @@ export function CodexSessionContextPage(props: {
         || statusQuery.isError
         || directStatus === null
         || directStatus === 'unknown'
-    const composerNotice = isNativeProcessing
+    const composerNotice = nativeWaitingForUserInput
+        ? t('recentCodex.status.waitingForLocalInput')
+        : isNativeProcessing
         ? nativeNeedsManualRecovery
             ? getNativeRecoveryDetail(
                 nativeRecoveryCandidate.reason,
@@ -1467,6 +1473,8 @@ export function CodexSessionContextPage(props: {
         ? 'bg-[#FF3B30]'
         : nativeConnectionHealth === 'degraded' || nativeConnectionHealth === 'recovering'
             ? 'bg-[#FF9500] animate-pulse'
+            : nativeWaitingForUserInput
+                ? 'bg-[#FF9500] animate-pulse'
             : nativeNeedsManualRecovery
                 ? 'bg-[#FF9500] animate-pulse'
             : isNativeProcessing
@@ -2047,6 +2055,15 @@ export function CodexSessionContextPage(props: {
                                 disabled: !canFork
                             }}
                             testId="codex-fork-error"
+                        />
+                    </div>
+                ) : nativeWaitingForUserInput ? (
+                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
+                        <SessionDetailStatusNotice
+                            tone="warning"
+                            title={t('recentCodex.status.waitingForLocalInput')}
+                            detail={t('recentCodex.status.waitingForLocalInput.detail')}
+                            testId="codex-native-waiting-for-local-input"
                         />
                     </div>
                 ) : nativeNeedsManualRecovery ? (

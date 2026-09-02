@@ -26,7 +26,11 @@ export const ExternalCodexRequestPayloadSchema = z.object({
     codexSessionId: z.string().min(1).max(200),
     requestId: z.string().min(1).max(300),
     kind: ExternalCodexRequestKindSchema,
-    toolName: z.string().min(1).max(200).optional()
+    toolName: z.string().min(1).max(200).optional(),
+    /** Defaults preserve older PreToolUse hook commands. */
+    phase: z.enum(['requested', 'resolved']).default('requested'),
+    turnId: z.string().min(1).max(200).optional(),
+    observedAt: z.number().int().nonnegative().optional()
 })
 
 export type ExternalCodexRequestPayload = z.infer<typeof ExternalCodexRequestPayloadSchema>
@@ -116,6 +120,7 @@ export type BinaryFileReadRequest = {
     fileName?: string | null
 } | {
     type: 'uploaded-file'
+    sessionId: string
     path: string
 }
 
@@ -126,20 +131,6 @@ export type BinaryFileReadResponse = {
     fileName?: string | null
     size?: number
     mtimeMs?: number
-} | {
-    success: false
-    error: string
-}
-
-export type BinaryFileUploadRequest = {
-    filename: string
-    mimeType: string
-    bytes: Uint8Array | ArrayBuffer
-}
-
-export type BinaryFileUploadResponse = {
-    success: true
-    path: string
 } | {
     success: false
     error: string
@@ -309,7 +300,6 @@ export interface ServerToClientEvents {
     update: (data: Update, ack?: (response: CancelQueuedMessageAck) => void) => void
     'rpc-request': (data: { method: string; params: string }, callback: (response: string) => void) => void
     'file:read-bytes': (data: BinaryFileReadRequest, callback: (response: BinaryFileReadResponse) => void) => void
-    'file:upload-bytes': (data: BinaryFileUploadRequest, callback: (response: BinaryFileUploadResponse) => void) => void
     'native-kanban-feedback:stage': (data: NativeKanbanFeedbackStageRequest, callback: (response: NativeKanbanFeedbackStageResponse) => void) => void
     'native-kanban-feedback:delete': (data: NativeKanbanFeedbackDeleteRequest, callback: (response: NativeKanbanFeedbackDeleteResponse) => void) => void
     'terminal:open': (data: TerminalOpenPayload) => void

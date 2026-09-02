@@ -100,7 +100,10 @@ function isActiveHapiCodexSession(
         return session.active
             && session.metadata?.flavor === 'codex'
             && session.metadata.machineId === request.machineId
-            && session.metadata.codexSessionId === request.codexSessionId
+            && (
+                session.id === request.codexSessionId
+                || session.metadata.codexSessionId === request.codexSessionId
+            )
     }) ?? false
 }
 
@@ -208,6 +211,11 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         onSessionEnd: (payload) => syncEngine?.handleSessionEnd(payload),
         onMachineAlive: (payload) => syncEngine?.handleMachineAlive(payload),
         onExternalCodexRequest: (request) => {
+            // PostToolUse only clears runner-local state. It must never create
+            // a second PWA prompt after the person already answered locally.
+            if (request.phase === 'resolved') {
+                return
+            }
             if (isActiveHapiCodexSession(syncEngine, request)) {
                 return
             }

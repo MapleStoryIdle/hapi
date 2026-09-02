@@ -17,6 +17,7 @@ describe('ExternalCodexPushNotifier', () => {
             codexSessionId: 'session/1',
             requestId: 'request-1',
             kind: 'permission',
+            phase: 'requested',
             toolName: 'Bash'
         })).resolves.toBe(true)
 
@@ -48,7 +49,8 @@ describe('ExternalCodexPushNotifier', () => {
             machineId: 'machine-1',
             codexSessionId: 'session-1',
             requestId: 'request-1',
-            kind: 'user-input' as const
+            kind: 'user-input' as const,
+            phase: 'requested' as const
         }
 
         expect(await notifier.send(request)).toBe(true)
@@ -56,5 +58,24 @@ describe('ExternalCodexPushNotifier', () => {
         now += 1_000
         expect(await notifier.send(request)).toBe(true)
         expect(sent).toHaveLength(2)
+    })
+
+    it('does not notify after local Codex resolves the request', async () => {
+        const sent: PushPayload[] = []
+        const notifier = new ExternalCodexPushNotifier({
+            sendToNamespace: async (_namespace: string, payload: PushPayload) => {
+                sent.push(payload)
+            }
+        } as never)
+
+        await expect(notifier.send({
+            namespace: 'default',
+            machineId: 'machine-1',
+            codexSessionId: 'session-1',
+            requestId: 'request-1',
+            kind: 'user-input',
+            phase: 'resolved'
+        })).resolves.toBe(false)
+        expect(sent).toHaveLength(0)
     })
 })

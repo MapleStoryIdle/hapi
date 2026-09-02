@@ -125,6 +125,29 @@ describe('ApiClient error mapping', () => {
         vi.useRealTimers()
     })
 
+    it('gives file uploads a five-minute timeout without widening other API requests', async () => {
+        vi.useFakeTimers()
+        fetchMock.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => (
+            new Promise<Response>((_resolve, reject) => {
+                init?.signal?.addEventListener('abort', () => {
+                    reject(new DOMException('The operation was aborted.', 'AbortError'))
+                }, { once: true })
+            })
+        ))
+
+        const api = new ApiClient('test-token', { requestTimeoutMs: 100 })
+        const upload = api.uploadFile('session-1', 'large.bin', new Blob([new Uint8Array([1])]), 'application/octet-stream')
+        const timeoutExpectation = expect(upload).rejects.toMatchObject({
+            status: 408,
+            code: 'request_timeout'
+        })
+
+        await vi.advanceTimersByTimeAsync(299_999)
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(1)
+        await timeoutExpectation
+    })
+
     it('uses the authenticated share-management endpoints', async () => {
         fetchMock
             .mockResolvedValueOnce(new Response(JSON.stringify({
