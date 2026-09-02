@@ -104,6 +104,34 @@ describe('NativeCodexTurnLifecycleTracker', () => {
         }
     })
 
+    it('does not let an orphaned transcript start survive a newer completed turn', () => {
+        const tracker = new NativeCodexTurnLifecycleTracker()
+        const lifecycle = [
+            { type: 'task_started' as const, turnId: 'turn-orphaned' },
+            { type: 'task_started' as const, turnId: 'turn-latest' },
+            { type: 'task_complete' as const, turnId: 'turn-latest' }
+        ]
+
+        try {
+            tracker.observeTranscriptEvents(sessionId, lifecycle)
+            expect(tracker.applyToSummary(summary('idle')).runState).toBe('idle')
+
+            // Cached transcript lifecycle tails are replayed on later status
+            // reads. The replay must remain idle and must also reject a late
+            // UserPromptSubmit hook for the superseded turn.
+            tracker.observeTranscriptEvents(sessionId, lifecycle)
+            expect(tracker.applyToSummary(summary('idle')).runState).toBe('idle')
+            expect(tracker.observeHookStart({
+                codexSessionId: sessionId,
+                turnId: 'turn-orphaned',
+                event: 'turn_started',
+                observedAt: 1
+            })).toBe(false)
+        } finally {
+            tracker.dispose()
+        }
+    })
+
     it('does not let an old turn terminal clear a newer active turn', () => {
         const tracker = new NativeCodexTurnLifecycleTracker({ now: () => 1_000 })
         try {

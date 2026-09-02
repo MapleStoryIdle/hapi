@@ -115,9 +115,23 @@ export class NativeCodexTurnLifecycleTracker {
      * fallback rather than risking one turn ending another.
      */
     observeTranscriptEvents(codexSessionId: string, events: readonly CodexTranscriptLifecycleEvent[]): boolean {
+        const scopedEvents = events.filter((event): event is CodexTranscriptLifecycleEvent & { turnId: string } => (
+            typeof event.turnId === 'string' && event.turnId.length > 0
+        ))
         let changed = false
-        for (const event of events) {
-            if (!event.turnId) continue
+
+        // A later scoped lifecycle record proves that an earlier started turn
+        // is no longer the live native turn, even when Codex crashed before it
+        // could append that turn's own terminal. Remember the superseded turn
+        // before replaying the bounded transcript tail so repeated status
+        // reads cannot resurrect the orphaned start.
+        for (let index = 0; index < scopedEvents.length - 1; index += 1) {
+            const event = scopedEvents[index]
+            if (event.type !== 'task_started') continue
+            changed = this.observeTranscriptTerminal(codexSessionId, event.turnId) || changed
+        }
+
+        for (const event of scopedEvents) {
             if (event.type === 'task_started') {
                 changed = this.observeTranscriptStart(codexSessionId, event.turnId) || changed
             } else {

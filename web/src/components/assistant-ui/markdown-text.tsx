@@ -13,6 +13,7 @@ import remarkBreaks from 'remark-breaks'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { Check as CheckIconNode, Copy as CopyIconNode } from 'lucide'
+import { FileText, Link2 } from 'lucide-react'
 import remarkDisableIndentedCode from '@/lib/remark-disable-indented-code'
 import remarkRepairTables from '@/lib/remark-repair-tables'
 import { useNavigate } from '@tanstack/react-router'
@@ -534,7 +535,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
     fileLinkTarget?: HappyChatFileLinkTarget
 }) {
     const navigate = useNavigate()
-    const { fileTarget, sessionId, fileLinkTarget, className, title, onClick, target, rel: propRel, ...anchorProps } = props
+    const { fileTarget, sessionId, fileLinkTarget, className, title, onClick, target, rel: propRel, children, ...anchorProps } = props
     const rel = target === '_blank' ? (propRel ?? 'noreferrer') : propRel
     const linkTitle = title ?? formatFileTargetTitle(fileTarget)
     const searchParams = new URLSearchParams({
@@ -605,10 +606,17 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
                 data-hapi-file-link="true"
                 className={cn(
                     FILE_PATH_CHIP_CLASS,
-                    'transition-colors hover:border-[var(--app-link-muted)] hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-link)]',
+                    'inline-flex items-center gap-1 text-[var(--app-link)] transition-colors hover:border-[var(--app-link-muted)] hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-link)]',
                     className
                 )}
-            />
+            >
+                <FileText
+                    className="h-[0.95em] w-[0.95em] shrink-0"
+                    data-markdown-link-icon="file"
+                    aria-hidden="true"
+                />
+                <span className="min-w-0 truncate">{children}</span>
+            </a>
             <FilePathCopyButton path={fileTarget.path} />
         </span>
     )
@@ -679,7 +687,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
 
     const isAllowed = ctx?.isAllowed ?? (() => false)
 
-    const { onClick, href, ...rest } = props
+    const { onClick, href, children, ...rest } = props
     // Relative / no-scheme hrefs (/settings, ./foo, #section, ?q=1) must not be
     // classified via classifyScheme — it returns 'deny' for inputs with no valid
     // scheme, which previously caused the onClick handler to preventDefault and
@@ -690,6 +698,11 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     const colonIdx = href ? href.indexOf(':') : -1
     const scheme = colonIdx > 0 && !isRelative ? href!.slice(0, colonIdx).toLowerCase() : ''
     const isCustomAllowed = classification === 'custom' && isAllowed(scheme)
+    const isExternalLink = Boolean(
+        href
+        && classification !== 'deny'
+        && (href.startsWith('//') || hasScheme(href))
+    )
 
     const domHref =
         classification === 'iana' || isCustomAllowed
@@ -732,8 +745,18 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
             href={domHref}
             rel={rel}
             onClick={handleClick}
+            data-hapi-external-link={isExternalLink ? 'true' : undefined}
             className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}
-        />
+        >
+            {isExternalLink ? (
+                <Link2
+                    className="mr-[0.3em] inline h-[0.9em] w-[0.9em] align-[-0.08em]"
+                    data-markdown-link-icon="external"
+                    aria-hidden="true"
+                />
+            ) : null}
+            {children}
+        </a>
     )
 }
 

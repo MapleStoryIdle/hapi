@@ -261,7 +261,11 @@ describe('markdown <A> component — click handler', () => {
 
     it('renders the real href for an IANA scheme (https)', () => {
         renderA({ href: 'https://example.com', children: 'link' })
-        expect(document.querySelector('a')!.getAttribute('href')).toBe('https://example.com')
+        const link = document.querySelector('a')!
+        expect(link.getAttribute('href')).toBe('https://example.com')
+        expect(link).toHaveAttribute('data-hapi-external-link', 'true')
+        expect(link).toHaveClass('text-[var(--app-link)]')
+        expect(link.querySelector('[data-markdown-link-icon="external"]')).not.toBeNull()
     })
 
     it('does not navigate for a deny scheme (href="")', () => {
@@ -298,6 +302,14 @@ describe('markdown <A> component — relative / no-scheme hrefs navigate normall
 
     it('/settings → click not prevented (absolute-path relative link)', () => {
         clickAndCheckNotPrevented('/settings')
+    })
+
+    it('does not mark an internal route as an external link', () => {
+        renderA({ href: '/settings', children: 'settings' })
+
+        const link = screen.getByRole('link')
+        expect(link).not.toHaveAttribute('data-hapi-external-link')
+        expect(link.querySelector('[data-markdown-link-icon="external"]')).toBeNull()
     })
 
     it('./foo → click not prevented (relative-path link)', () => {
@@ -347,7 +359,9 @@ describe('markdown <A> component — file path links', () => {
 
         const link = screen.getByRole('link')
         expect(link).toHaveClass('aui-md-file-link')
+        expect(link).toHaveClass('text-[var(--app-link)]')
         expect(link).toHaveAttribute('title', 'docs/guide.md:42')
+        expect(link.querySelector('[data-markdown-link-icon="file"]')).not.toBeNull()
 
         fireEvent.click(link)
         expect(routerMocks.navigate).toHaveBeenCalledWith({

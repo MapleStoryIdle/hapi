@@ -302,17 +302,20 @@ export function groupMergedCodexSessionsForKanban(
     pinnedSessionKeys: ReadonlySet<string> = EMPTY_PINNED_SESSION_KEYS
 ): MergedCodexKanbanGroup[] {
     const groups: MergedCodexKanbanGroup[] = [
-        { id: 'pinned', sessions: [] },
         { id: 'pending', sessions: [] },
         { id: 'processing', sessions: [] },
+        { id: 'pinned', sessions: [] },
         { id: 'completed', sessions: [] }
     ]
     const groupsById = new Map(groups.map((group) => [group.id, group]))
 
     for (const session of sessions) {
-        const groupId = pinnedSessionKeys.has(session.key)
+        const status = getMergedCodexKanbanStatus(session)
+        // User action and active thinking take precedence over a local pin.
+        // Pins collect only otherwise-completed sessions.
+        const groupId = status === 'completed' && pinnedSessionKeys.has(session.key)
             ? 'pinned'
-            : getMergedCodexKanbanStatus(session)
+            : status
         groupsById.get(groupId)!.sessions.push(session)
     }
 
@@ -615,7 +618,7 @@ function KanbanSessionCard(props: {
                             event.stopPropagation()
                             onTogglePin()
                         }}
-                        className={`absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${pinned ? 'bg-[var(--app-link)] text-white' : 'text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]'}`}
+                        className={`absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${pinned ? 'text-[var(--app-link)] hover:bg-[var(--app-secondary-bg)]' : 'text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]'}`}
                         aria-label={pinned ? t('sessions.kanban.unpin') : t('sessions.kanban.pin')}
                         title={pinned ? t('sessions.kanban.unpin') : t('sessions.kanban.pin')}
                         aria-pressed={pinned}
@@ -1317,14 +1320,6 @@ export function RecentCodexSessions(props: {
                                             <ThinkingKanbanLabel label={t(presentation.labelKey)} />
                                         ) : t(presentation.labelKey)}
                                     </h2>
-                                    {group.id !== 'processing' ? (
-                                        <span
-                                            className="text-xs tabular-nums text-[var(--app-hint)]"
-                                            data-kanban-group-count
-                                        >
-                                            {group.sessions.length}
-                                        </span>
-                                    ) : null}
                                 </div>
                                 <ul className="mt-2 flex flex-col gap-2.5 pl-5" data-kanban-card-column>
                                     {group.sessions.map((session) => (

@@ -112,6 +112,17 @@ describe('MarkdownRenderer', () => {
         expect(link).not.toBeNull()
         expect(link).toHaveAttribute('data-hapi-file-link', 'true')
         expect(link).toHaveAttribute('title', '/workspace/project/docs/README.md:42')
+        expect(link).toHaveClass('text-[var(--app-link)]')
+        expect(link?.querySelector('[data-markdown-link-icon="file"]')).not.toBeNull()
+    })
+
+    it('shows external Markdown links with a link icon and theme-link color', () => {
+        renderInChat('[HAPI docs](https://hapi.run/docs)')
+
+        const link = screen.getByRole('link', { name: 'HAPI docs' })
+        expect(link).toHaveAttribute('data-hapi-external-link', 'true')
+        expect(link).toHaveClass('text-[var(--app-link)]')
+        expect(link.querySelector('[data-markdown-link-icon="external"]')).not.toBeNull()
     })
 
     it('keeps remark plugins stable when the chat provider value is recreated', () => {

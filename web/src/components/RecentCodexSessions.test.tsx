@@ -181,7 +181,7 @@ describe('RecentCodexSessions', () => {
         ])
     })
 
-    it('moves pinned cards into a page-level group while preserving every other status', () => {
+    it('keeps pinned action and thinking cards in their higher-priority groups', () => {
         const now = 1_800_000_000_000
         const pending = {
             id: 'hapi-pending',
@@ -232,12 +232,16 @@ describe('RecentCodexSessions', () => {
             { now }
         )
 
-        const groups = groupMergedCodexSessionsForKanban(rows, new Set(['native:native-completed']))
+        const groups = groupMergedCodexSessionsForKanban(rows, new Set([
+            'hapi:hapi-pending',
+            'hapi:hapi-processing',
+            'native:native-completed'
+        ]))
 
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
-            ['pinned', ['native-completed']],
             ['pending', ['hapi-pending']],
             ['processing', ['hapi-processing']],
+            ['pinned', ['native-completed']],
             ['completed', ['native-newer-completed']]
         ])
     })
@@ -417,7 +421,7 @@ describe('RecentCodexSessions', () => {
         expect(nativeIcon?.querySelector('[data-session-running-indicator]')).toHaveClass('bg-[#34C759]', 'motion-safe:animate-pulse')
     })
 
-    it('renders a page-level pinned group, aligned card columns, and a quiet thinking animation', async () => {
+    it('renders priority-ordered Kanban groups, one completed count, and a quiet thinking animation', async () => {
         const api = createApi()
         api.getCodexSessions = vi.fn(async () => ({
             success: true as const,
@@ -501,16 +505,26 @@ describe('RecentCodexSessions', () => {
         )
 
         const board = await screen.findByTestId('session-kanban-board')
+        expect([...board.querySelectorAll('[data-kanban-group]')].map((group) => group.getAttribute('data-kanban-group'))).toEqual([
+            'pending',
+            'processing',
+            'pinned',
+            'completed'
+        ])
         const pinnedGroup = board.querySelector('[data-kanban-group="pinned"]')
         expect(pinnedGroup).toHaveTextContent('Pinned')
         expect(pinnedGroup).toHaveTextContent('Pinned Codex task')
-        expect(board.querySelector('[data-kanban-group="pending"]')).toHaveTextContent('Needs confirmation')
+        const pendingGroup = board.querySelector('[data-kanban-group="pending"]')
+        expect(pendingGroup).toHaveTextContent('Needs confirmation')
+        expect(pendingGroup?.querySelector('[data-kanban-group-count]')).toBeNull()
         const processingGroup = board.querySelector('[data-kanban-group="processing"]')
         expect(processingGroup).toHaveTextContent('thinking')
         expect(processingGroup?.querySelector('[data-kanban-thinking-label]')).toHaveTextContent('thinking...')
         expect(processingGroup?.querySelector('.session-kanban-thinking-dot-second')).not.toBeNull()
         expect(processingGroup?.querySelector('.session-kanban-thinking-dot-third')).not.toBeNull()
         expect(processingGroup?.querySelector('[data-kanban-group-count]')).toBeNull()
+        expect(pinnedGroup?.querySelector('[data-kanban-group-count]')).toBeNull()
+        expect(board.querySelectorAll('[data-kanban-group-count]')).toHaveLength(0)
         expect(processingGroup).toHaveTextContent('Thinking task')
         expect(processingGroup?.querySelector('.session-kanban-card-thinking')).not.toBeNull()
         expect(processingGroup?.querySelector('.motion-safe\\:animate-pulse')).not.toBeNull()
@@ -541,7 +555,10 @@ describe('RecentCodexSessions', () => {
             'Uncommitted changes'
         )
 
-        fireEvent.click(screen.getByRole('button', { name: 'Unpin session' }))
+        const unpinButton = screen.getByRole('button', { name: 'Unpin session' })
+        expect(unpinButton).toHaveClass('text-[var(--app-link)]')
+        expect(unpinButton).not.toHaveClass('bg-[var(--app-link)]')
+        fireEvent.click(unpinButton)
         expect(onTogglePin).toHaveBeenCalledWith('native:codex-thread-1')
     })
 
