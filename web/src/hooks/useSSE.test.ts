@@ -2,7 +2,7 @@ import { createElement, type ReactNode } from 'react'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { resetInteractionPriorityForTests } from '@/lib/interaction-priority'
+import { markUserInteraction, resetInteractionPriorityForTests } from '@/lib/interaction-priority'
 import { subscribeNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
 import { queryKeys } from '@/lib/query-keys'
 import type { SessionSummary, SessionsResponse } from '@/types/api'
@@ -242,6 +242,318 @@ describe('useSSE reconnect handling', () => {
         })
 
         expect(MockEventSource.instances[1]?.url).toContain('lastEventId=7')
+    })
+
+    it('accepts low event ids after the Hub stream epoch changes', () => {
+        vi.useFakeTimers()
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+        const onEvent = vi.fn()
+
+        const { rerender } = renderHook(({ reconnectKey }: { reconnectKey: number }) => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            reconnectKey,
+            subscription: { all: true },
+            scope: 'global',
+            onEvent
+        }), {
+            initialProps: { reconnectKey: 0 },
+            wrapper: createWrapper()
+        })
+
+        const firstSource = MockEventSource.instances[0]
+        act(() => {
+            firstSource?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'connection-changed',
+                    data: { status: 'connected', streamEpoch: 'hub-a' }
+                }),
+                lastEventId: ''
+            } as MessageEvent<string>)
+            firstSource?.onmessage?.({
+                data: JSON.stringify({ type: 'heartbeat', data: { timestamp: 1 } }),
+                lastEventId: '100'
+            } as MessageEvent<string>)
+            rerender({ reconnectKey: 1 })
+        })
+
+        const secondSource = MockEventSource.instances[1]
+        expect(secondSource?.url).toContain('lastEventId=100')
+        expect(secondSource?.url).toContain('lastStreamEpoch=hub-a')
+        act(() => {
+            secondSource?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'connection-changed',
+                    data: { status: 'connected', streamEpoch: 'hub-b' }
+                }),
+                lastEventId: ''
+            } as MessageEvent<string>)
+            secondSource?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'session-updated',
+                    sessionId: 'session-1',
+                    data: { thinking: true }
+                }),
+                lastEventId: '1'
+            } as MessageEvent<string>)
+            vi.advanceTimersByTime(100)
+        })
+
+        expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'session-updated',
+            sessionId: 'session-1'
+        }))
+        rerender({ reconnectKey: 2 })
+        expect(MockEventSource.instances[2]?.url).toContain('lastEventId=1')
+        expect(MockEventSource.instances[2]?.url).toContain('lastStreamEpoch=hub-b')
+    })
+
+    it('reconnects from cursor zero when a new Hub disconnects before its first event', () => {
+        vi.useFakeTimers()
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+
+        const { rerender } = renderHook(({ reconnectKey }: { reconnectKey: number }) => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            reconnectKey,
+            subscription: { all: true },
+            scope: 'global',
+            onEvent: vi.fn()
+        }), {
+            initialProps: { reconnectKey: 0 },
+            wrapper: createWrapper()
+        })
+
+        const firstSource = MockEventSource.instances[0]
+        act(() => {
+            firstSource?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'connection-changed',
+                    data: { status: 'connected', streamEpoch: 'hub-a' }
+                }),
+                lastEventId: ''
+            } as MessageEvent<string>)
+            firstSource?.onmessage?.({
+                data: JSON.stringify({ type: 'heartbeat', data: { timestamp: 1 } }),
+                lastEventId: '100'
+            } as MessageEvent<string>)
+            rerender({ reconnectKey: 1 })
+        })
+
+        const restartedSource = MockEventSource.instances[1]
+        act(() => {
+            restartedSource?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'connection-changed',
+                    data: { status: 'connected', streamEpoch: 'hub-b' }
+                }),
+                lastEventId: ''
+            } as MessageEvent<string>)
+            rerender({ reconnectKey: 2 })
+        })
+
+        expect(MockEventSource.instances[2]?.url).toContain('lastEventId=0')
+        expect(MockEventSource.instances[2]?.url).toContain('lastStreamEpoch=hub-b')
+    })
+
+    it('does not replay pre-subscription history after a fresh epoch marker', () => {
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+
+        const { rerender } = renderHook(({ reconnectKey }: { reconnectKey: number }) => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            reconnectKey,
+            subscription: { all: true },
+            scope: 'global',
+            onEvent: vi.fn()
+        }), {
+            initialProps: { reconnectKey: 0 },
+            wrapper: createWrapper()
+        })
+
+        act(() => {
+            MockEventSource.instances[0]?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'connection-changed',
+                    data: { status: 'connected', streamEpoch: 'hub-a' }
+                }),
+                lastEventId: ''
+            } as MessageEvent<string>)
+            rerender({ reconnectKey: 1 })
+        })
+
+        expect(MockEventSource.instances[1]?.url).not.toContain('lastEventId=')
+        expect(MockEventSource.instances[1]?.url).not.toContain('lastStreamEpoch=')
+    })
+
+    it('dispatches a deferred event before a replacement stream acknowledges it', () => {
+        vi.useFakeTimers()
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+        const listener = vi.fn()
+        const unsubscribe = subscribeNativeCodexSessionUpdated(listener)
+
+        const { rerender } = renderHook(({ reconnectKey }: { reconnectKey: number }) => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            reconnectKey,
+            subscription: { all: true },
+            scope: 'global',
+            onEvent: vi.fn()
+        }), {
+            initialProps: { reconnectKey: 0 },
+            wrapper: createWrapper()
+        })
+
+        const firstSource = MockEventSource.instances[0]
+        act(() => {
+            markUserInteraction()
+            firstSource?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'codex-session-updated',
+                    machineId: 'machine-1',
+                    codexSessionId: 'thread-1'
+                }),
+                lastEventId: '9'
+            } as MessageEvent<string>)
+            rerender({ reconnectKey: 1 })
+        })
+
+        expect(listener).toHaveBeenCalledTimes(1)
+        expect(MockEventSource.instances[1]?.url).toContain('lastEventId=9')
+
+        act(() => {
+            vi.advanceTimersByTime(250)
+        })
+
+        expect(listener).toHaveBeenCalledTimes(1)
+        unsubscribe()
+    })
+
+    it('does not let a later immediate event skip an earlier deferred event', () => {
+        vi.useFakeTimers()
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+        const nativeListener = vi.fn()
+        const onEvent = vi.fn()
+        const unsubscribe = subscribeNativeCodexSessionUpdated(nativeListener)
+
+        const { rerender } = renderHook(({ reconnectKey }: { reconnectKey: number }) => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            reconnectKey,
+            subscription: { all: true },
+            scope: 'global',
+            onEvent
+        }), {
+            initialProps: { reconnectKey: 0 },
+            wrapper: createWrapper()
+        })
+
+        const source = MockEventSource.instances[0]
+        act(() => {
+            markUserInteraction()
+            source?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'codex-session-updated',
+                    machineId: 'machine-1',
+                    codexSessionId: 'thread-1'
+                }),
+                lastEventId: '10'
+            } as MessageEvent<string>)
+            source?.onmessage?.({
+                data: JSON.stringify({ type: 'heartbeat', data: { timestamp: 1 } }),
+                lastEventId: '11'
+            } as MessageEvent<string>)
+        })
+
+        expect(nativeListener).not.toHaveBeenCalled()
+        act(() => {
+            vi.advanceTimersByTime(250)
+        })
+
+        expect(nativeListener).toHaveBeenCalledTimes(1)
+        expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'codex-session-updated' }))
+        rerender({ reconnectKey: 1 })
+        expect(MockEventSource.instances[1]?.url).toContain('lastEventId=11')
+        unsubscribe()
+    })
+
+    it('applies a session update queued behind deferred work before reconnecting', () => {
+        vi.useFakeTimers()
+        vi.spyOn(Math, 'random').mockReturnValue(0)
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+        const queryClient = createQueryClient()
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [makeSessionSummary({ id: 'session-1' })]
+        })
+
+        renderHook(() => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            subscription: { all: true },
+            scope: 'global',
+            onEvent: vi.fn()
+        }), { wrapper: createWrapper(queryClient) })
+
+        const source = MockEventSource.instances[0]
+        act(() => {
+            markUserInteraction()
+            source?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'codex-session-updated',
+                    machineId: 'machine-1',
+                    codexSessionId: 'thread-1'
+                }),
+                lastEventId: '12'
+            } as MessageEvent<string>)
+            source?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'session-updated',
+                    sessionId: 'session-1',
+                    data: { thinking: true, updatedAt: 2 }
+                }),
+                lastEventId: '13'
+            } as MessageEvent<string>)
+            source?.onerror?.(new Event('error'))
+        })
+
+        expect(queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)?.sessions[0]).toMatchObject({
+            thinking: true,
+            updatedAt: 2
+        })
+        act(() => {
+            vi.advanceTimersByTime(1_000)
+        })
+        expect(MockEventSource.instances[1]?.url).toContain('lastEventId=13')
     })
 
     it('rebuilds immediately when the operator requests a reconnect', () => {

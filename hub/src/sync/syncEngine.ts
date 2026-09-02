@@ -79,7 +79,11 @@ import {
     type RpcSendCodexLocalSessionMessageResponse
 } from './rpcGateway'
 import type { NativeKanbanFeedbackDeleteRequest, NativeKanbanFeedbackStageRequest } from '@hapi/protocol'
-import type { NativeCodexDeliveryPolicy, NativeKanbanFeedbackReviewGuard } from '@hapi/protocol/codexTranscript'
+import type {
+    CodexLocalSessionSnapshotReadOptions,
+    NativeCodexDeliveryPolicy,
+    NativeKanbanFeedbackReviewGuard
+} from '@hapi/protocol/codexTranscript'
 import { SessionCache } from './sessionCache'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
@@ -1808,7 +1812,7 @@ export class SyncEngine {
     async readCodexLocalSessionSnapshot(
         machineId: string,
         sessionId: string,
-        options?: { before?: number; limit?: number }
+        options?: CodexLocalSessionSnapshotReadOptions
     ): Promise<RpcCodexLocalSessionSnapshotResponse> {
         return await this.rpcGateway.readCodexLocalSessionSnapshot(machineId, sessionId, options)
     }

@@ -871,6 +871,7 @@ export default {
   'composer.skills.title': '技能',
   'composer.skills.count': '{count} 个',
   'composer.skills.search': '搜索技能',
+  'composer.skills.recent': '最近使用',
   'composer.skills.customTab': '自建',
   'composer.skills.otherTab': '其他',
   'composer.skills.loading': '正在加载技能...',

@@ -37,7 +37,6 @@ import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimeP
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { QueuedMessagesBar, useQueuedMessages } from '@/components/AssistantChat/QueuedMessagesBar'
 import { ScratchlistDrawer } from '@/components/AssistantChat/ScratchlistPanel'
-import { SubagentDock } from '@/components/AssistantChat/SubagentDock'
 import { GitDiffSummary, summarizeGitStatusFiles } from '@/components/AssistantChat/GitDiffSummary'
 import {
     PlanStatusSummary,
@@ -2073,15 +2072,10 @@ function SessionChatInner(props: SessionChatProps) {
                             testId="session-chat-composer-overlay"
                         >
                             <div className="relative">
-                                {agentFlavor === 'codex' ? (
-                                    <SubagentDock
-                                        subagents={props.session.agentState?.codex?.subagents}
-                                        messages={visibleMessages}
-                                    />
-                                ) : null}
                                 <HappyComposer
                                 key={`composer-${props.session.id}`}
                                 sessionId={props.session.id}
+                                projectPath={props.session.metadata?.path}
                                 disabled={props.isSending}
                                 pendingSchedule={pendingSchedule}
                                 onSchedule={setPendingSchedule}

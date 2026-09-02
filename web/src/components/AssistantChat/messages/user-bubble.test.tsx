@@ -46,12 +46,23 @@ describe('extractLeadingDirectives', () => {
 
 describe('UserBubbleContent', () => {
     it('renders directive chips inline with the remaining single-line message body', () => {
-        render(<UserBubbleContent text="$ralplan polish the user bubble" />)
+        const { container } = render(<UserBubbleContent text="$ralplan polish the user bubble" />)
 
         expect(screen.getByText('ralplan')).toBeInTheDocument()
         expect(screen.getByText('polish the user bubble')).toBeInTheDocument()
         expect(screen.getByTitle('$ralplan')).toBeInTheDocument()
         expect(screen.getByTestId('lazy-rainbow-text')).toHaveAttribute('data-inline', 'true')
+        const skill = container.querySelector('[data-user-directive-kind="skill"]')
+        expect(skill).toHaveClass('text-[var(--app-link)]')
+        expect(skill?.querySelector('svg')).toBeInTheDocument()
+    })
+
+    it('keeps slash commands visually separate from skills', () => {
+        const { container } = render(<UserBubbleContent text="/model gpt-5" />)
+
+        const command = container.querySelector('[data-user-directive-kind="command"]')
+        expect(command).toHaveClass('text-[var(--app-chat-user-chip-fg)]')
+        expect(command).not.toHaveClass('text-[var(--app-link)]')
     })
 
     it('asks LazyRainbowText to preserve single newlines in sent prompt bodies', () => {

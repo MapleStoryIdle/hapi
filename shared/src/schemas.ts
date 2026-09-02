@@ -422,6 +422,75 @@ export const CodexLocalSessionListUpdateSchema = z.object({
 
 export type CodexLocalSessionListUpdate = z.infer<typeof CodexLocalSessionListUpdateSchema>
 
+export const CodexLocalSessionSnapshotVersionSchema = z.object({
+    runnerEpoch: z.string().min(1).max(200),
+    revision: z.number().int().positive()
+}).strict()
+
+export const CodexLocalSessionDirectSendProgressSchema = z.object({
+    phase: z.enum(['launching', 'matching', 'connected', 'retrying', 'reasoning']),
+    startedAt: z.number().finite(),
+    phaseStartedAt: z.number().finite(),
+    transport: z.enum(['app-server', 'exec-resume']),
+    attempt: z.number().int().positive().optional()
+}).strict()
+
+export const CodexLocalSessionQueuedMessageSchema = z.object({
+    id: z.string(),
+    text: z.string(),
+    queuedAt: z.number().finite(),
+    recoveryRequired: z.boolean().optional(),
+    recoveryReason: z.enum([
+        'codex_timeout',
+        'session_status_unknown',
+        'launch_failed',
+        'runner_restarted',
+        'external_writer_active'
+    ]).optional()
+}).strict()
+
+const CodexLocalSessionRealtimeQueuedMessageSchema = z.object({
+    id: z.string().min(1).max(160),
+    recoveryRequired: z.boolean().optional(),
+    recoveryReason: z.enum([
+        'codex_timeout',
+        'session_status_unknown',
+        'launch_failed',
+        'runner_restarted',
+        'external_writer_active'
+    ]).optional()
+}).strict()
+
+export const CodexLocalSessionRealtimeStatusSchema = z.object({
+    success: z.literal(true),
+    status: z.enum(['idle', 'processing', 'unknown']),
+    stalledSince: z.number().finite().optional(),
+    startedAt: z.number().finite().optional(),
+    progress: CodexLocalSessionDirectSendProgressSchema.optional(),
+    lastError: z.string().optional(),
+    lastErrorAt: z.number().finite().optional(),
+    lastErrorClientMessageId: z.string().optional(),
+    lastErrorCode: z.enum([
+        'codex_timeout',
+        'session_status_unknown',
+        'launch_failed',
+        'runner_restarted',
+        'external_writer_active'
+    ]).optional(),
+    queuedMessageRefs: z.array(CodexLocalSessionRealtimeQueuedMessageSchema).max(50).optional()
+}).strict()
+
+/** Global SSE invalidation only; transcript bodies must use snapshot RPC. */
+export const CodexLocalSessionRealtimeSnapshotSchema = z.object({
+    version: CodexLocalSessionSnapshotVersionSchema,
+    revision: z.number().int().positive(),
+    status: CodexLocalSessionRealtimeStatusSchema,
+    timing: z.object({
+        cache: z.enum(['hit', 'miss']),
+        durationMs: z.number().finite().nonnegative()
+    }).strict()
+}).strict()
+
 export const SyncEventSchema = z.discriminatedUnion('type', [
     SessionChangedSchema.extend({
         type: z.literal('session-added'),
@@ -480,8 +549,8 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         modifiedAt: z.number().optional(),
         /** Sanitized list-row update from a current runner. */
         summary: CodexLocalSessionListUpdateSchema.optional(),
-        /** Bounded runner snapshot; older runners emit an invalidation only. */
-        snapshot: z.unknown().optional()
+        /** Version/status invalidation only; transcript data stays on snapshot RPC. */
+        snapshot: CodexLocalSessionRealtimeSnapshotSchema.optional()
     }),
     SessionEventBaseSchema.extend({
         type: z.literal('heartbeat'),
@@ -493,7 +562,9 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         type: z.literal('connection-changed'),
         data: z.object({
             status: z.string(),
-            subscriptionId: z.string().optional()
+            subscriptionId: z.string().optional(),
+            /** Identifies one Hub process so SSE ids may safely restart at 1. */
+            streamEpoch: z.string().min(1).optional()
         }).optional()
     }),
 ])

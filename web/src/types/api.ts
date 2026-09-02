@@ -289,8 +289,16 @@ export type CodexLocalSessionComposerCapabilitiesResponse =
         error: string
     }
 
+export type CodexLocalSessionSnapshotVersion = {
+    runnerEpoch: string
+    revision: number
+}
+
 export type CodexLocalSessionSnapshotResponse = CodexLocalSessionContextResponse & {
+    unchanged?: false
     status: Extract<CodexLocalSessionStatusResponse, { success: true }>
+    /** Missing only when an older runner answers the snapshot RPC. */
+    version?: CodexLocalSessionSnapshotVersion
     revision: number
     timing: {
         cache: 'hit' | 'miss'
@@ -298,22 +306,32 @@ export type CodexLocalSessionSnapshotResponse = CodexLocalSessionContextResponse
     }
 }
 
-export type CodexLocalSessionRealtimeSnapshot = {
-    revision: number
+export type CodexLocalSessionSnapshotReadResponse = CodexLocalSessionSnapshotResponse | {
+    success: true
+    unchanged: true
     status: Extract<CodexLocalSessionStatusResponse, { success: true }>
+    version: CodexLocalSessionSnapshotVersion
+    revision: number
+    session?: CodexLocalSessionContextResponse['session']
     timing: {
         cache: 'hit' | 'miss'
         durationMs: number
     }
-    session?: CodexLocalSessionSnapshotResponse['session']
-    importedMessages?: Array<{
-        createdAt?: number
-        role: 'user' | 'agent'
-        content: unknown
-        meta?: unknown
-    }>
-    startIndex?: number
-    page?: CodexLocalSessionContextResponse['page']
+}
+
+export type CodexLocalSessionRealtimeSnapshot = {
+    version: CodexLocalSessionSnapshotVersion
+    revision: number
+    status: Omit<Extract<CodexLocalSessionStatusResponse, { success: true }>, 'queuedMessages'> & {
+        queuedMessageRefs?: Array<Pick<
+            CodexLocalSessionQueuedMessage,
+            'id' | 'recoveryRequired' | 'recoveryReason'
+        >>
+    }
+    timing: {
+        cache: 'hit' | 'miss'
+        durationMs: number
+    }
 }
 
 export type SendCodexLocalSessionMessageResponse =

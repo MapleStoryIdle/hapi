@@ -24,12 +24,15 @@ import type {
 import type { FileReadResponse, GitBranchResponse, GitCommandResponse, MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
 import {
     type CodexLocalSessionListUpdate,
+    type CodexLocalSessionDisplaySummary,
     type CodexLocalSessionComposerCapabilitiesRpcResponse,
     type ArchiveCodexLocalSessionRpcResponse,
     type CodexLocalSessionDataRpcResponse,
     type DiscardCodexLocalSessionMessageRpcResponse,
     type CodexLocalSessionRealtimeSnapshot,
+    type CodexLocalSessionRealtimeStatus,
     type CodexLocalSessionSnapshotRpcResponse,
+    type CodexLocalSessionSnapshotVersion,
     type CodexLocalSessionStatusRpcResponse,
     type CodexLocalSessionSummary,
     type CodexLocalSessionsRpcResponse,
@@ -108,6 +111,10 @@ interface ReadCodexLocalSessionRequest {
     limit?: unknown
 }
 
+interface ReadCodexLocalSessionSnapshotRequest extends ReadCodexLocalSessionRequest {
+    knownVersion?: unknown
+}
+
 interface GetCodexLocalSessionStatusRequest {
     sessionId?: unknown
 }
@@ -135,49 +142,57 @@ interface ArchiveCodexLocalSessionRequest {
     sessionId?: unknown
 }
 
-const MAX_NATIVE_CODEX_REALTIME_SNAPSHOT_BYTES = 96 * 1024
-
 function toNativeCodexSessionListUpdate(session: CodexLocalSessionSummary): CodexLocalSessionListUpdate {
     const { file: _file, ...summary } = normalizeNativeCodexSessionForDisplay(session)
     return summary
 }
 
+function toNativeCodexSessionDisplaySummary(session: CodexLocalSessionSummary): CodexLocalSessionDisplaySummary {
+    const normalized = normalizeNativeCodexSessionForDisplay(session)
+    return {
+        id: normalized.id,
+        title: normalized.title,
+        cwd: normalized.cwd,
+        modifiedAt: normalized.modifiedAt,
+        model: normalized.model,
+        modelReasoningEffort: normalized.modelReasoningEffort
+    }
+}
+
 function buildNativeCodexRealtimeSnapshot(
     read: NativeCodexTranscriptRead,
-    status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>,
-    includeTranscript: boolean
+    status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
 ): CodexLocalSessionRealtimeSnapshot {
-    const snapshot: CodexLocalSessionRealtimeSnapshot = {
+    const { queuedMessages, ...baseStatus } = status
+    const realtimeStatus: CodexLocalSessionRealtimeStatus = {
+        ...baseStatus,
+        ...(queuedMessages === undefined ? {} : {
+            queuedMessageRefs: queuedMessages.map(({ id, recoveryRequired, recoveryReason }) => ({
+                id,
+                ...(recoveryRequired ? { recoveryRequired: true } : {}),
+                ...(recoveryReason ? { recoveryReason } : {})
+            }))
+        })
+    }
+    return {
+        version: read.version,
         revision: read.revision,
-        status,
+        status: realtimeStatus,
         timing: read.timing
     }
-    if (!includeTranscript) {
-        return snapshot
-    }
+}
 
-    const { data } = read
-    const withTranscript: CodexLocalSessionRealtimeSnapshot = {
-        ...snapshot,
-        session: {
-            id: data.session.id,
-            title: data.session.title,
-            cwd: data.session.cwd,
-            modifiedAt: data.session.modifiedAt,
-            model: data.session.model,
-            modelReasoningEffort: data.session.modelReasoningEffort
-        },
-        importedMessages: data.importedMessages,
-        startIndex: data.startIndex,
-        page: data.page
+function parseKnownCodexSnapshotVersion(value: unknown): CodexLocalSessionSnapshotVersion | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null
     }
-    try {
-        return Buffer.byteLength(JSON.stringify(withTranscript), 'utf8') <= MAX_NATIVE_CODEX_REALTIME_SNAPSHOT_BYTES
-            ? withTranscript
-            : snapshot
-    } catch {
-        return snapshot
+    const record = value as Record<string, unknown>
+    const runnerEpoch = typeof record.runnerEpoch === 'string' ? record.runnerEpoch.trim() : ''
+    const revision = record.revision
+    if (!runnerEpoch || typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 1) {
+        return null
     }
+    return { runnerEpoch, revision }
 }
 
 function normalizeWorkspaceRoots(paths?: string[]): string[] | undefined {
@@ -389,7 +404,7 @@ export class ApiMachineClient {
             }
         )
 
-        this.rpcHandlerManager.registerHandler<ReadCodexLocalSessionRequest, CodexLocalSessionSnapshotRpcResponse>(
+        this.rpcHandlerManager.registerHandler<ReadCodexLocalSessionSnapshotRequest, CodexLocalSessionSnapshotRpcResponse>(
             RPC_METHODS.ReadCodexLocalSessionSnapshot,
             async (params) => {
                 const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
@@ -404,6 +419,12 @@ export class ApiMachineClient {
                 if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100)) {
                     return { success: false, error: 'limit must be an integer between 1 and 100' }
                 }
+                const knownVersion = params?.knownVersion === undefined
+                    ? undefined
+                    : parseKnownCodexSnapshotVersion(params.knownVersion)
+                if (params?.knownVersion !== undefined && !knownVersion) {
+                    return { success: false, error: 'knownVersion must contain runnerEpoch and a positive integer revision' }
+                }
 
                 const read = this.readNativeCodexTranscript(sessionId, { before, limit })
                 if (!read) {
@@ -414,11 +435,28 @@ export class ApiMachineClient {
                 if (status.success !== true) {
                     return { success: false, error: status.error }
                 }
+                const canUseKnownVersion = before === undefined && (limit ?? 50) === 50
+                if (knownVersion
+                    && canUseKnownVersion
+                    && knownVersion.runnerEpoch === read.version.runnerEpoch
+                    && knownVersion.revision === read.version.revision) {
+                    return {
+                        success: true,
+                        unchanged: true,
+                        version: read.version,
+                        revision: read.revision,
+                        session: toNativeCodexSessionDisplaySummary(read.data.session),
+                        status,
+                        timing: read.timing
+                    }
+                }
                 return {
                     success: true,
+                    unchanged: false,
                     snapshot: {
                         data: read.data,
                         status,
+                        version: read.version,
                         revision: read.revision,
                         timing: read.timing
                     }
@@ -987,13 +1025,11 @@ export class ApiMachineClient {
         const status = read
             ? this.nativeCodexSessionDirectSender.getStatus(codexSessionId, read.data.session)
             : null
-        // A direct-send lifecycle callback can race a JSONL append before the
-        // file watcher fires. If that opportunistic read advanced the cache,
-        // carry its page too; a status-only payload must never skip a newer
-        // transcript revision in the browser.
-        const includeTranscript = transcriptRead !== undefined || read?.timing.cache === 'miss'
+        // Every matching browser receives this global event. Send an
+        // invalidation version plus status only; an opened detail asks for
+        // transcript bodies through its conditional snapshot RPC.
         const snapshot = read && status?.success === true
-            ? buildNativeCodexRealtimeSnapshot(read, status, includeTranscript)
+            ? buildNativeCodexRealtimeSnapshot(read, status)
             : undefined
         const summary = read?.data.session ?? listSession
         socket.emit('codex-session-updated', {

@@ -70,6 +70,7 @@ function createApi() {
         getCodexSessionSnapshot: vi.fn(async (sessionId: string, machineId: string, options: { before?: number; limit?: number }) => ({
             ...(await getCodexSessionContext(sessionId, machineId, options)),
             status: await getCodexSessionStatus(sessionId, machineId),
+            version: { runnerEpoch: 'runner-a', revision: 1 },
             revision: 1,
             timing: { cache: 'hit' as const, durationMs: 1 }
         })),
@@ -453,6 +454,10 @@ describe('CodexSessionContextPage', () => {
         const { api } = renderPage({ realtimeAvailable: true, realtimeConnected: true })
 
         await screen.findByText('Original response')
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
+                .toBeGreaterThanOrEqual(2)
+        })
         const snapshotCallsBefore = (api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length
 
         publishNativeCodexSessionUpdated({
@@ -467,10 +472,40 @@ describe('CodexSessionContextPage', () => {
         })
     })
 
-    it('applies a bounded native realtime snapshot without another runner read', async () => {
+    it('coalesces one foreground episode into one conditional snapshot read', async () => {
         const { api } = renderPage({ realtimeAvailable: true, realtimeConnected: true })
 
         await screen.findByText('Original response')
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
+                .toBeGreaterThanOrEqual(2)
+        })
+        const snapshotCallsBefore = (api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length
+
+        act(() => {
+            window.dispatchEvent(new Event('focus'))
+            window.dispatchEvent(new Event('pageshow'))
+            window.dispatchEvent(new Event('online'))
+            document.dispatchEvent(new Event('visibilitychange'))
+        })
+
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
+                .toBe(snapshotCallsBefore + 1)
+        })
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
+            .toBe(snapshotCallsBefore + 1)
+    })
+
+    it('applies status from a matching compact realtime version without another runner read', async () => {
+        const { api } = renderPage({ realtimeAvailable: true, realtimeConnected: true })
+
+        await screen.findByText('Original response')
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
+                .toBeGreaterThanOrEqual(2)
+        })
         const snapshotCallsBefore = (api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length
 
         publishNativeCodexSessionUpdated({
@@ -478,43 +513,8 @@ describe('CodexSessionContextPage', () => {
             machineId: 'machine-1',
             codexSessionId: 'codex-thread-1',
             snapshot: {
-                revision: 2,
-                status: { success: true, status: 'idle' },
-                timing: { cache: 'miss', durationMs: 2 },
-                session: {
-                    id: 'codex-thread-1',
-                    title: 'Recent Codex task',
-                    cwd: '/workspace/project',
-                    modifiedAt: 2,
-                    model: 'gpt-5.6-terra',
-                    modelReasoningEffort: 'high'
-                },
-                importedMessages: [
-                    {
-                        createdAt: 0,
-                        role: 'user',
-                        content: { type: 'text', text: 'Original prompt' },
-                        meta: { sentFrom: 'cli' }
-                    },
-                    {
-                        createdAt: 2,
-                        role: 'agent',
-                        content: { type: 'codex', data: { type: 'message', message: 'Pushed without polling' } },
-                        meta: { sentFrom: 'cli' }
-                    }
-                ],
-                startIndex: 0,
-                page: { limit: 50, nextBefore: null, hasMore: false }
-            }
-        })
-
-        expect(await screen.findByText('Pushed without polling')).toBeInTheDocument()
-        publishNativeCodexSessionUpdated({
-            type: 'codex-session-updated',
-            machineId: 'machine-1',
-            codexSessionId: 'codex-thread-1',
-            snapshot: {
-                revision: 2,
+                version: { runnerEpoch: 'runner-a', revision: 1 },
+                revision: 1,
                 status: { success: true, status: 'processing' },
                 timing: { cache: 'hit', durationMs: 0 }
             }
@@ -528,7 +528,197 @@ describe('CodexSessionContextPage', () => {
             .toBe(snapshotCallsBefore)
     })
 
-    it('does not let an in-flight snapshot overwrite a newer realtime page', async () => {
+    it('keeps a realtime status that arrives while a newer full snapshot is in flight', async () => {
+        const api = createApi()
+        renderPage({ api, realtimeAvailable: true, realtimeConnected: true })
+
+        await screen.findByText('Original response')
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
+                .toBeGreaterThanOrEqual(2)
+        })
+        const callsBefore = (api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length
+        let resolveFull!: (response: CodexLocalSessionSnapshotResponse) => void
+        ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockImplementationOnce(
+            () => new Promise<CodexLocalSessionSnapshotResponse>((resolve) => {
+                resolveFull = resolve
+            })
+        )
+
+        act(() => window.dispatchEvent(new Event('focus')))
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
+                .toBe(callsBefore + 1)
+        })
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 2 },
+                revision: 2,
+                status: { success: true, status: 'idle' },
+                timing: { cache: 'hit', durationMs: 0 }
+            }
+        })
+
+        await act(async () => {
+            resolveFull({
+                success: true,
+                session: {
+                    id: 'codex-thread-1',
+                    title: 'Recent Codex task',
+                    cwd: '/workspace/project',
+                    modifiedAt: 2,
+                    model: 'gpt-5.6-terra',
+                    modelReasoningEffort: 'high'
+                },
+                page: { limit: 50, nextBefore: null, hasMore: false },
+                messages: [{
+                    id: 'codex-local:codex-thread-1:2',
+                    createdAt: 2,
+                    content: {
+                        role: 'agent',
+                        content: { type: 'codex', data: { type: 'message', message: 'Revision two' } }
+                    }
+                }],
+                status: { success: true, status: 'processing' },
+                version: { runnerEpoch: 'runner-a', revision: 2 },
+                revision: 2,
+                timing: { cache: 'miss', durationMs: 10 }
+            })
+        })
+
+        expect(await screen.findByText('Revision two')).toBeInTheDocument()
+        openNativeSessionMenu()
+        expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).not.toBeDisabled()
+    })
+
+    it('does not let React Query duplicate a permanent snapshot error', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockRejectedValue(
+            new ApiError('Native session not found', 404, 'session_not_found')
+        )
+        renderPage({ api })
+
+        await screen.findByTestId('session-connection-recovery')
+        await new Promise((resolve) => setTimeout(resolve, 600))
+
+        expect(api.getCodexSessionSnapshot).toHaveBeenCalledTimes(1)
+    })
+
+    it('clears optional realtime progress and errors when the next status omits them', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'idle',
+            lastError: 'Another writer owns the thread',
+            lastErrorCode: 'external_writer_active'
+        })
+        renderPage({ api, realtimeAvailable: true, realtimeConnected: true })
+
+        expect(await screen.findByTestId('codex-native-external-writer')).toBeInTheDocument()
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
+                .toBeGreaterThanOrEqual(2)
+        })
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 1 },
+                revision: 1,
+                status: {
+                    success: true,
+                    status: 'processing',
+                    progress: {
+                        phase: 'launching',
+                        startedAt: 1,
+                        phaseStartedAt: 1,
+                        transport: 'app-server'
+                    }
+                },
+                timing: { cache: 'hit', durationMs: 0 }
+            }
+        })
+
+        expect(await screen.findByTestId('codex-direct-send-phase-launching')).toBeInTheDocument()
+        expect(screen.queryByTestId('codex-native-external-writer')).toBeNull()
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 1 },
+                revision: 1,
+                status: { success: true, status: 'idle' },
+                timing: { cache: 'hit', durationMs: 0 }
+            }
+        })
+
+        await waitFor(() => {
+            expect(screen.queryByTestId('codex-direct-send-phase-launching')).toBeNull()
+        })
+    })
+
+    it('reconciles full queued messages when compact realtime queue refs change', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            queuedMessages: [{ id: 'queued-1', text: 'Keep text out of SSE', queuedAt: 123 }]
+        })
+        const { api: renderedApi } = renderPage({ api, realtimeAvailable: true, realtimeConnected: true })
+
+        expect(await screen.findByRole('button', { name: 'Open 1 queued messages' })).toBeInTheDocument()
+        await waitFor(() => {
+            expect((renderedApi.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
+                .toBeGreaterThanOrEqual(2)
+        })
+        const snapshotCallsBefore = (renderedApi.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length
+        ;(renderedApi.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            unchanged: true,
+            session: {
+                id: 'codex-thread-1',
+                title: 'Recent Codex task',
+                cwd: '/workspace/project',
+                modifiedAt: 1,
+                model: 'gpt-5.6-terra',
+                modelReasoningEffort: 'high'
+            },
+            status: { success: true, status: 'idle', queuedMessages: [] },
+            version: { runnerEpoch: 'runner-a', revision: 1 },
+            revision: 1,
+            timing: { cache: 'hit', durationMs: 0 }
+        })
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 1 },
+                revision: 1,
+                status: { success: true, status: 'idle', queuedMessageRefs: [] },
+                timing: { cache: 'hit', durationMs: 0 }
+            }
+        })
+
+        await waitFor(() => {
+            expect((renderedApi.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
+                .toBe(snapshotCallsBefore + 1)
+        })
+        await waitFor(() => {
+            expect(screen.queryByRole('button', { name: 'Open 1 queued messages' })).toBeNull()
+        })
+    })
+
+    it('accepts revision one after a runner epoch changes', async () => {
         const api = createApi()
         const staleSnapshot: CodexLocalSessionSnapshotResponse = {
             success: true,
@@ -560,13 +750,38 @@ describe('CodexSessionContextPage', () => {
             ],
             page: { limit: 50, nextBefore: null, hasMore: false },
             status: { success: true, status: 'idle' },
-            revision: 1,
+            version: { runnerEpoch: 'old-runner', revision: 100 },
+            revision: 100,
             timing: { cache: 'hit', durationMs: 1 }
         }
+        const restartedSnapshot: CodexLocalSessionSnapshotResponse = {
+            ...staleSnapshot,
+            session: { ...staleSnapshot.session, modifiedAt: 2 },
+            status: {
+                success: true,
+                status: 'idle',
+                queuedMessages: [{ id: 'runner-b-queue', text: 'Queued on runner B', queuedAt: 2 }]
+            },
+            messages: [
+                staleSnapshot.messages[0],
+                {
+                    id: 'codex-local:codex-thread-1:1',
+                    createdAt: 2,
+                    content: {
+                        role: 'agent',
+                        content: { type: 'codex', data: { type: 'message', message: 'New runner wins' } }
+                    }
+                }
+            ],
+            version: { runnerEpoch: 'new-runner', revision: 1 },
+            revision: 1
+        }
         let resolveSnapshot!: (response: CodexLocalSessionSnapshotResponse) => void
-        ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise<CodexLocalSessionSnapshotResponse>((resolve) => {
-            resolveSnapshot = resolve
-        }))
+        ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>)
+            .mockImplementationOnce(() => new Promise<CodexLocalSessionSnapshotResponse>((resolve) => {
+                resolveSnapshot = resolve
+            }))
+            .mockResolvedValue(restartedSnapshot)
         renderPage({ api, realtimeAvailable: true, realtimeConnected: true })
 
         await waitFor(() => expect(api.getCodexSessionSnapshot).toHaveBeenCalled())
@@ -575,44 +790,25 @@ describe('CodexSessionContextPage', () => {
             machineId: 'machine-1',
             codexSessionId: 'codex-thread-1',
             snapshot: {
-                revision: 2,
-                status: { success: true, status: 'idle' },
-                timing: { cache: 'miss', durationMs: 2 },
-                session: {
-                    id: 'codex-thread-1',
-                    title: 'Recent Codex task',
-                    cwd: '/workspace/project',
-                    modifiedAt: 2,
-                    model: 'gpt-5.6-terra',
-                    modelReasoningEffort: 'high'
+                version: { runnerEpoch: 'new-runner', revision: 1 },
+                revision: 1,
+                status: {
+                    success: true,
+                    status: 'idle',
+                    queuedMessageRefs: [{ id: 'runner-b-queue' }]
                 },
-                importedMessages: [
-                    {
-                        createdAt: 0,
-                        role: 'user',
-                        content: { type: 'text', text: 'Original prompt' },
-                        meta: { sentFrom: 'cli' }
-                    },
-                    {
-                        createdAt: 2,
-                        role: 'agent',
-                        content: { type: 'codex', data: { type: 'message', message: 'Realtime wins' } },
-                        meta: { sentFrom: 'cli' }
-                    }
-                ],
-                startIndex: 0,
-                page: { limit: 50, nextBefore: null, hasMore: false }
+                timing: { cache: 'miss', durationMs: 2 }
             }
         })
 
-        expect(await screen.findByText('Realtime wins')).toBeInTheDocument()
         await act(async () => {
             resolveSnapshot(staleSnapshot)
         })
         await waitFor(() => {
-            expect(screen.getByText('Realtime wins')).toBeInTheDocument()
+            expect(screen.getByText('New runner wins')).toBeInTheDocument()
             expect(screen.queryByText('Original response')).toBeNull()
         })
+        expect(await screen.findByRole('button', { name: 'Open 1 queued messages' })).toBeInTheDocument()
     })
 
     it('sends directly to the native Codex thread instead of forking it', async () => {
@@ -678,36 +874,47 @@ describe('CodexSessionContextPage', () => {
         expect(screen.queryByTestId('codex-native-recovery')).not.toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Open .* queued messages/ })).not.toBeInTheDocument()
 
+        ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            session: {
+                id: 'codex-thread-1',
+                title: 'Recent Codex task',
+                cwd: '/workspace/project',
+                modifiedAt: 2,
+                model: 'gpt-5.6-terra',
+                modelReasoningEffort: 'high'
+            },
+            page: { limit: 50, nextBefore: null, hasMore: false },
+            messages: [
+                {
+                    id: 'codex-local:codex-thread-1:0',
+                    createdAt: 0,
+                    content: { role: 'user', content: { type: 'text', text: 'Original prompt' } }
+                },
+                {
+                    id: 'codex-local:codex-thread-1:1',
+                    createdAt: 2,
+                    content: {
+                        role: 'agent',
+                        content: { type: 'codex', data: { type: 'message', message: 'New native update' } }
+                    }
+                }
+            ],
+            status: { success: true, status: 'idle' },
+            version: { runnerEpoch: 'runner-a', revision: 2 },
+            revision: 2,
+            timing: { cache: 'miss', durationMs: 2 }
+        })
+
         publishNativeCodexSessionUpdated({
             type: 'codex-session-updated',
             machineId: 'machine-1',
             codexSessionId: 'codex-thread-1',
             snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 2 },
                 revision: 2,
                 status: { success: true, status: 'idle' },
-                timing: { cache: 'miss', durationMs: 2 },
-                session: {
-                    id: 'codex-thread-1',
-                    title: 'Recent Codex task',
-                    cwd: '/workspace/project',
-                    modifiedAt: 2,
-                    model: 'gpt-5.6-terra',
-                    modelReasoningEffort: 'high'
-                },
-                importedMessages: [
-                    {
-                        createdAt: 0,
-                        role: 'user',
-                        content: { type: 'text', text: 'Original prompt' }
-                    },
-                    {
-                        createdAt: 2,
-                        role: 'agent',
-                        content: { type: 'codex', data: { type: 'message', message: 'New native update' } }
-                    }
-                ],
-                startIndex: 0,
-                page: { limit: 50, nextBefore: null, hasMore: false }
+                timing: { cache: 'miss', durationMs: 2 }
             }
         })
 
@@ -1140,6 +1347,33 @@ describe('CodexSessionContextPage', () => {
         expect(screen.getByText('gpt-5.6-terra')).toBeInTheDocument()
         expect(screen.getByText('Reasoning:')).toBeInTheDocument()
         expect(screen.getByText('high')).toBeInTheDocument()
+    })
+
+    it('updates display metadata from an unchanged conditional snapshot', async () => {
+        const { api } = renderPage()
+
+        await screen.findByText('Original response')
+        ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            unchanged: true,
+            session: {
+                id: 'codex-thread-1',
+                title: 'Renamed native task',
+                cwd: '/workspace/project',
+                modifiedAt: 2,
+                model: 'gpt-5.6-terra',
+                modelReasoningEffort: 'high'
+            },
+            status: { success: true, status: 'idle' },
+            version: { runnerEpoch: 'runner-a', revision: 1 },
+            revision: 1,
+            timing: { cache: 'hit', durationMs: 0 }
+        })
+
+        openNativeSessionMenu()
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh' }))
+
+        expect(await screen.findByRole('button', { name: 'Renamed native task' })).toBeInTheDocument()
     })
 
     it('uses the shared capability-scoped header menu without HAPI-only actions', async () => {

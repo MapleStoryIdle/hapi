@@ -143,13 +143,13 @@ describe('ToolGroupCard', () => {
             forceCompact: true
         }))
 
-        const toggle = within(view.container).getByRole('button', { name: /查看本地会话 0s/i })
+        const toggle = within(view.container).getByRole('button', { name: /^查看本地会话$/i })
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
         expect(view.container.innerHTML).not.toContain('bg-[var(--app-tool-group-bg)]')
 
         fireEvent.click(toggle)
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.getByText('查看本地会话')).toBeInTheDocument()
+        expect(within(view.container).getAllByText('查看本地会话')).toHaveLength(2)
     })
 
     it('keeps forced compact activity collapsed while a tool is running', () => {
@@ -402,10 +402,10 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const toggle = within(view.container).getByRole('button', { name: /run node\.js 0s/i })
+        const toggle = within(view.container).getByRole('button', { name: /^run node\.js$/i })
         fireEvent.click(toggle)
 
-        expect(within(view.container).getByText('Run Node.js')).toBeInTheDocument()
+        expect(within(view.container).getAllByText('Run Node.js')).toHaveLength(2)
         expect(within(view.container).queryByText(/node -e/i)).not.toBeInTheDocument()
     })
 
@@ -436,7 +436,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const singleToggle = within(singleView.container).getByRole('button', { name: /read file · App\.tsx · L12–80 0s/i })
+        const singleToggle = within(singleView.container).getByRole('button', { name: /^read file · App\.tsx · L12–80$/i })
         fireEvent.click(singleToggle)
 
         expect(within(singleView.container).getByText('Read file')).toBeInTheDocument()
@@ -474,10 +474,10 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const batchToggle = within(batchView.container).getByRole('button', { name: /read a batch of files 0s/i })
+        const batchToggle = within(batchView.container).getByRole('button', { name: /^read a batch of files$/i })
         fireEvent.click(batchToggle)
 
-        expect(within(batchView.container).getByText('Read a batch of files')).toBeInTheDocument()
+        expect(within(batchView.container).getAllByText('Read a batch of files')).toHaveLength(2)
         expect(within(batchView.container).queryByText('web/src/a.ts')).not.toBeInTheDocument()
         expect(within(batchView.container).queryByText('web/src/b.ts · L1–20')).not.toBeInTheDocument()
     })
@@ -741,7 +741,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /apply_patch 0s/i })).toBeInTheDocument()
+        expect(within(view.container).getByRole('button', { name: /^apply_patch$/i })).toBeInTheDocument()
     })
 
     it('uses the parsed file target for a mutation when available', () => {
@@ -768,7 +768,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /modified src\/example\.ts 0s/i })).toBeInTheDocument()
+        expect(within(view.container).getByRole('button', { name: /^modified src\/example\.ts$/i })).toBeInTheDocument()
     })
 
     it('opens a compact Modified row in a bounded dialog instead of a full-screen page', () => {
@@ -801,7 +801,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        fireEvent.click(within(view.container).getByRole('button', { name: /modified src\/example\.ts 0s/i }))
+        fireEvent.click(within(view.container).getByRole('button', { name: /^modified src\/example\.ts$/i }))
         const mutationRow = within(view.container)
             .getAllByRole('button', { name: /modified.*example\.ts/i })
             .find((button) => !button.hasAttribute('aria-expanded'))

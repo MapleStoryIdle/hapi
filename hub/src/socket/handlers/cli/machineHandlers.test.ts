@@ -118,6 +118,39 @@ describe('native Codex transcript machine socket events', () => {
         }])
     })
 
+    it('forwards only the compact version/status snapshot', () => {
+        const socket = new FakeSocket()
+        const events: unknown[] = []
+
+        registerMachineHandlers(socket as unknown as CliSocketWithData, {
+            store: {} as Store,
+            resolveMachineAccess: () => ({ ok: true, value: {} as StoredMachine }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onWebappEvent: (event) => events.push(event)
+        })
+
+        socket.trigger('codex-session-updated', {
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 7 },
+                revision: 7,
+                status: { success: true, status: 'processing' },
+                timing: { cache: 'hit', durationMs: 2 },
+                importedMessages: [{ role: 'agent', content: 'must not pass through' }]
+            }
+        })
+
+        expect(events).toEqual([{
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            namespace: 'team-a'
+        }])
+    })
+
     it('rejects a native event whose machine id differs from the socket identity', () => {
         const socket = new FakeSocket()
         const accessErrors: unknown[] = []

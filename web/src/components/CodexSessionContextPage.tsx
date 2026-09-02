@@ -10,7 +10,6 @@ import type {
     CodexLocalSessionDirectSendRecoveryReason,
     CodexLocalSessionQueuedMessage,
     CodexLocalSessionRunState,
-    CodexLocalSessionRealtimeSnapshot,
     CodexLocalSessionSnapshotResponse,
     CodexLocalSessionStatusResponse,
     DecryptedMessage,
@@ -56,6 +55,12 @@ import {
     getNativeCodexRealtimeSnapshot,
     subscribeNativeCodexSessionUpdated
 } from '@/lib/native-codex-realtime-events'
+import {
+    createNativeSnapshotRefreshCoordinator,
+    isNativeSnapshotVersionCovered,
+    type NativeSnapshotRefreshCoordinator,
+    type NativeSnapshotVersion
+} from '@/lib/native-snapshot-refresh-coordinator'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useCodexSubscriptionLimits } from '@/hooks/queries/useCodexSubscriptionLimits'
 import { useNativeCodexSessionComposerCapabilities } from '@/hooks/queries/useNativeCodexSessionComposerCapabilities'
@@ -80,6 +85,18 @@ const NATIVE_CONTEXT_STALE_AFTER_MS = 12_000
 const NATIVE_STATUS_STALE_AFTER_MS = 6_000
 const NATIVE_ORPHANED_RECEIPT_GRACE_MS = 3_000
 const NATIVE_UNCONFIRMED_RECEIPT_GRACE_MS = 15_000
+
+function areNativeQueueRefsCurrent(
+    messages: readonly CodexLocalSessionQueuedMessage[],
+    refs: ReadonlyArray<Pick<CodexLocalSessionQueuedMessage, 'id' | 'recoveryRequired' | 'recoveryReason'>>
+): boolean {
+    return messages.length === refs.length && messages.every((message, index) => {
+        const ref = refs[index]
+        return ref?.id === message.id
+            && Boolean(ref.recoveryRequired) === Boolean(message.recoveryRequired)
+            && ref.recoveryReason === message.recoveryReason
+    })
+}
 
 export type NativeCodexDirectSendPhase = CodexLocalSessionDirectSendProgress['phase'] | 'queued'
 
@@ -178,34 +195,6 @@ function getNativeCodexDirectSendPhaseStartedAt(input: {
         .reverse()
         .find((echo) => echo.status !== 'failed' && echo.deliveryPhase === input.phase)
     return matchingEcho?.phaseStartedAt ?? null
-}
-
-export function buildNativeRealtimeContextResponse(
-    snapshot: CodexLocalSessionRealtimeSnapshot
-): CodexLocalSessionSnapshotResponse | null {
-    const { session, importedMessages, startIndex, page } = snapshot
-    if (
-        !session
-        || !importedMessages
-        || startIndex === undefined
-        || !page
-    ) {
-        return null
-    }
-    return {
-        success: true,
-        session,
-        messages: importedMessages.map((content, index) => ({
-            id: `codex-local:${session.id}:${startIndex + index}`,
-            createdAt: content.createdAt ?? session.modifiedAt,
-            position: startIndex + index,
-            content
-        })),
-        page,
-        status: snapshot.status,
-        revision: snapshot.revision,
-        timing: snapshot.timing
-    }
 }
 
 /**
@@ -513,6 +502,7 @@ export function buildNativeCodexBlocks(
 function NativeCodexThread(props: {
     api: ApiClient
     sessionId: string
+    projectPath?: string | null
     machineId?: string
     title: string
     metadata: SessionMetadataSummary
@@ -679,6 +669,7 @@ function NativeCodexThread(props: {
                             <HappyComposer
                                 key={`codex-native-composer-${props.sessionId}`}
                                 sessionId={`codex-native-${props.sessionId}`}
+                                projectPath={props.projectPath}
                                 disabled={props.composerDisabled}
                                 active
                                 agentFlavor={null}
@@ -740,32 +731,77 @@ export function CodexSessionContextPage(props: {
         () => queryKeys.codexSessionSnapshot(props.machineId ?? 'unknown', props.sessionId),
         [props.machineId, props.sessionId]
     )
-    const latestNativeRealtimeUpdateAtRef = useRef(0)
+    const nativeApplySequenceRef = useRef(0)
     const [isForking, setIsForking] = useState(false)
     const [forkError, setForkError] = useState<string | null>(null)
     const contextQuery = useQuery({
         queryKey: nativeSnapshotQueryKey,
-        queryFn: async () => {
+        queryFn: async (): Promise<CodexLocalSessionSnapshotResponse> => {
             if (!props.machineId) {
                 throw new Error(t('recentCodex.runnerRequired'))
             }
-            const requestStartedAt = Date.now()
-            const response = await props.api.getCodexSessionSnapshot(props.sessionId, props.machineId, { limit: 50 })
+            const requestApplySequence = nativeApplySequenceRef.current
+            const known = queryClient.getQueryData<CodexLocalSessionSnapshotResponse>(nativeSnapshotQueryKey)
+            const response = await props.api.getCodexSessionSnapshot(props.sessionId, props.machineId, {
+                limit: 50,
+                ...(known?.version ? { knownVersion: known.version } : {})
+            })
+            if (response.unchanged === true) {
+                const current = queryClient.getQueryData<CodexLocalSessionSnapshotResponse>(nativeSnapshotQueryKey)
+                if (!current) {
+                    // A cache clear can race a conditional response. Recover
+                    // with the ordinary full read instead of inventing data.
+                    const recovered = await props.api.getCodexSessionSnapshot(
+                        props.sessionId,
+                        props.machineId,
+                        { limit: 50 }
+                    )
+                    if (recovered.unchanged === true) {
+                        throw new Error('Native Codex runner returned an invalid conditional snapshot')
+                    }
+                    return recovered
+                }
+                const realtimeAppliedAfterRequest = nativeApplySequenceRef.current > requestApplySequence
+                return {
+                    ...current,
+                    session: response.session
+                        ? { ...current.session, ...response.session }
+                        : current.session,
+                    status: realtimeAppliedAfterRequest ? current.status : response.status,
+                    version: response.version,
+                    revision: response.revision,
+                    timing: realtimeAppliedAfterRequest ? current.timing : response.timing
+                }
+            }
+
             const current = queryClient.getQueryData<CodexLocalSessionSnapshotResponse>(nativeSnapshotQueryKey)
-            // A bounded SSE page can arrive while its preceding HTTP read is
-            // still in flight. Do not let that older response roll the visible
-            // transcript/status backwards after the push was applied.
-            if (current && (
-                current.revision > response.revision
-                || (current.revision === response.revision && latestNativeRealtimeUpdateAtRef.current > requestStartedAt)
-            )) {
-                return current
+            if (current && nativeApplySequenceRef.current > requestApplySequence) {
+                if (
+                    current.version
+                    && response.version
+                    && isNativeSnapshotVersionCovered(current.version, response.version)
+                ) {
+                    return current
+                }
+                if (!current.version && !response.version && current.revision > response.revision) {
+                    return current
+                }
+                // Transcript revision and run status advance independently.
+                // A compact status event applied while this full body was in
+                // flight is newer in browser application order. Keep that
+                // status while accepting the response's transcript/page.
+                return {
+                    ...response,
+                    status: current.status,
+                    timing: current.timing
+                }
             }
             return response
         },
         enabled: Boolean(props.machineId),
-        retry: 1,
-        retryDelay: 500,
+        // The page coordinator owns bounded retry/backoff. Query-level retry
+        // would double every attempt, including permanent 4xx responses.
+        retry: false,
         // A native realtime payload updates this cache directly. Poll only
         // when an older runner cannot provide that stream.
         refetchInterval: hasRealtimeUpdates
@@ -775,8 +811,11 @@ export function CodexSessionContextPage(props: {
             ),
         refetchIntervalInBackground: false,
         refetchOnMount: 'always',
-        refetchOnReconnect: true,
-        refetchOnWindowFocus: true,
+        // Foreground and reconnect recovery are coalesced below. Letting React
+        // Query run its own copies caused the same large snapshot to race in
+        // from several independent entry points.
+        refetchOnReconnect: false,
+        refetchOnWindowFocus: false,
     })
     const statusQuery = {
         data: contextQuery.data?.status,
@@ -825,8 +864,7 @@ export function CodexSessionContextPage(props: {
     const connectionRecoveryTokenRef = useRef(0)
     const nativeRecoveryAbortControllerRef = useRef<AbortController | null>(null)
     const nativeRecoveryRequestTokenRef = useRef(0)
-    const foregroundRefreshAtRef = useRef(0)
-    const nativeEventRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const snapshotRefreshCoordinatorRef = useRef<NativeSnapshotRefreshCoordinator | null>(null)
     const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
     const menuId = useId()
     pageScopeRef.current = pageScope
@@ -880,7 +918,6 @@ export function CodexSessionContextPage(props: {
         setDismissedRunnerError(null)
         setConnectionNow(Date.now())
         attemptedNativeDirectMessageIdsRef.current.clear()
-        foregroundRefreshAtRef.current = 0
         setOutlineOpen(false)
         setMenuOpen(false)
         connectionRecoveryTokenRef.current += 1
@@ -1126,80 +1163,117 @@ export function CodexSessionContextPage(props: {
         enabled: Boolean(props.machineId && context),
         thinking: directStatus === 'processing'
     })
-    const refetchNativeSnapshot = contextQuery.refetch
+    const rawRefetchNativeSnapshot = contextQuery.refetch
+    const nativeSnapshotInFlightRef = useRef<{
+        scope: string
+        promise: ReturnType<typeof rawRefetchNativeSnapshot>
+    } | null>(null)
+    const refetchNativeSnapshot = useCallback(() => {
+        const current = nativeSnapshotInFlightRef.current
+        if (current?.scope === pageScope) {
+            return current.promise
+        }
+        const request = rawRefetchNativeSnapshot({ cancelRefetch: false })
+        const tracked = { scope: pageScope, promise: request }
+        nativeSnapshotInFlightRef.current = tracked
+        void request.finally(() => {
+            if (nativeSnapshotInFlightRef.current === tracked) {
+                nativeSnapshotInFlightRef.current = null
+            }
+        })
+        return request
+    }, [pageScope, rawRefetchNativeSnapshot])
     const refetchNativeSnapshotRef = useRef(refetchNativeSnapshot)
     refetchNativeSnapshotRef.current = refetchNativeSnapshot
 
-    const applyNativeRealtimeSnapshot = useCallback((event: Parameters<typeof getNativeCodexRealtimeSnapshot>[0]): boolean => {
+    const applyNativeRealtimeSnapshot = useCallback((event: Parameters<typeof getNativeCodexRealtimeSnapshot>[0]): {
+        covered: boolean
+        requiresStatusRefresh: boolean
+        version: NativeSnapshotVersion
+    } | null => {
         const snapshot = getNativeCodexRealtimeSnapshot(event)
         if (!snapshot) {
-            return false
+            return null
         }
-        const context = buildNativeRealtimeContextResponse(snapshot)
         let covered = false
         let applied = false
+        let requiresStatusRefresh = false
         queryClient.setQueryData<CodexLocalSessionSnapshotResponse>(
             nativeSnapshotQueryKey,
             (current) => {
-                if (context) {
-                    if (current && current.revision > context.revision) {
-                        covered = true
-                        return current
-                    }
-                    covered = true
-                    applied = true
-                    return context
-                }
                 if (!current) {
                     return current
                 }
-                // Direct-send lifecycle updates do not change the transcript
-                // revision. Accept an equal revision so processing/queued
-                // state reaches the composer without a follow-up HTTP read.
-                if (current.revision > snapshot.revision) {
-                    covered = true
-                    return current
+                const { queuedMessageRefs, ...realtimeStatus } = snapshot.status
+                if (
+                    queuedMessageRefs
+                    && !areNativeQueueRefsCurrent(current.status.queuedMessages ?? [], queuedMessageRefs)
+                ) {
+                    requiresStatusRefresh = true
                 }
-                // A status-only event is allowed to describe a lifecycle
-                // change at the current transcript revision. A future
-                // revision would mean its message page is missing, so leave
-                // it uncovered and fetch one authoritative snapshot.
-                if (current.revision < snapshot.revision) {
-                    return current
+                const nextStatus: Extract<CodexLocalSessionStatusResponse, { success: true }> = {
+                    ...realtimeStatus,
+                    ...(current.status.queuedMessages === undefined
+                        ? {}
+                        : { queuedMessages: current.status.queuedMessages })
                 }
-                covered = true
+
+                if (current.version?.runnerEpoch === snapshot.version.runnerEpoch) {
+                    if (current.version.revision > snapshot.version.revision) {
+                        covered = true
+                        return current
+                    }
+                    if (current.version.revision === snapshot.version.revision) {
+                        covered = true
+                        applied = true
+                        return {
+                            ...current,
+                            status: nextStatus,
+                            version: snapshot.version,
+                            revision: snapshot.revision,
+                            timing: snapshot.timing
+                        }
+                    }
+                }
+
+                // A newer/different runner version has no transcript body in
+                // the global SSE event. Show its status immediately but keep
+                // the old page/version so the coordinator cannot mistake it
+                // for a complete snapshot.
                 applied = true
                 return {
                     ...current,
-                    status: snapshot.status,
-                    revision: snapshot.revision,
+                    status: nextStatus,
                     timing: snapshot.timing
                 }
             }
         )
         if (applied) {
-            latestNativeRealtimeUpdateAtRef.current = Date.now()
+            nativeApplySequenceRef.current += 1
         }
         setConnectionNow(Date.now())
-        return covered
+        return { covered, requiresStatusRefresh, version: snapshot.version }
     }, [nativeSnapshotQueryKey, queryClient])
 
-    const scheduleNativeSnapshotRefresh = useCallback(() => {
-        if (nativeEventRefreshTimerRef.current !== null) {
-            return
+    useEffect(() => {
+        const coordinator = createNativeSnapshotRefreshCoordinator({
+            getCurrentVersion: () => (
+                queryClient.getQueryData<CodexLocalSessionSnapshotResponse>(nativeSnapshotQueryKey)?.version ?? null
+            ),
+            isVisible: () => document.visibilityState === 'visible',
+            refresh: async () => {
+                const result = await refetchNativeSnapshotRef.current()
+                if (result.error) throw result.error
+            }
+        })
+        snapshotRefreshCoordinatorRef.current = coordinator
+        return () => {
+            coordinator.dispose()
+            if (snapshotRefreshCoordinatorRef.current === coordinator) {
+                snapshotRefreshCoordinatorRef.current = null
+            }
         }
-        nativeEventRefreshTimerRef.current = setTimeout(() => {
-            nativeEventRefreshTimerRef.current = null
-            void refetchNativeSnapshotRef.current()
-        }, 80)
-    }, [])
-
-    useEffect(() => () => {
-        if (nativeEventRefreshTimerRef.current !== null) {
-            clearTimeout(nativeEventRefreshTimerRef.current)
-            nativeEventRefreshTimerRef.current = null
-        }
-    }, [pageScope])
+    }, [nativeSnapshotQueryKey, pageScope, queryClient])
 
     // Freshness is time-based, so it must be re-evaluated even when a hung
     // request has not produced a new React Query notification.  The clock is
@@ -1216,44 +1290,59 @@ export function CodexSessionContextPage(props: {
         return () => window.clearInterval(timer)
     }, [])
 
-    // React Query normally refetches on focus/reconnect, but an explicit
-    // foreground read avoids waiting for stale-time bookkeeping and keeps the
-    // native detail route aligned with HAPI's reconnect behaviour.
+    // Mobile browsers often emit focus, pageshow, online and visibility in one
+    // foreground episode. Feed all of them to one coordinator so the episode
+    // performs one conditional read instead of four full snapshots.
     const refreshNativeDataOnForeground = useCallback(() => {
         if (document.visibilityState !== 'visible') return
         const now = Date.now()
-        if (now - foregroundRefreshAtRef.current < 300) return
-        foregroundRefreshAtRef.current = now
         setConnectionNow(now)
-        void refetchNativeSnapshot()
-    }, [refetchNativeSnapshot])
+        snapshotRefreshCoordinatorRef.current?.request({
+            authoritative: true,
+            delayMs: 250
+        })
+    }, [])
 
     useEffect(() => {
         if (!hasRealtimeUpdates || !props.machineId) {
             return
         }
 
-        const refreshFromNativeEvent = () => {
-            setConnectionNow(Date.now())
-            void refetchNativeSnapshotRef.current()
-        }
-        // Reconcile once when this detail first gets a healthy event stream;
-        // any file writes missed before subscription are covered too.
-        refreshFromNativeEvent()
+        // Reconcile once after the stream's short replay grace. This remains
+        // necessary because the Hub event history is bounded and does not yet
+        // report a replay gap explicitly.
+        snapshotRefreshCoordinatorRef.current?.request({
+            authoritative: true,
+            delayMs: 250
+        })
         return subscribeNativeCodexSessionUpdated((event) => {
             if (event.machineId !== props.machineId || event.codexSessionId !== props.sessionId) {
                 return
             }
-            if (!applyNativeRealtimeSnapshot(event)) {
-                scheduleNativeSnapshotRefresh()
+            const applied = applyNativeRealtimeSnapshot(event)
+            if (!applied) {
+                snapshotRefreshCoordinatorRef.current?.request({
+                    authoritative: true,
+                    delayMs: 250
+                })
+            } else if (applied.requiresStatusRefresh) {
+                snapshotRefreshCoordinatorRef.current?.request({
+                    authoritative: true,
+                    ...(!applied.covered ? { requiredVersion: applied.version } : {}),
+                    delayMs: 250
+                })
+            } else if (!applied.covered) {
+                snapshotRefreshCoordinatorRef.current?.request({
+                    requiredVersion: applied.version,
+                    delayMs: 250
+                })
             }
         })
     }, [
         applyNativeRealtimeSnapshot,
         hasRealtimeUpdates,
         props.machineId,
-        props.sessionId,
-        scheduleNativeSnapshotRefresh
+        props.sessionId
     ])
 
     useEffect(() => {
@@ -1904,6 +1993,7 @@ export function CodexSessionContextPage(props: {
                         <NativeCodexThread
                             api={props.api}
                             sessionId={props.sessionId}
+                            projectPath={context.session.cwd}
                             machineId={props.machineId}
                             title={title}
                             metadata={nativeMetadata}

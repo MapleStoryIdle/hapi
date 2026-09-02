@@ -11,9 +11,11 @@ import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
 import { ScheduleIcon } from '@/components/icons'
 import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
+import { getProjectRecentSkills, markProjectSkillUsed } from '@/lib/recent-skills'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 
 function ChevronIcon() {
     return <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 3.75L5 6.25L7.5 3.75" /></svg>
@@ -570,9 +572,11 @@ export function ToolbarMenu(props: {
         return () => document.removeEventListener('pointerdown', handlePointerDown)
     }, [props.anchorRef, props.onClose])
 
-    return (
+    const menu = (
         <div
             ref={panelRef}
+            data-testid="toolbar-menu"
+            data-toolbar-menu-surface={props.surface ?? 'default'}
             style={position
                 ? {
                     position: 'fixed',
@@ -610,17 +614,26 @@ export function ToolbarMenu(props: {
                 />
             ) : null}
             <div
+                data-toolbar-menu-scroll="true"
                 className={
                     props.surface === 'permission'
-                        ? 'overflow-y-auto rounded-[26px] border border-[var(--app-divider)] bg-[var(--app-bg)] shadow-[0_18px_48px_rgba(15,23,42,0.18)]'
-                        : 'overflow-y-auto'
+                        ? 'overscroll-contain overflow-y-auto rounded-[26px] border border-[var(--app-divider)] bg-[var(--app-bg)] shadow-[0_18px_48px_rgba(15,23,42,0.18)]'
+                        : 'overscroll-contain overflow-y-auto'
                 }
-                style={{ maxHeight: position?.maxHeight ?? props.maxHeight ?? 260 }}
+                style={{
+                    maxHeight: position?.maxHeight ?? props.maxHeight ?? 260,
+                    WebkitOverflowScrolling: 'touch'
+                }}
             >
                 {props.children}
             </div>
         </div>
     )
+
+    // Composer rows use clipping for their expand/collapse animation. Portaling
+    // keeps fixed menus out of that stacking context, so iOS can place them
+    // against the keyboard-sized VisualViewport instead of the composer box.
+    return typeof document === 'undefined' ? menu : createPortal(menu, document.body)
 }
 
 function ToolbarMenuSection(props: { title: string; children: ReactNode }) {
@@ -996,6 +1009,7 @@ export function ComposerButtons(props: {
     skillsLoading?: boolean
     skillsError?: string | null
     onSkillSelect?: (skill: SkillSummary) => void
+    projectPath?: string | null
     showPlanModeButton?: boolean
     planModeActive?: boolean
     onPlanModeToggle?: () => void
@@ -1058,6 +1072,9 @@ export function ComposerButtons(props: {
     const [showContextUsageMenu, setShowContextUsageMenu] = useState(false)
     const [skillQuery, setSkillQuery] = useState('')
     const [hideLarkSkills, setHideLarkSkills] = useState(true)
+    const [recentSkillNames, setRecentSkillNames] = useState<string[]>(() => (
+        getProjectRecentSkills(props.projectPath)
+    ))
     const [permissionAnchor, setPermissionAnchor] = useState<'tools' | 'button'>('tools')
     const [skillAnchor, setSkillAnchor] = useState<'tools' | 'button'>('button')
     const [toolbarWidth, setToolbarWidth] = useState<number | null>(null)
@@ -1397,20 +1414,28 @@ export function ComposerButtons(props: {
         ...section,
         skills: visibleSkills.filter((skill) => getSkillPickerGroup(skill) === section.key),
     })).filter((section) => section.skills.length > 0)
+    const recentSkills = normalizedSkillQuery
+        ? []
+        : recentSkillNames
+            .map((name) => filteredSkills.find((skill) => skill.name === name))
+            .filter((skill): skill is SkillSummary => skill != null)
 
-    const renderSkillOption = (skill: SkillSummary) => (
+    const renderSkillOption = (skill: SkillSummary, recent = false) => (
         <button
-            key={`${skill.scope ?? 'unknown'}:${skill.name}`}
+            key={`${recent ? 'recent:' : ''}${skill.scope ?? 'unknown'}:${skill.name}`}
             type="button"
-            className="group flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+            className={`group flex min-h-11 w-full gap-3 rounded-lg px-3 text-left transition-colors hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                recent ? 'items-center py-2' : 'items-start py-2.5'
+            }`}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
+                setRecentSkillNames(markProjectSkillUsed(props.projectPath, skill.name))
                 props.onSkillSelect?.(skill)
                 setShowSkillMenu(false)
                 setSkillQuery('')
             }}
         >
-            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-[var(--app-link)]">
+            <span className={`${recent ? '' : 'mt-0.5'} flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-[var(--app-link)]`}>
                 <Puzzle className="h-[17px] w-[17px]" />
             </span>
             <span className="min-w-0 flex-1">
@@ -1422,7 +1447,7 @@ export function ComposerButtons(props: {
                         {getSkillScopeLabel(skill, t)}
                     </span>
                 </span>
-                {skill.description ? (
+                {!recent && skill.description ? (
                     <span className="mt-0.5 block truncate text-xs leading-4 text-[var(--app-hint)]">
                         {skill.description}
                     </span>
@@ -1464,7 +1489,8 @@ export function ComposerButtons(props: {
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-hint)]" />
                     <input
                         value={skillQuery}
-                        autoFocus
+                        autoFocus={typeof document === 'undefined'
+                            || document.documentElement.dataset.appKeyboardOpen !== 'true'}
                         placeholder={t('composer.skills.search')}
                         className="h-9 w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] pl-9 pr-3 text-sm text-[var(--app-fg)] outline-none transition-colors placeholder:text-[var(--app-hint)] focus:border-[var(--app-link)]"
                         onChange={(event) => setSkillQuery(event.target.value)}
@@ -1477,7 +1503,7 @@ export function ComposerButtons(props: {
                 </label>
             </div>
 
-            <div className="mt-3 max-h-[280px] overflow-y-auto px-2">
+            <div className="mt-3 px-2">
                 {props.skillsLoading ? (
                     <div className="px-3 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('composer.skills.loading')}
@@ -1492,13 +1518,24 @@ export function ComposerButtons(props: {
                     </div>
                 ) : (
                     <div className="space-y-3 pb-1">
+                        {recentSkills.length > 0 ? (
+                            <div data-testid="composer-recent-skills">
+                                <div className="px-3 pb-1 text-[11px] font-medium text-[var(--app-hint)]">
+                                    {t('composer.skills.recent')}
+                                </div>
+                                <div className="space-y-0.5">
+                                    {recentSkills.map((skill) => renderSkillOption(skill, true))}
+                                </div>
+                                <div className="mx-3 mt-3 border-t border-[var(--app-divider)]" />
+                            </div>
+                        ) : null}
                         {skillSections.map((section) => (
                             <div key={section.key}>
                                 <div className="px-3 pb-1 text-[11px] font-medium text-[var(--app-hint)]">
                                     {section.label}
                                 </div>
                                 <div className="space-y-0.5">
-                                    {section.skills.map(renderSkillOption)}
+                                    {section.skills.map((skill) => renderSkillOption(skill))}
                                 </div>
                             </div>
                         ))}
@@ -1547,6 +1584,10 @@ export function ComposerButtons(props: {
         }
         return () => observer.disconnect()
     }, [])
+
+    useEffect(() => {
+        setRecentSkillNames(getProjectRecentSkills(props.projectPath))
+    }, [props.projectPath])
 
     if (props.compact) {
         return (

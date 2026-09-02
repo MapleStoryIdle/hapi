@@ -77,8 +77,47 @@ describe('resume schemas', () => {
             type: 'codex-session-updated',
             machineId: 'machine-1',
             codexSessionId: '12345678-1234-4234-8234-123456789012',
-            modifiedAt: 1_725_000_000_000
+            modifiedAt: 1_725_000_000_000,
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 7 },
+                revision: 7,
+                status: {
+                    success: true,
+                    status: 'processing',
+                    queuedMessageRefs: [{ id: 'queued-1', recoveryRequired: true, recoveryReason: 'codex_timeout' }]
+                },
+                timing: { cache: 'hit', durationMs: 2 }
+            }
         }).success).toBe(true)
+
+        expect(SyncEventSchema.safeParse({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: '12345678-1234-4234-8234-123456789012',
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 7 },
+                revision: 7,
+                status: {
+                    success: true,
+                    status: 'processing',
+                    queuedMessages: [{ id: 'queued-1', text: 'must stay out of SSE', queuedAt: 1 }]
+                },
+                timing: { cache: 'hit', durationMs: 2 }
+            }
+        }).success).toBe(false)
+
+        expect(SyncEventSchema.safeParse({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: '12345678-1234-4234-8234-123456789012',
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 7 },
+                revision: 7,
+                status: { success: true, status: 'processing' },
+                timing: { cache: 'hit', durationMs: 2 },
+                importedMessages: [{ role: 'agent' }]
+            }
+        }).success).toBe(false)
 
         expect(SyncEventSchema.safeParse({
             type: 'codex-session-updated',

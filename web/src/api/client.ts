@@ -4,7 +4,8 @@ import type {
     CodexLocalSessionsResponse,
     CodexLocalSessionContextResponse,
     CodexLocalSessionComposerCapabilitiesResponse,
-    CodexLocalSessionSnapshotResponse,
+    CodexLocalSessionSnapshotReadResponse,
+    CodexLocalSessionSnapshotVersion,
     CodexLocalSessionStatusResponse,
     ArchiveCodexLocalSessionResponse,
     DiscardCodexLocalSessionMessageResponse,
@@ -311,12 +312,20 @@ export class ApiClient {
     async getCodexSessionSnapshot(
         sessionId: string,
         machineId: string,
-        options: { before?: number; limit?: number } = {}
-    ): Promise<CodexLocalSessionSnapshotResponse> {
+        options: {
+            before?: number
+            limit?: number
+            knownVersion?: CodexLocalSessionSnapshotVersion
+        } = {}
+    ): Promise<CodexLocalSessionSnapshotReadResponse> {
         const queryParams = new URLSearchParams({ machineId })
         if (options.before !== undefined) queryParams.set('before', String(options.before))
         if (options.limit !== undefined) queryParams.set('limit', String(options.limit))
-        return await this.request<CodexLocalSessionSnapshotResponse>(
+        if (options.knownVersion) {
+            queryParams.set('knownRunnerEpoch', options.knownVersion.runnerEpoch)
+            queryParams.set('knownRevision', String(options.knownVersion.revision))
+        }
+        return await this.request<CodexLocalSessionSnapshotReadResponse>(
             `/api/codex/sessions/${encodeURIComponent(sessionId)}/snapshot?${queryParams.toString()}`
         )
     }

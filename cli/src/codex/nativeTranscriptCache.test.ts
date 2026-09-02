@@ -49,18 +49,20 @@ describe('NativeCodexTranscriptCache', () => {
             'utf8'
         )
         process.env.CODEX_HOME = codexHome
-        const cache = new NativeCodexTranscriptCache()
+        const cache = new NativeCodexTranscriptCache({ runnerEpoch: 'runner-a' })
 
         try {
             const first = cache.read(sessionId, { limit: 50 })
             expect(first?.timing.cache).toBe('miss')
             expect(first?.revision).toBe(1)
+            expect(first?.version).toEqual({ runnerEpoch: 'runner-a', revision: 1 })
             expect(first?.data.importedMessages).toMatchObject([{ role: 'user', content: { text: 'First prompt' } }])
             expect(first?.data.session.runState).toBe('idle')
 
             const warm = cache.read(sessionId, { limit: 50 })
             expect(warm?.timing.cache).toBe('hit')
             expect(warm?.revision).toBe(first?.revision)
+            expect(warm?.version).toEqual(first?.version)
 
             appendFileSync(
                 file,
@@ -89,6 +91,7 @@ describe('NativeCodexTranscriptCache', () => {
             const advanced = cache.refreshCached(sessionId, { limit: 50 })
             expect(advanced?.timing.cache).toBe('miss')
             expect(advanced?.revision).toBe((first?.revision ?? 0) + 1)
+            expect(advanced?.version).toEqual({ runnerEpoch: 'runner-a', revision: advanced?.revision })
             expect(advanced?.data.importedMessages).toMatchObject([
                 { role: 'user', content: { text: 'First prompt' } },
                 {

@@ -82,7 +82,7 @@ function createResultDetailsGroup(
         summary: summarizeToolGroup(tools),
         expansionStateKeys: collectExpansionStateKeys(sourceBlocks),
         detailBlocks,
-        showAgentIcon: true,
+        showAgentIcon: tools.length > 0,
         forceGenericCompactTitle: true,
         forceCompact: true
     }

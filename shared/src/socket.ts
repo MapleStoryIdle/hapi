@@ -1,18 +1,16 @@
 import { z } from 'zod'
 import type { CodexCollaborationMode, PermissionMode } from './modes'
+import type { CodexLocalSessionSnapshotVersion } from './codexSnapshot'
 import type { CodexLocalSessionListUpdate, SessionEndReason } from './schemas'
 export { SessionEndReasonSchema, type SessionEndReason } from './schemas'
 
 export type SocketErrorReason = 'namespace-missing' | 'access-denied' | 'not-found'
 
 type NativeCodexRealtimeSocketSnapshot = {
+    version: CodexLocalSessionSnapshotVersion
     revision: number
     status: unknown
     timing: { cache: 'hit' | 'miss'; durationMs: number }
-    session?: unknown
-    importedMessages?: unknown[]
-    startIndex?: number
-    page?: unknown
 }
 
 /**

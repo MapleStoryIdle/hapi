@@ -17,6 +17,8 @@ import {
     type CodexLocalSessionComposerCapabilitiesRpcResponse,
     type CodexLocalSessionData as RunnerCodexLocalSessionData,
     type CodexLocalSessionReadTiming,
+    type CodexLocalSessionSnapshotReadOptions,
+    type CodexLocalSessionSnapshotVersion,
     type CodexLocalSessionStatusRpcResponse,
     type ArchiveCodexLocalSessionRpcResponse,
     type DiscardCodexLocalSessionMessageRpcResponse,
@@ -114,8 +116,21 @@ type CodexLocalSessionContextResponse = {
 }
 
 type CodexLocalSessionSnapshotResponse = CodexLocalSessionContextResponse & {
+    unchanged: false
     status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
+    /** Missing only when a pre-conditional-read runner answers the RPC. */
+    version?: CodexLocalSessionSnapshotVersion
     revision: number
+    timing: CodexLocalSessionReadTiming
+}
+
+type CodexLocalSessionSnapshotUnchangedResponse = {
+    success: true
+    unchanged: true
+    status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
+    version: CodexLocalSessionSnapshotVersion
+    revision: number
+    session?: CodexLocalSessionContextResponse['session']
     timing: CodexLocalSessionReadTiming
 }
 
@@ -623,22 +638,33 @@ function createCodexTranscriptContextMessages(
 
 function createRunnerCodexSessionContextResponse(
     data: RunnerCodexLocalSessionData,
-    revision: number
-): CodexLocalSessionContextResponse & { revision: number } {
+    revision: number,
+    version?: CodexLocalSessionSnapshotVersion
+): CodexLocalSessionContextResponse & { revision: number; version?: CodexLocalSessionSnapshotVersion } {
     const { session, importedMessages } = data
     return {
         success: true,
-        session: {
-            id: session.id,
-            title: session.title,
-            cwd: session.cwd,
-            modifiedAt: session.modifiedAt,
-            model: session.model,
-            modelReasoningEffort: session.modelReasoningEffort
-        },
+        session: createRunnerCodexSessionDisplaySummary(session),
         messages: createCodexTranscriptContextMessages(session.id, importedMessages, data.startIndex, session.modifiedAt),
         page: data.page,
-        revision
+        revision,
+        ...(version === undefined ? {} : { version })
+    }
+}
+
+function createRunnerCodexSessionDisplaySummary(
+    session: Pick<
+        CodexLocalSessionSummary,
+        'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort'
+    >
+): CodexLocalSessionContextResponse['session'] {
+    return {
+        id: session.id,
+        title: session.title,
+        cwd: session.cwd,
+        modifiedAt: session.modifiedAt,
+        model: session.model,
+        modelReasoningEffort: session.modelReasoningEffort
     }
 }
 
@@ -702,6 +728,21 @@ function parseCodexContextBefore(value: string | undefined): number | null | und
     if (value === undefined) return undefined
     const parsed = Number(value)
     return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+}
+
+function parseKnownCodexSnapshotVersion(
+    runnerEpochValue: string | undefined,
+    revisionValue: string | undefined
+): CodexLocalSessionSnapshotVersion | null | undefined {
+    const runnerEpoch = runnerEpochValue?.trim()
+    // A revision without a runner epoch is from the previous protocol. It is
+    // deliberately treated as an unconditional read, never as a match.
+    if (!runnerEpoch) return undefined
+    if (runnerEpoch.length > 200 || revisionValue === undefined) return null
+    const revision = Number(revisionValue)
+    return Number.isSafeInteger(revision) && revision >= 1
+        ? { runnerEpoch, revision }
+        : null
 }
 
 function parseCodexRunnerMachineId(value: string | undefined): string | null {
@@ -1862,7 +1903,11 @@ export function createCodexDesktopRoutes(options: {
             return c.json({ success: false, error: 'HAPI hub is not connected' }, 503)
         }
         if (!getOnlineCodexRunner(engine, c.get('namespace'), machineId)) {
-            return c.json({ success: false, error: 'Selected runner is not online' }, 409)
+            return c.json({
+                success: false,
+                error: 'Selected runner is not online',
+                code: 'runner_offline'
+            }, 409)
         }
         try {
             const listOptions = {
@@ -1938,7 +1983,11 @@ export function createCodexDesktopRoutes(options: {
             return c.json({ success: false, error: 'HAPI hub is not connected' }, 503)
         }
         if (!getOnlineCodexRunner(engine, c.get('namespace'), machineId)) {
-            return c.json({ success: false, error: 'Selected runner is not online' }, 409)
+            return c.json({
+                success: false,
+                error: 'Selected runner is not online',
+                code: 'runner_offline'
+            }, 409)
         }
         try {
             const result = await engine.readCodexLocalSession(machineId, c.req.param('id'), {
@@ -2131,6 +2180,9 @@ export function createCodexDesktopRoutes(options: {
     })
 
     app.get('/codex/sessions/:id/snapshot', async (c) => {
+        // Conditional snapshots must never be served from an intermediary or
+        // service worker: an old 200 body would look like a valid match.
+        c.header('Cache-Control', 'no-store')
         const limit = parseCodexContextPageLimit(c.req.query('limit'))
         if (limit === null) {
             return c.json({ success: false, error: 'limit must be an integer between 1 and 100' }, 400)
@@ -2143,25 +2195,58 @@ export function createCodexDesktopRoutes(options: {
         if (!machineId) {
             return c.json({ success: false, error: 'machineId is required' }, 400)
         }
+        const knownVersion = parseKnownCodexSnapshotVersion(
+            c.req.query('knownRunnerEpoch'),
+            c.req.query('knownRevision')
+        )
+        if (knownVersion === null) {
+            return c.json({ success: false, error: 'knownRunnerEpoch requires a positive integer knownRevision' }, 400)
+        }
 
         const engine = options.getSyncEngine()
         if (!engine) {
             return c.json({ success: false, error: 'HAPI hub is not connected' }, 503)
         }
         if (!getOnlineCodexRunner(engine, c.get('namespace'), machineId)) {
-            return c.json({ success: false, error: 'Selected runner is not online' }, 409)
+            return c.json({
+                success: false,
+                error: 'Selected runner is not online',
+                code: 'runner_offline'
+            }, 409)
         }
 
         try {
-            const result = await engine.readCodexLocalSessionSnapshot(machineId, c.req.param('id'), {
+            const snapshotOptions: CodexLocalSessionSnapshotReadOptions = {
                 limit,
-                ...(before === undefined ? {} : { before })
-            })
+                ...(before === undefined ? {} : { before }),
+                ...(knownVersion === undefined ? {} : { knownVersion })
+            }
+            const result = await engine.readCodexLocalSessionSnapshot(machineId, c.req.param('id'), snapshotOptions)
             if (result.success !== true) {
                 return c.json({ success: false, error: result.error || 'Codex session not found' }, 404)
             }
+            if (result.unchanged === true) {
+                const response: CodexLocalSessionSnapshotUnchangedResponse = {
+                    success: true,
+                    unchanged: true,
+                    version: result.version,
+                    revision: result.revision,
+                    ...(result.session ? {
+                        session: createRunnerCodexSessionDisplaySummary(result.session)
+                    } : {}),
+                    status: result.status,
+                    timing: result.timing
+                }
+                c.header('Server-Timing', `native-cache;desc=${result.timing.cache};dur=${result.timing.durationMs}`)
+                return c.json(response)
+            }
             const response: CodexLocalSessionSnapshotResponse = {
-                ...createRunnerCodexSessionContextResponse(result.snapshot.data, result.snapshot.revision),
+                ...createRunnerCodexSessionContextResponse(
+                    result.snapshot.data,
+                    result.snapshot.revision,
+                    result.snapshot.version
+                ),
+                unchanged: false,
                 status: result.snapshot.status,
                 timing: result.snapshot.timing
             }

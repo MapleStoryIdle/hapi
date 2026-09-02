@@ -144,15 +144,60 @@ function compactActiveTurnReasoning(
     ))
 }
 
+/**
+ * Keep live reasoning available without rendering a separate noisy row beside
+ * the tool activity it describes. A reasoning-only turn remains visible.
+ */
+function foldActiveTurnReasoningIntoNearestToolGroup(
+    blocks: VisibleChatBlock[],
+    runActive: boolean | undefined
+): VisibleChatBlock[] {
+    if (!runActive) return blocks
+
+    const latestBoundaryIndex = blocks.findLastIndex((block) => (
+        block.kind === 'user-text' || block.kind === 'question-answer'
+    ))
+    const reasoningIndex = blocks.findLastIndex((block, index) => (
+        index > latestBoundaryIndex && block.kind === 'agent-reasoning'
+    ))
+    if (reasoningIndex === -1) return blocks
+
+    const groupIndexes: number[] = []
+    for (let index = latestBoundaryIndex + 1; index < blocks.length; index += 1) {
+        if (isToolGroupBlock(blocks[index]!)) groupIndexes.push(index)
+    }
+    if (groupIndexes.length === 0) return blocks
+
+    const targetIndex = groupIndexes.reduce((nearest, candidate) => {
+        const nearestDistance = Math.abs(nearest - reasoningIndex)
+        const candidateDistance = Math.abs(candidate - reasoningIndex)
+        return candidateDistance < nearestDistance ? candidate : nearest
+    })
+    const target = blocks[targetIndex]!
+    const reasoning = blocks[reasoningIndex]!
+    if (!isToolGroupBlock(target) || reasoning.kind !== 'agent-reasoning') return blocks
+
+    const detailBlocks = [...(target.detailBlocks ?? target.tools), reasoning]
+        .filter((block, index, source) => source.findIndex((candidate) => candidate.id === block.id) === index)
+        .sort((left, right) => left.createdAt - right.createdAt)
+
+    return blocks
+        .filter((_, index) => index !== reasoningIndex)
+        .map((block) => block === target ? { ...target, detailBlocks } : block)
+}
+
 export function buildSessionDetailTimeline(
     blocks: readonly ChatBlock[],
     options: SessionDetailTimelineOptions
 ): SessionDetailTimeline {
-    const grouped = compactActiveTurnReasoning(buildVisibleChatBlocks([...blocks], {
-        hasMoreMessages: options.hasMoreMessages,
-        previousGroups: options.previousGroups ? [...options.previousGroups] : undefined,
-        terminalToolDisplayMode: options.terminalToolDisplayMode
-    }), options.runActive)
+    const grouped = foldActiveTurnReasoningIntoNearestToolGroup(
+        compactActiveTurnReasoning(buildVisibleChatBlocks([...blocks], {
+            hasMoreMessages: options.hasMoreMessages,
+            previousGroups: options.previousGroups ? [...options.previousGroups] : undefined,
+            terminalToolDisplayMode: options.terminalToolDisplayMode
+        }), options.runActive),
+        options.runActive
+    )
 
     return {
         grouped,

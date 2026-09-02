@@ -4,6 +4,14 @@ import type { SyncEvent } from '../sync/syncEngine'
 import { VisibilityTracker } from '../visibility/visibilityTracker'
 
 describe('SSEManager namespace filtering', () => {
+    it('keeps one stream epoch for the manager lifetime', () => {
+        const first = new SSEManager(0, new VisibilityTracker())
+        const second = new SSEManager(0, new VisibilityTracker())
+
+        expect(first.getStreamEpoch()).toBe(first.getStreamEpoch())
+        expect(first.getStreamEpoch()).not.toBe(second.getStreamEpoch())
+    })
+
     it('routes events to matching namespace', async () => {
         const manager = new SSEManager(0, new VisibilityTracker())
         const receivedAlpha: SyncEvent[] = []

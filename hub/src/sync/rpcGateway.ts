@@ -4,6 +4,7 @@ import type {
     CodexLocalSessionComposerCapabilitiesRpcResponse,
     ArchiveCodexLocalSessionRpcResponse,
     CodexLocalSessionDataRpcResponse,
+    CodexLocalSessionSnapshotReadOptions,
     CodexLocalSessionSnapshotRpcResponse,
     CodexLocalSessionStatusRpcResponse,
     CodexLocalSessionsRpcResponse,
@@ -288,7 +289,7 @@ export class RpcGateway {
     async readCodexLocalSessionSnapshot(
         machineId: string,
         sessionId: string,
-        options?: { before?: number; limit?: number }
+        options?: CodexLocalSessionSnapshotReadOptions
     ): Promise<RpcCodexLocalSessionSnapshotResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.ReadCodexLocalSessionSnapshot, {
             sessionId,

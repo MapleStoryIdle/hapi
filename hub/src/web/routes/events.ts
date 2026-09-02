@@ -36,6 +36,19 @@ function parseLastEventId(queryValue: string | undefined, headerValue: string | 
     return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null
 }
 
+export function resolveReplayLastEventId(input: {
+    lastEventId: number | null
+    lastStreamEpoch: string | null
+    currentStreamEpoch: string
+}): number | null {
+    if (input.lastEventId === null) {
+        return null
+    }
+    return input.lastStreamEpoch === input.currentStreamEpoch
+        ? input.lastEventId
+        : 0
+}
+
 const visibilitySchema = z.object({
     subscriptionId: z.string().min(1),
     visibility: z.enum(['visible', 'hidden'])
@@ -61,6 +74,12 @@ export function createEventsRoutes(
         const subscriptionId = randomUUID()
         const visibility = parseVisibility(query.visibility)
         const lastEventId = parseLastEventId(query.lastEventId, c.req.header('Last-Event-ID'))
+        const lastStreamEpoch = parseOptionalId(query.lastStreamEpoch)
+        const replayLastEventId = resolveReplayLastEventId({
+            lastEventId,
+            lastStreamEpoch,
+            currentStreamEpoch: manager.getStreamEpoch()
+        })
         const namespace = c.get('namespace')
         let resolvedSessionId = sessionId
 
@@ -122,12 +141,13 @@ export function createEventsRoutes(
                         type: 'connection-changed',
                         data: {
                             status: 'connected',
-                            subscriptionId
+                            subscriptionId,
+                            streamEpoch: manager.getStreamEpoch()
                         }
                     })
                 })
 
-                await manager.replay(subscription.id, lastEventId)
+                await manager.replay(subscription.id, replayLastEventId)
 
                 await new Promise<void>((resolve) => {
                     const done = () => resolve()

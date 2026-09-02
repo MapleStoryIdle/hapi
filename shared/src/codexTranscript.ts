@@ -7,6 +7,8 @@ import {
     normalizeCodexUserMessageContent,
     normalizeCodexUserMessageText
 } from './codexUserMessage'
+import type { CodexLocalSessionSnapshotVersion } from './codexSnapshot'
+export type { CodexLocalSessionSnapshotVersion } from './codexSnapshot'
 import { parseAutomationHeartbeatMessageContent } from './messages'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
 import type { SlashCommand } from './apiTypes'
@@ -30,6 +32,12 @@ export type CodexLocalSessionSummary = {
 
 /** Runner-to-browser list update; the local transcript path stays private. */
 export type CodexLocalSessionListUpdate = Omit<CodexLocalSessionSummary, 'file'>
+
+/** Small metadata that may change while a transcript revision stays stable. */
+export type CodexLocalSessionDisplaySummary = Pick<
+    CodexLocalSessionSummary,
+    'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort'
+>
 
 export type CodexLocalSessionConfig = {
     model: string | null
@@ -91,6 +99,12 @@ export type CodexLocalSessionReadOptions = {
     /** Exclusive message index for loading older transcript entries. */
     before?: number
     limit?: number
+}
+
+/** Options for a conditional native Codex transcript snapshot read. */
+export type CodexLocalSessionSnapshotReadOptions = CodexLocalSessionReadOptions & {
+    /** Conditional matching is valid only for the canonical latest-50 page. */
+    knownVersion?: CodexLocalSessionSnapshotVersion
 }
 
 export type CodexLocalSessionData = {
@@ -196,6 +210,19 @@ export type CodexLocalSessionStatusRpcResponse = {
     error: string
 }
 
+/** Queue identity carried by global realtime invalidations; message text stays in snapshot RPC. */
+export type CodexLocalSessionRealtimeQueuedMessage = Pick<
+    CodexLocalSessionQueuedMessage,
+    'id' | 'recoveryRequired' | 'recoveryReason'
+>
+
+export type CodexLocalSessionRealtimeStatus = Omit<
+    Extract<CodexLocalSessionStatusRpcResponse, { success: true }>,
+    'queuedMessages'
+> & {
+    queuedMessageRefs?: CodexLocalSessionRealtimeQueuedMessage[]
+}
+
 /** Capabilities that can safely be presented in an original native thread. */
 export type CodexLocalSessionComposerCapabilities = {
     /** Custom prompts only. HAPI-owned control commands cannot alter a native thread. */
@@ -219,14 +246,27 @@ export type CodexLocalSessionComposerCapabilitiesRpcResponse = {
 export type CodexLocalSessionSnapshot = {
     data: CodexLocalSessionData
     status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
-    /** Monotonic for the lifetime of a runner process and native thread. */
+    /** Opaque version for conditional reads and realtime invalidations. */
+    version: CodexLocalSessionSnapshotVersion
+    /** Kept alongside `version` for compact display and older consumers. */
     revision: number
     timing: CodexLocalSessionReadTiming
 }
 
 export type CodexLocalSessionSnapshotRpcResponse = {
     success: true
+    unchanged: false
     snapshot: CodexLocalSessionSnapshot
+} | {
+    /** The known `{ runnerEpoch, revision }` still describes the transcript page. */
+    success: true
+    unchanged: true
+    version: CodexLocalSessionSnapshotVersion
+    revision: number
+    /** Small display metadata can change independently from the transcript. */
+    session?: CodexLocalSessionDisplaySummary
+    status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
+    timing: CodexLocalSessionReadTiming
 } | {
     success: false
     error: string
@@ -238,14 +278,11 @@ export type CodexLocalSessionSnapshotRpcResponse = {
  * transcript path and other runner-only metadata.
  */
 export type CodexLocalSessionRealtimeSnapshot = {
+    /** Opaque version only; transcript bodies travel through snapshot RPC. */
+    version: CodexLocalSessionSnapshotVersion
     revision: number
-    status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
+    status: CodexLocalSessionRealtimeStatus
     timing: CodexLocalSessionReadTiming
-    /** Present after a transcript append; omitted for a status-only update. */
-    session?: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort'>
-    importedMessages?: CodexImportedMessageContent[]
-    startIndex?: number
-    page?: CodexLocalSessionPage
 }
 
 export type CodexLocalSessionQueuedMessage = {

@@ -107,7 +107,8 @@ function buildEventsUrl(
     token: string,
     subscription: SSESubscription,
     visibility: VisibilityState,
-    lastEventId: number | null
+    lastEventId: number | null,
+    lastStreamEpoch: string | null
 ): string {
     const params = new URLSearchParams()
     params.set('token', token)
@@ -123,6 +124,9 @@ function buildEventsUrl(
     }
     if (lastEventId !== null) {
         params.set('lastEventId', `${lastEventId}`)
+        if (lastStreamEpoch) {
+            params.set('lastStreamEpoch', lastStreamEpoch)
+        }
     }
 
     const path = `/api/events?${params.toString()}`
@@ -164,6 +168,7 @@ export function useSSE(options: {
     const reconnectAttemptRef = useRef(0)
     const lastActivityAtRef = useRef(0)
     const lastEventIdRef = useRef<number | null>(null)
+    const streamEpochRef = useRef<string | null>(null)
     const streamIdentityRef = useRef<string | null>(null)
     const [reconnectNonce, setReconnectNonce] = useState(0)
     const [subscriptionId, setSubscriptionId] = useState<string | null>(null)
@@ -220,17 +225,21 @@ export function useSSE(options: {
         if (streamIdentityRef.current !== streamIdentity) {
             streamIdentityRef.current = streamIdentity
             lastEventIdRef.current = null
+            streamEpochRef.current = null
         }
         const url = buildEventsUrl(options.baseUrl, options.token, {
             ...subscription,
             sessionId: subscription.sessionId ?? undefined
-        }, getVisibilityState(), lastEventIdRef.current)
+        }, getVisibilityState(), lastEventIdRef.current, streamEpochRef.current)
         const eventSource = new EventSource(url)
         let disconnectNotified = false
         let reconnectRequested = false
         let sessionUpdateTimer: ReturnType<typeof setTimeout> | null = null
         let pendingSessionUpdates: SessionCacheEvent[] = []
         let flushPendingSessionUpdates = () => {}
+        let drainSyncEventQueue = () => {}
+        let syncEventQueueScheduled = false
+        const pendingSyncEvents: Array<{ event: SyncEvent | null; eventId: number | null }> = []
         eventSourceRef.current = eventSource
         lastActivityAtRef.current = Date.now()
 
@@ -261,9 +270,9 @@ export function useSSE(options: {
                 return
             }
             reconnectRequested = true
-            // The cursor already acknowledges transport receipt. Apply the
-            // short UI batch before closing this source so the rebuilt stream
-            // cannot start after an event that was never committed locally.
+            // Commit every event received by this source before closing it.
+            // The replacement stream may start after the committed cursor.
+            drainSyncEventQueue()
             flushPendingSessionUpdates()
             flushInvalidations()
             notifyDisconnect(reason)
@@ -615,17 +624,66 @@ export function useSSE(options: {
             onEventRef.current(event)
         }
 
+        drainSyncEventQueue = () => {
+            syncEventQueueScheduled = false
+            while (pendingSyncEvents.length > 0) {
+                const next = pendingSyncEvents.shift()
+                if (!next) continue
+                const nextStreamEpoch = next.event?.type === 'connection-changed'
+                    ? next.event.data?.streamEpoch
+                    : undefined
+                if (nextStreamEpoch && nextStreamEpoch !== streamEpochRef.current) {
+                    const hadPreviousStream = streamEpochRef.current !== null
+                        || lastEventIdRef.current !== null
+                    streamEpochRef.current = nextStreamEpoch
+                    if (hadPreviousStream) {
+                        // A changed epoch establishes a logical cursor before
+                        // its first numbered event. Persist zero so a second
+                        // disconnect can replay id 1. A genuinely fresh page
+                        // keeps null and does not replay pre-subscription data.
+                        lastEventIdRef.current = 0
+                    }
+                }
+                if (
+                    next.eventId !== null
+                    && lastEventIdRef.current !== null
+                    && next.eventId <= lastEventIdRef.current
+                ) {
+                    continue
+                }
+                if (next.event) {
+                    handleSyncEvent(next.event)
+                }
+                if (next.eventId !== null) {
+                    lastEventIdRef.current = next.eventId
+                }
+            }
+        }
+
+        const enqueueSyncEvent = (event: SyncEvent | null, eventId: number | null, immediate: boolean) => {
+            const hasEarlierPendingEvent = pendingSyncEvents.length > 0 || syncEventQueueScheduled
+            pendingSyncEvents.push({ event, eventId })
+            if (immediate && !hasEarlierPendingEvent) {
+                drainSyncEventQueue()
+                return
+            }
+            if (syncEventQueueScheduled) return
+            syncEventQueueScheduled = true
+            scheduleBackgroundWork(drainSyncEventQueue)
+        }
+
         const handleMessage = (message: MessageEvent<string>) => {
             if (eventSourceRef.current !== eventSource) {
                 return
             }
-            if (typeof message.lastEventId === 'string' && message.lastEventId.trim() !== '') {
-                const eventId = Number(message.lastEventId)
-                if (Number.isSafeInteger(eventId) && eventId >= 0) {
-                    lastEventIdRef.current = eventId
-                }
-            }
+            const parsedEventId = typeof message.lastEventId === 'string' && message.lastEventId.trim() !== ''
+                ? Number(message.lastEventId)
+                : null
+            const eventId = parsedEventId !== null && Number.isSafeInteger(parsedEventId) && parsedEventId >= 0
+                ? parsedEventId
+                : null
             if (typeof message.data !== 'string') {
+                enqueueSyncEvent(null, eventId, false)
                 return
             }
 
@@ -633,13 +691,16 @@ export function useSSE(options: {
             try {
                 parsed = JSON.parse(message.data)
             } catch {
+                enqueueSyncEvent(null, eventId, false)
                 return
             }
 
             if (!isObject(parsed)) {
+                enqueueSyncEvent(null, eventId, false)
                 return
             }
             if (typeof parsed.type !== 'string') {
+                enqueueSyncEvent(null, eventId, false)
                 return
             }
 
@@ -647,20 +708,17 @@ export function useSSE(options: {
             // Token/message events already flow through the frame-batched
             // message store. Put every other server-driven cache update behind
             // a task boundary so it cannot steal a simultaneous tap/click.
-            if (
+            const immediate = (
                 event.type === 'heartbeat'
                 || event.type === 'message-received'
                 || event.type === 'session-added'
                 || event.type === 'session-updated'
                 || event.type === 'session-removed'
-            ) {
-                handleSyncEvent(event)
-            } else {
-                scheduleBackgroundWork(() => {
-                    if (eventSourceRef.current !== eventSource) return
-                    handleSyncEvent(event)
-                })
-            }
+            )
+            // Once one event is deferred, later immediate events join the same
+            // queue. Advancing past an unprocessed lower ID would make a
+            // reconnect permanently skip it.
+            enqueueSyncEvent(event, eventId, immediate)
         }
 
         eventSource.onmessage = handleMessage
@@ -714,6 +772,10 @@ export function useSSE(options: {
         return () => {
             clearInterval(watchdogTimer)
             document.removeEventListener('visibilitychange', onVisibilityChange)
+            // Apply every event received by this source before exposing its
+            // cursor to the replacement stream. A queued callback left in the
+            // interaction scheduler becomes a harmless no-op afterwards.
+            drainSyncEventQueue()
             // Commit cursor-acknowledged session events before this effect
             // discards its local queue. Skip App callbacks during unmount.
             flushSessionUpdates(false)

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { SyncEvent } from '../sync/syncEngine'
 import type { VisibilityState } from '../visibility/visibilityTracker'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
@@ -39,10 +40,15 @@ export class SSEManager {
     private readonly visibilityTracker: VisibilityTracker
     private nextEventId = 0
     private readonly history: SSEHistoryEntry[] = []
+    private readonly streamEpoch = randomUUID()
 
     constructor(heartbeatMs = 30_000, visibilityTracker: VisibilityTracker) {
         this.heartbeatMs = heartbeatMs
         this.visibilityTracker = visibilityTracker
+    }
+
+    getStreamEpoch(): string {
+        return this.streamEpoch
     }
 
     subscribe(options: {

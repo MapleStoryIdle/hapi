@@ -36,43 +36,6 @@ function ChevronIcon(props: { className?: string; open?: boolean }) {
     )
 }
 
-function ThoughtTraceIcon(props: { streaming: boolean }) {
-    return (
-        <span
-            aria-hidden="true"
-            className="relative flex h-5 w-5 shrink-0 items-center justify-center text-[var(--app-hint)]"
-        >
-            <svg viewBox="0 0 20 20" className="h-[18px] w-[18px] overflow-visible" fill="none">
-                <path
-                    d="M3.5 10h4m1.5 0 3-4m-3 4 3 4m0-8h3.5m-3.5 8h3.5"
-                    stroke="currentColor"
-                    strokeWidth="1.35"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    opacity="0.62"
-                />
-                <circle cx="3" cy="10" r="1.55" fill="currentColor" opacity="0.72" />
-                <circle cx="8.5" cy="10" r="1.45" fill="currentColor" opacity="0.82" />
-                <circle
-                    cx="16"
-                    cy="6"
-                    r="1.6"
-                    fill="currentColor"
-                    className={cn(props.streaming && 'motion-safe:animate-pulse')}
-                />
-                <circle
-                    cx="16"
-                    cy="14"
-                    r="1.6"
-                    fill="currentColor"
-                    className={cn(props.streaming && 'motion-safe:animate-pulse')}
-                    style={props.streaming ? { animationDelay: '350ms' } : undefined}
-                />
-            </svg>
-        </span>
-    )
-}
-
 function getReasoningPreview(content: readonly unknown[]): string {
     const preview = content
         .map((part) => {
@@ -129,7 +92,6 @@ export const ReasoningGroup: FC<PropsWithChildren> = ({ children }) => {
                     'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
                 )}
             >
-                <ThoughtTraceIcon streaming={isStreaming} />
                 <span className="shrink-0 font-medium text-[var(--app-hint)] group-hover:text-[var(--app-fg)]">
                     {label}
                 </span>

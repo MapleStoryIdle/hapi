@@ -87,6 +87,9 @@ export function getToolGroupDurationMs(block: ToolGroupBlock, now: number): numb
 
 export function formatCompactDuration(durationMs: number): string {
     const totalSeconds = Math.max(0, Math.floor(durationMs / 1000))
+    if (totalSeconds === 0) {
+        return ''
+    }
     const hours = Math.floor(totalSeconds / 3600)
     const minutes = Math.floor((totalSeconds % 3600) / 60)
     const seconds = totalSeconds % 60

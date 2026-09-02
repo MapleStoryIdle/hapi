@@ -89,7 +89,7 @@ describe('buildSessionDetailTimeline', () => {
         ])
     })
 
-    it('shows only the latest reasoning trace while the current turn is running', () => {
+    it('folds the latest reasoning trace into the nearest tool group while the current turn is running', () => {
         const timeline = buildSessionDetailTimeline([
             userBlock(),
             reasoningBlock('reasoning-1', 2, 'Inspecting'),
@@ -99,8 +99,26 @@ describe('buildSessionDetailTimeline', () => {
 
         expect(timeline.visible.map((block) => block.id)).toEqual([
             'user-1',
-            'tool-group:tool-1',
-            'reasoning-2'
+            'tool-group:tool-1'
+        ])
+        expect(timeline.visible[1]).toMatchObject({
+            kind: 'tool-group',
+            detailBlocks: [
+                { id: 'tool-1' },
+                { id: 'reasoning-2' }
+            ]
+        })
+    })
+
+    it('keeps a reasoning-only active turn visible', () => {
+        const timeline = buildSessionDetailTimeline([
+            userBlock(),
+            reasoningBlock('reasoning-1', 2, 'Inspecting')
+        ], { hasMoreMessages: false, runActive: true })
+
+        expect(timeline.visible.map((block) => block.id)).toEqual([
+            'user-1',
+            'reasoning-1'
         ])
     })
 
@@ -119,6 +137,7 @@ describe('buildSessionDetailTimeline', () => {
         ])
         expect(timeline.visible[1]).toMatchObject({
             kind: 'tool-group',
+            showAgentIcon: false,
             detailBlocks: [
                 { id: 'reasoning-1' },
                 { id: 'reasoning-2' }

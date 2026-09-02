@@ -867,6 +867,7 @@ export default {
   'composer.skills.title': 'Skills',
   'composer.skills.count': '{count}',
   'composer.skills.search': 'Search skills',
+  'composer.skills.recent': 'Recent',
   'composer.skills.customTab': 'Custom',
   'composer.skills.otherTab': 'Other',
   'composer.skills.loading': 'Loading skills...',

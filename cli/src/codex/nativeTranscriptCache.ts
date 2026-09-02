@@ -1,4 +1,5 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import {
     appendCodexTranscriptImportLines,
     createCodexTranscriptImportAccumulator,
@@ -11,6 +12,7 @@ import {
     type CodexLocalSessionReadOptions,
     type CodexLocalSessionReadTiming,
     type CodexLocalSessionSummary,
+    type CodexLocalSessionSnapshotVersion,
     type CodexTranscriptImportAccumulator,
     type CodexTranscriptLifecycleEvent
 } from '@hapi/protocol/codexTranscript'
@@ -49,6 +51,9 @@ type RecentLifecycleTail = {
 
 export type NativeCodexTranscriptRead = {
     data: CodexLocalSessionData
+    /** Opaque version that cannot survive a runner restart. */
+    version: CodexLocalSessionSnapshotVersion
+    /** Kept for compact callers that only display the revision. */
     revision: number
     timing: CodexLocalSessionReadTiming
     /** Bounded raw lifecycle records for the runner-local turn tracker. */
@@ -57,12 +62,16 @@ export type NativeCodexTranscriptRead = {
 
 export type NativeCodexTranscriptSummaryRead = {
     session: CodexLocalSessionSummary
+    version: CodexLocalSessionSnapshotVersion
+    revision: number
     lifecycleEvents: readonly CodexTranscriptLifecycleEvent[]
 }
 
 export type NativeCodexTranscriptCacheOptions = {
     maxEntries?: number
     now?: () => number
+    /** Test hook; production runners generate a fresh opaque epoch. */
+    runnerEpoch?: string
     applyLifecycle?: (session: CodexLocalSessionSummary) => CodexLocalSessionSummary
 }
 
@@ -157,13 +166,16 @@ export class NativeCodexTranscriptCache {
     private readonly revisions = new Map<string, number>()
     private readonly maxEntries: number
     private readonly now: () => number
+    private readonly runnerEpoch: string
     private readonly applyLifecycle: ((session: CodexLocalSessionSummary) => CodexLocalSessionSummary) | null
+    private revisionCounter = 0
 
     constructor(options: NativeCodexTranscriptCacheOptions = {}) {
         // Match the watcher’s observed-thread window so parsed message bodies
         // cannot accumulate for every historical Codex transcript.
         this.maxEntries = options.maxEntries ?? 16
         this.now = options.now ?? Date.now
+        this.runnerEpoch = options.runnerEpoch?.trim() || randomUUID()
         this.applyLifecycle = options.applyLifecycle ?? null
     }
 
@@ -203,8 +215,11 @@ export class NativeCodexTranscriptCache {
     ): NativeCodexTranscriptSummaryRead | null {
         const entry = this.resolveEntry(sessionId, { forceRefresh, allowColdLoad })?.entry
         if (!entry) return null
+        const revision = this.getRevision(sessionId)
         return {
             session: this.applyLifecycleToSummary(entry.session),
+            version: this.getVersion(revision),
+            revision,
             lifecycleEvents: entry.lifecycleEvents
         }
     }
@@ -256,12 +271,14 @@ export class NativeCodexTranscriptCache {
         }
 
         const data = createLocalCodexSessionData(entry.session, entry.importedMessages ?? [], options)
+        const revision = this.getRevision(sessionId)
         return {
             data: {
                 ...data,
                 session: this.applyLifecycleToSummary(data.session)
             },
-            revision: this.revisions.get(sessionId) ?? 1,
+            version: this.getVersion(revision),
+            revision,
             timing: {
                 cache: cacheMiss ? 'miss' : 'hit',
                 durationMs: Math.max(0, this.now() - startedAt)
@@ -386,8 +403,21 @@ export class NativeCodexTranscriptCache {
         return next
     }
 
-    private bumpRevision(sessionId: string): void {
-        this.revisions.set(sessionId, (this.revisions.get(sessionId) ?? 0) + 1)
+    private bumpRevision(sessionId: string): number {
+        const revision = ++this.revisionCounter
+        this.revisions.set(sessionId, revision)
+        return revision
+    }
+
+    private getRevision(sessionId: string): number {
+        return this.revisions.get(sessionId) ?? this.bumpRevision(sessionId)
+    }
+
+    private getVersion(revision: number): CodexLocalSessionSnapshotVersion {
+        return {
+            runnerEpoch: this.runnerEpoch,
+            revision
+        }
     }
 
     private setEntry(sessionId: string, entry: CacheEntry): void {

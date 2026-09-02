@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactElement } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 
@@ -347,6 +347,7 @@ describe('ComposerButtons — permission mode button', () => {
 
     afterEach(() => {
         cleanup()
+        document.documentElement.removeAttribute('data-app-keyboard-open')
     })
 
     /**
@@ -424,6 +425,51 @@ describe('ComposerButtons — permission mode button', () => {
         expect(safeYoloRow?.querySelector('span')?.className).not.toContain('text-orange-500')
         expect(safeYoloRow?.querySelector('span')?.className).toContain('text-blue-500')
         expect(fullAccessRow?.querySelector('span')?.className).toContain('text-orange-500')
+    })
+
+    it('keeps the keyboard-open permission menu in the shared viewport scroll layer', () => {
+        document.documentElement.setAttribute('data-app-keyboard-open', 'true')
+        renderInProviders(
+            <ComposerButtons
+                canSend={false}
+                controlsDisabled={false}
+                showSettingsButton={false}
+                onSettingsToggle={noop}
+                permissionMode="default"
+                permissionLabel="Default"
+                permissionModeOptions={[
+                    { mode: 'default', label: 'Default' },
+                    { mode: 'read-only', label: 'Read Only' },
+                    { mode: 'safe-yolo', label: 'Safe Yolo' },
+                    { mode: 'yolo', label: 'Yolo' }
+                ]}
+                onPermissionModeChange={noop}
+                showTerminalButton={false}
+                terminalDisabled={false}
+                terminalLabel="Terminal"
+                onTerminal={noop}
+                showAbortButton={false}
+                abortDisabled={false}
+                isAborting={false}
+                onAbort={noop}
+                showSwitchButton={false}
+                switchDisabled={false}
+                isSwitching={false}
+                onSwitch={noop}
+                voiceEnabled={false}
+                voiceStatus="disconnected"
+                onVoiceToggle={noop}
+                onSend={noop}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: /Permission Mode: Default/ }))
+
+        const menu = screen.getByTestId('toolbar-menu')
+        const scrollLayer = menu.querySelector('[data-toolbar-menu-scroll="true"]')
+        expect(menu.parentElement).toBe(document.body)
+        expect(menu).toHaveAttribute('data-toolbar-menu-surface', 'permission')
+        expect(scrollLayer).toHaveClass('overflow-y-auto', 'overscroll-contain')
     })
 })
 
@@ -576,6 +622,8 @@ describe('ComposerButtons — skill picker', () => {
 
     afterEach(() => {
         cleanup()
+        localStorage.clear()
+        document.documentElement.removeAttribute('data-app-keyboard-open')
     })
 
     it('groups skills by scope without tab or count badges', () => {
@@ -623,6 +671,91 @@ describe('ComposerButtons — skill picker', () => {
         expect(screen.queryByRole('button', { name: /Custom\s+\d/ })).not.toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Other\s+\d/ })).not.toBeInTheDocument()
         expect(screen.queryByText('4')).not.toBeInTheDocument()
+    })
+
+    it('shows the last deliberately clicked skills for the current project only', () => {
+        const skills = [
+            { name: 'first', description: 'First skill', scope: 'project' as const },
+            { name: 'second', description: 'Second skill', scope: 'project' as const },
+        ]
+        const props = {
+            canSend: false,
+            controlsDisabled: false,
+            showSettingsButton: false,
+            onSettingsToggle: noop,
+            skills,
+            onSkillSelect: noop,
+            showTerminalButton: false,
+            terminalDisabled: false,
+            terminalLabel: 'Terminal',
+            onTerminal: noop,
+            showAbortButton: false,
+            abortDisabled: false,
+            isAborting: false,
+            onAbort: noop,
+            showSwitchButton: false,
+            switchDisabled: false,
+            isSwitching: false,
+            onSwitch: noop,
+            voiceEnabled: false,
+            voiceStatus: 'disconnected' as const,
+            onVoiceToggle: noop,
+            onSend: noop,
+        }
+
+        const view = renderInProviders(<ComposerButtons {...props} projectPath="/work/alpha" />)
+        fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
+        fireEvent.click(screen.getByText('second'))
+        fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
+
+        const recent = screen.getByTestId('composer-recent-skills')
+        expect(within(recent).getByText('Recent')).toBeInTheDocument()
+        expect(within(recent).getByText('second')).toBeInTheDocument()
+
+        view.rerender(
+            <I18nProvider>
+                <ComposerButtons {...props} projectPath="/work/beta" />
+            </I18nProvider>
+        )
+        expect(screen.queryByTestId('composer-recent-skills')).not.toBeInTheDocument()
+    })
+
+    it('keeps the keyboard focus stable and portals the menu to the viewport layer', () => {
+        document.documentElement.setAttribute('data-app-keyboard-open', 'true')
+        renderInProviders(
+            <ComposerButtons
+                canSend={false}
+                controlsDisabled={false}
+                showSettingsButton={false}
+                onSettingsToggle={noop}
+                projectPath="/work/alpha"
+                skills={[{ name: 'project-skill', scope: 'project' }]}
+                onSkillSelect={noop}
+                showTerminalButton={false}
+                terminalDisabled={false}
+                terminalLabel="Terminal"
+                onTerminal={noop}
+                showAbortButton={false}
+                abortDisabled={false}
+                isAborting={false}
+                onAbort={noop}
+                showSwitchButton={false}
+                switchDisabled={false}
+                isSwitching={false}
+                onSwitch={noop}
+                voiceEnabled={false}
+                voiceStatus="disconnected"
+                onVoiceToggle={noop}
+                onSend={noop}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
+
+        const menu = screen.getByTestId('toolbar-menu')
+        const search = screen.getByPlaceholderText('Search skills')
+        expect(menu.parentElement).toBe(document.body)
+        expect(search).not.toHaveFocus()
     })
 })
 

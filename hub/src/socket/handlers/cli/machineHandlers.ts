@@ -1,5 +1,8 @@
 import { ExternalCodexRequestPayloadSchema, type ClientToServerEvents, type ExternalCodexRequestPayload } from '@hapi/protocol'
-import { CodexLocalSessionListUpdateSchema } from '@hapi/protocol/schemas'
+import {
+    CodexLocalSessionListUpdateSchema,
+    CodexLocalSessionRealtimeSnapshotSchema
+} from '@hapi/protocol/schemas'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { Store, StoredMachine } from '../../../store'
@@ -208,13 +211,20 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
             return
         }
 
+        // Older runners may still send the previous transcript-bearing
+        // payload. Preserve their lightweight list invalidation, but never
+        // forward unbounded transcript data through the global SSE channel.
+        const realtimeSnapshot = parsed.data.snapshot === undefined
+            ? undefined
+            : CodexLocalSessionRealtimeSnapshotSchema.safeParse(parsed.data.snapshot).data
+
         onWebappEvent?.({
             type: 'codex-session-updated',
             machineId: parsed.data.machineId,
             codexSessionId: parsed.data.codexSessionId,
             ...(parsed.data.modifiedAt === undefined ? {} : { modifiedAt: parsed.data.modifiedAt }),
             ...(parsed.data.summary === undefined ? {} : { summary: parsed.data.summary }),
-            ...(parsed.data.snapshot === undefined ? {} : { snapshot: parsed.data.snapshot }),
+            ...(realtimeSnapshot === undefined ? {} : { snapshot: realtimeSnapshot }),
             namespace
         })
     })

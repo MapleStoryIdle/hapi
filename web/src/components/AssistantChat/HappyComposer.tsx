@@ -250,6 +250,8 @@ export function ModelEffortSettingsSection(props: {
 
 export function HappyComposer(props: {
     sessionId?: string
+    /** Workspace identity for project-scoped skill shortcuts. */
+    projectPath?: string | null
     disabled?: boolean
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
@@ -1860,6 +1862,7 @@ export function HappyComposer(props: {
                                 skillsLoading={skillsLoading}
                                 skillsError={skillsError}
                                 onSkillSelect={handleSkillSelect}
+                                projectPath={props.projectPath}
                                 showPlanModeButton={showPlanModeTool}
                                 planModeActive={collaborationMode === 'plan'}
                                 onPlanModeToggle={showPlanModeTool ? handlePlanModeToggle : undefined}

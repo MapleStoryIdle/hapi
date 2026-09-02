@@ -935,8 +935,31 @@ describe('Codex Desktop import routes', () => {
             ...createImportSyncEngine(store, [machine]),
             readCodexLocalSessionSnapshot: async (...args: unknown[]) => {
                 snapshotCalls.push(args)
+                const options = args[2] as { knownVersion?: { runnerEpoch: string; revision: number } } | undefined
+                if (options?.knownVersion) {
+                    return {
+                        success: true as const,
+                        unchanged: true as const,
+                        version: options.knownVersion,
+                        revision: options.knownVersion.revision,
+                        session: {
+                            id: sessionId,
+                            title: 'Renamed native task',
+                            cwd: '/runner/workspace/project',
+                            modifiedAt: 123,
+                            file: '/must/not/reach/web.jsonl'
+                        },
+                        status: {
+                            success: true as const,
+                            status: 'processing' as const,
+                            queuedMessages: [{ id: 'queued-1', text: 'next', queuedAt: 42 }]
+                        },
+                        timing: { cache: 'hit' as const, durationMs: 1 }
+                    }
+                }
                 return {
                     success: true as const,
+                    unchanged: false as const,
                     snapshot: {
                         data,
                         status: {
@@ -944,6 +967,7 @@ describe('Codex Desktop import routes', () => {
                             status: 'processing' as const,
                             queuedMessages: [{ id: 'queued-1', text: 'next', queuedAt: 42 }]
                         },
+                        version: { runnerEpoch: 'runner-a', revision: 7 },
                         revision: 7,
                         timing: { cache: 'hit' as const, durationMs: 3 }
                     }
@@ -956,8 +980,11 @@ describe('Codex Desktop import routes', () => {
             const response = await app.request(`/api/codex/sessions/${sessionId}/snapshot?machineId=mac-runner&limit=50`)
             expect(response.status).toBe(200)
             expect(response.headers.get('server-timing')).toBe('native-cache;desc=hit;dur=3')
+            expect(response.headers.get('cache-control')).toBe('no-store')
             expect(await response.json()).toMatchObject({
                 success: true,
+                unchanged: false,
+                version: { runnerEpoch: 'runner-a', revision: 7 },
                 revision: 7,
                 timing: { cache: 'hit', durationMs: 3 },
                 status: {
@@ -972,6 +999,61 @@ describe('Codex Desktop import routes', () => {
                 ]
             })
             expect(snapshotCalls).toEqual([['mac-runner', sessionId, { limit: 50 }]])
+
+            const unchangedResponse = await app.request(
+                `/api/codex/sessions/${sessionId}/snapshot?machineId=mac-runner&limit=50&knownRunnerEpoch=runner-a&knownRevision=7`
+            )
+            expect(unchangedResponse.status).toBe(200)
+            expect(unchangedResponse.headers.get('cache-control')).toBe('no-store')
+            expect(await unchangedResponse.json()).toEqual({
+                success: true,
+                unchanged: true,
+                version: { runnerEpoch: 'runner-a', revision: 7 },
+                revision: 7,
+                session: {
+                    id: sessionId,
+                    title: 'Renamed native task',
+                    cwd: '/runner/workspace/project',
+                    modifiedAt: 123
+                },
+                status: {
+                    success: true,
+                    status: 'processing',
+                    queuedMessages: [{ id: 'queued-1', text: 'next', queuedAt: 42 }]
+                },
+                timing: { cache: 'hit', durationMs: 1 }
+            })
+            expect(snapshotCalls).toEqual([
+                ['mac-runner', sessionId, { limit: 50 }],
+                ['mac-runner', sessionId, {
+                    limit: 50,
+                    knownVersion: { runnerEpoch: 'runner-a', revision: 7 }
+                }]
+            ])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('marks an offline snapshot runner with a retryable stable code', async () => {
+        const store = new Store(':memory:')
+        const machine = {
+            ...createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex'),
+            active: false
+        }
+        const engine = createImportSyncEngine(store, [machine])
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(
+                '/api/codex/sessions/56565656-5656-4656-8656-565656565656/snapshot?machineId=mac-runner&limit=50'
+            )
+            expect(response.status).toBe(409)
+            expect(await response.json()).toEqual({
+                success: false,
+                error: 'Selected runner is not online',
+                code: 'runner_offline'
+            })
         } finally {
             store.close()
         }

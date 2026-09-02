@@ -1,6 +1,6 @@
 import type { MessageStatus } from '@/types/api'
 import { LazyRainbowText } from '@/components/LazyRainbowText'
-import { SparklesIcon } from '@/components/ToolCard/icons'
+import { PuzzleIcon, SparklesIcon } from '@/components/ToolCard/icons'
 import { cn } from '@/lib/utils'
 
 const LEADING_DIRECTIVE_REGEX = /^([$\/][a-z0-9][\w-]*)(?=\s|$)/i
@@ -47,16 +47,21 @@ export function formatDirectiveLabel(value: string): string {
 
 export function DirectiveChip(props: { value: string }) {
     const label = formatDirectiveLabel(props.value)
+    const isSkill = props.value.startsWith('$')
 
     return (
         <span
             className={cn(
-                'inline-flex items-center justify-center gap-[0.2rem] whitespace-nowrap rounded-full border border-[var(--app-chat-user-border)] bg-[var(--app-chat-user-chip-bg)] px-2 py-px align-middle text-[length:var(--app-chat-font-size)] font-normal leading-[1.4] text-[var(--app-chat-user-chip-fg)] shadow-none'
+                'inline-flex items-center justify-center gap-[0.2rem] whitespace-nowrap rounded-full border border-[var(--app-chat-user-border)] bg-[var(--app-chat-user-chip-bg)] px-2 py-px align-middle text-[length:var(--app-chat-font-size)] font-normal leading-[1.4] shadow-none',
+                isSkill ? 'text-[var(--app-link)]' : 'text-[var(--app-chat-user-chip-fg)]'
             )}
             title={props.value}
             aria-label={props.value}
+            data-user-directive-kind={isSkill ? 'skill' : 'command'}
         >
-            <SparklesIcon className="h-[0.92em] w-[0.92em] shrink-0 [stroke-width:1.6]" />
+            {isSkill
+                ? <PuzzleIcon className="h-[0.92em] w-[0.92em] shrink-0 [stroke-width:1.6]" />
+                : <SparklesIcon className="h-[0.92em] w-[0.92em] shrink-0 [stroke-width:1.6]" />}
             <span>{label}</span>
         </span>
     )

@@ -362,30 +362,143 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
             JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })
         ].join('\n'), 'utf8')
         const client = new ApiMachineClient('cli-token', machine)
+        let displayTitle = 'Original native title'
+        ;(client as unknown as {
+            nativeCodexSessionTitleCache: {
+                resolve: (sessionIds: readonly string[]) => ReadonlyMap<string, string>
+            }
+        }).nativeCodexSessionTitleCache.resolve = () => new Map([[sessionId, displayTitle]])
 
         try {
             const first = await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', { sessionId, limit: 50 }) as {
                 success: boolean
-                snapshot?: { revision: number; timing: { cache: string }; status: { status: string }; data: { importedMessages: unknown[] } }
+                unchanged?: boolean
+                snapshot?: {
+                    revision: number
+                    version: { runnerEpoch: string; revision: number }
+                    timing: { cache: string }
+                    status: { status: string }
+                    data: { session: { title: string }; importedMessages: unknown[] }
+                }
             }
             expect(first).toMatchObject({
                 success: true,
+                unchanged: false,
                 snapshot: {
                     revision: 1,
+                    version: { revision: 1 },
                     timing: { cache: 'miss' },
                     status: { status: 'idle' },
-                    data: { importedMessages: [{ role: 'user' }] }
+                    data: {
+                        session: { title: 'Original native title' },
+                        importedMessages: [{ role: 'user' }]
+                    }
                 }
             })
 
             const warm = await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', { sessionId, limit: 50 }) as {
                 success: boolean
+                unchanged?: boolean
                 snapshot?: { revision: number; timing: { cache: string } }
             }
             expect(warm).toMatchObject({
                 success: true,
+                unchanged: false,
                 snapshot: { revision: first.snapshot?.revision, timing: { cache: 'hit' } }
             })
+
+            displayTitle = 'Renamed without transcript change'
+            const unchanged = await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', {
+                sessionId,
+                limit: 50,
+                knownVersion: first.snapshot?.version
+            }) as {
+                success: boolean
+                unchanged?: boolean
+                version?: { runnerEpoch: string; revision: number }
+                revision?: number
+                session?: { title: string }
+                status?: { status: string }
+                timing?: { cache: string }
+                snapshot?: unknown
+            }
+            expect(unchanged).toMatchObject({
+                success: true,
+                unchanged: true,
+                version: first.snapshot?.version,
+                revision: first.snapshot?.revision,
+                session: { title: 'Renamed without transcript change' },
+                status: { status: 'idle' },
+                timing: { cache: 'hit' }
+            })
+            expect(unchanged.snapshot).toBeUndefined()
+
+            const differentPage = await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', {
+                sessionId,
+                limit: 1,
+                knownVersion: first.snapshot?.version
+            }) as {
+                success: boolean
+                unchanged?: boolean
+                snapshot?: { data: { page: { limit: number } } }
+            }
+            expect(differentPage).toMatchObject({
+                success: true,
+                unchanged: false,
+                snapshot: { data: { page: { limit: 1 } } }
+            })
+
+            const emit = vi.fn()
+            ;(client as unknown as { socket: { emit: typeof emit; close: () => void } }).socket = {
+                emit,
+                close: () => {}
+            }
+            ;(client as unknown as {
+                nativeCodexSessionDirectSender: {
+                    getStatus: () => {
+                        success: true
+                        status: 'processing'
+                        queuedMessages: Array<{
+                            id: string
+                            text: string
+                            queuedAt: number
+                            recoveryRequired?: boolean
+                            recoveryReason?: 'codex_timeout'
+                        }>
+                    }
+                }
+            }).nativeCodexSessionDirectSender.getStatus = () => ({
+                success: true,
+                status: 'processing',
+                queuedMessages: [{
+                    id: 'queued-1',
+                    text: 'This text must never enter global SSE',
+                    queuedAt: 42,
+                    recoveryRequired: true,
+                    recoveryReason: 'codex_timeout'
+                }]
+            })
+            const report = (client as unknown as {
+                reportNativeCodexSessionUpdated: (id: string, modifiedAt?: number) => boolean
+            }).reportNativeCodexSessionUpdated.bind(client)
+            expect(report(sessionId, 1)).toBe(true)
+            const update = emit.mock.calls[0]?.[1] as { snapshot?: Record<string, unknown> } | undefined
+            expect(update?.snapshot).toMatchObject({
+                version: first.snapshot?.version,
+                revision: first.snapshot?.revision,
+                status: {
+                    status: 'processing',
+                    queuedMessageRefs: [{
+                        id: 'queued-1',
+                        recoveryRequired: true,
+                        recoveryReason: 'codex_timeout'
+                    }]
+                },
+                timing: { cache: 'hit' }
+            })
+            expect(update?.snapshot).not.toHaveProperty('importedMessages')
+            expect(update?.snapshot).not.toHaveProperty('session')
+            expect(update?.snapshot?.status).not.toHaveProperty('queuedMessages')
         } finally {
             client.shutdown()
         }
