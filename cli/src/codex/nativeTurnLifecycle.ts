@@ -418,6 +418,22 @@ export class NativeCodexTurnLifecycleTracker {
         return next
     }
 
+    /**
+     * Small realtime-safe identity for the native turn currently owned by
+     * Codex. A stale hook lease must not keep an old plan visible forever.
+     */
+    getActiveTurnId(codexSessionId: string): string | null {
+        const lifecycle = this.sessions.get(codexSessionId)
+        const active = lifecycle?.active
+        if (!lifecycle || !active) return null
+        const now = this.now()
+        this.touch(codexSessionId, lifecycle, now)
+        if (!active.confirmed && (active.expired || now >= active.expiresAt)) {
+            return null
+        }
+        return active.turnId
+    }
+
     dispose(): void {
         for (const session of this.sessions.values()) {
             this.clearActiveTimer(session.active)

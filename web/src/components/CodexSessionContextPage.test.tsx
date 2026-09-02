@@ -5,13 +5,19 @@ import { I18nProvider } from '@/lib/i18n-context'
 import { NativeCodexRealtimeProvider } from '@/lib/native-codex-realtime-context'
 import { publishNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
 import { ApiError, type ApiClient } from '@/api/client'
-import type { CodexLocalSessionContextMessage, CodexLocalSessionContextResponse, CodexLocalSessionSnapshotResponse } from '@/types/api'
+import type {
+    CodexLocalSessionContextMessage,
+    CodexLocalSessionContextResponse,
+    CodexLocalSessionPlan,
+    CodexLocalSessionSnapshotResponse
+} from '@/types/api'
 import {
     buildReadOnlyCodexBlocks,
     CodexSessionContextPage,
     deriveNativeSessionConnectionHealth,
     hasNativeCodexAgentReply,
     getNativeCodexDirectSendPhase,
+    getNativeCodexPlanStatus,
     getNativeContextRefreshInterval,
     getVisibleNativeDirectMessageEchoes,
     mergeCodexContextMessages
@@ -149,6 +155,60 @@ function openNativeSessionMenu() {
 }
 
 describe('CodexSessionContextPage', () => {
+    it('shows a native plan only for its active processing turn', () => {
+        const plan: CodexLocalSessionPlan = {
+            turnId: 'turn-plan',
+            callId: 'call-plan',
+            steps: [
+                { text: 'Inspect the transcript', status: 'completed' },
+                { text: 'Render the plan', status: 'in_progress' }
+            ]
+        }
+
+        expect(getNativeCodexPlanStatus(plan, 'processing', 'turn-plan')).toMatchObject({
+            sourceBlockId: 'native-plan:turn-plan:call-plan',
+            completed: 1,
+            total: 2,
+            currentStep: { text: 'Render the plan', status: 'in_progress' }
+        })
+        expect(getNativeCodexPlanStatus(plan, 'idle', 'turn-plan')).toBeNull()
+        expect(getNativeCodexPlanStatus(plan, 'processing', 'newer-turn')).toBeNull()
+    })
+
+    it('renders the active native plan through the shared summary', async () => {
+        const api = createApi()
+        const status = {
+            success: true as const,
+            status: 'processing' as const,
+            activeTurnId: 'turn-plan'
+        }
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue(status)
+        ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockImplementation(async (sessionId, machineId, options) => ({
+            ...(await api.getCodexSessionContext(sessionId, machineId, options)),
+            status,
+            plan: {
+                turnId: 'turn-plan',
+                callId: 'call-plan',
+                steps: [
+                    { text: 'Inspect the transcript', status: 'completed' },
+                    { text: 'Render the native plan', status: 'in_progress' }
+                ]
+            },
+            version: { runnerEpoch: 'runner-a', revision: 1 },
+            revision: 1,
+            timing: { cache: 'hit', durationMs: 1 }
+        }))
+
+        renderPage({ api })
+
+        const plan = await screen.findByRole('button', {
+            name: 'Plan · Render the native plan · 1/2 complete'
+        })
+        expect(plan).toHaveAttribute('aria-expanded', 'false')
+        expect(plan).toHaveTextContent('1/2·Render the native plan')
+        expect(screen.queryByText('Inspect the transcript')).toBeNull()
+    })
+
     it('uses a faster native fallback refresh cadence while a turn is running', () => {
         expect(getNativeContextRefreshInterval({ success: true, status: 'processing' })).toBe(1_000)
         expect(getNativeContextRefreshInterval({ success: true, status: 'idle' })).toBe(5_000)

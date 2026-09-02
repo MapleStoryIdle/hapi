@@ -8,6 +8,7 @@ import type {
     CodexLocalSessionContextResponse,
     CodexLocalSessionDirectSendProgress,
     CodexLocalSessionDirectSendRecoveryReason,
+    CodexLocalSessionPlan,
     CodexLocalSessionQueuedMessage,
     CodexLocalSessionRunState,
     CodexLocalSessionSnapshotResponse,
@@ -28,6 +29,7 @@ import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SESSION_DETAIL_HEADER_HEIGHT_PX } from '@/components/SessionDetailHeader'
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { HappyComposer, type ComposerSendError } from '@/components/AssistantChat/HappyComposer'
+import { PlanStatusSummary, type PlanStatusSummaryData } from '@/components/AssistantChat/PlanStatusSummary'
 import { NativeQueuedMessagesBar } from '@/components/NativeQueuedMessagesBar'
 import { buildConversationOutline } from '@/chat/outline'
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
@@ -499,6 +501,42 @@ export function buildNativeCodexBlocks(
     ])
 }
 
+/**
+ * Native transcript plans are not HAPI messages. Build the shared visual
+ * model directly from the full snapshot, and only while the runner confirms
+ * that exact Codex turn is still processing.
+ */
+export function getNativeCodexPlanStatus(
+    plan: CodexLocalSessionPlan | null | undefined,
+    runState: CodexLocalSessionRunState | null,
+    activeTurnId: string | null | undefined
+): PlanStatusSummaryData | null {
+    if (!plan || runState !== 'processing' || !activeTurnId || plan.turnId !== activeTurnId || plan.steps.length === 0) {
+        return null
+    }
+
+    const steps = plan.steps.map((step) => ({
+        text: step.text,
+        status: step.status
+    }))
+    const inProgressIndex = steps.findIndex((step) => step.status === 'in_progress')
+    const pendingIndex = steps.findIndex((step) => step.status === 'pending')
+    const currentIndex = inProgressIndex >= 0
+        ? inProgressIndex
+        : pendingIndex >= 0
+            ? pendingIndex
+            : Math.max(0, steps.length - 1)
+
+    return {
+        sourceBlockId: `native-plan:${plan.turnId}:${plan.callId}`,
+        steps,
+        total: steps.length,
+        completed: steps.filter((step) => step.status === 'completed').length,
+        currentIndex,
+        currentStep: steps[currentIndex]
+    }
+}
+
 function NativeCodexThread(props: {
     api: ApiClient
     sessionId: string
@@ -515,6 +553,9 @@ function NativeCodexThread(props: {
     outlineOpen: boolean
     onOutlineOpenChange: (open: boolean) => void
     isProcessing: boolean
+    runState: CodexLocalSessionRunState | null
+    activeTurnId?: string | null
+    plan?: CodexLocalSessionPlan | null
     queuedMessages: readonly CodexLocalSessionQueuedMessage[]
     composerDisabled: boolean
     composerNotice: string | null
@@ -529,10 +570,11 @@ function NativeCodexThread(props: {
     forceScrollToken: number
 }) {
     const composerOverlayRef = useRef<HTMLDivElement | null>(null)
-    const queueOverlayRef = useRef<HTMLDivElement | null>(null)
+    const accessoryOverlayRef = useRef<HTMLDivElement | null>(null)
     const [composerHeight, setComposerHeight] = useState(0)
-    const [queueHeight, setQueueHeight] = useState(0)
+    const [accessoryHeight, setAccessoryHeight] = useState(0)
     const [queueAccessoryExpanded, setQueueAccessoryExpanded] = useState(false)
+    const [planAccessoryExpanded, setPlanAccessoryExpanded] = useState(false)
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const nativeSession = useMemo(() => ({ active: true, thinking: props.isProcessing }), [props.isProcessing])
     const transcriptBlocks = useMemo(
@@ -543,6 +585,15 @@ function NativeCodexThread(props: {
         () => buildNativeCodexBlocks(props.messages, props.directMessageEchoes),
         [props.directMessageEchoes, props.messages]
     )
+    const nativePlan = useMemo(
+        () => getNativeCodexPlanStatus(props.plan, props.runState, props.activeTurnId),
+        [props.activeTurnId, props.plan, props.runState]
+    )
+    useEffect(() => {
+        if (!nativePlan) {
+            setPlanAccessoryExpanded(false)
+        }
+    }, [nativePlan])
     const timeline = useMemo(
         () => buildSessionDetailTimeline(ungroupedBlocks, {
             hasMoreMessages: props.hasMoreMessages,
@@ -593,15 +644,15 @@ function NativeCodexThread(props: {
     }, [])
 
     useLayoutEffect(() => {
-        const node = queueOverlayRef.current
+        const node = accessoryOverlayRef.current
         if (!node) {
-            setQueueHeight(0)
+            setAccessoryHeight(0)
             return
         }
 
         const measure = () => {
             const height = Math.ceil(node.getBoundingClientRect().height)
-            setQueueHeight((current) => current === height ? current : height)
+            setAccessoryHeight((current) => current === height ? current : height)
         }
         measure()
         if (typeof ResizeObserver === 'undefined') {
@@ -615,10 +666,11 @@ function NativeCodexThread(props: {
             observer.disconnect()
             window.removeEventListener('resize', measure)
         }
-    }, [props.queuedMessages.length])
+    }, [nativePlan?.sourceBlockId, props.queuedMessages.length])
 
     const queueAccessoryVisible = props.queuedMessages.length > 0
-    const totalBottomInset = composerHeight + (queueHeight > 0 ? queueHeight + NATIVE_QUEUE_FLOATING_GAP_PX : 0)
+    const accessoryVisible = queueAccessoryVisible || nativePlan !== null
+    const totalBottomInset = composerHeight + (accessoryHeight > 0 ? accessoryHeight + NATIVE_QUEUE_FLOATING_GAP_PX : 0)
 
     return (
         <AssistantRuntimeProvider runtime={runtime}>
@@ -655,8 +707,8 @@ function NativeCodexThread(props: {
                     topInset={SESSION_DETAIL_HEADER_HEIGHT_PX}
                     bottomInset={totalBottomInset || undefined}
                     scrollButtonBottomInset={totalBottomInset > 0 ? totalBottomInset + 8 : undefined}
-                    bottomAccessoryVisible={queueAccessoryVisible}
-                    bottomAccessoryExpanded={queueAccessoryExpanded}
+                    bottomAccessoryVisible={accessoryVisible}
+                    bottomAccessoryExpanded={queueAccessoryExpanded || planAccessoryExpanded}
                     onOutlineOpenChange={props.onOutlineOpenChange}
                 />
 
@@ -687,16 +739,24 @@ function NativeCodexThread(props: {
                         </div>
                     </SessionDetailBottomDockComposer>
 
-                    {queueAccessoryVisible ? (
+                    {accessoryVisible ? (
                         <SessionDetailBottomDockAccessory
-                            ref={queueOverlayRef}
-                            testId="codex-native-session-queue-overlay"
+                            ref={accessoryOverlayRef}
+                            testId="codex-native-session-accessory-overlay"
                         >
-                            <div className="pointer-events-auto">
-                                <NativeQueuedMessagesBar
-                                    messages={props.queuedMessages}
-                                    onExpandedChange={setQueueAccessoryExpanded}
-                                />
+                            <div className="pointer-events-auto flex flex-col gap-2">
+                                {nativePlan ? (
+                                    <PlanStatusSummary
+                                        plan={nativePlan}
+                                        onExpandedChange={setPlanAccessoryExpanded}
+                                    />
+                                ) : null}
+                                {queueAccessoryVisible ? (
+                                    <NativeQueuedMessagesBar
+                                        messages={props.queuedMessages}
+                                        onExpandedChange={setQueueAccessoryExpanded}
+                                    />
+                                ) : null}
                             </div>
                         </SessionDetailBottomDockAccessory>
                     ) : null}
@@ -2014,6 +2074,11 @@ export function CodexSessionContextPage(props: {
                             outlineOpen={outlineOpen}
                             onOutlineOpenChange={setOutlineOpen}
                             isProcessing={isNativeProcessing}
+                            runState={directStatus}
+                            activeTurnId={statusQuery.data?.success === true
+                                ? statusQuery.data.activeTurnId ?? null
+                                : null}
+                            plan={context?.plan ?? null}
                             queuedMessages={nativeQueuedMessages}
                             composerDisabled={composerDisabled}
                             composerNotice={composerNotice}

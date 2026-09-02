@@ -441,7 +441,7 @@ export class ApiMachineClient {
                     return { success: false, error: 'Codex session not found' }
                 }
                 this.observeNativeCodexSession(sessionId)
-                const status = this.nativeCodexSessionDirectSender.getStatus(sessionId, read.data.session)
+                const status = this.getNativeCodexSessionStatus(sessionId, read.data.session, read.plan)
                 if (status.success !== true) {
                     return { success: false, error: status.error }
                 }
@@ -466,6 +466,7 @@ export class ApiMachineClient {
                     snapshot: {
                         data: read.data,
                         status,
+                        plan: read.plan,
                         version: read.version,
                         revision: read.revision,
                         timing: read.timing
@@ -485,7 +486,7 @@ export class ApiMachineClient {
                 if (summary) {
                     this.observeNativeCodexSession(sessionId)
                 }
-                return this.nativeCodexSessionDirectSender.getStatus(sessionId, summary ?? undefined)
+                return this.getNativeCodexSessionStatus(sessionId, summary ?? undefined)
             }
         )
 
@@ -1108,7 +1109,7 @@ export class ApiMachineClient {
         // into a full cross-directory session lookup merely to construct a
         // status payload; an open detail already has a hot cache entry.
         const status = read
-            ? this.nativeCodexSessionDirectSender.getStatus(codexSessionId, read.data.session)
+            ? this.getNativeCodexSessionStatus(codexSessionId, read.data.session, read.plan)
             : null
         // Every matching browser receives this global event. Send an
         // invalidation version plus status only; an opened detail asks for
@@ -1126,6 +1127,25 @@ export class ApiMachineClient {
             ...(snapshot === undefined ? {} : { snapshot })
         })
         return true
+    }
+
+    /**
+     * Plan steps travel only in the full snapshot body. Realtime updates carry
+     * the tiny active turn identity so a newly started turn immediately hides
+     * a cached plan belonging to the preceding turn.
+     */
+    private getNativeCodexSessionStatus(
+        sessionId: string,
+        summary?: CodexLocalSessionSummary | null,
+        plan?: NativeCodexTranscriptRead['plan']
+    ): CodexLocalSessionStatusRpcResponse {
+        const status = this.nativeCodexSessionDirectSender.getStatus(sessionId, summary)
+        if (status.success !== true || status.status !== 'processing') {
+            return status
+        }
+        const activeTurnId = this.nativeCodexTurnLifecycle.getActiveTurnId(sessionId)
+            ?? plan?.turnId
+        return activeTurnId ? { ...status, activeTurnId } : status
     }
 
     private withNativeCodexTitle(read: NativeCodexTranscriptRead): NativeCodexTranscriptRead {

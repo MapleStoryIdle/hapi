@@ -239,6 +239,17 @@ export type CodexLocalSessionContextResponse = {
 
 export type CodexLocalSessionRunState = 'idle' | 'processing' | 'unknown'
 
+export type CodexLocalSessionPlanStep = {
+    text: string
+    status: 'pending' | 'in_progress' | 'completed'
+}
+
+export type CodexLocalSessionPlan = {
+    turnId: string
+    callId: string
+    steps: CodexLocalSessionPlanStep[]
+}
+
 export type CodexLocalSessionDirectSendPhase =
     | 'launching'
     | 'matching'
@@ -265,6 +276,7 @@ export type CodexLocalSessionStatusResponse =
     | {
         success: true
         status: CodexLocalSessionRunState
+        activeTurnId?: string
         waitingForUserInput?: boolean
         stalledSince?: number
         startedAt?: number
@@ -299,6 +311,8 @@ export type CodexLocalSessionSnapshotVersion = {
 export type CodexLocalSessionSnapshotResponse = CodexLocalSessionContextResponse & {
     unchanged?: false
     status: Extract<CodexLocalSessionStatusResponse, { success: true }>
+    /** Full snapshot only; realtime carries only activeTurnId. */
+    plan?: CodexLocalSessionPlan | null
     /** Missing only when an older runner answers the snapshot RPC. */
     version?: CodexLocalSessionSnapshotVersion
     revision: number

@@ -371,4 +371,69 @@ describe('NativeCodexTranscriptCache', () => {
             rmSync(codexHome, { recursive: true, force: true })
         }
     })
+
+    it('retains the active native plan outside a short message page and clears it on task_failed', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-plan-'))
+        const sessionId = 'c2234567-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        const file = join(transcriptDir, `rollout-${sessionId}.jsonl`)
+        writeFileSync(file, [
+            transcriptRecord({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-plan' } }),
+            transcriptRecord({
+                type: 'response_item',
+                payload: {
+                    type: 'function_call',
+                    name: 'update_plan',
+                    call_id: 'plan-call',
+                    arguments: JSON.stringify({
+                        plan: [
+                            { step: 'Inspect current behavior', status: 'completed' },
+                            { step: 'Render native plan', status: 'in_progress' }
+                        ]
+                    })
+                }
+            }),
+            transcriptRecord({
+                type: 'response_item',
+                payload: {
+                    type: 'function_call_output',
+                    call_id: 'plan-call',
+                    output: 'Plan updated'
+                }
+            }),
+            transcriptRecord({
+                type: 'response_item',
+                payload: {
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'Plan is now being implemented.' }]
+                }
+            })
+        ].join(''), 'utf8')
+        process.env.CODEX_HOME = codexHome
+        const cache = new NativeCodexTranscriptCache()
+
+        try {
+            const first = cache.read(sessionId, { limit: 1 })
+            expect(first?.data.importedMessages).toHaveLength(1)
+            expect(first?.plan).toEqual({
+                turnId: 'turn-plan',
+                callId: 'plan-call',
+                steps: [
+                    { text: 'Inspect current behavior', status: 'completed' },
+                    { text: 'Render native plan', status: 'in_progress' }
+                ]
+            })
+
+            appendFileSync(file, transcriptRecord({
+                type: 'event_msg',
+                payload: { type: 'task_failed', turn_id: 'turn-plan' }
+            }), 'utf8')
+            expect(cache.refreshCached(sessionId, { limit: 1 })?.plan).toBeNull()
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
 })

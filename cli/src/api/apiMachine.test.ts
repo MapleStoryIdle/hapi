@@ -504,6 +504,81 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
         }
     })
 
+    it('keeps native plan steps in the full snapshot and sends only the active turn through realtime', async () => {
+        const machine = makeMachine('machine-codex-plan-snapshot')
+        const sessionId = '32345678-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(join(transcriptDir, `rollout-${sessionId}.jsonl`), [
+            JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-plan' } }),
+            JSON.stringify({
+                type: 'response_item',
+                payload: {
+                    type: 'function_call',
+                    name: 'update_plan',
+                    call_id: 'call-plan',
+                    arguments: JSON.stringify({
+                        plan: [{ step: 'Show the native plan', status: 'in_progress' }]
+                    })
+                }
+            }),
+            JSON.stringify({
+                type: 'response_item',
+                payload: {
+                    type: 'function_call_output',
+                    call_id: 'call-plan',
+                    output: 'Plan updated'
+                }
+            })
+        ].join('\n'), 'utf8')
+        const client = new ApiMachineClient('cli-token', machine)
+
+        try {
+            const snapshot = await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', {
+                sessionId,
+                limit: 1
+            }) as {
+                success: boolean
+                unchanged?: boolean
+                snapshot?: {
+                    plan?: unknown
+                    status: { status: string; activeTurnId?: string }
+                }
+            }
+            expect(snapshot).toMatchObject({
+                success: true,
+                unchanged: false,
+                snapshot: {
+                    status: { status: 'processing', activeTurnId: 'turn-plan' },
+                    plan: {
+                        turnId: 'turn-plan',
+                        callId: 'call-plan',
+                        steps: [{ text: 'Show the native plan', status: 'in_progress' }]
+                    }
+                }
+            })
+
+            const emit = vi.fn()
+            ;(client as unknown as { socket: { emit: typeof emit; close: () => void } }).socket = {
+                emit,
+                close: () => {}
+            }
+            const report = (client as unknown as {
+                reportNativeCodexSessionUpdated: (id: string, modifiedAt?: number) => boolean
+            }).reportNativeCodexSessionUpdated.bind(client)
+            expect(report(sessionId, 1)).toBe(true)
+            const update = emit.mock.calls[0]?.[1] as { snapshot?: Record<string, unknown> } | undefined
+            expect(update?.snapshot).toMatchObject({
+                status: { status: 'processing', activeTurnId: 'turn-plan' }
+            })
+            expect(update?.snapshot).not.toHaveProperty('plan')
+            expect(update?.snapshot?.status).not.toHaveProperty('steps')
+        } finally {
+            client.shutdown()
+        }
+    })
+
     it('overlays a UserPromptSubmit start across native list, detail, snapshot, and status before emitting', async () => {
         const machine = makeMachine('machine-codex-hook-lifecycle')
         const sessionId = '92345678-1234-4234-8234-123456789012'

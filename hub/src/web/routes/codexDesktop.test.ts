@@ -965,7 +965,13 @@ describe('Codex Desktop import routes', () => {
                         status: {
                             success: true as const,
                             status: 'processing' as const,
+                            activeTurnId: 'turn-plan',
                             queuedMessages: [{ id: 'queued-1', text: 'next', queuedAt: 42 }]
+                        },
+                        plan: {
+                            turnId: 'turn-plan',
+                            callId: 'call-plan',
+                            steps: [{ text: 'Render the native plan', status: 'in_progress' as const }]
                         },
                         version: { runnerEpoch: 'runner-a', revision: 7 },
                         revision: 7,
@@ -990,7 +996,13 @@ describe('Codex Desktop import routes', () => {
                 status: {
                     success: true,
                     status: 'processing',
+                    activeTurnId: 'turn-plan',
                     queuedMessages: [{ text: 'next' }]
+                },
+                plan: {
+                    turnId: 'turn-plan',
+                    callId: 'call-plan',
+                    steps: [{ text: 'Render the native plan', status: 'in_progress' }]
                 },
                 session: { id: sessionId },
                 messages: [

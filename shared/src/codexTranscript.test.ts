@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
     appendCodexTranscriptImportLines,
     createCodexTranscriptImportAccumulator,
+    getCodexTranscriptImportPlan,
     getCodexSessionDisplayTitle,
     getCodexTranscriptLifecycleEvents,
     getCodexTranscriptTailSummary,
@@ -41,6 +42,115 @@ describe('getCodexSessionDisplayTitle', () => {
 })
 
 describe('getLocalCodexSessionData', () => {
+    it('keeps only a confirmed, turn-scoped native update_plan outside the message page', () => {
+        const accumulator = createCodexTranscriptImportAccumulator()
+        const line = (record: unknown) => JSON.stringify(record)
+
+        appendCodexTranscriptImportLines(accumulator, [
+            line({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-a' } }),
+            line({
+                type: 'response_item',
+                payload: {
+                    type: 'function_call',
+                    name: 'update_plan',
+                    call_id: 'plan-a',
+                    arguments: JSON.stringify({
+                        plan: [
+                            { step: 'Read the source', status: 'completed' },
+                            { step: 'Ship the fix', status: 'in_progress' }
+                        ]
+                    })
+                }
+            })
+        ])
+
+        // An unconfirmed tool call must not be presented as native progress.
+        expect(getCodexTranscriptImportPlan(accumulator)).toBeNull()
+
+        appendCodexTranscriptImportLines(accumulator, [
+            line({
+                type: 'response_item',
+                payload: {
+                    type: 'function_call_output',
+                    call_id: 'plan-a',
+                    output: 'Plan updated'
+                }
+            })
+        ])
+
+        expect(getCodexTranscriptImportPlan(accumulator)).toEqual({
+            turnId: 'turn-a',
+            callId: 'plan-a',
+            steps: [
+                { text: 'Read the source', status: 'completed' },
+                { text: 'Ship the fix', status: 'in_progress' }
+            ]
+        })
+        // The plan is a dedicated accessory, not duplicate transcript cards.
+        expect(accumulator.messages).toHaveLength(0)
+
+        appendCodexTranscriptImportLines(accumulator, [
+            line({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-b' } }),
+            line({ type: 'event_msg', payload: { type: 'task_failed', turn_id: 'turn-a' } })
+        ])
+        // A late terminal for the old turn cannot clear the new turn state or
+        // resurrect its plan.
+        expect(getCodexTranscriptImportPlan(accumulator)).toBeNull()
+
+        appendCodexTranscriptImportLines(accumulator, [
+            line({
+                type: 'response_item',
+                payload: {
+                    type: 'function_call',
+                    name: 'update_plan',
+                    call_id: 'bad-plan',
+                    arguments: JSON.stringify({
+                        plan: [{ step: 'Never accept this', status: 'running' }]
+                    })
+                }
+            }),
+            line({
+                type: 'response_item',
+                payload: {
+                    type: 'function_call_output',
+                    call_id: 'bad-plan',
+                    output: 'Plan updated'
+                }
+            })
+        ])
+        expect(getCodexTranscriptImportPlan(accumulator)).toBeNull()
+    })
+
+    it('does not confirm a native plan when Codex rejects update_plan in Plan mode', () => {
+        const accumulator = createCodexTranscriptImportAccumulator()
+        const line = (record: unknown) => JSON.stringify(record)
+
+        appendCodexTranscriptImportLines(accumulator, [
+            line({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-plan-mode' } }),
+            line({
+                type: 'response_item',
+                payload: {
+                    type: 'function_call',
+                    name: 'update_plan',
+                    call_id: 'plan-mode-rejected',
+                    arguments: JSON.stringify({
+                        plan: [{ step: 'This must stay hidden', status: 'in_progress' }]
+                    })
+                }
+            }),
+            line({
+                type: 'response_item',
+                payload: {
+                    type: 'function_call_output',
+                    call_id: 'plan-mode-rejected',
+                    output: 'update_plan is a TODO/checklist tool and is not allowed in Plan mode'
+                }
+            })
+        ])
+
+        expect(getCodexTranscriptImportPlan(accumulator)).toBeNull()
+    })
+
     it('coalesces canonical reasoning summaries and suppresses same-turn mirrors', () => {
         const accumulator = createCodexTranscriptImportAccumulator()
         const line = (record: unknown) => JSON.stringify(record)

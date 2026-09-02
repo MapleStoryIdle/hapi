@@ -5,11 +5,13 @@ import {
     createCodexTranscriptImportAccumulator,
     createLocalCodexSessionData,
     findLocalCodexSession,
+    getCodexTranscriptImportPlan,
     getCodexTranscriptLifecycleEvents,
     getCodexTranscriptUserInputEvents,
     getCodexTranscriptTailSummary,
     type CodexImportedMessageContent,
     type CodexLocalSessionData,
+    type CodexLocalSessionPlan,
     type CodexLocalSessionReadOptions,
     type CodexLocalSessionReadTiming,
     type CodexLocalSessionSummary,
@@ -55,6 +57,8 @@ type RecentLifecycleTail = {
 
 export type NativeCodexTranscriptRead = {
     data: CodexLocalSessionData
+    /** Current confirmed update_plan outside the bounded message page. */
+    plan: CodexLocalSessionPlan | null
     /** Opaque version that cannot survive a runner restart. */
     version: CodexLocalSessionSnapshotVersion
     /** Kept for compact callers that only display the revision. */
@@ -286,6 +290,7 @@ export class NativeCodexTranscriptCache {
                 ...data,
                 session: this.applyLifecycleToSummary(data.session)
             },
+            plan: entry.accumulator ? getCodexTranscriptImportPlan(entry.accumulator) : null,
             version: this.getVersion(revision),
             revision,
             timing: {

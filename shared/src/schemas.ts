@@ -436,6 +436,8 @@ export const CodexLocalSessionDirectSendProgressSchema = z.object({
     attempt: z.number().int().positive().optional()
 }).strict()
 
+const CodexLocalSessionActiveTurnIdSchema = z.string().trim().min(1).max(512)
+
 export const CodexLocalSessionQueuedMessageSchema = z.object({
     id: z.string(),
     text: z.string(),
@@ -465,6 +467,7 @@ const CodexLocalSessionRealtimeQueuedMessageSchema = z.object({
 export const CodexLocalSessionRealtimeStatusSchema = z.object({
     success: z.literal(true),
     status: z.enum(['idle', 'processing', 'unknown']),
+    activeTurnId: CodexLocalSessionActiveTurnIdSchema.optional(),
     waitingForUserInput: z.boolean().optional(),
     stalledSince: z.number().finite().optional(),
     startedAt: z.number().finite().optional(),

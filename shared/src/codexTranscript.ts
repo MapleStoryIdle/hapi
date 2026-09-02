@@ -152,8 +152,25 @@ export type CodexLocalSessionRunState = 'idle' | 'processing' | 'unknown'
 
 /** Turn-scoped native records used by the runner's local lifecycle overlay. */
 export type CodexTranscriptLifecycleEvent = {
-    type: 'task_started' | 'task_complete' | 'turn_aborted'
+    type: 'task_started' | 'task_complete' | 'turn_aborted' | 'task_failed'
     turnId?: string
+}
+
+/**
+ * A plan explicitly emitted by Codex's native `update_plan` tool. This is
+ * intentionally separate from imported chat messages so a bounded detail
+ * page does not lose the current plan when its original tool call is older
+ * than the latest message window.
+ */
+export type CodexLocalSessionPlanStep = {
+    text: string
+    status: 'pending' | 'in_progress' | 'completed'
+}
+
+export type CodexLocalSessionPlan = {
+    turnId: string
+    callId: string
+    steps: CodexLocalSessionPlanStep[]
 }
 
 /**
@@ -210,6 +227,8 @@ export type CodexLocalSessionDirectSendRecoveryReason =
 export type CodexLocalSessionStatusRpcResponse = {
     success: true
     status: CodexLocalSessionRunState
+    /** Current native turn identity only; plan contents stay in snapshot RPC. */
+    activeTurnId?: string
     /** Native Codex is blocked on an answer in its own local UI. */
     waitingForUserInput?: boolean
     /**
@@ -273,6 +292,8 @@ export type CodexLocalSessionComposerCapabilitiesRpcResponse = {
 export type CodexLocalSessionSnapshot = {
     data: CodexLocalSessionData
     status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
+    /** Present on full snapshot responses from current runners. */
+    plan?: CodexLocalSessionPlan | null
     /** Opaque version for conditional reads and realtime invalidations. */
     version: CodexLocalSessionSnapshotVersion
     /** Kept alongside `version` for compact display and older consumers. */
@@ -404,6 +425,9 @@ export type CodexTranscriptFileCandidate = {
 const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 500
 const MAX_CODEX_CONTEXT_MESSAGES = 2_000
 const MAX_CODEX_CONTEXT_MESSAGE_CHARS = 24_000
+const MAX_CODEX_PLAN_STEPS = 32
+const MAX_CODEX_PLAN_STEP_CHARS = 600
+const MAX_CODEX_PLAN_ID_LENGTH = 512
 // Session lists only need metadata from the transcript header and latest
 // records. Large historical transcripts must not be fully loaded just to
 // render a row in the native-session list.
@@ -560,6 +584,58 @@ function extractCodexTurnId(record: Record<string, unknown>, payload: Record<str
         ?? record.turn_id
         ?? record.turnId
     )
+}
+
+function normalizeCodexPlanIdentifier(value: unknown): string | null {
+    if (typeof value !== 'string') return null
+    const normalized = value.trim()
+    return normalized.length > 0 && normalized.length <= MAX_CODEX_PLAN_ID_LENGTH
+        ? normalized
+        : null
+}
+
+function parseCodexPlanSteps(value: unknown): CodexLocalSessionPlanStep[] | null {
+    const input = asRecord(value)
+    const rawSteps = input?.plan
+    if (!Array.isArray(rawSteps) || rawSteps.length === 0 || rawSteps.length > MAX_CODEX_PLAN_STEPS) {
+        return null
+    }
+
+    const steps: CodexLocalSessionPlanStep[] = []
+    for (const rawStep of rawSteps) {
+        const record = asRecord(rawStep)
+        const text = typeof record?.step === 'string' ? record.step.trim() : ''
+        const status = record?.status
+        if (
+            !text
+            || text.length > MAX_CODEX_PLAN_STEP_CHARS
+            || (status !== 'pending' && status !== 'in_progress' && status !== 'completed')
+        ) {
+            return null
+        }
+        steps.push({ text, status })
+    }
+    return steps
+}
+
+function isSuccessfulCodexPlanOutput(value: unknown): boolean {
+    if (typeof value === 'string') {
+        return value.trim() === 'Plan updated'
+    }
+
+    const record = asRecord(value)
+    if (!record) return false
+    if (record.success === false || record.ok === false || record.is_error === true || record.isError === true) {
+        return false
+    }
+    const status = typeof record.status === 'string' ? record.status.trim().toLowerCase() : ''
+    if (status && status !== 'ok' && status !== 'success' && status !== 'completed') {
+        return false
+    }
+
+    const message = [record.output, record.message, record.content]
+        .find((candidate): candidate is string => typeof candidate === 'string')
+    return message?.trim() === 'Plan updated'
 }
 
 /**
@@ -1089,7 +1165,7 @@ export function getCodexTranscriptLifecycleEvents(lines: readonly string[]): Cod
             if (record?.type !== 'event_msg') continue
             const payload = asRecord(record.payload)
             const type = asString(payload?.type)
-            if (type !== 'task_started' && type !== 'task_complete' && type !== 'turn_aborted') continue
+            if (type !== 'task_started' && type !== 'task_complete' && type !== 'turn_aborted' && type !== 'task_failed') continue
             const turnId = payload ? extractCodexTurnId(record, payload) : null
             events.push({ type, ...(turnId ? { turnId } : {}) })
         } catch {
@@ -1120,7 +1196,7 @@ export function getCodexTranscriptUserInputEvents(lines: readonly string[]): Cod
                 const turnId = extractCodexTurnId(record, payload)
                 if (eventType === 'task_started') {
                     events.push({ type: 'turn_started', ...(turnId ? { turnId } : {}) })
-                } else if (eventType === 'task_complete' || eventType === 'turn_aborted') {
+                } else if (eventType === 'task_complete' || eventType === 'turn_aborted' || eventType === 'task_failed') {
                     events.push({ type: 'turn_terminal', ...(turnId ? { turnId } : {}) })
                 }
                 continue
@@ -1189,7 +1265,7 @@ function getCodexTranscriptRunState(content: string): CodexLocalSessionRunState 
             const eventType = asString(payload?.type)
             if (eventType === 'task_started') {
                 state = 'processing'
-            } else if (eventType === 'task_complete' || eventType === 'turn_aborted') {
+            } else if (eventType === 'task_complete' || eventType === 'turn_aborted' || eventType === 'task_failed') {
                 state = 'idle'
             }
         } catch {
@@ -1245,7 +1321,7 @@ export function getCodexTranscriptTailSummary(lines: readonly string[]): CodexTr
                 const eventType = asString(payload?.type)
                 if (eventType === 'task_started') {
                     summary.runState = 'processing'
-                } else if (eventType === 'task_complete' || eventType === 'turn_aborted') {
+                } else if (eventType === 'task_complete' || eventType === 'turn_aborted' || eventType === 'task_failed') {
                     summary.runState = 'idle'
                 }
             }
@@ -1440,6 +1516,12 @@ export type CodexTranscriptImportAccumulator = {
     pendingReasoningIndex?: number
     pendingReasoningParts: string[]
     reasoningFingerprintsInCurrentTurn: Set<string>
+    /** The transcript-owned current native turn. Never inferred from reasoning. */
+    activePlanTurnId: string | null
+    /** Valid update_plan calls await their matching successful tool output. */
+    pendingPlansByCallId: Map<string, CodexLocalSessionPlan>
+    /** Last confirmed plan for the active native turn, retained outside the message page. */
+    plan: CodexLocalSessionPlan | null
 }
 
 export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportAccumulator {
@@ -1451,8 +1533,111 @@ export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportA
         startedAtByCallId: new Map(),
         toolResultIndexesByCallId: new Map(),
         pendingReasoningParts: [],
-        reasoningFingerprintsInCurrentTurn: new Set()
+        reasoningFingerprintsInCurrentTurn: new Set(),
+        activePlanTurnId: null,
+        pendingPlansByCallId: new Map(),
+        plan: null
     }
+}
+
+function cloneCodexLocalSessionPlan(plan: CodexLocalSessionPlan): CodexLocalSessionPlan {
+    return {
+        turnId: plan.turnId,
+        callId: plan.callId,
+        steps: plan.steps.map((step) => ({ ...step }))
+    }
+}
+
+/** Read a defensive copy of the current transcript-confirmed native plan. */
+export function getCodexTranscriptImportPlan(
+    accumulator: CodexTranscriptImportAccumulator
+): CodexLocalSessionPlan | null {
+    return accumulator.plan ? cloneCodexLocalSessionPlan(accumulator.plan) : null
+}
+
+/**
+ * Extract only an explicit native `update_plan` transaction. We require both
+ * a turn id and the matching successful output, so an unrelated/failed tool
+ * record can neither resurrect an old plan nor masquerade as progress.
+ *
+ * Returns true when the record belongs to update_plan and must stay out of
+ * the ordinary transcript message stream; the PlanStatusSummary owns its UI.
+ */
+function applyCodexTranscriptPlanRecord(
+    accumulator: CodexTranscriptImportAccumulator,
+    record: Record<string, unknown>
+): boolean {
+    const recordType = asString(record.type)
+    const payload = asRecord(record.payload)
+    if (!recordType || !payload) return false
+
+    if (recordType === 'event_msg') {
+        const eventType = asString(payload.type)
+        const turnId = extractCodexTurnId(record, payload)
+        if (eventType === 'task_started' && turnId) {
+            if (accumulator.activePlanTurnId !== turnId) {
+                accumulator.activePlanTurnId = turnId
+                accumulator.pendingPlansByCallId.clear()
+                accumulator.plan = null
+            }
+        } else if (
+            (eventType === 'task_complete' || eventType === 'turn_aborted' || eventType === 'task_failed')
+            && turnId
+            && accumulator.activePlanTurnId === turnId
+        ) {
+            accumulator.activePlanTurnId = null
+            accumulator.pendingPlansByCallId.clear()
+            accumulator.plan = null
+        }
+        return false
+    }
+
+    if (recordType !== 'response_item') return false
+    const itemType = asString(payload.type)
+    if (!itemType) return false
+
+    if (itemType === 'function_call' || itemType === 'custom_tool_call') {
+        if (asString(payload.name) !== 'update_plan') return false
+        // Stock Codex rollout response_items normally omit turn_id. They are
+        // ordered inside the surrounding task_started/task terminal records,
+        // so inherit the accumulator's current transcript-owned turn. An
+        // explicit id, when present, must still match that turn.
+        const explicitTurnId = normalizeCodexPlanIdentifier(extractCodexTurnId(record, payload))
+        const turnId = explicitTurnId ?? accumulator.activePlanTurnId
+        const callId = normalizeCodexPlanIdentifier(extractCodexToolCallId(payload))
+        const source = itemType === 'function_call'
+            ? parseCodexFunctionArguments(payload.arguments)
+            : parseCodexFunctionArguments(payload.input)
+        const steps = parseCodexPlanSteps(source)
+        if (
+            turnId
+            && callId
+            && steps
+            && accumulator.activePlanTurnId === turnId
+        ) {
+            accumulator.pendingPlansByCallId.set(callId, { turnId, callId, steps })
+        }
+        // update_plan has its own compact status renderer. Suppress malformed
+        // calls too; exposing raw plan payloads creates duplicate noisy cards.
+        return true
+    }
+
+    if (itemType !== 'function_call_output' && itemType !== 'custom_tool_call_output') return false
+    const callId = normalizeCodexPlanIdentifier(extractCodexToolCallId(payload))
+    if (!callId) return false
+    const candidate = accumulator.pendingPlansByCallId.get(callId)
+    if (!candidate) return false
+
+    accumulator.pendingPlansByCallId.delete(callId)
+    const outputTurnId = normalizeCodexPlanIdentifier(extractCodexTurnId(record, payload))
+    if (
+        (!outputTurnId || outputTurnId === candidate.turnId)
+        && accumulator.activePlanTurnId === candidate.turnId
+        && isSuccessfulCodexPlanOutput(payload.output)
+    ) {
+        accumulator.plan = cloneCodexLocalSessionPlan(candidate)
+    }
+    return true
 }
 
 function getImportedToolData(message: CodexImportedMessageContent): Record<string, unknown> | null {
@@ -1635,6 +1820,11 @@ export function appendCodexTranscriptImportLines(
             const record = asRecord(JSON.parse(line))
             if (!record) continue
             const { recordType, payloadType, payload } = getCodexRecordKinds(record)
+
+            if (applyCodexTranscriptPlanRecord(accumulator, record)) {
+                finalizePendingReasoning(accumulator)
+                continue
+            }
 
             if (
                 recordType === 'response_item'

@@ -17,6 +17,7 @@ import {
     type CodexImportedMessageContent,
     type CodexLocalSessionComposerCapabilitiesRpcResponse,
     type CodexLocalSessionData as RunnerCodexLocalSessionData,
+    type CodexLocalSessionPlan,
     type CodexLocalSessionReadTiming,
     type CodexLocalSessionSnapshotReadOptions,
     type CodexLocalSessionSnapshotVersion,
@@ -120,6 +121,7 @@ type CodexLocalSessionContextResponse = {
 type CodexLocalSessionSnapshotResponse = CodexLocalSessionContextResponse & {
     unchanged: false
     status: Extract<CodexLocalSessionStatusRpcResponse, { success: true }>
+    plan?: CodexLocalSessionPlan | null
     /** Missing only when a pre-conditional-read runner answers the RPC. */
     version?: CodexLocalSessionSnapshotVersion
     revision: number
@@ -339,7 +341,7 @@ function getCodexTranscriptRunState(content: string): 'idle' | 'processing' | 'u
             const eventType = asString(payload?.type)
             if (eventType === 'task_started') {
                 state = 'processing'
-            } else if (eventType === 'task_complete' || eventType === 'turn_aborted') {
+            } else if (eventType === 'task_complete' || eventType === 'turn_aborted' || eventType === 'task_failed') {
                 state = 'idle'
             }
         } catch {
@@ -2251,6 +2253,7 @@ export function createCodexDesktopRoutes(options: {
                 ),
                 unchanged: false,
                 status: result.snapshot.status,
+                ...(result.snapshot.plan === undefined ? {} : { plan: result.snapshot.plan }),
                 timing: result.snapshot.timing
             }
             c.header('Server-Timing', `native-cache;desc=${result.snapshot.timing.cache};dur=${result.snapshot.timing.durationMs}`)
