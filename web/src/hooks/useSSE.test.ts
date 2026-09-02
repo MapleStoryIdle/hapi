@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resetInteractionPriorityForTests } from '@/lib/interaction-priority'
 import { subscribeNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
+import { queryKeys } from '@/lib/query-keys'
+import type { SessionSummary, SessionsResponse } from '@/types/api'
 import { isGlobalScopedMessageStreamEvent, useSSE } from './useSSE'
 
 class MockEventSource {
@@ -53,16 +55,39 @@ function restoreVisibilityState(): void {
     delete (document as { visibilityState?: unknown }).visibilityState
 }
 
-function createWrapper() {
-    const queryClient = new QueryClient({
+function createQueryClient(): QueryClient {
+    return new QueryClient({
         defaultOptions: {
             queries: { retry: false },
             mutations: { retry: false }
         }
     })
+}
+
+function createWrapper(queryClient = createQueryClient()) {
     return ({ children }: { children: ReactNode }) => (
         createElement(QueryClientProvider, { client: queryClient }, children)
     )
+}
+
+function makeSessionSummary(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
+    return {
+        active: true,
+        thinking: false,
+        activeAt: 1,
+        updatedAt: 1,
+        metadata: null,
+        todoProgress: null,
+        pendingRequestsCount: 0,
+        pendingRequestKinds: [],
+        pendingRequests: [],
+        backgroundTaskCount: 0,
+        futureScheduledMessageCount: 0,
+        nextScheduledAt: null,
+        model: null,
+        effort: null,
+        ...overrides
+    }
 }
 
 afterEach(() => {
@@ -286,5 +311,101 @@ describe('useSSE native Codex session events', () => {
 
         expect(listener).toHaveBeenCalledWith(event)
         unsubscribe()
+    })
+})
+
+describe('useSSE session update batching', () => {
+    it('applies bursty session patches together after the short interaction window', () => {
+        vi.useFakeTimers()
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+        const queryClient = createQueryClient()
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [makeSessionSummary({ id: 'session-1' })]
+        })
+
+        renderHook(() => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            subscription: { all: true },
+            scope: 'global',
+            onEvent: vi.fn()
+        }), { wrapper: createWrapper(queryClient) })
+
+        act(() => {
+            for (const [lastEventId, data] of [
+                ['1', { thinking: true, updatedAt: 2 }],
+                ['2', { active: false, updatedAt: 3 }]
+            ] as const) {
+                MockEventSource.instances[0]?.onmessage?.({
+                    data: JSON.stringify({ type: 'session-updated', sessionId: 'session-1', data }),
+                    lastEventId
+                } as MessageEvent<string>)
+            }
+            vi.advanceTimersByTime(0)
+        })
+
+        expect(queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)?.sessions[0]).toMatchObject({
+            active: true,
+            thinking: false,
+            updatedAt: 1
+        })
+
+        act(() => {
+            vi.advanceTimersByTime(80)
+            vi.advanceTimersByTime(1)
+        })
+
+        expect(queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)?.sessions[0]).toMatchObject({
+            active: false,
+            thinking: true,
+            updatedAt: 3
+        })
+    })
+
+    it('flushes a cursor-acknowledged session update before reconnecting', () => {
+        vi.useFakeTimers()
+        vi.spyOn(Math, 'random').mockReturnValue(0)
+        Object.defineProperty(globalThis, 'EventSource', {
+            value: MockEventSource,
+            configurable: true,
+            writable: true
+        })
+        const queryClient = createQueryClient()
+        queryClient.setQueryData<SessionsResponse>(queryKeys.sessions, {
+            sessions: [makeSessionSummary({ id: 'session-1' })]
+        })
+
+        renderHook(() => useSSE({
+            enabled: true,
+            token: 'test-token',
+            baseUrl: 'http://hub.test',
+            subscription: { all: true },
+            scope: 'global',
+            onEvent: vi.fn()
+        }), { wrapper: createWrapper(queryClient) })
+
+        const source = MockEventSource.instances[0]
+        act(() => {
+            source?.onmessage?.({
+                data: JSON.stringify({
+                    type: 'session-updated',
+                    sessionId: 'session-1',
+                    data: { thinking: true, updatedAt: 2 }
+                }),
+                lastEventId: '8'
+            } as MessageEvent<string>)
+            source?.onerror?.(new Event('error'))
+        })
+
+        expect(source?.close).toHaveBeenCalledOnce()
+        expect(queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)?.sessions[0]).toMatchObject({
+            thinking: true,
+            updatedAt: 2
+        })
     })
 })

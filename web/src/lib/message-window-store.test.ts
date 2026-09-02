@@ -7,6 +7,7 @@ import {
     enqueueIncomingMessages,
     fetchLatestMessages,
     fetchOlderMessages,
+    getMessageSequenceFrontier,
     getMessageWindowState,
     ingestIncomingMessages,
     markMessagesConsumed,
@@ -173,6 +174,23 @@ describe('message-window-store frame-batched ingestion', () => {
         callbacks[1]?.(0)
         expect(listener).toHaveBeenCalledTimes(1)
         unsubscribe()
+    })
+
+    it('tracks a contiguous frontier across rendered, pending, and frame-queued rows', () => {
+        stubAnimationFrame()
+        ingestIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'rendered-10', seq: 10 })])
+        setAtBottom(SESSION_ID, false)
+        ingestIncomingMessages(SESSION_ID, [makeUserMessage({ id: 'pending-11', seq: 11 })])
+        enqueueIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'frame-12', seq: 12 })])
+
+        expect(getMessageSequenceFrontier(SESSION_ID)).toBe(12)
+
+        clearMessageWindow(SESSION_ID)
+        ingestIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'rendered-again-10', seq: 10 })])
+        enqueueIncomingMessages(SESSION_ID, [makeAgentMessage({ id: 'frame-gap-12', seq: 12 })])
+
+        // A simple max() would incorrectly return 12 and hide missing seq 11.
+        expect(getMessageSequenceFrontier(SESSION_ID)).toBe(10)
     })
 
     it('drops a queued SSE batch when its session window is cleared', () => {
@@ -817,13 +835,24 @@ describe('message-window-store visible trimming', () => {
                         }
                     }
                 }
+                if (calls.length === 2) {
+                    return {
+                        messages: [mainMessage],
+                        page: {
+                            limit: options.limit ?? 200,
+                            nextBeforeSeq: 1,
+                            nextBeforeAt: baseTime + 1,
+                            hasMore: false
+                        }
+                    }
+                }
                 return {
-                    messages: [mainMessage],
+                    messages: latestAgentRuns,
                     page: {
-                        limit: options.limit ?? 200,
-                        nextBeforeSeq: 1,
-                        nextBeforeAt: baseTime + 1,
-                        hasMore: false
+                        limit: options.limit ?? 50,
+                        nextBeforeSeq: 2,
+                        nextBeforeAt: baseTime + 2,
+                        hasMore: true
                     }
                 }
             }
@@ -840,6 +869,11 @@ describe('message-window-store visible trimming', () => {
         })
         expect(state.messages.some((message) => message.id === 'main-user-before-agent-flood')).toBe(true)
         expect(state.messages.filter((message) => message.id.startsWith('agent-run-latest-'))).toHaveLength(50)
+
+        await fetchLatestMessages(api as ApiClient, SESSION_ID, { force: true })
+
+        expect(calls).toHaveLength(3)
+        expect(calls[2]).toEqual({ limit: 50 })
     })
 
     it('drops a stale queued ghost on at-bottom refresh when the server no longer reports it as queued', async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
     getAppGlobalSseSubscription,
     getAppSessionSseSubscription,
+    shouldReconcileMessageSequenceGap,
     shouldUseGlobalMessageFallback
 } from './appSseSubscriptions'
 
@@ -34,6 +35,21 @@ describe('app SSE subscriptions', () => {
             eventSessionId: 'session-b',
             selectedSessionId: 'session-a',
             sessionStreamConnected: false
+        })).toBe(false)
+    })
+
+    it('repairs only a real gap beyond the contiguous message frontier', () => {
+        expect(shouldReconcileMessageSequenceGap({
+            knownFrontier: 41,
+            incomingSeq: 42
+        })).toBe(false)
+        expect(shouldReconcileMessageSequenceGap({
+            knownFrontier: 41,
+            incomingSeq: 43
+        })).toBe(true)
+        expect(shouldReconcileMessageSequenceGap({
+            knownFrontier: null,
+            incomingSeq: 43
         })).toBe(false)
     })
 })

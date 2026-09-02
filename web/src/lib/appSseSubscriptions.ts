@@ -32,3 +32,12 @@ export function shouldUseGlobalMessageFallback(input: {
     return input.eventSessionId === input.selectedSessionId
         && !input.sessionStreamConnected
 }
+
+export function shouldReconcileMessageSequenceGap(input: {
+    knownFrontier: number | null
+    incomingSeq: number | null
+}): boolean {
+    return input.knownFrontier !== null
+        && input.incomingSeq !== null
+        && input.incomingSeq > input.knownFrontier + 1
+}

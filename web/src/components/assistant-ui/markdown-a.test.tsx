@@ -264,7 +264,7 @@ describe('markdown <A> component — click handler', () => {
         const link = document.querySelector('a')!
         expect(link.getAttribute('href')).toBe('https://example.com')
         expect(link).toHaveAttribute('data-hapi-external-link', 'true')
-        expect(link).toHaveClass('text-[var(--app-link)]')
+        expect(link).toHaveClass('text-[var(--app-markdown-link)]')
         expect(link.querySelector('[data-markdown-link-icon="external"]')).not.toBeNull()
     })
 
@@ -359,7 +359,7 @@ describe('markdown <A> component — file path links', () => {
 
         const link = screen.getByRole('link')
         expect(link).toHaveClass('aui-md-file-link')
-        expect(link).toHaveClass('text-[var(--app-link)]')
+        expect(link).toHaveClass('text-[var(--app-markdown-link)]')
         expect(link).toHaveAttribute('title', 'docs/guide.md:42')
         expect(link.querySelector('[data-markdown-link-icon="file"]')).not.toBeNull()
 
@@ -456,7 +456,8 @@ describe('markdown <A> component — file path links', () => {
         const link = screen.getByRole('link')
         expect(link).toHaveClass('aui-md-file-link')
         expect(link).toHaveAttribute('title', `${filePath}:42:7`)
-        expect(link.nextElementSibling).toHaveAttribute('aria-label', 'Copy path')
+        expect(link.nextElementSibling).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Copy path' })).toBeNull()
 
         fireEvent.click(link)
         expect(routerMocks.navigate).toHaveBeenCalledWith({
@@ -660,42 +661,18 @@ describe('markdown <A> component — file path links', () => {
         expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument()
     })
 
-    it('copies the decoded file path without navigating', async () => {
+    it('does not render a copy control for a navigable file path', () => {
         const filePath = '/Users/dev/IdeaProjects/homebar-cloud/doc/中文 文件.md'
-        const writeText = vi.fn(async () => {})
-        const previousClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
-        Object.defineProperty(navigator, 'clipboard', {
-            configurable: true,
-            value: { writeText }
-        })
+        const href = `hapi-file:${encodeURIComponent(filePath)}?line=42`
+        renderAInChat(
+            { href, children: '中文 文件.md:42' },
+            { workspacePath: '/Users/dev/IdeaProjects/homebar-cloud' }
+        )
 
-        try {
-            const href = `hapi-file:${encodeURIComponent(filePath)}?line=42`
-            renderAInChat(
-                { href, children: '中文 文件.md:42' },
-                { workspacePath: '/Users/dev/IdeaProjects/homebar-cloud' }
-            )
-
-            const link = screen.getByRole('link')
-            expect(link).toHaveAttribute('data-hapi-file-link', 'true')
-            const copyButton = screen.getByRole('button', { name: 'Copy path' })
-            expect(link.nextElementSibling).toBe(copyButton)
-
-            fireEvent.click(copyButton)
-
-            await waitFor(() => {
-                expect(writeText).toHaveBeenCalledWith(filePath)
-                expect(copyButton).toHaveAttribute('aria-label', 'Copied!')
-                expect(copyButton.querySelector('[data-motion-icon="check"]')).not.toBeNull()
-            })
-            expect(routerMocks.navigate).not.toHaveBeenCalled()
-        } finally {
-            if (previousClipboard) {
-                Object.defineProperty(navigator, 'clipboard', previousClipboard)
-            } else {
-                Reflect.deleteProperty(navigator, 'clipboard')
-            }
-        }
+        const link = screen.getByRole('link')
+        expect(link).toHaveAttribute('data-hapi-file-link', 'true')
+        expect(link.nextElementSibling).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Copy path' })).toBeNull()
     })
 
     it('routes native Codex file paths through the owning runner', () => {

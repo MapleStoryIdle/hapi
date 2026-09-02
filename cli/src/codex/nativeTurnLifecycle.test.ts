@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import type { CodexLocalSessionSummary } from '@hapi/protocol/codexTranscript'
-import { NativeCodexTurnLifecycleTracker } from './nativeTurnLifecycle'
+import { describe, expect, it, vi } from 'vitest'
+import type { CodexLocalSessionSummary, CodexTranscriptLifecycleEvent } from '@hapi/protocol/codexTranscript'
+import {
+    NATIVE_CODEX_PROCESSING_STALE_AFTER_MS,
+    NativeCodexTurnLifecycleTracker,
+    normalizeNativeCodexSessionForDisplay
+} from './nativeTurnLifecycle'
 
 const sessionId = '12345678-1234-4234-8234-123456789012'
 
@@ -129,6 +133,81 @@ describe('NativeCodexTurnLifecycleTracker', () => {
             })).toBe(false)
         } finally {
             tracker.dispose()
+        }
+    })
+
+    it('does not resurrect an orphan when a replay exceeds the terminal tombstone limit', () => {
+        const tracker = new NativeCodexTurnLifecycleTracker()
+        const lifecycle: CodexTranscriptLifecycleEvent[] = [
+            { type: 'task_started', turnId: 'turn-orphaned' }
+        ]
+        for (let index = 0; index < 20; index += 1) {
+            lifecycle.push({ type: 'task_started', turnId: `turn-${index}` })
+            lifecycle.push({ type: 'task_complete', turnId: `turn-${index}` })
+        }
+
+        try {
+            tracker.observeTranscriptEvents(sessionId, lifecycle)
+            expect(tracker.applyToSummary(summary('idle')).runState).toBe('idle')
+
+            tracker.observeTranscriptEvents(sessionId, lifecycle)
+            expect(tracker.applyToSummary(summary('idle')).runState).toBe('idle')
+        } finally {
+            tracker.dispose()
+        }
+    })
+
+    it('presents an abandoned processing transcript as unknown without refreshing its timestamp', () => {
+        const now = NATIVE_CODEX_PROCESSING_STALE_AFTER_MS + 1_000
+        const tracker = new NativeCodexTurnLifecycleTracker({ now: () => now })
+        const abandoned = { ...summary('processing'), modifiedAt: 999 }
+
+        try {
+            tracker.observeTranscriptEvents(sessionId, [{ type: 'task_started', turnId: 'turn-a' }])
+            const tracked = tracker.applyToSummary(abandoned)
+            expect(tracked).toMatchObject({ runState: 'processing', modifiedAt: 999 })
+            expect(normalizeNativeCodexSessionForDisplay(tracked, now)).toMatchObject({
+                runState: 'unknown',
+                modifiedAt: 999
+            })
+
+            const advanced = { ...tracked, modifiedAt: now - 1 }
+            expect(normalizeNativeCodexSessionForDisplay(advanced, now).runState).toBe('processing')
+        } finally {
+            tracker.dispose()
+        }
+    })
+
+    it('notifies when a fresh processing transcript crosses the stale boundary', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(1_000)
+        const onProcessingStale = vi.fn()
+        const tracker = new NativeCodexTurnLifecycleTracker({
+            now: Date.now,
+            processingStaleAfterMs: 100,
+            onProcessingStale
+        })
+        const processing = { ...summary('processing'), modifiedAt: 950 }
+
+        try {
+            tracker.applyToSummary(processing)
+            vi.advanceTimersByTime(49)
+            expect(onProcessingStale).not.toHaveBeenCalled()
+
+            vi.advanceTimersByTime(1)
+            expect(onProcessingStale).toHaveBeenCalledOnce()
+            expect(onProcessingStale).toHaveBeenCalledWith(sessionId)
+
+            tracker.applyToSummary(processing)
+            vi.advanceTimersByTime(100)
+            expect(onProcessingStale).toHaveBeenCalledOnce()
+
+            tracker.applyToSummary({ ...processing, modifiedAt: 1_100 })
+            vi.advanceTimersByTime(100)
+            expect(onProcessingStale).toHaveBeenCalledTimes(2)
+        } finally {
+            tracker.dispose()
+            vi.useRealTimers()
         }
     })
 

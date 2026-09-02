@@ -16,7 +16,13 @@ import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
 import { SessionConnectionProvider, type SessionConnectionHealth } from '@/lib/session-connection-context'
 import { NativeCodexRealtimeProvider } from '@/lib/native-codex-realtime-context'
-import { clearMessageWindow, enqueueIncomingMessages, fetchLatestMessages, getMessageWindowState } from '@/lib/message-window-store'
+import {
+    clearMessageWindow,
+    enqueueIncomingMessages,
+    fetchLatestMessages,
+    getMessageSequenceFrontier,
+    getMessageWindowState
+} from '@/lib/message-window-store'
 import { markUserInteraction, scheduleBackgroundWork } from '@/lib/interaction-priority'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
@@ -25,6 +31,7 @@ import { requireHubUrlForLogin } from '@/lib/runtime-config'
 import {
     getAppGlobalSseSubscription,
     getAppSessionSseSubscription,
+    shouldReconcileMessageSequenceGap,
     shouldUseGlobalMessageFallback
 } from '@/lib/appSseSubscriptions'
 import { LoginPrompt } from '@/components/LoginPrompt'
@@ -41,7 +48,7 @@ import type { SyncEvent } from '@/types/api'
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
 
 const REQUIRE_SERVER_URL = requireHubUrlForLogin()
-const MESSAGE_RECONCILE_INTERVAL_MS = 8_000
+const DEGRADED_MESSAGE_PROBE_INTERVAL_MS = 30_000
 
 function withPwaBanner(content: ReactNode) {
     return (
@@ -307,11 +314,8 @@ function AppInner() {
         if (typeof incomingSeq !== 'number') {
             return
         }
-        const current = getMessageWindowState(event.sessionId)
-        if (current.isLoading || current.newestSeq === null) {
-            return
-        }
-        if (incomingSeq > current.newestSeq + 1) {
+        const knownFrontier = getMessageSequenceFrontier(event.sessionId)
+        if (shouldReconcileMessageSequenceGap({ knownFrontier, incomingSeq })) {
             scheduleBackgroundWork(() => {
                 void reconcileSelectedSessionMessages()
             })
@@ -428,14 +432,18 @@ function AppInner() {
     }, [])
 
     useEffect(() => {
-        if (!api || !selectedSessionId) {
+        if (!api || !selectedSessionId || sessionSseConnected) {
             return
         }
 
         let cancelled = false
         let probeInFlight = false
         const probeLatestMessage = async () => {
-            if (cancelled || document.visibilityState !== 'visible') {
+            if (
+                cancelled
+                || sessionSseConnectedRef.current
+                || document.visibilityState !== 'visible'
+            ) {
                 return
             }
             if (probeInFlight) {
@@ -456,8 +464,8 @@ function AppInner() {
                         ? message.seq
                         : latest
                 ), null)
-                const current = getMessageWindowState(selectedSessionId)
-                if (latestSeq !== null && (current.newestSeq === null || latestSeq > current.newestSeq)) {
+                const knownFrontier = getMessageSequenceFrontier(selectedSessionId)
+                if (latestSeq !== null && (knownFrontier === null || latestSeq > knownFrontier)) {
                     scheduleBackgroundWork(() => {
                         void reconcileSelectedSessionMessages()
                     })
@@ -472,13 +480,13 @@ function AppInner() {
 
         const timer = window.setInterval(() => {
             void probeLatestMessage()
-        }, MESSAGE_RECONCILE_INTERVAL_MS)
+        }, DEGRADED_MESSAGE_PROBE_INTERVAL_MS)
 
         return () => {
             cancelled = true
             window.clearInterval(timer)
         }
-    }, [api, reconcileSelectedSessionMessages, selectedSessionId])
+    }, [api, reconcileSelectedSessionMessages, selectedSessionId, sessionSseConnected])
     const translateIncomingToast = useCallback((title: string, body: string, kind?: ToastKind): { title: string; body: string; kind: ToastKind } => {
         const normalizedTitle = title.trim()
         const normalizedBody = body.trim()

@@ -1617,7 +1617,7 @@ describe('NativeCodexSessionDirectSender', () => {
         try {
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
-                status: 'processing',
+                status: 'unknown',
                 stalledSince: 1
             })
             expect(sender.send(sessionId, 'recover this', undefined, 'native:stalled')).toMatchObject({

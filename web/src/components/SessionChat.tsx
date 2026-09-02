@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffe
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { AssistantRuntimeProvider, useAssistantApi, useAssistantState } from '@assistant-ui/react'
+import { toSessionSummary } from '@hapi/protocol'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
 import { ApiError, type ApiClient } from '@/api/client'
 import type {
@@ -10,6 +11,7 @@ import type {
     DecryptedMessage,
     PermissionMode,
     Session,
+    SessionsResponse,
     PiModelSummary,
     SlashCommand,
     SkillSummary
@@ -817,7 +819,7 @@ function SessionChatInner(props: SessionChatProps) {
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
-    const { sessions: sessionSummaries } = useSessions(props.api)
+    const { sessions: sessionSummaries } = useSessions(props.api, { live: false })
     const sessionInactive = !props.session.active
     const inactiveCanResume = inactiveSessionCanResume(props.session, props.messages.length)
     const terminalSupported = isRemoteTerminalSupported(props.session.metadata)
@@ -852,7 +854,6 @@ function SessionChatInner(props: SessionChatProps) {
     const [queueAccessoryExpanded, setQueueAccessoryExpanded] = useState(false)
     const [clearedPlanSourceBlockId, setClearedPlanSourceBlockId] = useState<string | null>(null)
     const scrollButtonPositionReady = bottomOverlayHeight > 0 && !(gitSessionId && gitStatusLoading)
-    const lastGitRefreshUpdatedAtRef = useRef(props.session.updatedAt)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
             return
@@ -982,8 +983,19 @@ function SessionChatInner(props: SessionChatProps) {
             if (result.type === 'error') {
                 throw new Error(result.message)
             }
-            if (result.session) {
-                queryClient.setQueryData(queryKeys.session(result.sessionId), { session: result.session })
+            const sideSession = result.session
+            if (sideSession) {
+                queryClient.setQueryData(queryKeys.session(result.sessionId), { session: sideSession })
+                queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions, (previous) => {
+                    if (!previous) return previous
+                    return {
+                        ...previous,
+                        sessions: [
+                            toSessionSummary(sideSession),
+                            ...previous.sessions.filter((candidate) => candidate.id !== result.sessionId)
+                        ]
+                    }
+                })
             }
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
@@ -1464,6 +1476,7 @@ function SessionChatInner(props: SessionChatProps) {
         [reconciled.blocks]
     )
     const runActive = useSettledRunActive(rawRunActive, runActivityKey, turnCompletionKey)
+    const previousGitRunActiveRef = useRef(runActive)
     const activePlanStatus = getRunScopedPlanStatus(latestPlanStatus, {
         runActive,
         clearedSourceBlockId: clearedPlanSourceBlockId
@@ -1724,11 +1737,11 @@ function SessionChatInner(props: SessionChatProps) {
     }, [navigate, props.session.id])
 
     useEffect(() => {
-        if (!gitSessionId) return
-        if (lastGitRefreshUpdatedAtRef.current === props.session.updatedAt) return
-        lastGitRefreshUpdatedAtRef.current = props.session.updatedAt
+        const wasRunActive = previousGitRunActiveRef.current
+        previousGitRunActiveRef.current = runActive
+        if (!gitSessionId || !wasRunActive || runActive) return
         void refetchGitStatus()
-    }, [gitSessionId, props.session.updatedAt, refetchGitStatus])
+    }, [gitSessionId, refetchGitStatus, runActive])
 
     useEffect(() => {
         if (!planStatusVisible && !gitDiffAccessoryVisible) {

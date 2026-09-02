@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render as renderUi, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render as renderUi, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import { I18nProvider } from '@/lib/i18n-context'
 import { NativeCodexRealtimeProvider } from '@/lib/native-codex-realtime-context'
 import { publishNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
+import { resetInteractionPriorityForTests } from '@/lib/interaction-priority'
 import type { ApiClient } from '@/api/client'
 import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import {
@@ -24,6 +25,8 @@ import {
 
 afterEach(() => {
     cleanup()
+    resetInteractionPriorityForTests()
+    vi.useRealTimers()
     localStorage.removeItem('hapi-lang')
 })
 
@@ -895,6 +898,67 @@ describe('RecentCodexSessions', () => {
         expect(await screen.findByText('Updated without refetch')).toBeInTheDocument()
         await new Promise((resolve) => setTimeout(resolve, 120))
         expect(api.getCodexSessions).toHaveBeenCalledTimes(1)
+    })
+
+    it('batches realtime summary updates by session id and applies the newest row after the window', async () => {
+        const api = createApi()
+        render(
+            <NativeCodexRealtimeProvider value={{ connected: true }}>
+                <I18nProvider>
+                    <RecentCodexSessions
+                        api={api}
+                        machineId="machine-1"
+                        onOpen={vi.fn()}
+                        realtimeAvailable
+                    />
+                </I18nProvider>
+            </NativeCodexRealtimeProvider>
+        )
+
+        await screen.findByText('Recent Codex task')
+        vi.useFakeTimers()
+        const modifiedAt = Date.now()
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            summary: {
+                id: 'codex-thread-1',
+                title: 'First batched update',
+                cwd: '/workspace/project',
+                modifiedAt: modifiedAt + 1
+            }
+        })
+
+        expect(screen.queryByText('First batched update')).toBeNull()
+        expect(screen.getByText('Recent Codex task')).toBeInTheDocument()
+
+        act(() => {
+            vi.advanceTimersByTime(50)
+        })
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            summary: {
+                id: 'codex-thread-1',
+                title: 'Newest batched update',
+                cwd: '/workspace/project',
+                modifiedAt: modifiedAt + 2
+            }
+        })
+
+        expect(screen.queryByText('First batched update')).toBeNull()
+        expect(screen.queryByText('Newest batched update')).toBeNull()
+
+        act(() => {
+            vi.advanceTimersByTime(50)
+            vi.advanceTimersByTime(1)
+        })
+
+        expect(screen.queryByText('First batched update')).toBeNull()
+        expect(screen.getByText('Newest batched update')).toBeInTheDocument()
     })
 
     it('orders projects and sessions by their latest activity', () => {

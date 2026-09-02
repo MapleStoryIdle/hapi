@@ -606,7 +606,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
                 data-hapi-file-link="true"
                 className={cn(
                     FILE_PATH_CHIP_CLASS,
-                    'inline-flex items-center gap-1 text-[var(--app-link)] transition-colors hover:border-[var(--app-link-muted)] hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-link)]',
+                    'inline-flex items-center gap-1 text-[var(--app-markdown-link)] transition-colors hover:border-[var(--app-markdown-link-muted)] hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-markdown-link-hover)]',
                     className
                 )}
             >
@@ -617,7 +617,6 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
                 />
                 <span className="min-w-0 truncate">{children}</span>
             </a>
-            <FilePathCopyButton path={fileTarget.path} />
         </span>
     )
 }
@@ -746,7 +745,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
             rel={rel}
             onClick={handleClick}
             data-hapi-external-link={isExternalLink ? 'true' : undefined}
-            className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}
+            className={cn('aui-md-a font-medium text-[var(--app-markdown-link)] underline decoration-[color:var(--app-markdown-link-muted)] underline-offset-3 transition-colors hover:text-[var(--app-markdown-link-hover)] hover:decoration-[color:var(--app-markdown-link-hover)]', props.className)}
         >
             {isExternalLink ? (
                 <Link2

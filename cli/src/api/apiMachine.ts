@@ -46,7 +46,11 @@ import { NativeCodexSessionListCache } from '@/codex/nativeSessionListCache'
 import { NativeCodexSessionTitleCache } from '@/codex/nativeSessionTitleCache'
 import { NativeCodexTranscriptCache, type NativeCodexTranscriptRead } from '@/codex/nativeTranscriptCache'
 import { NativeCodexSessionWatcher } from '@/codex/nativeSessionWatcher'
-import { NativeCodexTurnLifecycleTracker, type ExternalCodexLifecycleEvent } from '@/codex/nativeTurnLifecycle'
+import {
+    NativeCodexTurnLifecycleTracker,
+    normalizeNativeCodexSessionForDisplay,
+    type ExternalCodexLifecycleEvent
+} from '@/codex/nativeTurnLifecycle'
 import type { RunnerState, Machine, MachineMetadata } from './types'
 import { RunnerStateSchema, MachineMetadataSchema } from './types'
 import { backoff } from '@/utils/time'
@@ -134,7 +138,7 @@ interface ArchiveCodexLocalSessionRequest {
 const MAX_NATIVE_CODEX_REALTIME_SNAPSHOT_BYTES = 96 * 1024
 
 function toNativeCodexSessionListUpdate(session: CodexLocalSessionSummary): CodexLocalSessionListUpdate {
-    const { file: _file, ...summary } = session
+    const { file: _file, ...summary } = normalizeNativeCodexSessionForDisplay(session)
     return summary
 }
 
@@ -249,14 +253,17 @@ export class ApiMachineClient {
     private rpcHandlerManager: RpcHandlerManager
     private readonly nativeCodexSessionTitleCache = new NativeCodexSessionTitleCache()
     private readonly nativeCodexTurnLifecycle = new NativeCodexTurnLifecycleTracker({
-        onUnconfirmedLeaseExpired: (codexSessionId) => this.handleNativeCodexLifecycleChange(codexSessionId)
+        onUnconfirmedLeaseExpired: (codexSessionId) => this.handleNativeCodexLifecycleChange(codexSessionId),
+        onProcessingStale: (codexSessionId) => this.handleNativeCodexLifecycleChange(codexSessionId)
     })
     private readonly nativeCodexTranscriptCache = new NativeCodexTranscriptCache({
         applyLifecycle: (session) => this.nativeCodexTurnLifecycle.applyToSummary(session)
     })
     private readonly nativeCodexSessionListCache = new NativeCodexSessionListCache({
         resolveTitles: (sessionIds, options) => this.nativeCodexSessionTitleCache.resolve(sessionIds, options),
-        applyLifecycle: (session) => this.nativeCodexTurnLifecycle.applyToSummary(session)
+        applyLifecycle: (session) => normalizeNativeCodexSessionForDisplay(
+            this.nativeCodexTurnLifecycle.applyToSummary(session)
+        )
     })
     private readonly nativeCodexSessionDirectSender: NativeCodexSessionDirectSender
     private readonly nativeKanbanFeedbackStore = new NativeKanbanFeedbackStore(
@@ -942,8 +949,10 @@ export class ApiMachineClient {
     }
 
     private handleNativeCodexLifecycleChange(sessionId: string): void {
-        // The expiry callback runs after the tracker has switched its overlay
-        // to unknown, so a waiting direct-send queue cannot treat this as idle.
+        // Both the short hook lease and the five-minute transcript freshness
+        // boundary need an event even when the JSONL stops changing. The
+        // summary/status serializers convert those states to unknown, never
+        // to an unsafe idle claim.
         const summary = this.nativeCodexTranscriptCache.readSummary(sessionId)?.session ?? null
         this.nativeCodexSessionDirectSender.notifyTranscriptChanged(sessionId)
         this.reportNativeCodexSessionUpdated(sessionId, Date.now(), null, summary)

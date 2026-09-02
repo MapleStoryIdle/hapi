@@ -29,13 +29,23 @@ type SessionLifecycle = {
 export type NativeCodexTurnLifecycleTrackerOptions = {
     now?: () => number
     unconfirmedLeaseMs?: number
+    processingStaleAfterMs?: number
     terminalTtlMs?: number
     maxSessions?: number
     maxTerminalTurnsPerSession?: number
     onUnconfirmedLeaseExpired?: (codexSessionId: string) => void
+    onProcessingStale?: (codexSessionId: string) => void
+}
+
+type ProcessingStaleTimer = {
+    modifiedAt: number
+    dueAt: number
+    notified: boolean
+    timer: ReturnType<typeof setTimeout> | null
 }
 
 const DEFAULT_UNCONFIRMED_LEASE_MS = 15_000
+export const NATIVE_CODEX_PROCESSING_STALE_AFTER_MS = 5 * 60_000
 const DEFAULT_TERMINAL_TTL_MS = 5 * 60_000
 const DEFAULT_MAX_SESSIONS = 128
 const DEFAULT_MAX_TERMINAL_TURNS_PER_SESSION = 16
@@ -48,20 +58,25 @@ const DEFAULT_MAX_TERMINAL_TURNS_PER_SESSION = 16
  */
 export class NativeCodexTurnLifecycleTracker {
     private readonly sessions = new Map<string, SessionLifecycle>()
+    private readonly processingStaleTimers = new Map<string, ProcessingStaleTimer>()
     private readonly now: () => number
     private readonly unconfirmedLeaseMs: number
+    private readonly processingStaleAfterMs: number
     private readonly terminalTtlMs: number
     private readonly maxSessions: number
     private readonly maxTerminalTurnsPerSession: number
     private readonly onUnconfirmedLeaseExpired: ((codexSessionId: string) => void) | null
+    private readonly onProcessingStale: ((codexSessionId: string) => void) | null
 
     constructor(options: NativeCodexTurnLifecycleTrackerOptions = {}) {
         this.now = options.now ?? Date.now
         this.unconfirmedLeaseMs = options.unconfirmedLeaseMs ?? DEFAULT_UNCONFIRMED_LEASE_MS
+        this.processingStaleAfterMs = options.processingStaleAfterMs ?? NATIVE_CODEX_PROCESSING_STALE_AFTER_MS
         this.terminalTtlMs = options.terminalTtlMs ?? DEFAULT_TERMINAL_TTL_MS
         this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS
         this.maxTerminalTurnsPerSession = options.maxTerminalTurnsPerSession ?? DEFAULT_MAX_TERMINAL_TURNS_PER_SESSION
         this.onUnconfirmedLeaseExpired = options.onUnconfirmedLeaseExpired ?? null
+        this.onProcessingStale = options.onProcessingStale ?? null
     }
 
     /** Returns true only when a new effective local lifecycle state begins. */
@@ -118,6 +133,7 @@ export class NativeCodexTurnLifecycleTracker {
         const scopedEvents = events.filter((event): event is CodexTranscriptLifecycleEvent & { turnId: string } => (
             typeof event.turnId === 'string' && event.turnId.length > 0
         ))
+        const supersededStartIndexes = new Set<number>()
         let changed = false
 
         // A later scoped lifecycle record proves that an earlier started turn
@@ -128,11 +144,18 @@ export class NativeCodexTurnLifecycleTracker {
         for (let index = 0; index < scopedEvents.length - 1; index += 1) {
             const event = scopedEvents[index]
             if (event.type !== 'task_started') continue
+            supersededStartIndexes.add(index)
             changed = this.observeTranscriptTerminal(codexSessionId, event.turnId) || changed
         }
 
-        for (const event of scopedEvents) {
+        for (let index = 0; index < scopedEvents.length; index += 1) {
+            const event = scopedEvents[index]
             if (event.type === 'task_started') {
+                // The terminal tombstone cache is intentionally bounded. Skip
+                // starts already proven obsolete in this batch as well, so a
+                // long transcript tail cannot prune an old tombstone and then
+                // resurrect that orphan while the same tail is replayed.
+                if (supersededStartIndexes.has(index)) continue
                 changed = this.observeTranscriptStart(codexSessionId, event.turnId) || changed
             } else {
                 changed = this.observeTranscriptTerminal(codexSessionId, event.turnId) || changed
@@ -143,14 +166,20 @@ export class NativeCodexTurnLifecycleTracker {
 
     /** Overlay the hook lifecycle onto the raw transcript summary. */
     applyToSummary(session: CodexLocalSessionSummary): CodexLocalSessionSummary {
+        this.updateProcessingStaleTimer(session)
+        const now = this.now()
         const lifecycle = this.sessions.get(session.id)
         if (!lifecycle?.active) return session
 
         const active = lifecycle.active
         const state: CodexLocalSessionRunState = active.confirmed
             ? 'processing'
-            : (active.expired || this.now() >= active.expiresAt ? 'unknown' : 'processing')
-        const modifiedAt = state === 'processing'
+            : (active.expired || now >= active.expiresAt ? 'unknown' : 'processing')
+        // A hook precedes the file append, so its short lease may advance the
+        // row timestamp. A confirmed transcript start already has an
+        // authoritative file mtime; replacing it with read time would make an
+        // abandoned historical start look freshly active after every restart.
+        const modifiedAt = state === 'processing' && !active.confirmed
             ? Math.max(session.modifiedAt, active.observedAt)
             : session.modifiedAt
         if (session.runState === state && session.modifiedAt === modifiedAt) {
@@ -163,7 +192,11 @@ export class NativeCodexTurnLifecycleTracker {
         for (const session of this.sessions.values()) {
             this.clearActiveTimer(session.active)
         }
+        for (const entry of this.processingStaleTimers.values()) {
+            if (entry.timer) clearTimeout(entry.timer)
+        }
         this.sessions.clear()
+        this.processingStaleTimers.clear()
     }
 
     private observeTranscriptStart(codexSessionId: string, turnId: string): boolean {
@@ -280,4 +313,70 @@ export class NativeCodexTurnLifecycleTracker {
         clearTimeout(active.expiryTimer)
         active.expiryTimer = null
     }
+
+    private updateProcessingStaleTimer(session: CodexLocalSessionSummary): void {
+        if (session.runState !== 'processing') {
+            this.clearProcessingStaleTimer(session.id)
+            return
+        }
+
+        const dueAt = session.modifiedAt + this.processingStaleAfterMs
+        const existing = this.processingStaleTimers.get(session.id)
+        if (existing?.modifiedAt === session.modifiedAt && existing.dueAt === dueAt) {
+            return
+        }
+
+        this.clearProcessingStaleTimer(session.id)
+        const entry: ProcessingStaleTimer = {
+            modifiedAt: session.modifiedAt,
+            dueAt,
+            notified: false,
+            timer: null
+        }
+        this.processingStaleTimers.set(session.id, entry)
+        this.armProcessingStaleTimer(session.id, entry)
+    }
+
+    private armProcessingStaleTimer(codexSessionId: string, entry: ProcessingStaleTimer): void {
+        const run = () => {
+            if (this.processingStaleTimers.get(codexSessionId) !== entry || entry.notified) return
+            const remaining = entry.dueAt - this.now()
+            if (remaining > 0) {
+                entry.timer = setTimeout(run, remaining)
+                entry.timer.unref?.()
+                return
+            }
+
+            entry.timer = null
+            entry.notified = true
+            this.onProcessingStale?.(codexSessionId)
+        }
+        entry.timer = setTimeout(run, Math.max(0, entry.dueAt - this.now()))
+        entry.timer.unref?.()
+    }
+
+    private clearProcessingStaleTimer(codexSessionId: string): void {
+        const entry = this.processingStaleTimers.get(codexSessionId)
+        if (entry?.timer) clearTimeout(entry.timer)
+        this.processingStaleTimers.delete(codexSessionId)
+    }
+}
+
+/**
+ * Public list rows should not animate forever for an abandoned final
+ * task_started record. Unknown is deliberately safer than claiming idle; the
+ * direct-send layer keeps the raw processing evidence so explicit recovery
+ * remains available.
+ */
+export function normalizeNativeCodexSessionForDisplay(
+    session: CodexLocalSessionSummary,
+    now = Date.now()
+): CodexLocalSessionSummary {
+    if (
+        session.runState !== 'processing'
+        || now - session.modifiedAt < NATIVE_CODEX_PROCESSING_STALE_AFTER_MS
+    ) {
+        return session
+    }
+    return { ...session, runState: 'unknown' }
 }

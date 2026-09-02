@@ -410,6 +410,29 @@ function RunnerSwitcherPanel(props: {
     )
 }
 
+function useDesktopSessionsSidebarVisible(): boolean {
+    const [matches, setMatches] = useState(() => (
+        typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(min-width: 1024px)').matches
+    ))
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+            return
+        }
+        const mediaQuery = window.matchMedia('(min-width: 1024px)')
+        const handleChange = (event: MediaQueryListEvent) => {
+            setMatches(event.matches)
+        }
+        setMatches(mediaQuery.matches)
+        mediaQuery.addEventListener('change', handleChange)
+        return () => mediaQuery.removeEventListener('change', handleChange)
+    }, [])
+
+    return matches
+}
+
 function SessionsPage() {
     const { api } = useAppContext()
     const navigate = useNavigate()
@@ -418,7 +441,11 @@ function SessionsPage() {
     const matchRoute = useMatchRoute()
     const { t } = useTranslation()
     const { addToast } = useToast()
-    const { sessions, isLoading, error, refetch } = useSessions(api)
+    const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
+    const desktopSessionsSidebarVisible = useDesktopSessionsSidebarVisible()
+    const { sessions, isLoading, error, refetch } = useSessions(api, {
+        live: isSessionsIndex || desktopSessionsSidebarVisible
+    })
     const { spawnSession, isPending: isQuickSessionPending } = useSpawnSession(api)
     const { addRecentPath, setLastUsedMachineId } = useRecentPaths()
     const {
@@ -451,16 +478,9 @@ function SessionsPage() {
         () => selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null,
         [selectedSessionId, sessions]
     )
-    useEffect(() => {
-        if (!selectedSessionId || !selectedSession) {
-            return
-        }
-        markSessionSeen(selectedSessionId, selectedSession.updatedAt)
-    }, [selectedSessionId, selectedSession?.updatedAt])
     const currentCodexSessionId = selectedSession?.metadata?.flavor === 'codex'
         ? (selectedSession.metadata.agentSessionId ?? null)
         : null
-    const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
     const selectableMachines = useMemo(
         () => {
@@ -1425,9 +1445,16 @@ function SessionDetailRoute() {
     const pathname = useLocation({ select: location => location.pathname })
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
     const navigate = useNavigate()
-    const { notFound: sessionNotFound } = useSession(api, sessionId)
+    const { session, notFound: sessionNotFound } = useSession(api, sessionId)
     const basePath = `/sessions/${sessionId}`
     const isChat = pathname === basePath || pathname === `${basePath}/`
+
+    useEffect(() => {
+        if (!session) {
+            return
+        }
+        markSessionSeen(session.id, session.updatedAt)
+    }, [session?.id, session?.updatedAt])
 
     useEffect(() => {
         if (!sessionNotFound) {

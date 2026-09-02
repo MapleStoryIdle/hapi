@@ -25,6 +25,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useLocalDayKey } from '@/hooks/useLocalDayKey'
 import { formatShareTimelineTime, groupShareTimeline, localDateKey } from '@/lib/shareTimeline'
 import { queryKeys } from '@/lib/query-keys'
+import { scheduleBackgroundWork } from '@/lib/interaction-priority'
 import {
     getNativeCodexSessionListUpdate,
     subscribeNativeCodexSessionUpdated,
@@ -34,6 +35,7 @@ import {
 /** The sessions index intentionally stays focused on the last three days. */
 export const RECENT_CODEX_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
 const NATIVE_CODEX_LIST_FALLBACK_REFRESH_INTERVAL_MS = 5_000
+const NATIVE_CODEX_LIST_UPDATE_BATCH_MS = 100
 const HAPI_CODEX_ORIGINATOR = 'hapi-codex-client'
 
 function isHapiInitiatedCodexSessionUpdate(update: NativeCodexSessionListUpdate): boolean {
@@ -938,9 +940,12 @@ export function RecentCodexSessions(props: {
     const [collapsedDirectories, setCollapsedDirectories] = useState<Set<string>>(() => new Set())
     const autoExpandedSelectionRef = useRef<string | null>(null)
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const realtimeListUpdateBatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const manualRefreshFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const mountedRef = useRef(true)
     const realtimeListUpdatesRef = useRef(new Map<string, { receivedAt: number; update: NativeCodexSessionListUpdate }>())
+    const pendingRealtimeListUpdatesRef = useRef(new Map<string, NativeCodexSessionListUpdate>())
+    const realtimeListUpdateBatchGenerationRef = useRef(0)
     const hasInitializedRealtimeStateRef = useRef(false)
     const [manualRefreshFeedback, setManualRefreshFeedback] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const [archivedSessionKeys, setArchivedSessionKeys] = useState<Set<string>>(() => new Set())
@@ -1120,17 +1125,48 @@ export function RecentCodexSessions(props: {
             return
         }
 
-        return subscribeNativeCodexSessionUpdated((event) => {
+        const batchGeneration = realtimeListUpdateBatchGenerationRef.current
+        const flushRealtimeListUpdates = () => {
+            realtimeListUpdateBatchTimerRef.current = null
+            scheduleBackgroundWork(() => {
+                if (
+                    !mountedRef.current
+                    || realtimeListUpdateBatchGenerationRef.current !== batchGeneration
+                ) {
+                    return
+                }
+
+                const updates = Array.from(pendingRealtimeListUpdatesRef.current.values())
+                pendingRealtimeListUpdatesRef.current.clear()
+                if (updates.length === 0) return
+
+                setSessions((current) => updates.reduce(
+                    (next, update) => applyNativeCodexSessionListUpdate(next, update, limit, {
+                        excludeHapiInitiated: !isMerged
+                    }),
+                    current
+                ))
+                setLastUpdatedAt(Date.now())
+            })
+        }
+
+        const scheduleRealtimeListUpdateBatch = () => {
+            if (realtimeListUpdateBatchTimerRef.current) return
+            realtimeListUpdateBatchTimerRef.current = setTimeout(
+                flushRealtimeListUpdates,
+                NATIVE_CODEX_LIST_UPDATE_BATCH_MS
+            )
+        }
+
+        const unsubscribe = subscribeNativeCodexSessionUpdated((event) => {
             if (event.machineId !== machineId) {
                 return
             }
             const update = getNativeCodexSessionListUpdate(event)
             if (update) {
                 realtimeListUpdatesRef.current.set(update.id, { receivedAt: Date.now(), update })
-                setSessions((current) => applyNativeCodexSessionListUpdate(current, update, limit, {
-                    excludeHapiInitiated: !isMerged
-                }))
-                setLastUpdatedAt(Date.now())
+                pendingRealtimeListUpdatesRef.current.set(update.id, update)
+                scheduleRealtimeListUpdateBatch()
                 return
             }
             if (realtimeRefreshTimerRef.current) {
@@ -1141,6 +1177,16 @@ export function RecentCodexSessions(props: {
                 void refresh(true)
             }, 100)
         })
+
+        return () => {
+            unsubscribe()
+            realtimeListUpdateBatchGenerationRef.current += 1
+            if (realtimeListUpdateBatchTimerRef.current) {
+                clearTimeout(realtimeListUpdateBatchTimerRef.current)
+                realtimeListUpdateBatchTimerRef.current = null
+            }
+            pendingRealtimeListUpdatesRef.current.clear()
+        }
     }, [isMerged, limit, props.machineId, refresh])
 
     useEffect(() => {

@@ -46,6 +46,11 @@ const RECONNECT_BASE_DELAY_MS = 1_000
 const RECONNECT_MAX_DELAY_MS = 30_000
 const RECONNECT_JITTER_MS = 500
 const INVALIDATION_BATCH_MS = 16
+const SESSION_UPDATE_BATCH_MS = 80
+
+type SessionCacheEvent = Extract<SyncEvent, {
+    type: 'session-added' | 'session-updated' | 'session-removed'
+}>
 
 function sortSessionSummaries(left: SessionSummary, right: SessionSummary): number {
     if (left.active !== right.active) {
@@ -223,6 +228,9 @@ export function useSSE(options: {
         const eventSource = new EventSource(url)
         let disconnectNotified = false
         let reconnectRequested = false
+        let sessionUpdateTimer: ReturnType<typeof setTimeout> | null = null
+        let pendingSessionUpdates: SessionCacheEvent[] = []
+        let flushPendingSessionUpdates = () => {}
         eventSourceRef.current = eventSource
         lastActivityAtRef.current = Date.now()
 
@@ -253,6 +261,11 @@ export function useSSE(options: {
                 return
             }
             reconnectRequested = true
+            // The cursor already acknowledges transport receipt. Apply the
+            // short UI batch before closing this source so the rebuilt stream
+            // cannot start after an event that was never committed locally.
+            flushPendingSessionUpdates()
+            flushInvalidations()
             notifyDisconnect(reason)
             eventSource.close()
             if (eventSourceRef.current === eventSource) {
@@ -450,6 +463,63 @@ export function useSSE(options: {
             })
         }
 
+        const applySessionCacheEvent = (event: SessionCacheEvent) => {
+            if (event.type === 'session-removed') {
+                removeSessionSummary(event.sessionId)
+                void queryClient.removeQueries({ queryKey: queryKeys.session(event.sessionId) })
+                clearMessageWindow(event.sessionId)
+                return
+            }
+
+            if (isSessionRecord(event.data) && event.data.id === event.sessionId) {
+                queryClient.setQueryData<SessionResponse>(queryKeys.session(event.sessionId), { session: event.data })
+                upsertSessionSummary(event.data)
+                return
+            }
+
+            const patch = getSessionPatch(event.data)
+            if (patch) {
+                const detailPatched = patchSessionDetail(event.sessionId, patch)
+                const summaryPatched = patchSessionSummary(event.sessionId, patch)
+
+                if (!detailPatched) {
+                    queueSessionDetailInvalidation(event.sessionId)
+                }
+                if (!summaryPatched) {
+                    queueSessionListInvalidation()
+                }
+            } else {
+                queueSessionDetailInvalidation(event.sessionId)
+                queueSessionListInvalidation()
+            }
+        }
+
+        const flushSessionUpdates = (notify = true) => {
+            if (eventSourceRef.current !== eventSource || pendingSessionUpdates.length === 0) {
+                pendingSessionUpdates = []
+                return
+            }
+            const updates = pendingSessionUpdates
+            pendingSessionUpdates = []
+            for (const update of updates) {
+                applySessionCacheEvent(update)
+                if (notify) onEventRef.current(update)
+            }
+        }
+        flushPendingSessionUpdates = () => flushSessionUpdates(true)
+
+        const queueSessionUpdate = (event: SessionCacheEvent) => {
+            pendingSessionUpdates.push(event)
+            if (sessionUpdateTimer !== null) return
+            sessionUpdateTimer = setTimeout(() => {
+                sessionUpdateTimer = null
+                // One short batch replaces many whole-list sorts/renders while
+                // preserving the exact event order. The interaction scheduler
+                // lets an in-progress mobile tap finish before React work.
+                scheduleBackgroundWork(flushPendingSessionUpdates)
+            }, SESSION_UPDATE_BATCH_MS)
+        }
+
         const handleSyncEvent = (event: SyncEvent) => {
             lastActivityAtRef.current = Date.now()
 
@@ -516,30 +586,8 @@ export function useSSE(options: {
             }
 
             if (event.type === 'session-added' || event.type === 'session-updated' || event.type === 'session-removed') {
-                if (event.type === 'session-removed') {
-                    removeSessionSummary(event.sessionId)
-                    void queryClient.removeQueries({ queryKey: queryKeys.session(event.sessionId) })
-                    clearMessageWindow(event.sessionId)
-                } else if (isSessionRecord(event.data) && event.data.id === event.sessionId) {
-                    queryClient.setQueryData<SessionResponse>(queryKeys.session(event.sessionId), { session: event.data })
-                    upsertSessionSummary(event.data)
-                } else {
-                    const patch = getSessionPatch(event.data)
-                    if (patch) {
-                        const detailPatched = patchSessionDetail(event.sessionId, patch)
-                        const summaryPatched = patchSessionSummary(event.sessionId, patch)
-
-                        if (!detailPatched) {
-                            queueSessionDetailInvalidation(event.sessionId)
-                        }
-                        if (!summaryPatched) {
-                            queueSessionListInvalidation()
-                        }
-                    } else {
-                        queueSessionDetailInvalidation(event.sessionId)
-                        queueSessionListInvalidation()
-                    }
-                }
+                queueSessionUpdate(event)
+                return
             }
 
             if (event.type === 'machine-updated') {
@@ -599,10 +647,17 @@ export function useSSE(options: {
             // Token/message events already flow through the frame-batched
             // message store. Put every other server-driven cache update behind
             // a task boundary so it cannot steal a simultaneous tap/click.
-            if (event.type === 'heartbeat' || event.type === 'message-received') {
+            if (
+                event.type === 'heartbeat'
+                || event.type === 'message-received'
+                || event.type === 'session-added'
+                || event.type === 'session-updated'
+                || event.type === 'session-removed'
+            ) {
                 handleSyncEvent(event)
             } else {
                 scheduleBackgroundWork(() => {
+                    if (eventSourceRef.current !== eventSource) return
                     handleSyncEvent(event)
                 })
             }
@@ -659,6 +714,15 @@ export function useSSE(options: {
         return () => {
             clearInterval(watchdogTimer)
             document.removeEventListener('visibilitychange', onVisibilityChange)
+            // Commit cursor-acknowledged session events before this effect
+            // discards its local queue. Skip App callbacks during unmount.
+            flushSessionUpdates(false)
+            flushInvalidations()
+            if (sessionUpdateTimer !== null) {
+                clearTimeout(sessionUpdateTimer)
+                sessionUpdateTimer = null
+            }
+            pendingSessionUpdates = []
             if (invalidationTimerRef.current) {
                 clearTimeout(invalidationTimerRef.current)
                 invalidationTimerRef.current = null

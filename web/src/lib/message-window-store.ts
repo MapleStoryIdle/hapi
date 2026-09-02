@@ -39,6 +39,14 @@ type InternalState = MessageWindowState & {
     pendingOverflowVisibleCount: number
     latestGeneration: number
     olderGeneration: number
+    // Set only after an authoritative latest-page read succeeds. Streaming
+    // rows can arrive before that first read, but they must not turn every
+    // later reconciliation into another cold-history backfill.
+    hasLoadedLatest: boolean
+    // Highest sequence known to be contiguous. Unlike `newestSeq`, this does
+    // not jump across a missing SSE row. A successful latest-page read resets
+    // the baseline because that snapshot is authoritative.
+    sequenceFrontier: number | null
     // V8 composite cursor: defined when hub responded with nextBeforeAt
     oldestPositionAt: number | null
     // Paired with oldestPositionAt — the server returns both as a cursor; keep them
@@ -77,6 +85,8 @@ type PersistedMessageWindowState = {
     oldestPositionSeq: number | null
     warning: string | null
     atBottom: boolean
+    hasLoadedLatest: boolean
+    sequenceFrontier: number | null
 }
 
 const states = new Map<string, InternalState>()
@@ -325,6 +335,8 @@ function persistState(sessionId: string, state: InternalState): void {
             oldestPositionSeq: state.oldestPositionSeq,
             warning: state.warning,
             atBottom: state.atBottom,
+            hasLoadedLatest: state.hasLoadedLatest,
+            sequenceFrontier: state.sequenceFrontier,
         }
         sessionStorage.setItem(getStorageKey(sessionId), JSON.stringify(persisted))
     } catch {
@@ -455,6 +467,8 @@ function createState(sessionId: string): InternalState {
         pendingOverflowCount: 0,
         latestGeneration: 0,
         olderGeneration: 0,
+        hasLoadedLatest: false,
+        sequenceFrontier: null,
     }
 }
 
@@ -473,17 +487,25 @@ function hydrateState(sessionId: string): InternalState | null {
             return null
         }
         const base = createState(sessionId)
-        return buildState(base, {
-            messages: parsed.messages,
-            pending: parsed.pending,
-            pendingOverflowCount: typeof parsed.pendingOverflowCount === 'number' ? parsed.pendingOverflowCount : 0,
-            pendingOverflowVisibleCount: typeof parsed.pendingOverflowVisibleCount === 'number' ? parsed.pendingOverflowVisibleCount : 0,
-            hasMore: parsed.hasMore === true,
-            oldestPositionAt: toNullableNumber(parsed.oldestPositionAt),
-            oldestPositionSeq: toNullableNumber(parsed.oldestPositionSeq),
-            warning: typeof parsed.warning === 'string' ? parsed.warning : null,
-            atBottom: parsed.atBottom !== false,
-        })
+        const persistedFrontier = toNullableNumber(parsed.sequenceFrontier)
+            ?? deriveSeqBounds(parsed.messages).newestSeq
+        return {
+            ...buildState(base, {
+                messages: parsed.messages,
+                pending: parsed.pending,
+                pendingOverflowCount: typeof parsed.pendingOverflowCount === 'number' ? parsed.pendingOverflowCount : 0,
+                pendingOverflowVisibleCount: typeof parsed.pendingOverflowVisibleCount === 'number' ? parsed.pendingOverflowVisibleCount : 0,
+                hasMore: parsed.hasMore === true,
+                oldestPositionAt: toNullableNumber(parsed.oldestPositionAt),
+                oldestPositionSeq: toNullableNumber(parsed.oldestPositionSeq),
+                warning: typeof parsed.warning === 'string' ? parsed.warning : null,
+                atBottom: parsed.atBottom !== false,
+                sequenceFrontier: persistedFrontier,
+            }),
+            // Old persisted windows predate this flag and already represent a
+            // rendered session, so treat only an explicit false as cold.
+            hasLoadedLatest: parsed.hasLoadedLatest !== false,
+        }
     } catch {
         clearPersistedState(sessionId)
         return null
@@ -589,6 +611,37 @@ function deriveSeqBounds(messages: DecryptedMessage[]): { oldestSeq: number | nu
         }
     }
     return { oldestSeq: oldest, newestSeq: newest }
+}
+
+function advanceSequenceFrontier(
+    initialFrontier: number | null,
+    messageGroups: ReadonlyArray<readonly DecryptedMessage[]>
+): number | null {
+    const sequences = new Set<number>()
+    for (const messages of messageGroups) {
+        for (const message of messages) {
+            if (typeof message.seq === 'number') {
+                sequences.add(message.seq)
+            }
+        }
+    }
+
+    let frontier = initialFrontier
+    if (frontier === null) {
+        for (const sequence of sequences) {
+            if (frontier === null || sequence < frontier) {
+                frontier = sequence
+            }
+        }
+    }
+    if (frontier === null) {
+        return null
+    }
+
+    while (sequences.has(frontier + 1)) {
+        frontier += 1
+    }
+    return frontier
 }
 
 function getMessagePositionAt(message: DecryptedMessage): number {
@@ -733,6 +786,8 @@ function buildState(
         isLoadingMore?: boolean
         warning?: string | null
         atBottom?: boolean
+        hasLoadedLatest?: boolean
+        sequenceFrontier?: number | null
     }
 ): InternalState {
     const messages = updates.messages ?? prev.messages
@@ -749,6 +804,10 @@ function buildState(
     }
     const pendingCount = pendingVisibleCount + pendingOverflowVisibleCount
     const { oldestSeq, newestSeq } = deriveSeqBounds(messages)
+    const sequenceFrontier = advanceSequenceFrontier(
+        updates.sequenceFrontier !== undefined ? updates.sequenceFrontier : prev.sequenceFrontier,
+        [messages, pending]
+    )
     const messagesVersion = messages === prev.messages ? prev.messagesVersion : prev.messagesVersion + 1
 
     return {
@@ -768,6 +827,8 @@ function buildState(
         isLoadingMore: updates.isLoadingMore !== undefined ? updates.isLoadingMore : prev.isLoadingMore,
         warning: updates.warning !== undefined ? updates.warning : prev.warning,
         atBottom: updates.atBottom !== undefined ? updates.atBottom : prev.atBottom,
+        hasLoadedLatest: updates.hasLoadedLatest ?? prev.hasLoadedLatest,
+        sequenceFrontier,
         messagesVersion,
     }
 }
@@ -954,6 +1015,18 @@ export function getMessageWindowState(sessionId: string): MessageWindowState {
     return getState(sessionId)
 }
 
+/**
+ * Highest sequence that is known without a hole across the rendered window,
+ * the scroll-up pending buffer, and rows waiting for the next animation frame.
+ * Reading the frame queue here keeps gap detection correct without forcing an
+ * early merge/re-render.
+ */
+export function getMessageSequenceFrontier(sessionId: string): number | null {
+    const state = getState(sessionId)
+    const frameQueued = pendingIncomingMessagesBySession.get(sessionId) ?? []
+    return advanceSequenceFrontier(state.sequenceFrontier, [state.messages, state.pending, frameQueued])
+}
+
 export function subscribeMessageWindow(sessionId: string, listener: () => void): () => void {
     const subs = listeners.get(sessionId) ?? new Set()
     subs.add(listener)
@@ -1003,6 +1076,8 @@ export function seedMessageWindowFromSession(fromSessionId: string, toSessionId:
         atBottom: source.atBottom,
         isLoading: false,
         isLoadingMore: false,
+        hasLoadedLatest: source.hasLoadedLatest,
+        sequenceFrontier: source.sequenceFrontier,
     })
     setState(toSessionId, {
         ...next,
@@ -1033,7 +1108,7 @@ export async function fetchLatestMessages(
 
     try {
         const firstResponse = await api.getMessages(sessionId, { limit: PAGE_SIZE })
-        const response = initial.atBottom
+        const response = initial.atBottom && !initial.hasLoadedLatest
             ? await backfillColdLoadMessages(api, sessionId, firstResponse, () => isCurrentGeneration(sessionId, 'latest', generation))
             : firstResponse
         if (!isCurrentGeneration(sessionId, 'latest', generation)) {
@@ -1044,6 +1119,7 @@ export async function fetchLatestMessages(
         // doesn't mix `beforeAt` from the server with a recomputed minimum `seq`.
         const nextBeforeAt = response.page.nextBeforeAt
         const nextBeforeSeq = response.page.nextBeforeSeq
+        const responseFrontier = deriveSeqBounds(response.messages).newestSeq
 
         updateStateForGeneration(sessionId, 'latest', generation, (prev) => {
             if (prev.atBottom) {
@@ -1065,6 +1141,8 @@ export async function fetchLatestMessages(
                     oldestPositionSeq: nextBeforeSeq,
                     isLoading: false,
                     warning: null,
+                    hasLoadedLatest: true,
+                    sequenceFrontier: responseFrontier ?? prev.sequenceFrontier,
                 })
             }
             const pendingResult = mergeIntoPending(prev, response.messages)
@@ -1080,6 +1158,8 @@ export async function fetchLatestMessages(
                 oldestPositionSeq: nextBeforeSeq,
                 isLoading: false,
                 warning: pendingResult.warning,
+                hasLoadedLatest: true,
+                sequenceFrontier: responseFrontier ?? prev.sequenceFrontier,
             })
         })
     } catch (error) {
