@@ -30,12 +30,10 @@ import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutation
 
 const ELAPSED_INTERVAL_MS = 1000
 
+export const FILE_MUTATION_DIALOG_CLASS_NAME = 'flex h-[60dvh] max-h-[60dvh] flex-col overflow-hidden sm:h-[min(75dvh,50rem)] sm:max-h-[calc(100dvh-2rem)]'
+
 export function shouldUseCompactTerminalToolCard(toolName: string, terminalToolDisplayMode: TerminalToolDisplayMode): boolean {
     return isTerminalExecutionTool(toolName) && terminalToolDisplayMode === 'compact'
-}
-
-export function shouldUseFullScreenToolDetail(toolName: string): boolean {
-    return toolName === 'CodexPatch'
 }
 
 export function shouldShowInlineToolCardBody(
@@ -291,10 +289,7 @@ export function ToolDetailDialogContent(props: {
     const fileMutationSummary = getFileMutationDialogSummary(props.block, props.metadata)
     if (fileMutationSummary && FullToolView) {
         return (
-            <div className={cn(
-                'mt-3 max-h-[75vh] overflow-auto',
-                toolName === 'CodexPatch' ? 'max-sm:mt-0 max-sm:max-h-none max-sm:flex-1 max-sm:px-5 max-sm:pb-5' : null
-            )}>
+            <div className="mt-3 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
                 <FullToolView block={props.block} metadata={props.metadata} surface="dialog" />
             </div>
         )
@@ -339,10 +334,9 @@ export function ToolDetailDialogHeader(props: {
     fallbackTitle: string
 }) {
     const summary = getFileMutationDialogSummary(props.block, props.metadata)
-    const fullScreenOnMobile = shouldUseFullScreenToolDetail(props.block.tool.name)
 
     return (
-        <DialogHeader className={fullScreenOnMobile ? 'max-sm:shrink-0 max-sm:border-b max-sm:border-[var(--app-border)] max-sm:px-5 max-sm:pb-4 max-sm:pt-5' : undefined}>
+        <DialogHeader className={summary ? 'shrink-0 border-b border-[var(--app-border)] pb-3 text-left' : undefined}>
             {summary ? (
                 <div className="flex min-w-0 items-center gap-3" data-file-mutation-dialog-header>
                     <DialogTitle className="min-w-0 flex-1 truncate font-mono" title={summary.fileNames.join(', ')}>
@@ -388,7 +382,7 @@ function ToolCardInner(props: ToolCardProps) {
     const isCodexAgentCard = toolName === 'CodexAgent'
     const isActivityTool = isActivityToolCard(props.block)
     const isTerminalExecution = isTerminalExecutionTool(toolName)
-    const useFullScreenToolDetail = shouldUseFullScreenToolDetail(toolName)
+    const useFileMutationDialog = getFileMutationDialogSummary(props.block, props.metadata) !== null
     const useCompactTerminalCard = shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode)
     const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal)
     const CompactToolView = showInline ? getToolViewComponent(toolName) : null
@@ -499,7 +493,11 @@ function ToolCardInner(props: ToolCardProps) {
                                 {header}
                             </button>
                         </DialogTrigger>
-                        <DialogContent fullScreenOnMobile={useFullScreenToolDetail} className="max-w-2xl" aria-describedby={undefined}>
+                        <DialogContent
+                            className={cn('max-w-2xl', useFileMutationDialog ? FILE_MUTATION_DIALOG_CLASS_NAME : null)}
+                            aria-describedby={undefined}
+                            data-file-mutation-dialog={useFileMutationDialog ? 'true' : undefined}
+                        >
                             <ToolDetailDialogHeader block={props.block} metadata={props.metadata} fallbackTitle={toolTitle} />
                             <ToolDetailDialogContent block={props.block} metadata={props.metadata} />
                         </DialogContent>

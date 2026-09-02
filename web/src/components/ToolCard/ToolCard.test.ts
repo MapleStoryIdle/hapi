@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldShowInlineToolCardBody, shouldUseCompactTerminalToolCard, shouldUseFullScreenToolDetail } from '@/components/ToolCard/ToolCard'
+import { shouldShowInlineToolCardBody, shouldUseCompactTerminalToolCard } from '@/components/ToolCard/ToolCard'
 
 describe('ToolCard terminal display mode helpers', () => {
     it('treats terminal-related cards as compact by default', () => {
@@ -20,11 +20,5 @@ describe('ToolCard terminal display mode helpers', () => {
         expect(shouldShowInlineToolCardBody('Task', false)).toBe(false)
         expect(shouldShowInlineToolCardBody('Agent', false)).toBe(false)
         expect(shouldShowInlineToolCardBody('Read', true)).toBe(false)
-    })
-
-    it('reserves the generic full-screen detail surface for exact Codex patches', () => {
-        expect(shouldUseFullScreenToolDetail('CodexBash')).toBe(false)
-        expect(shouldUseFullScreenToolDetail('CodexPatch')).toBe(true)
-        expect(shouldUseFullScreenToolDetail('Read')).toBe(false)
     })
 })

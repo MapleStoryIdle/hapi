@@ -771,6 +771,50 @@ describe('ToolGroupCard', () => {
         expect(within(view.container).getByRole('button', { name: /modified src\/example\.ts 0s/i })).toBeInTheDocument()
     })
 
+    it('opens a compact Modified row in a bounded dialog instead of a full-screen page', () => {
+        const edit = makeToolBlock('edit-1', 'Edit', {
+            file_path: 'src/example.ts',
+            old_string: 'before',
+            new_string: 'after'
+        })
+        const view = renderCard(makeGroup({
+            tools: [edit],
+            forceCompact: true,
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 0,
+                    search: 0,
+                    command: 0,
+                    mutation: 1,
+                    web: 0,
+                    other: 0,
+                },
+                fileTargets: ['src/example.ts'],
+                commandTargets: [],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        fireEvent.click(within(view.container).getByRole('button', { name: /modified src\/example\.ts 0s/i }))
+        const mutationRow = within(view.container)
+            .getAllByRole('button', { name: /modified.*example\.ts/i })
+            .find((button) => !button.hasAttribute('aria-expanded'))
+        expect(mutationRow).toBeDefined()
+        fireEvent.click(mutationRow!)
+
+        const dialog = screen.getByRole('dialog')
+        expect(dialog).toHaveAttribute('data-file-mutation-dialog', 'true')
+        expect(dialog).toHaveClass('left-1/2', 'top-1/2', 'h-[60dvh]', 'rounded-xl')
+        expect(dialog).not.toHaveClass('inset-0', 'h-[100dvh]', 'w-screen', 'rounded-none')
+        expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument()
+    })
+
     it('uses a generic compact title and renders detail blocks for result detail groups', () => {
         const tools = [
             makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {

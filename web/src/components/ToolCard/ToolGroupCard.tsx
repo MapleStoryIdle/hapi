@@ -3,11 +3,12 @@ import { getToolGroupActionKind, type ToolGroupBlock } from '@/chat/toolGroups'
 import type { ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
-import { shouldUseFullScreenToolDetail, ToolDetailDialogContent, ToolDetailDialogHeader, ToolStatusIcon, toolStatusColorClass } from '@/components/ToolCard/ToolCard'
+import { FILE_MUTATION_DIALOG_CLASS_NAME, ToolDetailDialogContent, ToolDetailDialogHeader, ToolStatusIcon, toolStatusColorClass } from '@/components/ToolCard/ToolCard'
 import { getTerminalExecutionToolState, isTerminalExecutionTool } from '@/components/ToolCard/terminalExecution'
 import { TerminalExecutionDrawer } from '@/components/ToolCard/TerminalExecutionDrawer'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
+import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutationDetail'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -483,11 +484,17 @@ function ToolGroupDetailSurface(props: {
         )
     }
 
+    const useFileMutationDialog = getFileMutationDialogSummary(props.selectedTool, props.metadata) !== null
+
     return (
         <Dialog open onOpenChange={(nextOpen) => {
             if (!nextOpen) props.onClose()
         }}>
-            <DialogContent fullScreenOnMobile={shouldUseFullScreenToolDetail(props.selectedTool.tool.name)} className="max-w-2xl" aria-describedby={undefined}>
+            <DialogContent
+                className={cn('max-w-2xl', useFileMutationDialog ? FILE_MUTATION_DIALOG_CLASS_NAME : null)}
+                aria-describedby={undefined}
+                data-file-mutation-dialog={useFileMutationDialog ? 'true' : undefined}
+            >
                 <ToolDetailDialogHeader block={props.selectedTool} metadata={props.metadata} fallbackTitle={props.title} />
                 <ToolDetailDialogContent block={props.selectedTool} metadata={props.metadata} />
             </DialogContent>

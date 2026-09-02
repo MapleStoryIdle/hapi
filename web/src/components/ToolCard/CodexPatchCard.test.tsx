@@ -72,7 +72,12 @@ describe('Codex patch card', () => {
 
         fireEvent.click(within(view.container).getByText('Modify file').closest('button')!)
 
-        const dialog = within(view.getByRole('dialog'))
+        const dialogElement = view.getByRole('dialog')
+        const dialog = within(dialogElement)
+        expect(dialogElement).toHaveAttribute('data-file-mutation-dialog', 'true')
+        expect(dialogElement).toHaveClass('left-1/2', 'top-1/2', 'h-[60dvh]', 'rounded-xl')
+        expect(dialogElement).not.toHaveClass('inset-0', 'bottom-0', 'h-[100dvh]', 'w-screen', 'rounded-none')
+        expect(dialog.getByRole('button', { name: 'Close' })).toBeInTheDocument()
         expect(dialog.getByRole('heading', { name: 'App.tsx' })).toBeInTheDocument()
         expect(dialog.getByText('+2')).toBeInTheDocument()
         expect(dialog.getByText('−1')).toBeInTheDocument()
