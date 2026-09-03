@@ -166,7 +166,7 @@ export function resolveOpencodeSlashCommand(
     if (command === 'clear' || command === 'compact') {
         return {
             kind: 'handled',
-            message: `/${command} is not yet supported in HAPI OpenCode sessions.`
+            message: `/${command} is not yet supported in SHAPI OpenCode sessions.`
         };
     }
 
@@ -197,7 +197,7 @@ export function resolveOpencodeSlashCommand(
                 'Model, reasoning effort, and permission mode have dedicated buttons in the composer. ' +
                 'You can still type `/model`, `/reasoning`, or `/permissions` if you prefer.',
                 '',
-                '`/clear` and `/compact` are not yet supported in HAPI OpenCode sessions.',
+                '`/clear` and `/compact` are not yet supported in SHAPI OpenCode sessions.',
                 '',
                 'Custom commands from `~/.config/opencode/command` or `.opencode/command` are expanded before sending.'
             ].join('\n')

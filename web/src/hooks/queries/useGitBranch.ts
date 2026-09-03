@@ -50,7 +50,7 @@ export function useGitBranch(
     }
 }
 
-/** Read a directory branch when no HAPI session exists for that project yet. */
+/** Read a directory branch when no SHAPI session exists for that project yet. */
 export function useMachineGitBranch(
     api: ApiClient | null,
     machineId: string | null,

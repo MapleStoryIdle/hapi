@@ -2,37 +2,32 @@
 
 <Steps>
 
-## Install HAPI
+## Install SHAPI
 
-::: code-group
+The first SHAPI package release has not been published yet. Build the current
+source on macOS or Linux:
 
-```bash [npm]
-npm install -g @twsxtd/hapi --registry=https://registry.npmjs.org
+```bash
+git clone https://github.com/MapleStoryIdle/shapi.git
+cd shapi
+bun install
+bun run build:single-exe
+SHAPI_BUILD="$(find cli/dist-exe -type f -name hapi | head -n 1)"
+sudo install "$SHAPI_BUILD" /usr/local/bin/shapi
+sudo ln -sf /usr/local/bin/shapi /usr/local/bin/hapi
 ```
-
-```bash [Homebrew]
-brew install tiann/tap/hapi
-```
-
-```bash [npx (one-off)]
-npx @twsxtd/hapi
-```
-
-:::
-
-> Recommendation: use the official npm registry for global install. Some mirrors may not sync platform packages in time.
 
 Other install options: [Installation](./installation.md)
 
 ## Start the hub
 
 ```bash
-hapi hub --relay
+shapi hub --relay
 ```
 
-On first run, HAPI prints an access token and saves it to `~/.hapi/settings.json`.
+On first run, SHAPI prints an access token and saves it to `~/.hapi/settings.json`.
 
-`hapi server` remains supported as an alias.
+The legacy `hapi` command remains supported as an alias; `hapi server` remains an alias for `shapi hub`.
 
 The terminal will display a URL and QR code for remote access.
 
@@ -41,10 +36,10 @@ The terminal will display a URL and QR code for remote access.
 ## Start a coding session
 
 ```bash
-hapi
+shapi
 ```
 
-This starts Claude Code wrapped with HAPI. The session appears in the web UI.
+This starts Claude Code wrapped with SHAPI. The session appears in the web UI.
 
 ## Open the UI
 
@@ -57,6 +52,6 @@ Enter your access token to log in.
 ## Next steps
 
 - [Seamless Handoff](./how-it-works.md#seamless-handoff) - Switch between terminal and phone seamlessly
-- [Hub setup](./installation.md#hub-setup) - Access HAPI from anywhere
+- [Hub setup](./installation.md#hub-setup) - Access SHAPI from anywhere
 - [Notifications](./installation.md#telegram-setup) - Set up Telegram notifications
-- [Install the App](./pwa.md) - Add HAPI to your home screen
+- [Install the App](./pwa.md) - Add SHAPI to your home screen

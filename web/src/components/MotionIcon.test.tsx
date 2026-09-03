@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { toMotionIcon } from './MotionIcon'
 
 describe('toMotionIcon', () => {
-    it('adapts and caches HAPI’s aligned Lucide SVG tuple', () => {
+    it('adapts and caches SHAPI’s aligned Lucide SVG tuple', () => {
         const input = toMotionIcon(Folder)
 
         expect(input).toBe(toMotionIcon(Folder))

@@ -569,7 +569,7 @@ describe('getLocalCodexSessionData', () => {
 })
 
 describe('listLocalCodexSessions', () => {
-    it('can exclude HAPI-initiated threads before applying the limit', () => {
+    it('can exclude SHAPI-initiated threads before applying the limit', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-list-test-'))
         const sessionDir = join(codexHome, 'sessions', '2026', '08', '15')
         const hapiSessionId = '11111111-1111-4111-8111-111111111111'

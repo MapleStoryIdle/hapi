@@ -72,7 +72,7 @@ describe('resume schemas', () => {
         }).success).toBe(true)
     })
 
-    it('validates native Codex transcript invalidations without treating them as HAPI sessions', () => {
+    it('validates native Codex transcript invalidations without treating them as SHAPI sessions', () => {
         expect(SyncEventSchema.safeParse({
             type: 'codex-session-updated',
             machineId: 'machine-1',

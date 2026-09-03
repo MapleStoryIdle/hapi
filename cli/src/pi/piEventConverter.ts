@@ -8,10 +8,10 @@ import type {
 } from './types';
 
 /**
- * Converts Pi AgentEvent to HAPI AgentMessage array.
+ * Converts Pi AgentEvent to SHAPI AgentMessage array.
  *
  * Pi events come from `pi --mode rpc` stdout as JSONL.
- * Not all Pi events map to HAPI AgentMessages — response/ack events
+ * Not all Pi events map to SHAPI AgentMessages — response/ack events
  * are handled directly by the runner, not by this converter.
  */
 export function convertPiEvent(event: PiAgentEvent): AgentMessage[] {

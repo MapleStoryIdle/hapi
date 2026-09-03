@@ -787,21 +787,21 @@ describe('ApiMachineClient runner metadata sync', () => {
             host: 'Mac-mini.local',
             platform: 'darwin',
             happyCliVersion: '0.20.2',
-            homeDir: '/Users/dev',
-            happyHomeDir: '/Users/dev/.hapi',
+            homeDir: '/Users/alice',
+            happyHomeDir: '/Users/alice/.hapi',
             happyLibDir: '/opt/hapi',
-            workspaceRoots: ['/Users/dev/IdeaProjects'],
+            workspaceRoots: ['/Users/alice/Projects'],
             displayName: 'My runner'
         }
         const advertisedMetadata: MachineMetadata = {
             host: 'Mac-mini.local',
             platform: 'darwin',
             happyCliVersion: '0.20.2',
-            homeDir: '/Users/dev',
-            codexHome: '/Users/dev/.codex',
-            happyHomeDir: '/Users/dev/.hapi',
+            homeDir: '/Users/alice',
+            codexHome: '/Users/alice/.codex',
+            happyHomeDir: '/Users/alice/.hapi',
             happyLibDir: '/opt/hapi',
-            workspaceRoots: ['/Users/dev/IdeaProjects']
+            workspaceRoots: ['/Users/alice/Projects']
         }
         const listeners = new Map<string, (...args: unknown[]) => void>()
         const socket = {
@@ -831,7 +831,7 @@ describe('ApiMachineClient runner metadata sync', () => {
         })
 
         expect(machine.metadata).toMatchObject({
-            codexHome: '/Users/dev/.codex',
+            codexHome: '/Users/alice/.codex',
             displayName: 'My runner'
         })
         client.shutdown()

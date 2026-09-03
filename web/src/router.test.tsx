@@ -10,7 +10,7 @@ describe('recent Codex session route', () => {
 
         await router.load()
 
-        // 验证静态 codex 前缀不会被 $sessionId 动态路由误判为普通 HAPI 会话。
+        // 验证静态 codex 前缀不会被 $sessionId 动态路由误判为普通 SHAPI 会话。
         const leaf = router.state.matches.at(-1)
         expect(leaf?.routeId).toBe('/sessions/codex/$codexSessionId')
         expect(leaf?.params).toEqual({ codexSessionId: 'codex-thread-1' })

@@ -56,7 +56,7 @@ function resolveSandboxPolicyOverride(value: CodexCliOverrides['sandbox'] | unde
 const APP_SERVER_FAST_TIER = 'priority';
 
 /**
- * Translate HAPI's stored service-tier representation into the Codex
+ * Translate SHAPI's stored service-tier representation into the Codex
  * app-server `serviceTier` field for thread/turn params:
  * - `'fast'`     → `'priority'`  (the advertised Fast tier request value)
  * - `'standard'` → `null`        (explicit Standard tier)

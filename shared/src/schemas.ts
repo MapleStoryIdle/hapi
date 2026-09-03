@@ -549,7 +549,7 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
     }),
     MachineChangedSchema.extend({
         type: z.literal('codex-session-updated'),
-        /** Native Codex thread id; deliberately separate from HAPI sessionId. */
+        /** Native Codex thread id; deliberately separate from SHAPI sessionId. */
         codexSessionId: z.string(),
         modifiedAt: z.number().optional(),
         /** Sanitized list-row update from a current runner. */

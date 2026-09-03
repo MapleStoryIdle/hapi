@@ -12,7 +12,7 @@ export async function runCli(): Promise<void> {
     const args = getCliArgs()
 
     if (args.includes('-v') || args.includes('--version')) {
-        console.log(`hapi version: ${packageJson.version}`)
+        console.log(`SHAPI version: ${packageJson.version}`)
         process.exit(0)
     }
 
@@ -30,7 +30,7 @@ export async function runCli(): Promise<void> {
     if (command.requiresRuntimeAssets) {
         const { ensureRuntimeAssets } = await import('@/runtime/assets')
         await ensureRuntimeAssets()
-        logger.debug('Starting hapi CLI with args: ', process.argv)
+        logger.debug('Starting SHAPI CLI with args: ', process.argv)
     }
 
     await command.run(context)

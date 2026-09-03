@@ -192,7 +192,7 @@ async function readRunnerControlState(path: string): Promise<RunnerControlState 
 
 /**
  * Invoked by a globally configured Codex hook. It intentionally succeeds
- * silently when the local HAPI runner is absent so a notification outage can
+ * silently when the local SHAPI runner is absent so a notification outage can
  * never interfere with Codex's normal approval flow.
  */
 export async function runExternalCodexHookForwarder(args: string[]): Promise<void> {

@@ -16,7 +16,7 @@ export const BUILTIN_SLASH_COMMANDS = {
         { name: 'compact', description: 'Compact current Codex thread context', source: 'builtin' },
         { name: 'review', description: 'Run a Codex code review', source: 'builtin' },
         { name: 'goal', description: 'Set, view, pause, resume, or clear a persistent Codex goal', source: 'builtin' },
-        { name: 'help', description: 'Show supported HAPI Codex slash commands', source: 'builtin' },
+        { name: 'help', description: 'Show supported SHAPI Codex slash commands', source: 'builtin' },
         { name: 'plan', description: 'Enable plan mode; use /plan off to return to default', source: 'builtin' },
         { name: 'default', description: 'Return Codex collaboration mode to default', source: 'builtin' },
         { name: 'execute', description: 'Return Codex collaboration mode to default', source: 'builtin' },
@@ -34,7 +34,7 @@ export const BUILTIN_SLASH_COMMANDS = {
         { name: 'stats', description: 'Check session stats', source: 'builtin' },
     ],
     opencode: [
-        { name: 'help', description: 'Show supported HAPI OpenCode slash commands', source: 'builtin' },
+        { name: 'help', description: 'Show supported SHAPI OpenCode slash commands', source: 'builtin' },
         { name: 'status', description: 'Show current OpenCode session config', source: 'builtin' },
         { name: 'plan', description: 'Enable plan mode; use /plan off to return to default', source: 'builtin' },
         { name: 'default', description: 'Return OpenCode permission mode to default', source: 'builtin' },

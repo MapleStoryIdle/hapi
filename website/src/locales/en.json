@@ -62,7 +62,7 @@
   },
   "lifestyle": {
     "title": "The \"Vibe Coding\" Lifestyle",
-    "subtitle": "HAPI isn't just a tool; it's a declaration of independence from your desk.",
+    "subtitle": "SHAPI isn't just a tool; it's a declaration of independence from your desk.",
     "cards": {
       "explore": {
         "title": "Go Explore",
@@ -74,7 +74,7 @@
       },
       "walk": {
         "title": "Walk Away",
-        "desc": "Literally. Walk away from the screen. HAPI keeps the session alive and secure until you return."
+        "desc": "Literally. Walk away from the screen. SHAPI keeps the session alive and secure until you return."
       }
     }
   },
@@ -97,7 +97,7 @@
     "title": "How it Works",
     "step1": {
       "title": "1. Start on Desktop",
-      "desc": "Launch HAPI on your machine. It keeps your session alive and ready for remote access."
+      "desc": "Launch SHAPI on your machine. It keeps your session alive and ready for remote access."
     },
     "step2": {
       "title": "2. Connect Mobile",
@@ -112,10 +112,10 @@
     "title": "Get Started in Seconds",
     "e2ee": "🔒 End-to-end encrypted with WireGuard + TLS",
     "npm": {
-      "step1": "1. Start the Server",
-      "step2": "2. Start a Coding Session",
-      "step3": "3. Open the URL",
-      "step3Hint": "URL and QR code shown in terminal"
+      "step1": "1. Build from source",
+      "step2": "2. Install the CLI",
+      "step3": "3. Start SHAPI",
+      "step3Hint": "shapi hub --relay\nshapi"
     }
   },
   "cta": {
@@ -127,7 +127,7 @@
     "desc": "Vibe Coding Anytime, Anywhere. <br/> The local-first AI agent platform for developers who love freedom.",
     "product": "Product",
     "community": "Community",
-    "copyright": "© {{year}} HAPI Team. Open source under AGPL License.",
+    "copyright": "© {{year}} SHAPI Team. Open source under AGPL License.",
     "designedWith": "Designed with <span class=\"text-red-500\">♥</span> for Vibe Coding."
   }
 }

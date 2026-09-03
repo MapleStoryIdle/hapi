@@ -74,7 +74,7 @@ describe('SessionActionMenu - Reopen action', () => {
 })
 
 describe('SessionActionMenu - capability-scoped actions', () => {
-    it('supports a native-session menu without rendering HAPI lifecycle actions', () => {
+    it('supports a native-session menu without rendering SHAPI lifecycle actions', () => {
         const onRefresh = vi.fn()
         const onFork = vi.fn()
         renderMenu({

@@ -88,12 +88,12 @@ function ensureEventHooks(
         return created
     }
     if (!Array.isArray(existing)) {
-        throw new Error(`${eventName} in hooks.json must be an array; HAPI did not modify it`)
+        throw new Error(`${eventName} in hooks.json must be an array; SHAPI did not modify it`)
     }
 
     for (const entry of existing) {
         if (!asRecord(entry)) {
-            throw new Error(`${eventName} in hooks.json contains an invalid hook group; HAPI did not modify it`)
+            throw new Error(`${eventName} in hooks.json contains an invalid hook group; SHAPI did not modify it`)
         }
     }
     return existing as Array<Record<string, unknown>>
@@ -155,7 +155,7 @@ async function loadHooksJson(path: string): Promise<Record<string, unknown>> {
         return root
     } catch (error) {
         if (error instanceof SyntaxError) {
-            throw new Error(`Could not parse ${path}; HAPI did not modify it`)
+            throw new Error(`Could not parse ${path}; SHAPI did not modify it`)
         }
         const nodeError = error as NodeJS.ErrnoException
         if (nodeError.code === 'ENOENT') {
@@ -196,7 +196,7 @@ export async function installExternalCodexNotificationHooks(
         root.hooks = hooks
     } else {
         hooks = asRecord(existingHooks) ?? (() => {
-            throw new Error('hooks in hooks.json must be an object; HAPI did not modify it')
+            throw new Error('hooks in hooks.json must be an object; SHAPI did not modify it')
         })()
     }
 

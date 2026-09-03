@@ -201,7 +201,7 @@ function getNativeCodexDirectSendPhaseStartedAt(input: {
 
 /**
  * Native transcript reads can take a moment while the runner reads Codex's
- * local history. Match the HAPI session's first-paint conversation skeleton.
+ * local history. Match the SHAPI session's first-paint conversation skeleton.
  */
 function NativeContextTypingIndicator(props: { label: string }) {
     return (
@@ -381,7 +381,7 @@ function buildReadOnlyCodexMessages(
 }
 
 /**
- * Use the normal HAPI message normalizer and reducer so local Codex history
+ * Use the normal SHAPI message normalizer and reducer so local Codex history
  * renders tool calls, tool results, and reasoning exactly as an imported chat.
  */
 export function buildReadOnlyCodexBlocks(
@@ -415,7 +415,7 @@ export function mergeCodexContextMessages(
 
 /**
  * A native prompt is accepted by a separate local Codex process, so there is
- * no HAPI message row or localId for the transcript to echo back. Keep a
+ * no SHAPI message row or localId for the transcript to echo back. Keep a
  * small client-side copy until a *new* matching transcript record arrives.
  */
 export type NativeDirectMessageEcho = NativeCodexDirectMessageEcho
@@ -502,7 +502,7 @@ export function buildNativeCodexBlocks(
 }
 
 /**
- * Native transcript plans are not HAPI messages. Build the shared visual
+ * Native transcript plans are not SHAPI messages. Build the shared visual
  * model directly from the full snapshot, and only while the runner confirms
  * that exact Codex turn is still processing.
  */
@@ -769,7 +769,7 @@ function NativeCodexThread(props: {
 /**
  * Renders a local Codex CLI transcript through the normal session thread.
  * Text is delivered to the original native thread. Its owning app-server
- * accepts prompts while a turn is running; HAPI keeps only a small FIFO for
+ * accepts prompts while a turn is running; SHAPI keeps only a small FIFO for
  * the hand-off command and retains the visible receipt across page exits.
  */
 export function CodexSessionContextPage(props: {
@@ -1121,10 +1121,10 @@ export function CodexSessionContextPage(props: {
     }, [isLoadingMore, oldestPage, pageScope, props.api, props.machineId, props.sessionId])
 
     const context = contextQuery.data
-    // Native transcripts do not carry HAPI's SessionMetadata row. Supplying a
+    // Native transcripts do not carry SHAPI's SessionMetadata row. Supplying a
     // small, explicit Codex metadata view keeps the shared thread renderer's
     // agent icon, path shortening and permission presentation identical to a
-    // normal Codex session without inventing HAPI-only state.
+    // normal Codex session without inventing SHAPI-only state.
     const nativeMetadata = useMemo<SessionMetadataSummary>(() => ({
         path: context?.session.cwd ?? '',
         host: 'local',

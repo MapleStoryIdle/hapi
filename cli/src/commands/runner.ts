@@ -190,13 +190,13 @@ export const runnerCommand: CommandDefinition = {
         }
 
         console.log(`
-${chalk.bold('hapi runner')} - Runner management
+${chalk.bold('shapi runner')} - Runner management
 
 ${chalk.bold('Usage:')}
-  hapi runner start              Start the runner (replaces existing runner)
-  hapi runner stop               Stop the runner (sessions stay alive)
-  hapi runner status             Show runner status
-  hapi runner list               List active sessions
+  shapi runner start              Start the runner (replaces existing runner)
+  shapi runner stop               Stop the runner (sessions stay alive)
+  shapi runner status             Show runner status
+  shapi runner list               List active sessions
 
 ${chalk.bold('Options:')}
   --workspace-root <path>        Expose this directory for file browsing.
@@ -205,13 +205,13 @@ ${chalk.bold('Options:')}
                                  Supports \`~\` / \`~/foo\` expansion.
                                  Omit to leave browsing off (legacy mode).
 
-  If you want to kill all hapi related processes run 
-  ${chalk.cyan('hapi doctor clean')}
+  If you want to kill all SHAPI-related processes run
+  ${chalk.cyan('shapi doctor clean')}
 
 ${chalk.bold('Note:')} The runner runs in the background and manages Claude sessions.
-Running ${chalk.cyan('hapi runner start')} stops any existing runner first so new flags and environment variables take effect.
+Running ${chalk.cyan('shapi runner start')} stops any existing runner first so new flags and environment variables take effect.
 
-${chalk.bold('To clean up runaway processes:')} Use ${chalk.cyan('hapi doctor clean')}
+${chalk.bold('To clean up runaway processes:')} Use ${chalk.cyan('shapi doctor clean')}
 `)
     }
 }

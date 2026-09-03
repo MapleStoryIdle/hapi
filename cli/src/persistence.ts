@@ -1,5 +1,5 @@
 /**
- * Minimal persistence functions for HAPI CLI
+ * Minimal persistence functions for SHAPI CLI
  * 
  * Handles settings, encryption key, and runner state storage in ~/.hapi/ (or HAPI_HOME override)
  */

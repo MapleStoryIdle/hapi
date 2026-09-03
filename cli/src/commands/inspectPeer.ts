@@ -17,11 +17,11 @@ export type ParsedInspectPeerArgs = {
 
 function showHelp(): void {
     console.log(`
-${chalk.bold('hapi inspect-peer')} - 只读查看同一 Hub 的另一个会话
+${chalk.bold('shapi inspect-peer')} - 只读查看同一 Hub 的另一个会话
 
 ${chalk.bold('Usage:')}
-  hapi inspect-peer <session-id-or-prefix>
-  hapi inspect-peer <session-id-or-prefix> --limit 50
+  shapi inspect-peer <session-id-or-prefix>
+  shapi inspect-peer <session-id-or-prefix> --limit 50
 
 ${chalk.bold('Machine-readable contract:')}
   输出包含会话元数据和最近可提取的用户 / Agent 文本；该命令绝不会 resume 目标会话。
@@ -67,7 +67,7 @@ export async function handleInspectPeerCommand(args: string[]): Promise<void> {
     await initializeToken()
     if (!parsed.sessionIdPrefix) {
         showHelp()
-        throw new PingPeerError('bad_args', 'missing session id; usage: hapi inspect-peer <session-id>')
+        throw new PingPeerError('bad_args', 'missing session id; usage: shapi inspect-peer <session-id>')
     }
     console.log(formatInspectPeerReport(await inspectPeer({
         sessionIdPrefix: parsed.sessionIdPrefix,
@@ -83,10 +83,10 @@ export const inspectPeerCommand: CommandDefinition = {
             await handleInspectPeerCommand(commandArgs)
         } catch (error) {
             if (error instanceof PingPeerError) {
-                console.error(chalk.red('hapi inspect-peer:'), error.message)
+                console.error(chalk.red('shapi inspect-peer:'), error.message)
                 process.exit(exitCodeForPingPeerError(error))
             }
-            console.error(chalk.red('hapi inspect-peer:'), error instanceof Error ? error.message : 'Unknown error')
+            console.error(chalk.red('shapi inspect-peer:'), error instanceof Error ? error.message : 'Unknown error')
             process.exit(1)
         }
     }

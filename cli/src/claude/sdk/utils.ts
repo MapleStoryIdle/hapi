@@ -77,7 +77,7 @@ function findWindowsClaudePath(): string | null {
     }
 
     // Try PATH lookup. npm global installs usually expose claude.cmd/claude
-    // shims, while HAPI spawns Claude with shell:false and needs the real exe.
+    // shims, while SHAPI spawns Claude with shell:false and needs the real exe.
     for (const command of ['claude.exe', 'claude.cmd', 'claude']) {
         for (const result of findWhereResults(command)) {
             const resolved = resolveWindowsClaudePathCandidate(result)

@@ -140,7 +140,7 @@ describe('resolveCodexSlashCommand', () => {
         for (const command of ['diff', 'undo', 'compat']) {
             expect(resolveCodexSlashCommand(`/${command}`, state)).toEqual({
                 kind: 'handled',
-                message: `/${command} is a Codex CLI command that is not supported in HAPI sessions yet.`
+                message: `/${command} is a Codex CLI command that is not supported in SHAPI sessions yet.`
             });
         }
     });

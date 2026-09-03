@@ -21,7 +21,7 @@ beforeAll(async () => {
     distDir = mkdtempSync(join(tmpdir(), 'hapi-web-static-'))
     mkdirSync(join(distDir, 'assets'), { recursive: true })
     mkdirSync(join(distDir, 'fonts'), { recursive: true })
-    writeFileSync(join(distDir, 'index.html'), '<html>HAPI index</html>')
+    writeFileSync(join(distDir, 'index.html'), '<html>SHAPI index</html>')
     writeFileSync(join(distDir, 'assets', 'app-abc123.js'), 'asset-content')
     writeFileSync(join(distDir, 'fonts', 'test.otf'), 'font-content')
     writeFileSync(join(distDir, 'sw.js'), 'service-worker-content')
@@ -85,14 +85,14 @@ for (const mode of ['embedded', 'filesystem'] as const) {
             const response = await createStaticApp(mode).request('/assets/old-hash.js')
 
             expect(response.status).toBe(404)
-            expect(await response.text()).not.toContain('HAPI index')
+            expect(await response.text()).not.toContain('SHAPI index')
         })
 
         test('keeps SPA routes on the no-cache index document', async () => {
             const response = await createStaticApp(mode).request('/sessions/example')
 
             expect(response.status).toBe(200)
-            expect(await response.text()).toContain('HAPI index')
+            expect(await response.text()).toContain('SHAPI index')
             expect(response.headers.get('Cache-Control')).toBe('no-cache')
         })
 

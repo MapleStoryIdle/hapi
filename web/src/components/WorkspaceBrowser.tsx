@@ -312,7 +312,7 @@ export function WorkspaceBrowser(props: {
                     <div className="text-sm text-[var(--app-fg)] font-medium">{t('browse.noRootTitle')}</div>
                     <div className="max-w-md text-sm text-[var(--app-hint)]">{t('browse.noRootHint')}</div>
                     <code className="px-3 py-1.5 text-xs rounded bg-[var(--app-subtle-bg)] text-[var(--app-fg)]">
-                        hapi runner start --workspace-root /path/a --workspace-root /path/b
+                        shapi runner start --workspace-root /path/a --workspace-root /path/b
                     </code>
                     <div className="text-xs text-[var(--app-hint)] mt-2">
                         {t('browse.noRootFooter')}

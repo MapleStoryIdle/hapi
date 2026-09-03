@@ -444,7 +444,7 @@ describe('markdown <A> component — file path links', () => {
     })
 
     it('routes encoded absolute project paths through the session file viewer', () => {
-        const workspacePath = '/Users/dev/IdeaProjects/homebar-cloud'
+        const workspacePath = '/Users/alice/Projects/example-app'
         const filePath = `${workspacePath}/doc/中文 文件.md`
         const href = `${workspacePath}/doc/${encodeURIComponent('中文 文件.md')}:42:7`
 
@@ -512,9 +512,9 @@ describe('markdown <A> component — file path links', () => {
     })
 
     it('keeps external absolute paths unavailable but copyable, while HTTP(S) stays a web link', async () => {
-        const workspacePath = '/Users/dev/IdeaProjects/homebar-cloud'
-        const externalPath = '/Users/dev/IdeaProjects/other-project/doc/中文 文件.md'
-        const externalHref = '/Users/dev/IdeaProjects/other-project/doc/%E4%B8%AD%E6%96%87%20%E6%96%87%E4%BB%B6.md'
+        const workspacePath = '/Users/alice/Projects/example-app'
+        const externalPath = '/Users/alice/Projects/other-project/doc/中文 文件.md'
+        const externalHref = '/Users/alice/Projects/other-project/doc/%E4%B8%AD%E6%96%87%20%E6%96%87%E4%BB%B6.md'
         const writeText = vi.fn(async () => {})
         const previousClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
         Object.defineProperty(navigator, 'clipboard', {
@@ -578,8 +578,8 @@ describe('markdown <A> component — file path links', () => {
     })
 
     it('keeps authored absolute hapi-file targets outside the workspace unavailable and copyable', async () => {
-        const workspacePath = '/Users/dev/IdeaProjects/project'
-        const filePath = '/Users/dev/IdeaProjects/other-project/doc/README.md'
+        const workspacePath = '/Users/alice/Projects/example-app'
+        const filePath = '/Users/alice/Projects/other-project/doc/README.md'
         const writeText = vi.fn(async () => {})
         const previousClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
         Object.defineProperty(navigator, 'clipboard', {
@@ -613,9 +613,9 @@ describe('markdown <A> component — file path links', () => {
     })
 
     it.each([
-        ['/Users/dev/project/../other/README.md', '/Users/dev/project'],
+        ['/Users/alice/project/../other/README.md', '/Users/alice/project'],
         ['C:/repo/../other/README.md', 'C:/repo'],
-        ['../other/README.md', '/Users/dev/project'],
+        ['../other/README.md', '/Users/alice/project'],
     ])('keeps traversal target %s unavailable', (filePath, workspacePath) => {
         const href = `hapi-file:${encodeURIComponent(filePath)}`
         renderAInChat({ href, children: 'traversal file' }, { workspacePath })
@@ -645,7 +645,7 @@ describe('markdown <A> component — file path links', () => {
     })
 
     it.each([
-        ['/Users/dev/project/../other/README.md', '/Users/dev/project'],
+        ['/Users/alice/project/../other/README.md', '/Users/alice/project'],
         ['C:/repo/../other/README.md', 'C:/repo'],
     ])('keeps explicit traversal href %s unavailable', (href, workspacePath) => {
         renderAInChat({ href, children: 'traversal file' }, { workspacePath })
@@ -662,11 +662,11 @@ describe('markdown <A> component — file path links', () => {
     })
 
     it('does not render a copy control for a navigable file path', () => {
-        const filePath = '/Users/dev/IdeaProjects/homebar-cloud/doc/中文 文件.md'
+        const filePath = '/Users/alice/Projects/example-app/doc/中文 文件.md'
         const href = `hapi-file:${encodeURIComponent(filePath)}?line=42`
         renderAInChat(
             { href, children: '中文 文件.md:42' },
-            { workspacePath: '/Users/dev/IdeaProjects/homebar-cloud' }
+            { workspacePath: '/Users/alice/Projects/example-app' }
         )
 
         const link = screen.getByRole('link')

@@ -150,11 +150,11 @@ export function parseSharePublishOptions(args: string[], inheritedSessionId?: st
         }
     }
     if (positional.length !== 1 || !Number.isSafeInteger(expires) || expires < 300 || expires > 604800) {
-        fail('Usage: hapi share publish <relative-file> [--expires 300..604800] [--session <session-id>] [--machine <machine-id>] [--feedback] [--feedback-request <text>]')
+        fail('Usage: shapi share publish <relative-file> [--expires 300..604800] [--session <session-id>] [--machine <machine-id>] [--feedback] [--feedback-request <text>]')
     }
     const inherited = inheritedSessionId?.trim() || null
     if (!sourceSessionId && inherited) {
-        if (inherited.length > 255 || /[\u0000-\u001f\u007f]/.test(inherited)) fail('Inherited HAPI session ID is invalid.')
+        if (inherited.length > 255 || /[\u0000-\u001f\u007f]/.test(inherited)) fail('Inherited SHAPI session ID is invalid.')
         sourceSessionId = inherited
     }
     if (feedbackRequest && !feedback) fail('--feedback-request requires --feedback.')
@@ -247,7 +247,7 @@ export const shareCommand: CommandDefinition = {
                     : `Share ${commandArgs[1]} revoked.`)
                 return
             }
-            fail('Usage: hapi share publish <relative-file> [--expires <seconds>] [--session <session-id>] [--machine <machine-id>] [--feedback] [--feedback-request <text>] | hapi share revoke <share-id>')
+            fail('Usage: shapi share publish <relative-file> [--expires <seconds>] [--session <session-id>] [--machine <machine-id>] [--feedback] [--feedback-request <text>] | shapi share revoke <share-id>')
         } catch (error) {
             console.error(error instanceof Error ? error.message : 'Share command failed.')
             process.exitCode = 1

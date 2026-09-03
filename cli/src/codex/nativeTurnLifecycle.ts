@@ -325,7 +325,7 @@ export class NativeCodexTurnLifecycleTracker {
         return changed
     }
 
-    /** Ignore a prompt created by HAPI's own headless native bridge. */
+    /** Ignore a prompt created by SHAPI's own headless native bridge. */
     suppressUserInputWait(codexSessionId: string): boolean {
         const session = this.sessions.get(codexSessionId)
         if (!session?.userInput) return false

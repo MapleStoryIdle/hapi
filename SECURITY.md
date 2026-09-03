@@ -1,3 +1,3 @@
 # Security Policy
 
-[Reporting a Vulnerability](https://github.com/tiann/hapi/security/advisories/new)
+[Report a vulnerability privately](https://github.com/MapleStoryIdle/shapi/security/advisories/new).

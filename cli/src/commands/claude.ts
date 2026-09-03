@@ -81,40 +81,42 @@ export const claudeCommand: CommandDefinition = {
 
         if (showHelp) {
             console.log(`
-${chalk.bold('hapi')} - Claude Code On the Go
+${chalk.bold('shapi')} - Claude Code On the Go
 
 ${chalk.bold('Usage:')}
-  hapi [options]         Start Claude with Telegram control (direct-connect)
-  hapi auth              Manage authentication
-  hapi codex             Start Codex mode
-  hapi cursor            Start Cursor Agent mode
-  hapi opencode          Start OpenCode ACP mode
-  hapi resume [id]       Resume an existing HAPI session locally
-  hapi mcp               Start MCP stdio bridge
-  hapi inspect-peer <id> Read another HAPI session (never resumes it)
-  hapi ping-peer <id> <message>
-                         Send a message to another HAPI session
-  hapi connect           (not available in direct-connect mode)
-  hapi notify            (not available in direct-connect mode)
-  hapi hub               Start the API + web hub
-  hapi hub --relay       Start with public relay
-  hapi server            Alias for hapi hub
-  hapi runner            Manage background service that allows
+  shapi [options]         Start Claude with Telegram control (direct-connect)
+  shapi auth              Manage authentication
+  shapi codex             Start Codex mode
+  shapi cursor            Start Cursor Agent mode
+  shapi opencode          Start OpenCode ACP mode
+  shapi resume [id]       Resume an existing SHAPI session locally
+  shapi mcp               Start MCP stdio bridge
+  shapi inspect-peer <id> Read another SHAPI session (never resumes it)
+  shapi ping-peer <id> <message>
+                         Send a message to another SHAPI session
+  shapi connect           (not available in direct-connect mode)
+  shapi notify            (not available in direct-connect mode)
+  shapi hub               Start the API + web hub
+  shapi hub --relay       Start with public relay
+  shapi server            Alias for shapi hub
+  shapi runner            Manage background service that allows
                             to spawn new sessions away from your computer
-  hapi doctor            System diagnostics & troubleshooting
+  shapi doctor            System diagnostics & troubleshooting
 
 ${chalk.bold('Examples:')}
-  hapi                    Start session (will prompt for token if not set)
-  hapi auth login         Configure CLI_API_TOKEN interactively
-  hapi --yolo             Start with bypassing permissions
-                            hapi sugar for --dangerously-skip-permissions
-  hapi auth status        Show direct-connect status
-  hapi doctor             Run diagnostics
+  shapi                    Start session (will prompt for token if not set)
+  shapi auth login         Configure CLI_API_TOKEN interactively
+  shapi --yolo             Start with bypassing permissions
+                            SHAPI sugar for --dangerously-skip-permissions
+  shapi auth status        Show direct-connect status
+  shapi doctor             Run diagnostics
 
-${chalk.bold('hapi supports ALL Claude options!')}
-  Use any claude flag with hapi as you would with claude. Our favorite:
+${chalk.bold('SHAPI supports ALL Claude options!')}
+  Use any claude flag with shapi as you would with claude. Our favorite:
 
-  hapi --resume
+  shapi --resume
+
+${chalk.gray('The legacy hapi command remains available as a compatibility alias.')}
 
 ${chalk.gray('─'.repeat(60))}
 ${chalk.bold.cyan('Claude Code Options (from `claude --help`):')}
@@ -173,13 +175,13 @@ ${chalk.bold.cyan('Claude Code Options (from `claude --help`):')}
                 messageLower.includes('enotfound') ||
                 messageLower.includes('network error')
             ) {
-                console.error(chalk.yellow('Unable to connect to HAPI hub'))
+                console.error(chalk.yellow('Unable to connect to SHAPI hub'))
                 console.error(chalk.gray(`  Hub URL: ${configuration.apiUrl}`))
                 console.error(chalk.gray('  Please check your network connection or hub status'))
             } else if (httpStatus === 403 && responseErrorText === 'Machine access denied') {
                 console.error(chalk.red('Machine access denied.'))
                 console.error(chalk.gray('  This machineId is already registered under a different namespace.'))
-                console.error(chalk.gray('  Fix: run `hapi auth logout`, or set a separate HAPI_HOME per namespace.'))
+                console.error(chalk.gray('  Fix: run `shapi auth logout`, or set a separate HAPI_HOME per namespace.'))
             } else if (httpStatus === 403 && responseErrorText === 'Session access denied') {
                 console.error(chalk.red('Session access denied.'))
                 console.error(chalk.gray('  This session belongs to a different namespace.'))
@@ -191,7 +193,7 @@ ${chalk.bold.cyan('Claude Code Options (from `claude --help`):')}
                 messageLower.includes('forbidden')
             ) {
                 console.error(chalk.red('Authentication error:'), message)
-                console.error(chalk.gray('  Run: hapi auth login'))
+                console.error(chalk.gray('  Run: shapi auth login'))
             } else {
                 console.error(chalk.red('Error:'), message)
             }

@@ -79,8 +79,8 @@ const DEFAULT_WAIT_ACTIVE_SECS = 60
 const POLL_ACTIVE_MS = 2_000
 const POLL_PI_READY_MS = 1_000
 const AUTH_RECOVERY_HINT =
-    'On a remote runner, set HAPI_API_URL to the runner hub and configure CLI_API_TOKEN with `hapi auth login`. '
-    + 'Inside a HAPI session, prefer MCP list_peers / inspect_peer / ping_peer.'
+    'On a remote runner, set HAPI_API_URL to the runner hub and configure CLI_API_TOKEN with `shapi auth login`. '
+    + 'Inside a SHAPI session, prefer MCP list_peers / inspect_peer / ping_peer.'
 
 function defaultSleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
@@ -89,7 +89,7 @@ function defaultSleep(ms: number): Promise<void> {
 function resolveApiUrl(apiUrl?: string): string {
     const raw = (apiUrl ?? configuration.apiUrl).trim().replace(/\/+$/, '')
     if (!raw) {
-        throw new PingPeerError('bad_args', `HAPI API URL is empty. ${AUTH_RECOVERY_HINT}`)
+        throw new PingPeerError('bad_args', `SHAPI API URL is empty. ${AUTH_RECOVERY_HINT}`)
     }
     // 安全边界：MCP 参数不能指定任意主机，只能访问已配置的同一个 Hub。
     return raw
@@ -374,7 +374,7 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     const matched = resolveSessionByPrefix(await listSessions(apiUrl, jwt, http), prefix)
     const callerSessionId = (options.callerSessionId ?? process.env.HAPI_SESSION_ID ?? '').trim()
     if (callerSessionId && matched.id === callerSessionId) {
-        throw new PingPeerError('bad_args', 'refusing to ping the current HAPI session')
+        throw new PingPeerError('bad_args', 'refusing to ping the current SHAPI session')
     }
     const name = resolvePeerSessionLabel(matched)
     options.onProgress?.(`resolved ${matched.id} active=${matched.active} name="${name}"`)

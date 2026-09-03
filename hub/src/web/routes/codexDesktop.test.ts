@@ -417,7 +417,7 @@ describe('Codex Desktop import routes', () => {
             })
 
             expect(result.success).toBe(true)
-            expect(result.output).toContain(`Hapi session: ${existing.id}`)
+            expect(result.output).toContain(`SHAPI session: ${existing.id}`)
             expect(result.output).toContain('Action: updated')
             expect(result.output).toContain('Appended messages: 0')
             expect(store.sessions.getSessionsByNamespace('default')).toHaveLength(1)
@@ -1138,7 +1138,7 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
-    it('does not archive a native thread that is already managed by a differently keyed HAPI session', async () => {
+    it('does not archive a native thread that is already managed by a differently keyed SHAPI session', async () => {
         const store = new Store(':memory:')
         const nativeSessionId = '56565656-5656-4656-8656-565656565658'
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
@@ -1402,7 +1402,7 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
-    it('lets the owning runner reject a HAPI-initiated Codex thread without a preflight transcript read', async () => {
+    it('lets the owning runner reject a SHAPI-initiated Codex thread without a preflight transcript read', async () => {
         const store = new Store(':memory:')
         const sessionId = '57575757-5757-4757-8757-575757575757'
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
@@ -1437,7 +1437,7 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
-    it('routes a stale native-list HAPI session through its existing HAPI transport', async () => {
+    it('routes a stale native-list SHAPI session through its existing SHAPI transport', async () => {
         const store = new Store(':memory:')
         const sessionId = '59575757-5757-4757-8757-575656565656'
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
@@ -1468,13 +1468,13 @@ describe('Codex Desktop import routes', () => {
             const response = await app.request(`/api/codex/sessions/${sessionId}/messages`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ machineId: 'mac-runner', message: 'Use the connected HAPI session' })
+                body: JSON.stringify({ machineId: 'mac-runner', message: 'Use the connected SHAPI session' })
             })
             expect(response.status).toBe(202)
             expect(await response.json()).toMatchObject({ success: true, status: 'processing' })
             expect(normalSendCalls).toEqual([[
                 'hapi-managed-session',
-                { text: 'Use the connected HAPI session', sentFrom: 'webapp' }
+                { text: 'Use the connected SHAPI session', sentFrom: 'webapp' }
             ]])
             expect(nativeSendCalls).toEqual([])
         } finally {
@@ -1482,7 +1482,7 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
-    it('asks the selected runner to exclude HAPI-initiated Codex threads', async () => {
+    it('asks the selected runner to exclude SHAPI-initiated Codex threads', async () => {
         const store = new Store(':memory:')
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
         const listCalls: unknown[][] = []

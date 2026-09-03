@@ -8,8 +8,8 @@ import { QueueIcon, SessionDetailQueueTrigger } from '@/components/SessionDetail
 /**
  * Queue affordance for an original native Codex thread.
  *
- * Native prompts are not HAPI messages, so they intentionally do not use the
- * HAPI queued-message mutation (there is no HAPI session row to cancel). The
+ * Native prompts are not SHAPI messages, so they intentionally do not use the
+ * SHAPI queued-message mutation (there is no SHAPI session row to cancel). The
  * runner owns delivery; this component only exposes a truthful read-only view
  * of the FIFO waiting list returned by the native status endpoint.
  */
@@ -35,7 +35,7 @@ export function NativeQueuedMessagesBar(props: {
         return null
     }
 
-    // Match the HAPI queue entry: show the first pending prompt as the quick
+    // Match the SHAPI queue entry: show the first pending prompt as the quick
     // preview, while the drawer remains the place for the complete list.
     const preview = props.messages[0]?.text.trim() || t('queuedMessages.emptyPreview')
 

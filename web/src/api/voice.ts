@@ -12,6 +12,7 @@
 import type { ApiClient } from './client'
 import {
     ELEVENLABS_API_BASE,
+    LEGACY_VOICE_AGENT_NAME,
     VOICE_AGENT_NAME,
     buildVoiceAgentConfig
 } from '@hapi/protocol/voice'
@@ -89,7 +90,7 @@ export interface CreateAgentResult {
 }
 
 /**
- * Find an existing "Hapi Voice Assistant" agent using the provided API key.
+ * Find an existing SHAPI voice agent, including the legacy Hapi name.
  */
 export async function findHapiAgent(apiKey: string): Promise<FindAgentResult> {
     try {
@@ -113,6 +114,7 @@ export async function findHapiAgent(apiKey: string): Promise<FindAgentResult> {
         const agents: ElevenLabsAgent[] = data.agents || []
 
         const hapiAgent = agents.find(agent => agent.name === VOICE_AGENT_NAME)
+            ?? agents.find(agent => agent.name === LEGACY_VOICE_AGENT_NAME)
 
         if (hapiAgent) {
             return { success: true, agentId: hapiAgent.agent_id }
@@ -125,7 +127,7 @@ export async function findHapiAgent(apiKey: string): Promise<FindAgentResult> {
 }
 
 /**
- * Create or update the "Hapi Voice Assistant" agent with our default configuration.
+ * Create or update the SHAPI Voice Assistant with our default configuration.
  */
 export async function createOrUpdateHapiAgent(apiKey: string): Promise<CreateAgentResult> {
     try {

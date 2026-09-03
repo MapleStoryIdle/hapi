@@ -116,7 +116,7 @@ export interface StartHubOptions {
 }
 
 export async function startHub(options: StartHubOptions = {}): Promise<HubInstance> {
-    console.log('HAPI Hub starting...')
+    console.log('SHAPI Hub starting...')
 
     let syncEngine: SyncEngine | null = null
     let happyBot: HappyBot | null = null
@@ -129,7 +129,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     // Load configuration (async - loads from env/file with persistence)
     const relayApiDomain = process.env.HAPI_RELAY_API || 'relay.hapi.run'
     const relayFlag = resolveRelayFlag(options.args ?? process.argv)
-    const officialWebUrl = process.env.HAPI_OFFICIAL_WEB_URL || 'https://app.hapi.run'
+    const officialWebUrl = process.env.HAPI_OFFICIAL_WEB_URL || 'https://maplestoryidle.github.io/shapi'
     const config = await createConfiguration()
     const baseCorsOrigins = normalizeOrigins(config.corsOrigins)
     const relayCorsOrigin = normalizeOrigin(officialWebUrl)
@@ -188,7 +188,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     const artifactService = new ArtifactService(store, config.dataDir)
     const jwtSecret = await getOrCreateJwtSecret()
     const vapidKeys = await getOrCreateVapidKeys(config.dataDir)
-    const vapidSubject = process.env.VAPID_SUBJECT ?? 'mailto:admin@hapi.run'
+    const vapidSubject = process.env.VAPID_SUBJECT ?? 'https://github.com/MapleStoryIdle/shapi'
     const pushService = new PushService(vapidKeys, vapidSubject, store)
     const externalCodexPushNotifier = new ExternalCodexPushNotifier(pushService)
 
@@ -341,7 +341,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         void announceTunnelAccess()
     }
     console.log('')
-    console.log('HAPI Hub is ready!')
+    console.log('SHAPI Hub is ready!')
 
     return {
         stop: async () => {

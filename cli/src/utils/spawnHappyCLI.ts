@@ -1,9 +1,9 @@
 /**
- * Cross-platform HAPI CLI spawning utility
+ * Cross-platform SHAPI CLI spawning utility
  *
  * ## Background
  *
- * HAPI CLI runs in two modes:
+ * SHAPI CLI runs in two modes:
  * 1. **Compiled binary**: A single executable built with `bun build --compile`
  * 2. **Development mode**: Running TypeScript directly via `bun`
  *
@@ -20,7 +20,7 @@
  *
  * ## Cross-Platform Support
  *
- * This utility handles spawning HAPI CLI subprocesses (for runner processes)
+ * This utility handles spawning SHAPI CLI subprocesses (for runner processes)
  * in a cross-platform way, detecting the current runtime mode and using
  * the appropriate command and arguments.
  */
@@ -109,7 +109,7 @@ export function getHappyCliCommand(args: string[]): HappyCliCommand {
   if (isBunRuntime) {
     // Bun can run TypeScript directly.
     // Force Bun's cwd to the CLI project root so alias resolution via bunfig.toml
-    // keeps working even when external tools launch HAPI from another workspace.
+    // keeps working even when external tools launch SHAPI from another workspace.
     return {
       command: process.execPath,
       args: ['--cwd', projectRoot, entrypoint, ...args]
@@ -147,7 +147,7 @@ export function spawnHappyCLI(args: string[], options: SpawnOptions = {}): Child
   // for when "hapi" was started and don't care about the underlying node process
   // details and flags we use to achieve the same result.
   const fullCommand = `hapi ${args.join(' ')}`;
-  logger.debug(`[SPAWN HAPI CLI] Spawning: ${fullCommand} in ${directory}`);
+  logger.debug(`[SPAWN SHAPI CLI] Spawning: ${fullCommand} in ${directory}`);
   
   const compiledMode = isBunCompiled();
   const { command: spawnCommand, args: spawnArgs } = getHappyCliCommand(args);
@@ -157,7 +157,7 @@ export function spawnHappyCLI(args: string[], options: SpawnOptions = {}): Child
     const entrypoint = spawnArgs.find((arg) => arg.endsWith('index.ts'));
     if (entrypoint && !existsSync(entrypoint)) {
       const errorMessage = `Entrypoint ${entrypoint} does not exist`;
-      logger.debug(`[SPAWN HAPI CLI] ${errorMessage}`);
+      logger.debug(`[SPAWN SHAPI CLI] ${errorMessage}`);
       throw new Error(errorMessage);
     }
   }

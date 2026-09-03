@@ -26,7 +26,7 @@ export class ServerChanChannel implements NotificationChannel {
         const agentName = getAgentName(session)
         const name = getSessionName(session)
         const url = buildSessionUrl(this.publicUrl, session.id)
-        await this.send('HAPI Ready for input', `${agentName} 正在等待输入\n\n会话：${name}\n\n${url}`)
+        await this.send('SHAPI Ready for input', `${agentName} 正在等待输入\n\n会话：${name}\n\n${url}`)
     }
 
     async sendPermissionRequest(session: Session): Promise<void> {
@@ -40,7 +40,7 @@ export class ServerChanChannel implements NotificationChannel {
             : null
         const toolName = request?.tool ? ` (${request.tool})` : ''
         const url = buildSessionUrl(this.publicUrl, session.id)
-        await this.send('HAPI Permission Request', `${name}${toolName}\n\n${url}`)
+        await this.send('SHAPI Permission Request', `${name}${toolName}\n\n${url}`)
     }
 
     async sendTaskNotification(session: Session, notification: TaskNotification): Promise<void> {
@@ -56,14 +56,14 @@ export class ServerChanChannel implements NotificationChannel {
             return
         }
         const url = buildSessionUrl(this.publicUrl, session.id)
-        await this.send('HAPI Task failed', `${agentName} · ${name}\n\n${notification.summary}\n\n${url}`)
+        await this.send('SHAPI Task failed', `${agentName} · ${name}\n\n${notification.summary}\n\n${url}`)
     }
 
     async sendSessionCompletion(session: Session, _reason: SessionEndReason): Promise<void> {
         const agentName = getAgentName(session)
         const name = getSessionName(session)
         const url = buildSessionUrl(this.publicUrl, session.id)
-        await this.send('HAPI Session completed', `${agentName} · ${name}\n\n会话已结束。\n\n${url}`)
+        await this.send('SHAPI Session completed', `${agentName} · ${name}\n\n会话已结束。\n\n${url}`)
     }
 
     private async send(title: string, desp: string): Promise<void> {

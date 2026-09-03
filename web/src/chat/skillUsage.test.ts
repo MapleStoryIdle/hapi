@@ -50,7 +50,7 @@ describe('detectExplicitSkillName', () => {
 describe('normalizeExplicitSkillUsage', () => {
     it('converts an announced skill plus its matching SKILL.md read into a standalone Skill block', () => {
         const intro = agentText('intro', '使用 `imagegen`：你要生成一张聊天会话主题的位图图片。')
-        const read = shellRead('read-skill', "/bin/zsh -lc 'cat /Users/dev/.codex/skills/.system/imagegen/SKILL.md'")
+        const read = shellRead('read-skill', "/bin/zsh -lc 'cat /Users/alice/.codex/skills/.system/imagegen/SKILL.md'")
         const result = agentText('result', '已生成。')
 
         const normalized = normalizeExplicitSkillUsage([intro, read, result])
@@ -74,7 +74,7 @@ describe('normalizeExplicitSkillUsage', () => {
 
     it('keeps an ordinary SKILL.md read when it lacks a matching explicit announcement', () => {
         const intro = agentText('intro', '使用 `imagegen`：生成预览图。')
-        const read = shellRead('read-other-skill', "/bin/zsh -lc 'cat /Users/dev/.codex/skills/.system/frontend-design/SKILL.md'")
+        const read = shellRead('read-other-skill', "/bin/zsh -lc 'cat /Users/alice/.codex/skills/.system/frontend-design/SKILL.md'")
         const blocks: ChatBlock[] = [intro, read]
 
         expect(normalizeExplicitSkillUsage(blocks)).toEqual(blocks)

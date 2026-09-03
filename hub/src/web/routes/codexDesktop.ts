@@ -632,7 +632,7 @@ function createCodexTranscriptContextMessages(
     fallbackCreatedAt = Date.now()
 ): CodexLocalSessionContextMessage[] {
     return messages.map((content, index) => ({
-        // The imported transcript does not retain HAPI store row IDs. Stable
+        // The imported transcript does not retain SHAPI store row IDs. Stable
         // local IDs keep React/thread reconciliation intact across pages.
         id: `codex-local:${sessionId}:${startIndex + index}`,
         createdAt: content.createdAt ?? fallbackCreatedAt,
@@ -868,7 +868,7 @@ function resolveDirectCodexLocalSessionTarget(options: {
 }): DirectCodexLocalSessionTarget {
     const engine = options.engine
     if (!engine) {
-        return { type: 'error', status: 503, message: 'HAPI hub is not connected' }
+        return { type: 'error', status: 503, message: 'SHAPI hub is not connected' }
     }
     const machine = getOnlineCodexRunner(engine, options.namespace, options.machineId)
     if (!machine) {
@@ -999,7 +999,7 @@ function normalizeComparableContent(content: unknown): string | null {
         }
         // Sessions imported before Codex scaffold normalization can still
         // contain the raw wrapper. Compare its visible request so a later
-        // sync reuses the same HAPI session instead of creating a fork.
+        // sync reuses the same SHAPI session instead of creating a fork.
         const text = normalizeCodexUserMessageText(body.text)
         if (!text) return null
         return stableSerialize({
@@ -1206,7 +1206,7 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
 
     const canonical = sessionStates[0]
     if (!canonical) {
-        throw new Error(`No duplicate Hapi session found for Codex thread: ${options.group.codexSessionId}`)
+        throw new Error(`No duplicate SHAPI session found for Codex thread: ${options.group.codexSessionId}`)
     }
 
     const knownKeys = new Set(canonical.comparableKeys)
@@ -1239,7 +1239,7 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
         } else {
             const deleted = options.store.sessions.deleteSession(source.sessionId, options.namespace)
             if (!deleted) {
-                throw new Error(`Failed to delete duplicate Hapi session: ${source.sessionId}`)
+                throw new Error(`Failed to delete duplicate SHAPI session: ${source.sessionId}`)
             }
         }
         removedSessionIds.push(source.sessionId)
@@ -1277,7 +1277,7 @@ function emitImportedMessageEvents(
         return
     }
 
-    // 中文注释：只有追加到已有 Hapi 会话时才逐条广播新增消息，确保当前打开的会话右侧消息区能立即刷新到最新 transcript。
+    // 中文注释：只有追加到已有 SHAPI 会话时才逐条广播新增消息，确保当前打开的会话右侧消息区能立即刷新到最新 transcript。
     for (const message of appendedMessages) {
         engine.handleRealtimeEvent({
             type: 'message-received',
@@ -1682,7 +1682,7 @@ function createImportSuccessResponse(
     )
     return {
         success: true,
-        message: `Imported ${results.length} Codex session(s) into Hapi`,
+        message: `Imported ${results.length} Codex session(s) into SHAPI`,
         pid: 0,
         command: DIRECT_IMPORT_COMMAND,
         cwd: workspace,
@@ -1745,7 +1745,7 @@ function importSingleCodexSession(options: {
         let sessionId = existingStored?.id ?? null
         let created = false
         if (!sessionId) {
-            // 中文注释：找不到可安全续写的历史会话时，直接新建一个 Hapi 会话，避免把已分叉的数据硬写进旧会话。
+            // 中文注释：找不到可安全续写的历史会话时，直接新建一个 SHAPI 会话，避免把已分叉的数据硬写进旧会话。
             const createdSession = engine?.getOrCreateSession(
                 randomUUID(),
                 metadata,
@@ -1762,20 +1762,20 @@ function importSingleCodexSession(options: {
                 options.namespace
             )
             if (updatedMetadata.result !== 'success') {
-                throw new Error(`Failed to update metadata for Hapi session: ${existingStored.id}`)
+                throw new Error(`Failed to update metadata for SHAPI session: ${existingStored.id}`)
             }
             engine?.handleRealtimeEvent({ type: 'session-updated', sessionId: existingStored.id })
         }
 
         if (!sessionId) {
-            throw new Error(`Failed to determine target Hapi session for Codex thread: ${options.codexSessionId}`)
+            throw new Error(`Failed to determine target SHAPI session for Codex thread: ${options.codexSessionId}`)
         }
 
         const comparablePrefixCount = sessionId ? target.comparablePrefixCount : 0
         const messagesToAppend = transcript.messages.slice(comparablePrefixCount)
         const appendedMessages = messagesToAppend.map((message) => options.store.messages.addMessage(sessionId!, message))
 
-        // 中文注释：更新 Hapi 会话的 updatedAt，并在已有会话追加时广播新增消息，让当前打开的聊天页立刻显示客户端新增内容。
+        // 中文注释：更新 SHAPI 会话的 updatedAt，并在已有会话追加时广播新增消息，让当前打开的聊天页立刻显示客户端新增内容。
         const latestMessageCreatedAt = appendedMessages[appendedMessages.length - 1]?.createdAt ?? Date.now()
         if (engine) {
             engine.recordSessionActivity(sessionId, latestMessageCreatedAt)
@@ -1788,7 +1788,7 @@ function importSingleCodexSession(options: {
 
         const output = [
             `Codex thread: ${options.codexSessionId}`,
-            `Hapi session: ${sessionId}`,
+            `SHAPI session: ${sessionId}`,
             `Action: ${created ? 'created' : 'updated'}`,
             `Appended messages: ${appendedMessages.length}`
         ].join('\n')
@@ -1801,7 +1801,7 @@ function importSingleCodexSession(options: {
 
         return {
             success: true,
-            message: created ? 'Codex session imported into a new Hapi session' : 'Codex session appended to existing Hapi session',
+            message: created ? 'Codex session imported into a new SHAPI session' : 'Codex session appended to existing SHAPI session',
             pid: 0,
             command: DIRECT_IMPORT_COMMAND,
             cwd: getDirectImportRouteContext().workspace,
@@ -1905,7 +1905,7 @@ export function createCodexDesktopRoutes(options: {
         }
         const engine = options.getSyncEngine()
         if (!engine) {
-            return c.json({ success: false, error: 'HAPI hub is not connected' }, 503)
+            return c.json({ success: false, error: 'SHAPI hub is not connected' }, 503)
         }
         if (!getOnlineCodexRunner(engine, c.get('namespace'), machineId)) {
             return c.json({
@@ -1931,9 +1931,9 @@ export function createCodexDesktopRoutes(options: {
             }
             // The runner normally filters before applying its limit. Filter a
             // second time at the hub boundary so a rolling upgrade cannot leak
-            // a HAPI-created thread from an older runner implementation. Some
-            // older HAPI Codex launches used Codex's desktop originator, so
-            // originator alone is not enough to keep a regular HAPI session
+            // a SHAPI-created thread from an older runner implementation. Some
+            // older SHAPI Codex launches used Codex's desktop originator, so
+            // originator alone is not enough to keep a regular SHAPI session
             // out of this native-session list.
             const managedHapiSessionIds = new Set(engine.getSessionsByNamespace(c.get('namespace'))
                 .filter((session) => session.metadata?.machineId === machineId)
@@ -1985,7 +1985,7 @@ export function createCodexDesktopRoutes(options: {
         }
         const engine = options.getSyncEngine()
         if (!engine) {
-            return c.json({ success: false, error: 'HAPI hub is not connected' }, 503)
+            return c.json({ success: false, error: 'SHAPI hub is not connected' }, 503)
         }
         if (!getOnlineCodexRunner(engine, c.get('namespace'), machineId)) {
             return c.json({
@@ -2116,7 +2116,7 @@ export function createCodexDesktopRoutes(options: {
             return c.json({ success: false, error: target.message }, target.status)
         }
 
-        // A stale native page must never archive a HAPI-owned thread through
+        // A stale native page must never archive a SHAPI-owned thread through
         // the native path. Its card uses /sessions/:id/archive instead.
         const managedSession = findHapiManagedCodexSession(
             engine!,
@@ -2128,7 +2128,7 @@ export function createCodexDesktopRoutes(options: {
             return c.json({
                 success: false,
                 code: 'not_native_session',
-                error: 'This Codex session is managed by HAPI. Archive it from the HAPI session list.'
+                error: 'This Codex session is managed by SHAPI. Archive it from the SHAPI session list.'
             } satisfies ArchiveCodexLocalSessionRpcResponse, 409)
         }
 
@@ -2210,7 +2210,7 @@ export function createCodexDesktopRoutes(options: {
 
         const engine = options.getSyncEngine()
         if (!engine) {
-            return c.json({ success: false, error: 'HAPI hub is not connected' }, 503)
+            return c.json({ success: false, error: 'SHAPI hub is not connected' }, 503)
         }
         if (!getOnlineCodexRunner(engine, c.get('namespace'), machineId)) {
             return c.json({
@@ -2283,12 +2283,12 @@ export function createCodexDesktopRoutes(options: {
         }
 
         try {
-            // A HAPI session from an older runner can have a Codex Desktop
+            // A SHAPI session from an older runner can have a Codex Desktop
             // originator and therefore appear in the native transcript list.
-            // Its app-server is already connected to HAPI; sending through
+            // Its app-server is already connected to SHAPI; sending through
             // `codex queue` would acknowledge into an unrelated global Codex
             // queue instead of reaching that session. Route the stale native
-            // page to its actual HAPI session transport.
+            // page to its actual SHAPI session transport.
             const managedSession = findHapiManagedCodexSession(
                 engine!,
                 c.get('namespace'),
@@ -2300,7 +2300,7 @@ export function createCodexDesktopRoutes(options: {
                     return c.json({
                         success: false,
                         code: 'not_native_session',
-                        error: 'This Codex session is managed by HAPI. Open it from the HAPI session list before sending a message.'
+                        error: 'This Codex session is managed by SHAPI. Open it from the SHAPI session list before sending a message.'
                     } satisfies SendCodexLocalSessionMessageRpcResponse, 409)
                 }
                 await engine!.sendMessage(managedSession.id, {
@@ -2392,7 +2392,7 @@ export function createCodexDesktopRoutes(options: {
     app.post('/codex/sessions/:id/fork', async (c) => {
         const engine = options.getSyncEngine()
         if (!engine) {
-            return c.json({ type: 'error', code: 'hub_unavailable', message: 'HAPI hub is not connected' } satisfies ForkCodexLocalSessionResponse, 503)
+            return c.json({ type: 'error', code: 'hub_unavailable', message: 'SHAPI hub is not connected' } satisfies ForkCodexLocalSessionResponse, 503)
         }
 
         const request = parseForkCodexLocalSessionRequest(await c.req.json().catch(() => null))
@@ -2508,7 +2508,7 @@ export function createCodexDesktopRoutes(options: {
             })
         }
 
-        // 中文注释：这里直接读取本地 transcript 写入 Hapi store，不再启动隐藏 codex resume 进程，避免漏导入客户端新增内容。
+        // 中文注释：这里直接读取本地 transcript 写入 SHAPI store，不再启动隐藏 codex resume 进程，避免漏导入客户端新增内容。
         const result = await importSelectedCodexSessions({
             codexSessionIds: parsed.sessionIds,
             store: options.store,
@@ -2585,7 +2585,7 @@ export function createCodexDesktopRoutes(options: {
             appendScriptLog(
                 workspace,
                 'sync',
-                `SUCCESS: merged duplicate Hapi sessions for selected codexSessionIds=${parsed.sessionIds.join(',')}`
+                `SUCCESS: merged duplicate SHAPI sessions for selected codexSessionIds=${parsed.sessionIds.join(',')}`
             )
             return c.json(result satisfies CodexMergeDuplicateSessionsResponse)
         } catch (error) {

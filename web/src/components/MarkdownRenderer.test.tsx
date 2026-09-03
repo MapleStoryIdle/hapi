@@ -117,9 +117,9 @@ describe('MarkdownRenderer', () => {
     })
 
     it('shows external Markdown links with a link icon and content-link color', () => {
-        renderInChat('[HAPI docs](https://hapi.run/docs)')
+        renderInChat('[SHAPI docs](https://github.com/MapleStoryIdle/shapi/tree/main/docs)')
 
-        const link = screen.getByRole('link', { name: 'HAPI docs' })
+        const link = screen.getByRole('link', { name: 'SHAPI docs' })
         expect(link).toHaveAttribute('data-hapi-external-link', 'true')
         expect(link).toHaveClass('text-[var(--app-markdown-link)]')
         expect(link.querySelector('[data-markdown-link-icon="external"]')).not.toBeNull()

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { HAPI_MCP_TOOL_NAMES, toClaudeAllowedHapiMcpTools } from './startHappyServer'
 
-describe('HAPI MCP A2A capabilities', () => {
-    it('only exposes the retained HAPI MCP tools', () => {
+describe('SHAPI MCP A2A capabilities', () => {
+    it('only exposes the retained SHAPI MCP tools', () => {
         expect(HAPI_MCP_TOOL_NAMES).toEqual([
             'change_title',
             'display_image',

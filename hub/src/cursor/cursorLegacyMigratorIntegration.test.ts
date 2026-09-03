@@ -9,7 +9,7 @@
  *
  * This is the same verify recipe the production migrator runs in its
  * temp-HOME staging step. The test exists to detect drift between the
- * cursor-agent on the developer's machine and HAPI's assumptions about
+ * cursor-agent on the developer's machine and SHAPI's assumptions about
  * its on-disk layout (#824).
  *
  * Opt-in: set CURSOR_AGENT_INTEGRATION=1 to enable. In CI without auth,

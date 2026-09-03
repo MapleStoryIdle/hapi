@@ -271,7 +271,7 @@ export function resolveCodexSlashCommand(
     if (UNSUPPORTED_CODEX_BUILTIN_COMMANDS.has(command)) {
         return {
             kind: 'handled',
-            message: `/${command} is a Codex CLI command that is not supported in HAPI sessions yet.`
+            message: `/${command} is a Codex CLI command that is not supported in SHAPI sessions yet.`
         };
     }
 

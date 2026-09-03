@@ -15,7 +15,8 @@ import { requireSessionFromParam, requireSyncEngine } from './guards'
 const PREVIEW_ROUTE_PREFIX = '/api/preview/sessions'
 const INTERNAL_QUERY_PARAMS = new Set(['hapiPreviewToken', 'hapiPreviewProtocol'])
 
-function parsePort(value: string): number | null {
+function parsePort(value: string | undefined): number | null {
+    if (!value) return null
     if (!/^\d+$/.test(value)) return null
     const port = Number(value)
     return Number.isSafeInteger(port) && port >= 1 && port <= 65535 ? port : null

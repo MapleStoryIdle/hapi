@@ -9,7 +9,7 @@ import {
 } from './codexSlashCommands'
 
 describe('getBuiltinSlashCommands', () => {
-    it('exposes HAPI-supported codex built-ins in remote web mode', () => {
+    it('exposes SHAPI-supported codex built-ins in remote web mode', () => {
         expect(getBuiltinSlashCommands('codex').map((command) => command.name)).toEqual(expect.arrayContaining([
             'clear',
             'compact',
@@ -88,13 +88,13 @@ describe('findCodexCustomPromptExpansion', () => {
 })
 
 describe('expandCodexCustomPrompt', () => {
-    it('appends custom-command arguments in the same shape as HAPI Codex sessions', () => {
+    it('appends custom-command arguments in the same shape as SHAPI Codex sessions', () => {
         expect(expandCodexCustomPrompt('/review src/index.ts', [
             { name: 'review', source: 'project', content: 'Review the requested code.' }
         ])).toBe('Review the requested code.\n\nUser arguments: src/index.ts')
     })
 
-    it('does not expand an HAPI control command for an original native thread', () => {
+    it('does not expand an SHAPI control command for an original native thread', () => {
         expect(expandCodexCustomPrompt('/model gpt-5.6', [
             { name: 'model', source: 'builtin' }
         ])).toBeNull()

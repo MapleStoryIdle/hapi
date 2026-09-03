@@ -93,7 +93,7 @@ describe('bootstrapExistingSession', () => {
         readSettingsMock.mockReset()
     })
 
-    it('loads an existing HAPI session and reports it to the runner', async () => {
+    it('loads an existing SHAPI session and reports it to the runner', async () => {
         const session = createSession()
         const sessionClient = {
             updateMetadata: vi.fn()

@@ -86,7 +86,7 @@ describe('git branch route', () => {
 })
 
 describe('session file route', () => {
-    it('uses the runner-scoped file RPC for a completed HAPI session', async () => {
+    it('uses the runner-scoped file RPC for a completed SHAPI session', async () => {
         const session = {
             id: 'session-1',
             namespace: 'default',
@@ -194,7 +194,7 @@ describe('session file blob route', () => {
         expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(pngBytes))
     })
 
-    it('uses the runner-scoped byte reader for a completed HAPI session', async () => {
+    it('uses the runner-scoped byte reader for a completed SHAPI session', async () => {
         const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
         const session = {
             id: 'session-1',

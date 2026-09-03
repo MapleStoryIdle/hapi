@@ -116,7 +116,7 @@ type SessionHeaderDetailsRef = {
 const EMPTY_SESSION_HEADER_DETAILS: readonly SessionHeaderDetail[] = []
 
 /**
- * Keep the title details dialog consistent across HAPI-backed and native
+ * Keep the title details dialog consistent across SHAPI-backed and native
  * Codex detail pages.  The transports provide different records, but the
  * operator should see the same rows in the same order.
  */
@@ -181,7 +181,7 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
     sessionId?: string
     details?: readonly SessionHeaderDetail[]
     /**
-     * Normal HAPI chats keep their latest details in this stable ref. A token
+     * Normal SHAPI chats keep their latest details in this stable ref. A token
      * stream can update it without invalidating the title control; opening
      * the popover reads the newest snapshot.
      */
@@ -348,7 +348,7 @@ function formatConnectionLastUpdated(value: number | null | undefined): string |
 
 /**
  * Shared visual control for a detail page whose live data connection needs
- * attention. HAPI sessions obtain the value from the SSE provider; native
+ * attention. SHAPI sessions obtain the value from the SSE provider; native
  * Codex sessions can supply the same shape from their runner queries.
  */
 export type SessionConnectionStatusLabels = {
@@ -447,7 +447,7 @@ export function SessionConnectionStatusControl(props: {
     )
 }
 
-/** HAPI-session adapter for the shared detail-page connection control. */
+/** SHAPI-session adapter for the shared detail-page connection control. */
 export function SessionConnectionRecoveryControl(props: {
     labels?: Partial<SessionConnectionStatusLabels>
     testId?: string

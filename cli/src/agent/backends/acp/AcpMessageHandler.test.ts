@@ -1164,7 +1164,7 @@ describe('AcpMessageHandler', () => {
     describe('tool_call_update content normalization (Gemini/OpenCode path)', () => {
         it('unwraps text content block to string output', () => {
             // Gemini sends content: [{type:'content', content:{type:'text', text:'...'}}]
-            // when the tool has stdout. HAPI must normalize this to a plain string.
+            // when the tool has stdout. SHAPI must normalize this to a plain string.
             const messages: AgentMessage[] = [];
             const handler = new AcpMessageHandler((message) => messages.push(message));
 
@@ -1216,7 +1216,7 @@ describe('AcpMessageHandler', () => {
 
         it('preserves diff content block fields in output', () => {
             // Gemini sends content: [{type:'diff', path, oldText, newText, _meta:{kind}}]
-            // for file-edit tools. HAPI must surface these fields intact.
+            // for file-edit tools. SHAPI must surface these fields intact.
             const messages: AgentMessage[] = [];
             const handler = new AcpMessageHandler((message) => messages.push(message));
 

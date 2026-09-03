@@ -123,7 +123,7 @@ describe('listSlashCommands', () => {
         await expect(listSlashCommands('claude', nonExistentProjectDir)).resolves.toBeDefined()
     })
 
-    it('exposes HAPI-supported Codex built-ins', async () => {
+    it('exposes SHAPI-supported Codex built-ins', async () => {
         const commands = await listSlashCommands('codex', projectDir)
 
         expect(commands.map((command) => command.name)).toEqual(expect.arrayContaining([
@@ -177,7 +177,7 @@ describe('listSlashCommands', () => {
         })
     })
 
-    it('exposes HAPI-supported OpenCode built-ins', async () => {
+    it('exposes SHAPI-supported OpenCode built-ins', async () => {
         const commands = await listSlashCommands('opencode', projectDir)
 
         const names = commands.map((command) => command.name)

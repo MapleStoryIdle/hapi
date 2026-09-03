@@ -65,7 +65,6 @@ export default defineConfig({
     },
     server: {
         host: true,
-        allowedHosts: ['hapidev.weishu.me'],
         proxy: {
             '/api': {
                 target: hubTarget,
@@ -87,8 +86,8 @@ export default defineConfig({
             srcDir: 'src',
             filename: 'sw.ts',
             manifest: {
-                name: 'HAPI',
-                short_name: 'HAPI',
+                name: 'SHAPI',
+                short_name: 'SHAPI',
                 description: 'AI-powered development assistant',
                 theme_color: '#ffffff',
                 background_color: '#ffffff',
@@ -117,7 +116,7 @@ export default defineConfig({
                     }
                 ],
                 // Web Share Target — Android Chrome routes POSTs to /share
-                // when the user picks HAPI in the system share sheet. The
+                // when the user picks SHAPI in the system share sheet. The
                 // service worker (`web/src/sw.ts`) intercepts POST /share,
                 // stashes the multipart payload in IndexedDB, and 303-
                 // redirects to /share?id=<transferId> for the SPA picker.

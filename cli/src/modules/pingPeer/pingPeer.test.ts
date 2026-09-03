@@ -64,7 +64,7 @@ describe('pingPeer', () => {
         expect(http.post.mock.calls.some(([url]) => String(url).includes('/resume'))).toBe(false)
     })
 
-    it('拒绝向当前 HAPI 会话投递，避免 Agent 自激循环', async () => {
+    it('拒绝向当前 SHAPI 会话投递，避免 Agent 自激循环', async () => {
         const http = createHttpMock({
             post: (url) => {
                 if (url.endsWith('/api/auth')) return { status: 200, data: { token: 'jwt' } }
@@ -87,7 +87,7 @@ describe('pingPeer', () => {
             http: http as never
         })).rejects.toMatchObject({
             code: 'bad_args',
-            message: 'refusing to ping the current HAPI session'
+            message: 'refusing to ping the current SHAPI session'
         })
         expect(http.post).toHaveBeenCalledTimes(1)
         expect(http.post.mock.calls.some(([url]) => String(url).includes('/messages'))).toBe(false)

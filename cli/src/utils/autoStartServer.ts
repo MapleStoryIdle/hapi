@@ -1,7 +1,7 @@
 /**
  * Auto-start hub module
  *
- * Automatically starts the HAPI hub when CLI is launched
+ * Automatically starts the SHAPI hub when CLI is launched
  * if specific conditions are met:
  * 1. HAPI_API_URL is not set (using default localhost:3006)
  * 2. cliApiToken exists in settings.json (hub was previously started)
@@ -150,7 +150,7 @@ export async function maybeAutoStartServer(): Promise<void> {
         }
 
         logger.debug('[AUTO-START] Starting hub automatically...')
-        console.log(chalk.gray('Starting HAPI hub in background...'))
+        console.log(chalk.gray('Starting SHAPI hub in background...'))
 
         startServerAsChild()
 
@@ -158,11 +158,11 @@ export async function maybeAutoStartServer(): Promise<void> {
 
         if (!isReady) {
             console.log(chalk.yellow('Warning: Hub did not start within expected time'))
-            console.log(chalk.gray('  Try running `hapi hub` manually to see errors'))
+            console.log(chalk.gray('  Try running `shapi hub` manually to see errors'))
             return
         }
 
-        console.log(chalk.green('HAPI hub started'))
+        console.log(chalk.green('SHAPI hub started'))
     } catch (error) {
         logger.debug('[AUTO-START] Error during hub auto-start', error)
         console.log(chalk.yellow('Warning: Failed to auto-start hub'))

@@ -16,7 +16,7 @@ export { getBuiltinSlashCommands, mergeSlashCommands }
 
 /**
  * Turns a custom `.codex/prompts` command into the plain prompt accepted by
- * `codex exec resume`. Native threads have no HAPI command interpreter, so
+ * `codex exec resume`. Native threads have no SHAPI command interpreter, so
  * keep built-ins as passthrough text and expand only discovered custom files.
  */
 export function expandCodexCustomPrompt(

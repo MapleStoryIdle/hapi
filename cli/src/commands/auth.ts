@@ -36,7 +36,7 @@ export async function handleAuthCommand(args: string[]): Promise<void> {
             console.log(chalk.gray('    2. Read ~/.hapi/settings.json on the server'))
             console.log(chalk.gray('    3. Ask your server administrator (if token is set via env var)'))
             console.log('')
-            console.log(chalk.gray('  Then run: hapi auth login'))
+            console.log(chalk.gray('  Then run: shapi auth login'))
         }
         return
     }
@@ -88,12 +88,12 @@ export async function handleAuthCommand(args: string[]): Promise<void> {
 
 function showHelp(): void {
     console.log(`
-${chalk.bold('hapi auth')} - Authentication management
+${chalk.bold('shapi auth')} - Authentication management
 
 ${chalk.bold('Usage:')}
-  hapi auth status            Show current configuration
-  hapi auth login             Enter and save CLI_API_TOKEN
-  hapi auth logout            Clear saved credentials
+  shapi auth status            Show current configuration
+  shapi auth login             Enter and save CLI_API_TOKEN
+  shapi auth logout            Clear saved credentials
 
 ${chalk.bold('Token priority (highest to lowest):')}
   1. CLI_API_TOKEN environment variable

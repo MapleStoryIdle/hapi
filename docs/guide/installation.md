@@ -1,9 +1,10 @@
 # Installation
 
-Install the HAPI CLI and set up the hub.
+Install the SHAPI CLI and set up the hub.
 
 ## Prerequisites
 
+- [Bun](https://bun.sh/) for building SHAPI from source
 - Claude Code, OpenAI Codex CLI, Cursor Agent CLI, Google Gemini CLI, or OpenCode CLI installed
 
 Verify your CLI is installed:
@@ -27,7 +28,7 @@ opencode --version
 
 ## Architecture
 
-HAPI has three components:
+SHAPI has three components:
 
 | Component | Role | Required |
 |-----------|------|----------|
@@ -60,49 +61,48 @@ HAPI has three components:
               └───────────┘
 ```
 
-- **CLI**: Start a session with `hapi`. The CLI wraps your AI agent and syncs with the hub.
-- **Hub**: Run `hapi hub`. Stores sessions, handles permissions, enables remote access.
-- **Runner**: Run `hapi runner start`. Lets you spawn sessions from phone/web without keeping a terminal open.
+- **CLI**: Start a session with `shapi`. The CLI wraps your AI agent and syncs with the hub.
+- **Hub**: Run `shapi hub`. Stores sessions, handles permissions, enables remote access.
+- **Runner**: Run `shapi runner start`. Lets you spawn sessions from phone/web without keeping a terminal open.
 
 ### Typical workflows
 
-**Local only**: `hapi hub` → `hapi` → work in terminal
+**Local only**: `shapi hub` → `shapi` → work in terminal
 
-**Remote access**: `hapi hub --relay` → `hapi runner start` → control from phone/web
+**Remote access**: `shapi hub --relay` → `shapi runner start` → control from phone/web
 
 ## Install the CLI
 
-```bash
-npm install -g @twsxtd/hapi --registry=https://registry.npmjs.org
-```
-
-> Recommendation: use the official npm registry for global install. Some mirrors may not sync platform packages in time.
-
-Or with Homebrew:
+The first SHAPI package release has not been published yet. Build the current
+source on macOS or Linux:
 
 ```bash
-brew install tiann/tap/hapi
+git clone https://github.com/MapleStoryIdle/shapi.git
+cd shapi
+bun install
+bun run build:single-exe
+SHAPI_BUILD="$(find cli/dist-exe -type f -name hapi | head -n 1)"
+sudo install "$SHAPI_BUILD" /usr/local/bin/shapi
+sudo ln -sf /usr/local/bin/shapi /usr/local/bin/hapi
 ```
+
+The former npm package and `tiann/tap/hapi` Homebrew formula are legacy upstream
+install options; they do not contain this SHAPI source tree.
 
 ## Other install options
 
 <details>
-<summary>npx (no install)</summary>
-
-```bash
-npx @twsxtd/hapi
-```
-</details>
-
-<details>
 <summary>Prebuilt binary</summary>
 
-Download the latest release from [GitHub Releases](https://github.com/tiann/hapi/releases).
+Download the latest release from [GitHub Releases](https://github.com/MapleStoryIdle/shapi/releases).
+Release archives keep the internal binary filename `hapi` for compatibility;
+install it under the public `shapi` command and keep the old alias if needed.
 
 ```bash
 xattr -d com.apple.quarantine ./hapi
 chmod +x ./hapi
-sudo mv ./hapi /usr/local/bin/
+sudo install ./hapi /usr/local/bin/shapi
+sudo ln -sf /usr/local/bin/shapi /usr/local/bin/hapi
 ```
 </details>
 
@@ -110,12 +110,15 @@ sudo mv ./hapi /usr/local/bin/
 <summary>Build from source</summary>
 
 ```bash
-git clone https://github.com/tiann/hapi.git
-cd hapi
+git clone https://github.com/MapleStoryIdle/shapi.git
+cd shapi
 bun install
-bun build:single-exe
+bun run build:single-exe
 
-./cli/dist/hapi
+# The build keeps the internal filename under cli/dist-exe/<bun-target>/hapi.
+SHAPI_BUILD="$(find cli/dist-exe -type f -name hapi | head -n 1)"
+sudo install "$SHAPI_BUILD" /usr/local/bin/shapi
+sudo ln -sf /usr/local/bin/shapi /usr/local/bin/hapi
 ```
 </details>
 
@@ -129,12 +132,12 @@ The hub can be deployed on:
 ### Default: Public Relay (recommended)
 
 ```bash
-hapi hub --relay
+shapi hub --relay
 ```
 
 The terminal displays a URL and QR code. Scan to access from anywhere.
 
-`hapi server` remains supported as an alias.
+The legacy `hapi` command remains supported as an alias; `hapi server` remains an alias for `shapi hub`.
 
 - **End-to-end encrypted** with WireGuard + TLS
 - No configuration needed
@@ -145,14 +148,14 @@ The terminal displays a URL and QR code. Scan to access from anywhere.
 ### Local Only
 
 ```bash
-hapi hub
+shapi hub
 # or
-hapi hub --no-relay
+shapi hub --no-relay
 ```
 
 The hub listens on `http://localhost:3006` by default.
 
-On first run, HAPI:
+On first run, SHAPI:
 
 1. Creates `~/.hapi/`
 2. Generates a secure access token
@@ -184,12 +187,18 @@ On first run, HAPI:
 | `CORS_ORIGINS` | - | `corsOrigins` | Allowed CORS origins (comma-separated) |
 | `TELEGRAM_BOT_TOKEN` | - | `telegramBotToken` | Telegram Bot API token |
 | `TELEGRAM_NOTIFICATION` | `true` | `telegramNotification` | Enable Telegram notifications |
+| `HAPI_RELAY_API` | `relay.hapi.run` | - | Relay API domain |
+| `HAPI_OFFICIAL_WEB_URL` | `https://maplestoryidle.github.io/shapi` | - | Separate PWA URL shown in relay mode |
 | `HAPI_RELAY_FORCE_TCP` | `false` | - | Force TCP mode for relay |
-| `VAPID_SUBJECT` | `mailto:admin@hapi.run` | - | Web Push contact info |
+| `VAPID_SUBJECT` | SHAPI repository URL | - | Web Push contact info |
 | `HAPI_HOME` | `~/.hapi` | - | Config directory path |
 | `DB_PATH` | `~/.hapi/hapi.db` | - | Database file path |
 | `ELEVENLABS_API_KEY` | - | - | ElevenLabs API key for voice |
 | `ELEVENLABS_AGENT_ID` | Auto-created | - | Custom ElevenLabs agent ID |
+
+The default `relay.hapi.run` endpoint is retained as an opt-in upstream
+compatibility service and is not SHAPI-owned. For a fully self-hosted setup,
+override both values with infrastructure you control.
 </details>
 
 <details>
@@ -201,19 +210,19 @@ When ENV values are set and not present in settings.json, they are automatically
 
 ```json
 {
-  "$schema": "https://hapi.run/docs/schemas/settings.schema.json",
+  "$schema": "https://raw.githubusercontent.com/MapleStoryIdle/shapi/main/docs/public/schemas/settings.schema.json",
   "listenHost": "0.0.0.0",
   "listenPort": 3006,
   "publicUrl": "https://your-domain.com"
 }
 ```
 
-JSON Schema: [settings.schema.json](https://hapi.run/schemas/settings.schema.json)
+JSON Schema: [settings.schema.json](https://raw.githubusercontent.com/MapleStoryIdle/shapi/main/docs/public/schemas/settings.schema.json)
 </details>
 
 ## CLI setup
 
-If the hub is not on localhost, set these before running `hapi`:
+If the hub is not on localhost, set these before running `shapi`:
 
 ```bash
 export HAPI_API_URL="http://your-hub:3006"
@@ -224,15 +233,15 @@ export HAPI_EXTRA_HEADERS_JSON='{"Cookie":"CF_Authorization=..."}'
 Or use interactive login:
 
 ```bash
-hapi auth login
+shapi auth login
 ```
 
 Authentication commands:
 
 ```bash
-hapi auth status
-hapi auth login
-hapi auth logout
+shapi auth status
+shapi auth login
+shapi auth logout
 ```
 
 Each machine gets a unique ID stored in `~/.hapi/settings.json`. This allows:
@@ -252,7 +261,7 @@ If you prefer not to use the public relay (e.g., for lower latency or self-manag
 
 https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
 
-> **Note:** Cloudflare Quick Tunnels (TryCloudflare) are not supported because they [do not support SSE](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/), which HAPI uses for real-time updates. Use a Named Tunnel instead.
+> **Note:** Cloudflare Quick Tunnels (TryCloudflare) are not supported because they [do not support SSE](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/), which SHAPI uses for real-time updates. Use a Named Tunnel instead.
 
 **Named tunnel setup:**
 
@@ -260,11 +269,11 @@ https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
 # Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
 
 # Create and configure a named tunnel
-cloudflared tunnel create hapi
-cloudflared tunnel route dns hapi hapi.yourdomain.com
+cloudflared tunnel create shapi
+cloudflared tunnel route dns shapi shapi.yourdomain.com
 
 # Run the tunnel
-cloudflared tunnel --protocol http2 run hapi
+cloudflared tunnel --protocol http2 run shapi
 ```
 
 > **Tip:** Use `--protocol http2` instead of QUIC (the default) to avoid potential timeout issues with long-lived connections.
@@ -278,7 +287,7 @@ https://tailscale.com/download
 
 ```bash
 sudo tailscale up
-hapi hub
+shapi hub
 ```
 
 Access via your Tailscale IP:
@@ -333,7 +342,7 @@ Enable Telegram notifications and Mini App access:
 export TELEGRAM_BOT_TOKEN="your-bot-token"
 export HAPI_PUBLIC_URL="https://your-public-url"
 
-hapi hub
+shapi hub
 ```
 
 Then message your bot with `/start`, open the app, and enter your `CLI_API_TOKEN`.
@@ -348,10 +357,10 @@ Then message your bot with `/start`, open the app, and enter your `CLI_API_TOKEN
 Run a background service for remote session spawning:
 
 ```bash
-hapi runner start
-hapi runner status
-hapi runner logs
-hapi runner stop
+shapi runner start
+shapi runner status
+shapi runner logs
+shapi runner stop
 ```
 
 With the runner running:
@@ -366,14 +375,14 @@ With the runner running:
 If you prefer pm2 for process management:
 
 ```bash
-pm2 start "hapi runner start-sync" --name hapi-runner
+pm2 start "shapi runner start-sync" --name hapi-runner
 pm2 save
 ```
 </details>
 
 ### Background service deployment
 
-Keep HAPI running persistently so it survives terminal closes, system restarts, and continues running in the background.
+Keep SHAPI running persistently so it survives terminal closes, system restarts, and continues running in the background.
 
 <details>
 <summary>Quick: nohup</summary>
@@ -382,10 +391,10 @@ Simple one-liner for quick background runs:
 
 ```bash
 # Hub
-nohup hapi hub --relay > ~/.hapi/logs/hub.log 2>&1 &
+nohup shapi hub --relay > ~/.hapi/logs/hub.log 2>&1 &
 
 # Runner
-nohup hapi runner start-sync > ~/.hapi/logs/runner.log 2>&1 &
+nohup shapi runner start-sync > ~/.hapi/logs/runner.log 2>&1 &
 ```
 
 View logs:
@@ -398,8 +407,8 @@ tail -f ~/.hapi/logs/runner.log
 Stop processes:
 
 ```bash
-pkill -f "hapi hub"
-pkill -f "hapi runner"
+pkill -f "shapi hub"
+pkill -f "shapi runner"
 ```
 </details>
 
@@ -413,8 +422,8 @@ pm2 provides process management with auto-restart on crashes and system reboot.
 npm install -g pm2
 
 # Start hub and runner
-pm2 start "hapi hub --relay" --name hapi-hub
-pm2 start "hapi runner start-sync" --name hapi-runner
+pm2 start "shapi hub --relay" --name hapi-hub
+pm2 start "shapi runner start-sync" --name hapi-runner
 
 # View status and logs
 pm2 status
@@ -443,7 +452,7 @@ Create plist files for automatic startup on macOS.
     <string>com.hapi.hub</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/hapi</string>
+        <string>/usr/local/bin/shapi</string>
         <string>hub</string>
         <string>--relay</string>
     </array>
@@ -470,7 +479,7 @@ Create plist files for automatic startup on macOS.
     <string>com.hapi.runner</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/hapi</string>
+        <string>/usr/local/bin/shapi</string>
         <string>runner</string>
         <string>start-sync</string>
     </array>
@@ -500,9 +509,9 @@ launchctl unload ~/Library/LaunchAgents/com.hapi.runner.plist
 
 > **macOS sleep note:** macOS may suspend background processes when the display sleeps. Use `caffeinate` to prevent this:
 > ```bash
-> caffeinate -dimsu hapi hub --relay
+> caffeinate -dimsu shapi hub --relay
 > ```
-> Or run `caffeinate -dimsu` in a separate terminal while HAPI is running.
+> Or run `caffeinate -dimsu` in a separate terminal while SHAPI is running.
 </details>
 
 <details>
@@ -514,12 +523,12 @@ Create user-level systemd services for automatic startup.
 
 ```ini
 [Unit]
-Description=HAPI Hub
+Description=SHAPI Hub
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/hapi hub --relay
+ExecStart=/usr/local/bin/shapi hub --relay
 Restart=always
 RestartSec=5
 
@@ -531,13 +540,13 @@ WantedBy=default.target
 
 ```ini
 [Unit]
-Description=HAPI Runner
+Description=SHAPI Runner
 After=network.target hapi-hub.service
 
 [Service]
 Type=simple
 KillMode=process
-ExecStart=/usr/local/bin/hapi runner start-sync
+ExecStart=/usr/local/bin/shapi runner start-sync
 Restart=always
 RestartSec=5
 
@@ -581,7 +590,7 @@ Enable voice control:
 
 ```bash
 export ELEVENLABS_API_KEY="your-api-key"
-hapi hub --relay
+shapi hub --relay
 ```
 
 See [Voice Assistant](./voice-assistant.md) for usage details.

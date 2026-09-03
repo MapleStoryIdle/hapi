@@ -15,7 +15,7 @@ type NativeCodexRealtimeSocketSnapshot = {
 
 /**
  * A pending request reported by a Codex session that was launched outside of
- * HAPI.  The runner forwards only routing metadata; command contents and
+ * SHAPI.  The runner forwards only routing metadata; command contents and
  * question text deliberately stay on the local machine.
  */
 export const ExternalCodexRequestKindSchema = z.enum(['permission', 'user-input'])

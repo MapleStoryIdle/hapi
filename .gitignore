@@ -36,7 +36,13 @@ coverage/
 
 # Claude local settings
 .claude/settings.local.json
-localdocs/
+/.codex-local/
+/.hapi-share/
+/localdocs/
+/audit-*.png
+/design-qa*.png
+/design-qa.md
+/web/public/fonts/tiempos-test/
 execplan/
 
 # Generated npm bundle output (local)

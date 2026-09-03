@@ -1,6 +1,6 @@
 ---
 layout: home
-title: HAPI Documentation
+title: SHAPI Documentation
 ---
 
 <script setup>

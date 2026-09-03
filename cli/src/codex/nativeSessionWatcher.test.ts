@@ -37,10 +37,10 @@ function waitForChange(check: () => void): Promise<void> {
 describe('NativeCodexSessionWatcher', () => {
     it('extracts a native Codex thread id from a rollout path', () => {
         expect(getCodexSessionIdFromTranscriptPath(
-            '/Users/dev/.codex/sessions/2026/08/28/rollout-12345678-1234-4234-8234-123456789012.jsonl'
+            '/Users/alice/.codex/sessions/2026/08/28/rollout-12345678-1234-4234-8234-123456789012.jsonl'
         )).toBe('12345678-1234-4234-8234-123456789012')
         expect(getCodexSessionIdFromTranscriptPath(
-            '/Users/dev/.codex/sessions/2026/08/28/rollout-2026-08-28T10-20-30-abcdefab-cdef-4def-8def-abcdefabcdef.jsonl'
+            '/Users/alice/.codex/sessions/2026/08/28/rollout-2026-08-28T10-20-30-abcdefab-cdef-4def-8def-abcdefabcdef.jsonl'
         )).toBe('abcdefab-cdef-4def-8def-abcdefabcdef')
         expect(getCodexSessionIdFromTranscriptPath('/tmp/not-a-rollout.jsonl')).toBeNull()
     })

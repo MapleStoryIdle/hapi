@@ -27,7 +27,7 @@ function renderDirectory(props: Partial<Parameters<typeof DirectorySection>[0]> 
             suggestions={[]}
             selectedIndex={-1}
             isDisabled={false}
-            recentPaths={['/Users/dev/IdeaProjects/github/hapi']}
+            recentPaths={['/Users/alice/Projects/shapi']}
             sessionType="simple"
             worktreeName=""
             worktreeInputRef={createRef<HTMLInputElement>()}
@@ -53,11 +53,11 @@ describe('DirectorySection', () => {
 
         rerender(
             <DirectorySection
-                directory="/Users/dev/IdeaProjects/github/hapi"
+                directory="/Users/alice/Projects/shapi"
                 suggestions={[]}
                 selectedIndex={-1}
                 isDisabled={false}
-                recentPaths={['/Users/dev/IdeaProjects/github/hapi']}
+                recentPaths={['/Users/alice/Projects/shapi']}
                 sessionType="simple"
                 worktreeName=""
                 worktreeInputRef={createRef<HTMLInputElement>()}
@@ -83,7 +83,7 @@ describe('DirectorySection', () => {
 
         rerender(
             <DirectorySection
-                directory="/Users/dev/IdeaProjects/github/hapi"
+                directory="/Users/alice/Projects/shapi"
                 suggestions={[]}
                 selectedIndex={-1}
                 isDisabled={false}

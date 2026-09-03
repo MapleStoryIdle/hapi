@@ -1,6 +1,6 @@
-# hapi CLI
+# SHAPI CLI
 
-Run Claude Code, Codex, Cursor Agent, Gemini, or OpenCode sessions from your terminal and control them remotely through the hapi hub.
+Run Claude Code, Codex, Cursor Agent, Gemini, or OpenCode sessions from your terminal and control them remotely through the SHAPI hub.
 
 ## What it does
 
@@ -16,57 +16,57 @@ Run Claude Code, Codex, Cursor Agent, Gemini, or OpenCode sessions from your ter
 ## Typical flow
 
 1. Start the hub and set env vars (see ../hub/README.md).
-2. Set the same CLI_API_TOKEN on this machine or run `hapi auth login`.
-3. Run `hapi` to start a session.
+2. Set the same CLI_API_TOKEN on this machine or run `shapi auth login`.
+3. Run `shapi` to start a session.
 4. Use the web app or Telegram Mini App to monitor and control.
 
 ## Commands
 
-For scripts and IDE integrations, run `hapi --hapi-capabilities` (or a supported
+For scripts and IDE integrations, run `shapi --hapi-capabilities` (or a supported
 subcommand with `--hapi-help-json`) to receive the stable JSON capability catalog.
 
 ### Session commands
 
-- `hapi` - Start a Claude Code session (passes through Claude CLI flags). See `src/index.ts`.
-- `hapi codex` - Start Codex mode. See `src/codex/runCodex.ts`.
-- `hapi codex resume <sessionId>` - Resume existing Codex session.
-- `hapi codex fork <sessionId>` - Fork a Codex CLI thread into a new HAPI session while preserving its native model and reasoning configuration. Remote forks read the source transcript from the selected runner's own `CODEX_HOME`; that runner must be allowed to spawn in the transcript workspace.
-- `hapi cursor` - Start Cursor Agent mode. See `src/cursor/runCursor.ts`.
-  Supports `hapi cursor resume <chatId>`, `hapi cursor --continue`, `--mode plan|ask`, `--yolo`, `--model`.
+- `shapi` - Start a Claude Code session (passes through Claude CLI flags). See `src/index.ts`.
+- `shapi codex` - Start Codex mode. See `src/codex/runCodex.ts`.
+- `shapi codex resume <sessionId>` - Resume existing Codex session.
+- `shapi codex fork <sessionId>` - Fork a Codex CLI thread into a new SHAPI session while preserving its native model and reasoning configuration. Remote forks read the source transcript from the selected runner's own `CODEX_HOME`; that runner must be allowed to spawn in the transcript workspace.
+- `shapi cursor` - Start Cursor Agent mode. See `src/cursor/runCursor.ts`.
+  Supports `shapi cursor resume <chatId>`, `shapi cursor --continue`, `--mode plan|ask`, `--yolo`, `--model`.
   Local and remote modes supported; remote uses `agent -p` with stream-json.
-- `hapi gemini` - Start Gemini mode via ACP. See `src/agent/runners/runAgentSession.ts`.
+- `shapi gemini` - Start Gemini mode via ACP. See `src/agent/runners/runAgentSession.ts`.
   Note: Gemini runs in remote mode only; it waits for messages from the hub UI/Telegram.
-- `hapi opencode` - Start OpenCode mode via ACP. See `src/opencode/runOpencode.ts`.
+- `shapi opencode` - Start OpenCode mode via ACP. See `src/opencode/runOpencode.ts`.
   Note: OpenCode supports local and remote modes; local mode streams via OpenCode plugins.
-- `hapi resume [sessionId]` - List resumable sessions for this machine or resume one locally.
-- `hapi inspect-peer <session-id-or-prefix>` - Read another same-namespace HAPI session's metadata and recent text; never resumes it.
-- `hapi ping-peer <session-id-or-prefix> <message>` - Resume a peer session when needed, then deliver a handoff/nudge message. It refuses to message the calling HAPI session itself; use `hapi ping-peer --list` for discovery.
+- `shapi resume [sessionId]` - List resumable sessions for this machine or resume one locally.
+- `shapi inspect-peer <session-id-or-prefix>` - Read another same-namespace SHAPI session's metadata and recent text; never resumes it.
+- `shapi ping-peer <session-id-or-prefix> <message>` - Resume a peer session when needed, then deliver a handoff/nudge message. It refuses to message the calling SHAPI session itself; use `shapi ping-peer --list` for discovery.
 
 ### Resume a remote session locally
 
 ```bash
-hapi resume
-hapi resume <session-id>
+shapi resume
+shapi resume <session-id>
 ```
 
-`hapi resume` lists resumable sessions for the current machine. `hapi resume <session-id>` hands off an active remote session and opens the same HAPI session in the local terminal.
+`shapi resume` lists resumable sessions for the current machine. `shapi resume <session-id>` hands off an active remote session and opens the same SHAPI session in the local terminal.
 
 ### Authentication
 
-- `hapi auth status` - Show authentication configuration and token source.
-- `hapi auth login` - Interactively enter and save CLI_API_TOKEN.
-- `hapi auth logout` - Clear saved credentials.
+- `shapi auth status` - Show authentication configuration and token source.
+- `shapi auth login` - Interactively enter and save CLI_API_TOKEN.
+- `shapi auth logout` - Clear saved credentials.
 
 See `src/commands/auth.ts`.
 
 ### Runner management
 
-- `hapi runner start` - Start runner as detached process.
-- `hapi runner stop` - Stop runner gracefully.
-- `hapi runner status` - Show runner diagnostics.
-- `hapi runner list` - List active sessions managed by runner.
-- `hapi runner stop-session <sessionId>` - Terminate specific session.
-- `hapi runner logs` - Print path to latest runner log file.
+- `shapi runner start` - Start runner as detached process.
+- `shapi runner stop` - Stop runner gracefully.
+- `shapi runner status` - Show runner diagnostics.
+- `shapi runner list` - List active sessions managed by runner.
+- `shapi runner stop-session <sessionId>` - Terminate specific session.
+- `shapi runner logs` - Print path to latest runner log file.
 
 Both `start` and `start-sync` accept repeatable `--workspace-root <path>` (or `--workspace-root=<path>`). When set:
 
@@ -80,18 +80,19 @@ See `src/runner/run.ts`.
 
 ### Diagnostics
 
-- `hapi doctor` - Show full diagnostics (version, runner status, logs, processes).
-- `hapi doctor clean` - Kill runaway HAPI processes.
+- `shapi doctor` - Show full diagnostics (version, runner status, logs, processes).
+- `shapi doctor clean` - Kill runaway SHAPI processes.
 
 See `src/ui/doctor.ts`.
 
 ### Other
 
-- `hapi mcp` - Start MCP stdio bridge. See `src/codex/happyMcpStdioBridge.ts`.
-- `hapi hub` - Start the bundled hub (single binary workflow).
-- `hapi share publish <relative-file> [--expires <seconds>] [--session <session-id>] [--feedback] [--feedback-request <text>]` - Create an expiring public link / 中文看板任务 for one local file (5 minutes–7 days; default 24h). `--session` binds the task to its source HAPI session; when run inside a managed HAPI agent session, that source is filled in automatically. `--feedback` is Markdown-only and embeds a one-time, 10 MiB feedback contract in the public document; the external Agent must self-report its model and environment in the returned Markdown.
-- `hapi share revoke <share-id>` - Revoke a public link. Public links are bearer links; redact `/s/*` paths in reverse-proxy logs.
-- `hapi server` - Alias for `hapi hub`.
+- `shapi mcp` - Start MCP stdio bridge. See `src/codex/happyMcpStdioBridge.ts`.
+- `shapi hub` - Start the bundled hub (single binary workflow).
+- `shapi share publish <relative-file> [--expires <seconds>] [--session <session-id>] [--feedback] [--feedback-request <text>]` - Create an expiring public link / 中文看板任务 for one local file (5 minutes–7 days; default 24h). `--session` binds the task to its source SHAPI session; when run inside a managed SHAPI agent session, that source is filled in automatically. `--feedback` is Markdown-only and embeds a one-time, 10 MiB feedback contract in the public document; the external Agent must self-report its model and environment in the returned Markdown.
+- `shapi share revoke <share-id>` - Revoke a public link. Public links are bearer links; redact `/s/*` paths in reverse-proxy logs.
+
+The legacy `hapi` command remains supported as an alias; `hapi server` remains an alias for `shapi hub`.
 
 ## Configuration
 
@@ -108,9 +109,9 @@ See `src/configuration.ts` for all options.
 - `HAPI_EXPERIMENTAL` - Enable experimental features (true/1/yes).
 - `HAPI_EXTRA_HEADERS_JSON` - JSON object of extra headers to send on CLI → hub requests, e.g. `{"Cookie":"CF_Authorization=..."}`.
 - `HAPI_CLAUDE_PATH` - Path to a specific `claude` executable.
-- `HAPI_HTTP_MCP_URL` - Default MCP target for `hapi mcp`.
-- `HAPI_SESSION_ID` - Current HAPI session ID exported into wrapped Agent processes.
-- `HAPI_WAIT_ACTIVE_SECS` - Timeout for `hapi ping-peer` to wait after resuming a session (default: 60).
+- `HAPI_HTTP_MCP_URL` - Default MCP target for `shapi mcp`.
+- `HAPI_SESSION_ID` - Current SHAPI session ID exported into wrapped Agent processes.
+- `HAPI_WAIT_ACTIVE_SECS` - Timeout for `shapi ping-peer` to wait after resuming a session (default: 60).
 - `HAPI_OPENVIKING_API_KEY` (or `HAPI_OPENVIKING_BEARER_TOKEN`), `HAPI_OPENVIKING_ACCOUNT`, `HAPI_OPENVIKING_USER` - Optional OpenViking credentials for the read-only Context page. When omitted, the runner uses matching values from `~/.openviking/ovcli.conf`.
 
 The recent Codex transcript API is runner-scoped: the selected runner reads its own `CODEX_HOME` through Hub RPC, so a remote Hub never needs access to your local transcript files.
@@ -139,7 +140,7 @@ Data is stored in `~/.hapi/` (or `$HAPI_HOME`):
 ## Requirements
 
 - Claude CLI installed and logged in (`claude` on PATH).
-- Cursor Agent CLI installed (`agent` on PATH) for `hapi cursor`. Install: `curl https://cursor.com/install -fsS | bash` (macOS/Linux), `irm 'https://cursor.com/install?win32=true' | iex` (Windows).
+- Cursor Agent CLI installed (`agent` on PATH) for `shapi cursor`. Install: `curl https://cursor.com/install -fsS | bash` (macOS/Linux), `irm 'https://cursor.com/install?win32=true' | iex` (Windows).
 - OpenCode CLI installed (`opencode` on PATH).
 - Bun for building from source.
 
@@ -150,7 +151,6 @@ From the repo root:
 ```bash
 bun install
 bun run build:cli
-bun run build:cli:exe
 ```
 
 For an all-in-one binary that also embeds the web app:

@@ -94,7 +94,7 @@ describe('parseSharePublishOptions', () => {
         expect(() => parseSharePublishOptions(['task.md', '--feedback-request', 'Review'])).toThrow('--feedback-request requires --feedback')
     })
 
-    test('uses the current HAPI session as the source when invoked from a managed agent session', () => {
+    test('uses the current SHAPI session as the source when invoked from a managed agent session', () => {
         expect(parseSharePublishOptions(['task.md', '--feedback'], 'inherited-session')).toMatchObject({
             sourceSessionId: 'inherited-session',
             sourceMachineId: null,

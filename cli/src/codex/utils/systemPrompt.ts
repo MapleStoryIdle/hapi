@@ -1,5 +1,5 @@
 /**
- * Codex-specific developer prompt for HAPI sessions.
+ * Codex-specific developer prompt for SHAPI sessions.
  *
  * Injected into both local CLI and remote App Server sessions.
  */
@@ -29,12 +29,12 @@ export const TITLE_INSTRUCTION = trimIdent(`
 const REQUEST_USER_INPUT_INSTRUCTION = trimIdent(`
     ## Structured user decisions
     When the native request_user_input tool is available in the active Codex mode, use it before asking the user for a decision, confirmation, clarification, or choice that blocks progress. Do not ask the same decision first in normal assistant text.
-    Prefer 2–4 clear, mutually exclusive options with short labels and descriptions. Do not add an Other option: HAPI provides a separate Other control for free-form answers.
+    Prefer 2–4 clear, mutually exclusive options with short labels and descriptions. Do not add an Other option: SHAPI provides a separate Other control for free-form answers.
     Do not interrupt for routine low-risk assumptions; make a reasonable assumption and continue. Do not use request_user_input for sandbox, command, file-edit, or other tool-permission approvals: use the normal permission flow for those.
     If request_user_input is unavailable, ask one concise plain-text question instead of pretending a choice dialog exists.
 `);
 
 /**
- * The HAPI developer prompt injected into Codex local and app-server sessions.
+ * The SHAPI developer prompt injected into Codex local and app-server sessions.
  */
 export const codexSystemPrompt = `${TITLE_INSTRUCTION}\n\n${REQUEST_USER_INPUT_INSTRUCTION}`;

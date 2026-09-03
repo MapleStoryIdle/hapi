@@ -333,7 +333,7 @@ function RunnerDetailsPanel(props: { machine: Machine }) {
                     <div className="font-medium text-[var(--app-hint)]">系统</div>
                     <div className="mt-1 space-y-1 text-[var(--app-fg)]">
                         <div>{machine.metadata?.platform ?? 'unknown'}</div>
-                        <div>HAPI {machine.metadata?.happyCliVersion ?? '—'}</div>
+                        <div>SHAPI {machine.metadata?.happyCliVersion ?? '—'}</div>
                         <div title={lastSeenAt ?? undefined}>心跳: {lastSeenAt ?? '—'}</div>
                     </div>
                 </div>
@@ -400,7 +400,7 @@ function RunnerSwitcherPanel(props: {
                         <LaptopIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)]" />
                         <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-semibold text-[var(--app-fg)]">{getMachineTitle(machine)}</span>
-                            <span className="block truncate text-[11px] text-[var(--app-hint)]">{machine.metadata?.platform ?? 'unknown'} · HAPI {machine.metadata?.happyCliVersion ?? '—'}</span>
+                            <span className="block truncate text-[11px] text-[var(--app-hint)]">{machine.metadata?.platform ?? 'unknown'} · SHAPI {machine.metadata?.happyCliVersion ?? '—'}</span>
                         </span>
                         {selected ? <span className="text-xs font-semibold text-[var(--app-link)]">当前</span> : null}
                     </button>
@@ -632,7 +632,7 @@ function SessionsPage() {
         if (isCodexScriptTimeout(raw)) {
             return t('codexSync.error.timeout')
         }
-        if (/当前会话仍处于活跃状态，请等待会话结束后重试|Active Hapi process already has this Codex thread/i.test(raw)) {
+        if (/当前会话仍处于活跃状态，请等待会话结束后重试|Active (?:SHAPI|Hapi) process already has this Codex thread/i.test(raw)) {
             return t('codexSync.error.active')
         }
         if (/未安装\/找不到codex客户端|unable to find codex launcher|找不到.*codex/i.test(raw)) {
@@ -794,7 +794,7 @@ function SessionsPage() {
 
         setIsSyncingCodexSession(true)
         try {
-            // 中文注释：弹窗提交的是本地 Codex thread ID；后端会直接读取这些 transcript 并导入到 Hapi。
+            // 中文注释：弹窗提交的是本地 Codex thread ID；后端会直接读取这些 transcript 并导入到 SHAPI。
             const result = await api.syncCodexSession({ sessionIds })
             if (!result.success) {
                 throw new Error(normalizeCodexScriptError(result.error, t('codexSync.failed.body')))
@@ -1016,7 +1016,7 @@ function SessionsPage() {
                 </div>
             </div>
             </div>
-            {/* 中文注释：这里展示的是本地 Codex transcript 列表；默认尝试勾选当前 Hapi 会话关联的 Codex thread。 */}
+            {/* 中文注释：这里展示的是本地 Codex transcript 列表；默认尝试勾选当前 SHAPI 会话关联的 Codex thread。 */}
             <CodexSessionSyncDialog
                 isOpen={isSyncConfirmOpen}
                 onClose={() => setIsSyncConfirmOpen(false)}
@@ -1204,7 +1204,7 @@ function SessionPage() {
         isSessionThinking: session?.thinking ?? false,
         onSuccess: (sentSessionId) => {
             clearDraftsAfterSend(sentSessionId, sessionId)
-            // 中文注释：一旦用户已经在 Hapi 内继续这个 Codex 会话，就清除"刚从 Codex 导入"的标记。
+            // 中文注释：一旦用户已经在 SHAPI 内继续这个 Codex 会话，就清除"刚从 Codex 导入"的标记。
             clearCodexImportedSession(session?.metadata?.codexSessionId)
             // A successful send supersedes any previously-rendered error
             // for that session.  Other sessions' errors stay put.

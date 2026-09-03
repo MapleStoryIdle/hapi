@@ -96,7 +96,7 @@ describe('installExternalCodexNotificationHooks', () => {
         expect(written.hooks.SessionEnd).toBeUndefined()
     })
 
-    it('migrates existing HAPI hooks that use unsupported async execution', async () => {
+    it('migrates existing SHAPI hooks that use unsupported async execution', async () => {
         await writeFile(hooksPath, JSON.stringify({
             hooks: {
                 PermissionRequest: [{
@@ -160,7 +160,7 @@ describe('installExternalCodexNotificationHooks', () => {
         }])
     })
 
-    it('is idempotent when HAPI hooks already exist', async () => {
+    it('is idempotent when SHAPI hooks already exist', async () => {
         const options = {
             hooksPath,
             commandForKind: (kind: 'permission' | 'user-input' | 'user-input-resolved' | 'turn-started') => kind === 'turn-started'

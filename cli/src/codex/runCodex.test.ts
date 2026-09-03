@@ -217,7 +217,7 @@ describe('runCodex', () => {
         expect(mockCodexSession.setModelReasoningEffort).toHaveBeenLastCalledWith(modelReasoningEffort)
     })
 
-    it('replays transcript history when attaching a new Hapi session to an existing Codex thread', async () => {
+    it('replays transcript history when attaching a new SHAPI session to an existing Codex thread', async () => {
         await runCodexImpl({
             workingDirectory: '/tmp/project',
             resumeSessionId: 'codex-thread-2'

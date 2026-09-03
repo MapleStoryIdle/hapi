@@ -193,7 +193,7 @@ async function resolveShareSource(
     sourceMachineId: string | null
 ): Promise<ResolvedShareSource> {
     // An explicit runner is a request for a native source. Do not silently
-    // fall back to an HAPI session with a coincidentally equal id.
+    // fall back to an SHAPI session with a coincidentally equal id.
     if (sourceMachineId) {
         return await resolveNativeCodexShareSource(engine, namespace, sourceSessionId, sourceMachineId)
     }

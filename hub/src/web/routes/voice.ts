@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { WebAppEnv } from '../middleware/auth'
 import {
     ELEVENLABS_API_BASE,
+    LEGACY_VOICE_AGENT_NAME,
     VOICE_AGENT_NAME,
     buildVoiceAgentConfig,
     listConfiguredVoiceBackends,
@@ -40,6 +41,7 @@ const agentIdCache = new Map<string, string>()
 // Per-process set of agent IDs that already had their platform_settings.overrides
 // reconciled with the canonical buildVoiceAgentConfig() shape. Reset on process restart.
 const overridesEnsuredAgents = new Set<string>()
+const brandedAgents = new Set<string>()
 
 interface ElevenLabsAgent {
     agent_id: string
@@ -47,22 +49,59 @@ interface ElevenLabsAgent {
 }
 
 /**
- * Ensure an existing ElevenLabs ConvAI agent has the platform_settings.overrides
- * declared by buildVoiceAgentConfig(). Without these overrides, the client-side
- * SDK crashes with `Cannot read properties of undefined (reading 'error_type')`
- * when a session sends agent.prompt / tts.* override fields the server rejects.
+ * Reconcile an existing ElevenLabs ConvAI agent with the platform overrides
+ * declared by buildVoiceAgentConfig(). When branding is supplied, also migrate
+ * legacy SHAPI-owned agents to the canonical name and prompt without replacing
+ * an existing voice unless the caller explicitly requested one. Without the
+ * platform overrides, the client-side SDK crashes with
+ * `Cannot read properties of undefined (reading 'error_type')` when a session
+ * sends agent.prompt / tts.* override fields the server rejects.
  *
  * Idempotent and best-effort: PATCH failures are logged and swallowed so token
  * issuance is never blocked by reconciliation. Cached per agent_id per process.
  *
  * See: https://elevenlabs.io/docs/agents-platform/customization/personalization/overrides
  */
-async function ensureAgentOverrides(apiKey: string, agentId: string): Promise<void> {
-    if (overridesEnsuredAgents.has(agentId)) return
+async function ensureAgentOverrides(
+    apiKey: string,
+    agentId: string,
+    branding?: { agentName: string; voiceId?: string }
+): Promise<void> {
+    const needsOverrides = !overridesEnsuredAgents.has(agentId)
+    const needsBranding = Boolean(branding) && !brandedAgents.has(agentId)
+    if (!needsOverrides && !needsBranding) return
     overridesEnsuredAgents.add(agentId)
+    if (branding) brandedAgents.add(agentId)
 
-    const canonical = buildVoiceAgentConfig().platform_settings
-    if (!canonical) return
+    const canonical = buildVoiceAgentConfig()
+    if (!canonical.platform_settings) return
+
+    let body: { platform_settings: NonNullable<typeof canonical.platform_settings> } | {
+        name: string
+        conversation_config: {
+            agent: typeof canonical.conversation_config.agent
+            tts?: { voice_id: string }
+        }
+        platform_settings: NonNullable<typeof canonical.platform_settings>
+    } = {
+        platform_settings: canonical.platform_settings
+    }
+    if (branding) {
+        const conversationConfig: {
+            agent: typeof canonical.conversation_config.agent
+            tts?: { voice_id: string }
+        } = {
+            agent: canonical.conversation_config.agent
+        }
+        if (branding.voiceId) {
+            conversationConfig.tts = { voice_id: branding.voiceId }
+        }
+        body = {
+            name: branding.agentName,
+            conversation_config: conversationConfig,
+            platform_settings: canonical.platform_settings
+        }
+    }
 
     try {
         const response = await fetch(
@@ -74,7 +113,7 @@ async function ensureAgentOverrides(apiKey: string, agentId: string): Promise<vo
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify({ platform_settings: canonical })
+                body: JSON.stringify(body)
             }
         )
 
@@ -92,16 +131,18 @@ async function ensureAgentOverrides(apiKey: string, agentId: string): Promise<vo
                 errorMessage
             })
             overridesEnsuredAgents.delete(agentId)
+            brandedAgents.delete(agentId)
             return
         }
 
-        console.log('[Voice] Reconciled platform_settings.overrides on agent', { agentId })
+        console.log('[Voice] Reconciled SHAPI voice agent configuration', { agentId })
     } catch (error) {
         console.warn('[Voice] Error reconciling agent overrides (non-fatal)', {
             agentId,
             error: error instanceof Error ? error.message : String(error)
         })
         overridesEnsuredAgents.delete(agentId)
+        brandedAgents.delete(agentId)
     }
 }
 
@@ -122,9 +163,12 @@ function parseVoiceAgentMap(): Record<string, string> {
 }
 
 /**
- * Find an existing "Hapi Voice Assistant" agent
+ * Find an existing SHAPI voice agent. Callers may include legacy names.
  */
-async function findHapiAgent(apiKey: string, agentName: string = VOICE_AGENT_NAME): Promise<string | null> {
+async function findHapiAgent(
+    apiKey: string,
+    agentNames: string | readonly string[] = VOICE_AGENT_NAME
+): Promise<string | null> {
     try {
         const response = await fetch(`${ELEVENLABS_API_BASE}/convai/agents`, {
             method: 'GET',
@@ -140,7 +184,10 @@ async function findHapiAgent(apiKey: string, agentName: string = VOICE_AGENT_NAM
 
         const data = await response.json() as { agents?: ElevenLabsAgent[] }
         const agents: ElevenLabsAgent[] = data.agents || []
-        const hapiAgent = agents.find(agent => agent.name === agentName)
+        const names = typeof agentNames === 'string' ? [agentNames] : agentNames
+        const hapiAgent = names
+            .map(name => agents.find(agent => agent.name === name))
+            .find((agent): agent is ElevenLabsAgent => agent !== undefined)
 
         return hapiAgent?.agent_id || null
     } catch {
@@ -149,7 +196,7 @@ async function findHapiAgent(apiKey: string, agentName: string = VOICE_AGENT_NAM
 }
 
 /**
- * Create a new "Hapi Voice Assistant" agent
+ * Create a new SHAPI Voice Assistant agent.
  */
 async function createHapiAgent(apiKey: string): Promise<string | null> {
     return createNamedHapiAgent(apiKey, VOICE_AGENT_NAME)
@@ -191,7 +238,7 @@ async function createNamedHapiAgent(apiKey: string, agentName: string, voiceId?:
 }
 
 /**
- * Get or create agent ID - finds existing or creates new "Hapi Voice Assistant" agent
+ * Get or create an agent ID, reusing legacy Hapi-named agents when present.
  */
 async function getOrCreateAgentId(apiKey: string): Promise<string | null> {
     return getOrCreateAgentIdForVoice(apiKey)
@@ -200,6 +247,11 @@ async function getOrCreateAgentId(apiKey: string): Promise<string | null> {
 function getVoiceAgentName(voiceId?: string): string {
     if (!voiceId || voiceId.trim().length === 0) return VOICE_AGENT_NAME
     return `${VOICE_AGENT_NAME} [voice:${voiceId}]`
+}
+
+function getLegacyVoiceAgentName(voiceId?: string): string {
+    if (!voiceId || voiceId.trim().length === 0) return LEGACY_VOICE_AGENT_NAME
+    return `${LEGACY_VOICE_AGENT_NAME} [voice:${voiceId}]`
 }
 
 async function getOrCreateAgentIdForVoice(apiKey: string, voiceId?: string): Promise<string | null> {
@@ -217,13 +269,13 @@ async function getOrCreateAgentIdForVoice(apiKey: string, voiceId?: string): Pro
         voiceId,
         agentName
     })
-    let agentId = await findHapiAgent(apiKey, agentName)
+    let agentId = await findHapiAgent(apiKey, [agentName, getLegacyVoiceAgentName(voiceId)])
 
     if (agentId) {
         console.log('[Voice] Found existing agent:', agentId)
         // Existing agents may predate the platform_settings.overrides we declare
         // in buildVoiceAgentConfig() — reconcile so client overrides are accepted.
-        await ensureAgentOverrides(apiKey, agentId)
+        await ensureAgentOverrides(apiKey, agentId, { agentName, voiceId })
     } else {
         // Create new agent
         console.log('[Voice] No existing agent found, creating new one...')

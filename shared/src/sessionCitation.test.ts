@@ -24,8 +24,15 @@ describe('sessionCitation', () => {
     it('规范化单个引用，并在多个引用时拒绝猜测', () => {
         const other = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
         expect(normalizeSessionIdPrefix(`See session "Coding" (/sessions/${SESSION_ID}) for context.${SESSION_REFERENCE_STEER_SUFFIX}`)).toBe(SESSION_ID)
+        expect(normalizeSessionIdPrefix(`See SHAPI session /sessions/${SESSION_ID} for context.${SESSION_REFERENCE_STEER_SUFFIX}`)).toBe(SESSION_ID)
         expect(normalizeSessionIdPrefix(`[Coding](/sessions/${SESSION_ID})`)).toBe(SESSION_ID)
         expect(normalizeSessionIdPrefix(`[A](/sessions/${SESSION_ID}) and [B](/sessions/${other})`)).toBe('')
+    })
+
+    it('仍能解析旧 HAPI 品牌生成的复制引用', () => {
+        const legacyTail = ' HAPI hub peer - call inspect_peer with that session id; do not Grep/Glob/Read /sessions/ as a local file.'
+        expect(normalizeSessionIdPrefix(`See session "Coding" (/sessions/${SESSION_ID}) for context.${legacyTail}`)).toBe(SESSION_ID)
+        expect(normalizeSessionIdPrefix(`See HAPI session /sessions/${SESSION_ID} for context.${legacyTail}`)).toBe(SESSION_ID)
     })
 
     it('生成的系统提示明确禁止按本地文件读取会话路径', () => {

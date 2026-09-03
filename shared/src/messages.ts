@@ -37,7 +37,7 @@ function extractTextMessageContent(value: unknown): string | null {
         if (value.type === 'text' && typeof value.text === 'string') return value.text
 
         // Recent Codex session details keep assistant records in the normal
-        // HAPI agent envelope. Accept its final message payload too, so a
+        // SHAPI agent envelope. Accept its final message payload too, so a
         // heartbeat response renders as a status card rather than XML text.
         const data = isObject(value.data) ? value.data : null
         if (data?.type === 'message' && typeof data.message === 'string') return data.message

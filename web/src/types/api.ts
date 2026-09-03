@@ -404,7 +404,7 @@ export type ForkCodexLocalSessionResponse =
     }
 
 export type CodexDesktopSyncRequest = {
-    // 中文注释：前端弹窗直接提交 Codex thread ID，后端会按这些 transcript 直接导入到 Hapi。
+    // 中文注释：前端弹窗直接提交 Codex thread ID，后端会按这些 transcript 直接导入到 SHAPI。
     sessionIds: string[]
 }
 

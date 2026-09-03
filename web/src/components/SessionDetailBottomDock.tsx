@@ -4,7 +4,7 @@ import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
 /**
  * The vertical gap used by every detail-page accessory (queue, plan, or git
  * summary).  Keeping it next to the dock primitives prevents the native
- * Codex detail page from drifting away from the HAPI detail page.
+ * Codex detail page from drifting away from the SHAPI detail page.
  */
 export const SESSION_DETAIL_BOTTOM_ACCESSORY_GAP_PX = 8
 

@@ -64,7 +64,7 @@ function SessionEntryLoadingHeader(props: {
 
 /**
  * A shared first-paint conversation shape. It lives inside a
- * SessionDetailContent so HAPI and native Codex sessions arrive in the same
+ * SessionDetailContent so SHAPI and native Codex sessions arrive in the same
  * familiar frame while their transcript requests are still in flight.
  */
 export function SessionConversationLoading(props: {
@@ -122,7 +122,7 @@ export function SessionConversationLoading(props: {
 }
 
 /**
- * Cold HAPI session navigation used to show a blank page with a centered
+ * Cold SHAPI session navigation used to show a blank page with a centered
  * spinner until the session record arrived. Keep the wait in the familiar
  * conversation frame instead, so the header remains usable and the first
  * real messages replace a shape that already looks like the destination.

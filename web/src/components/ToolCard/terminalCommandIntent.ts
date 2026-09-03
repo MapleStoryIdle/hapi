@@ -548,7 +548,11 @@ function classifyShellInvocation(command: string): TerminalCommandIntent | null 
     if (DATABASE_COMMANDS.has(executable) || executable.endsWith('dbcli')) return getDatabaseIntent(invocation)
     if (OUTPUT_INSPECTION_COMMANDS.has(executable)) return { kind: 'inspect-output', files: getOutputFiles(invocation) }
     if (SERVICE_COMMANDS.has(executable)) return getServiceIntent(invocation)
-    if (executable === 'hapi' || executable.includes('hapi') && executable.endsWith('.sh')) return { kind: 'manage-hapi' }
+    if (
+        executable === 'hapi'
+        || executable === 'shapi'
+        || (executable.includes('hapi') && executable.endsWith('.sh'))
+    ) return { kind: 'manage-hapi' }
     if (STOP_PROCESS_COMMANDS.has(executable)) return { kind: 'stop-process' }
     if (FILE_MANAGEMENT_COMMANDS.has(executable)) return { kind: 'manage-files', ...getManagedFiles(invocation) }
     if (FORMAT_COMMANDS.has(executable)) return { kind: 'format-code' }
@@ -661,7 +665,7 @@ export function getTerminalCommandIntentTitle(intent: TerminalCommandIntent, t?:
         'query-database': 'Execute SQL',
         'inspect-output': 'Inspect output',
         'manage-service': 'Manage service',
-        'manage-hapi': 'Manage HAPI',
+        'manage-hapi': 'Manage SHAPI',
         'stop-process': 'Stop process',
         'manage-files': 'Manage files',
         'format-code': 'Format code'

@@ -152,7 +152,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('allows destructive archive of external work but protects HAPI hand-offs and queued receipts', async () => {
+    it('allows destructive archive of external work but protects SHAPI hand-offs and queued receipts', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-archive-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789014'
         let runState: 'idle' | 'processing' | 'unknown' = 'processing'
@@ -180,7 +180,7 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(archiveAttempt).toHaveBeenCalledTimes(2)
 
             runState = 'idle'
-            expect(sender.send(sessionId, 'HAPI hand-off before archive')).toMatchObject({ success: true, status: 'processing' })
+            expect(sender.send(sessionId, 'SHAPI hand-off before archive')).toMatchObject({ success: true, status: 'processing' })
             await expect(sender.archive(sessionId, archiveAttempt)).resolves.toMatchObject({
                 success: false,
                 code: 'session_busy'
@@ -671,7 +671,7 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(client.initializeCalls).toEqual([{
                 clientInfo: {
                     name: 'hapi-native-session-bridge',
-                    title: 'HAPI Native Session Bridge',
+                    title: 'SHAPI Native Session Bridge',
                     version: '1.0.0'
                 },
                 capabilities: { experimentalApi: true }
@@ -1133,7 +1133,7 @@ describe('NativeCodexSessionDirectSender', () => {
         const sessionId = '11345678-1234-4234-8234-123456789012'
         const lookup = vi.fn(() => ({
             id: sessionId,
-            title: 'HAPI-created thread',
+            title: 'SHAPI-created thread',
             cwd,
             file: '/not-read.jsonl',
             modifiedAt: 0,
@@ -1826,7 +1826,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('does not unlock a raw native turn after a failed HAPI-started child', () => {
+    it('does not unlock a raw native turn after a failed SHAPI-started child', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-direct-failure-'))
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-workspace-'))
         const sessionId = '42345678-1234-4234-8234-123456789012'

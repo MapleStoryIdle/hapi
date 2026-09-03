@@ -6,15 +6,13 @@ export default {
         extend: {
             fontFamily: {
                 sans: [
-                    '"Test Tiempos Text"',
-                    '"Tiempos Text"',
-                    '"Tiempos"',
-                    'ui-serif',
-                    'Georgia',
-                    'Cambria',
-                    '"Times New Roman"',
-                    'Times',
-                    'serif'
+                    'ui-sans-serif',
+                    'system-ui',
+                    '-apple-system',
+                    'BlinkMacSystemFont',
+                    '"SF Pro Text"',
+                    '"Segoe UI"',
+                    'sans-serif'
                 ]
             },
             maxWidth: {

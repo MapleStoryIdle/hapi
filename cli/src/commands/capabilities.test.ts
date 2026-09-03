@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { HAPI_CLI_CAPABILITIES, getHapiCliCommandCapabilities } from './capabilities'
 
-describe('HAPI CLI machine-readable capabilities', () => {
+describe('SHAPI CLI machine-readable capabilities', () => {
     it('声明原生 Codex fork 与 A2A peer 工具', () => {
         expect(HAPI_CLI_CAPABILITIES.commands.codex.subcommands.fork).toMatchObject({
             args: ['sourceSessionId'],

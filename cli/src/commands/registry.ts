@@ -21,7 +21,7 @@ import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
 // 2026-06-18) so the agent is no longer launchable. Keep an explicit tombstone
-// command so `hapi gemini` reports a clear error instead of falling through to
+// command so `shapi gemini` reports a clear error instead of falling through to
 // the default Claude command with "gemini" as a forwarded argument.
 const removedGeminiCommand: CommandDefinition = {
     name: 'gemini',
@@ -43,7 +43,7 @@ const removedArtifactCommand: CommandDefinition = {
     name: 'artifact',
     requiresRuntimeAssets: false,
     run: async () => {
-        console.error(chalk.red('Error:'), 'hapi artifact was replaced by hapi share. Use `hapi share publish <relative-file>` instead.')
+        console.error(chalk.red('Error:'), 'shapi artifact was replaced by shapi share. Use `shapi share publish <relative-file>` instead.')
         process.exit(1)
     }
 }

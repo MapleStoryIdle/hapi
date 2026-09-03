@@ -293,7 +293,7 @@ export function createWebApp(options: {
     app.route('/api', createLocalPreviewRoutes(options.getSyncEngine))
     app.route('/api', createOpenVikingRoutes(options.getSyncEngine))
     app.route('/api', createShareManagementRoutes(options.store, undefined, options.getSyncEngine))
-    // 中文注释：这里提供两类 Codex 辅助能力：扫描本地 transcript 以导入到 Hapi，以及按需重启 Codex Desktop 客户端。
+    // 中文注释：这里提供两类 Codex 辅助能力：扫描本地 transcript 以导入到 SHAPI，以及按需重启 Codex Desktop 客户端。
     app.route('/api', createCodexDesktopRoutes({
         store: options.store,
         getSyncEngine: options.getSyncEngine
@@ -303,14 +303,14 @@ export function createWebApp(options: {
 
     // Skip static serving in relay mode, show helpful message on root
     if (options.relayMode) {
-        const officialUrl = options.officialWebUrl || 'https://app.hapi.run'
+        const officialUrl = options.officialWebUrl || 'https://maplestoryidle.github.io/shapi'
         app.get('/', (c) => {
             return c.html(`<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>HAPI Hub</title></head>
+<head><meta charset="utf-8"><title>SHAPI Hub</title></head>
 <body style="font-family: system-ui; padding: 2rem; max-width: 600px;">
-<h1>HAPI Hub</h1>
-<p>This hub is running in relay mode. Please use the official web app:</p>
+<h1>SHAPI Hub</h1>
+<p>This hub is running in relay mode. Please use the configured web app:</p>
 <p><a href="${officialUrl}">${officialUrl}</a></p>
 <details>
 <summary>Why am I seeing this?</summary>

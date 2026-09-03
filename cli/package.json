@@ -1,18 +1,19 @@
 {
   "name": "@twsxtd/hapi",
   "version": "0.20.2",
-  "description": "App for agentic coding - access coding agent anywhere",
+  "description": "SHAPI CLI - control local coding agents from anywhere",
   "author": "Kirill Dubovitskiy & weishu",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "homepage": "https://github.com/tiann/hapi",
-  "bugs": "https://github.com/tiann/hapi/issues",
+  "homepage": "https://github.com/MapleStoryIdle/shapi",
+  "bugs": "https://github.com/MapleStoryIdle/shapi/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tiann/hapi.git",
+    "url": "git+https://github.com/MapleStoryIdle/shapi.git",
     "directory": "cli"
   },
   "bin": {
+    "shapi": "bin/hapi.cjs",
     "hapi": "bin/hapi.cjs"
   },
   "files": [
@@ -53,21 +54,21 @@
   "dependencies": {
     "@hapi/protocol": "workspace:*",
     "hapi-hub": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/cross-spawn": "^6.0.6",
     "@types/ps-list": "^6.2.1",
     "@types/react": "^19.2.7",
-    "axios": "^1.13.2",
+    "axios": "^1.20.0",
     "chalk": "^5.6.2",
     "cross-spawn": "^7.0.6",
-    "fastify": "^5.6.2",
+    "fastify": "^5.12.1",
     "fastify-type-provider-zod": "6.1.0",
     "ink": "^6.6.0",
     "ps-list": "^9.0.0",
     "react": "^19.2.3",
     "socket.io-client": "^4.8.3",
-    "tar": "^7.5.2",
-    "yaml": "^2.8.2",
+    "tar": "^7.5.22",
+    "yaml": "^2.9.0",
     "zod": "^4.2.1"
   },
   "devDependencies": {
@@ -75,7 +76,7 @@
     "bun-types": "^1.3.14",
     "dotenv": "^17.2.3",
     "typescript": "^5",
-    "vitest": "^4.0.16"
+    "vitest": "^4.1.11"
   },
   "resolutions": {
     "whatwg-url": "14.2.0",

@@ -1125,7 +1125,7 @@ describe('codexRemoteLauncher', () => {
         expect(session.thinking).toBe(false);
     });
 
-    it('forks the native Codex thread without applying HAPI model or reasoning overrides', async () => {
+    it('forks the native Codex thread without applying SHAPI model or reasoning overrides', async () => {
         const { session, foundSessionIds, getModel, getModelReasoningEffort, getServiceTier } = createSessionStub(['branch this']);
         session.forkSessionId = 'source-thread';
 

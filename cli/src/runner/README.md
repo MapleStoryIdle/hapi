@@ -1,12 +1,12 @@
-# HAPI CLI Runner: Control Flow and Lifecycle
+# SHAPI CLI Runner: Control Flow and Lifecycle
 
-The runner is a persistent background process that manages HAPI sessions, enables remote control from the mobile app, and handles auto-updates when the CLI version changes.
+The runner is a persistent background process that manages SHAPI sessions, enables remote control from the mobile app, and handles auto-updates when the CLI version changes.
 
 ## 1. Runner Lifecycle
 
 ### Starting the Runner
 
-Command: `hapi runner start`
+Command: `shapi runner start`
 
 Control Flow:
 1. `src/index.ts` receives `runner start` command
@@ -40,7 +40,7 @@ Control Flow:
 
 ### Version Detection & Auto-Update
 
-The runner detects when CLI binary changes (e.g., after `npm upgrade hapi`):
+The runner detects when the installed SHAPI executable changes:
 1. At startup, records `startedWithCliMtimeMs` (file modification time of CLI binary)
 2. Heartbeat compares current CLI mtime with recorded mtime via `getInstalledCliMtimeMs()`
 3. If mtime changed:
@@ -62,7 +62,7 @@ Every 60 seconds (configurable via `HAPI_RUNNER_HEARTBEAT_INTERVAL`):
 
 ### Stopping the Runner
 
-Command: `hapi runner stop`
+Command: `shapi runner stop`
 
 Control Flow:
 1. `stopRunner()` in `controlClient.ts` reads runner.state.json
@@ -82,10 +82,10 @@ The runner supports spawning sessions with different AI agents:
 
 | Agent | Command | Token Environment |
 |-------|---------|-------------------|
-| `claude` (default) | `hapi claude` | `CLAUDE_CODE_OAUTH_TOKEN` |
-| `codex` | `hapi codex` | `CODEX_HOME` (temp directory with `auth.json`) |
-| `gemini` | `hapi gemini` | - |
-| `opencode` | `hapi opencode` | OpenCode config (no token injection) |
+| `claude` (default) | `shapi claude` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| `codex` | `shapi codex` | `CODEX_HOME` (temp directory with `auth.json`) |
+| `gemini` | `shapi gemini` | - |
+| `opencode` | `shapi opencode` | OpenCode config (no token injection) |
 
 ### Token Authentication
 
@@ -104,10 +104,10 @@ Initiated by mobile app via backend RPC:
 3. `spawnSession()`:
    - Validates/creates directory (with approval flow)
    - Configures agent-specific token environment
-   - Spawns detached HAPI process with `--hapi-starting-mode remote --started-by runner`
+   - Spawns detached SHAPI process with `--hapi-starting-mode remote --started-by runner`
    - Adds to `pidToTrackedSession` map
    - Sets up 15-second awaiter for session webhook
-4. New HAPI process:
+4. New SHAPI process:
    - Creates session with backend, receives `happySessionId`
    - Calls `notifyRunnerSessionStarted()` to POST to runner's `/session-started`
 5. Runner updates tracking with `happySessionId`, resolves awaiter
@@ -115,9 +115,9 @@ Initiated by mobile app via backend RPC:
 
 ### Terminal-Spawned Sessions
 
-User runs `hapi` directly:
+User runs `shapi` directly:
 1. CLI auto-starts runner if configured
-2. HAPI process calls `notifyRunnerSessionStarted()`
+2. SHAPI process calls `notifyRunnerSessionStarted()`
 3. Runner receives webhook, creates `TrackedSession` with `startedBy: 'hapi directly - likely by user from terminal'`
 4. Session tracked for health monitoring
 
@@ -264,14 +264,14 @@ All data is plain JSON over TLS; authentication is `CLI_API_TOKEN` (no end-to-en
 
 ### Doctor Command
 
-`hapi doctor` uses `ps aux | grep` to find all HAPI processes:
-- Production: matches `hapi` binary, `happy-coder`
+`shapi doctor` uses `ps aux | grep` to find all SHAPI processes:
+- Production: matches `shapi`, the legacy `hapi` binary name, and `happy-coder`
 - Development: matches `src/index.ts` (run via `bun`)
 - Categorizes by command args: runner, runner-spawned, user-session, doctor
 
 ### Clean Runaway Processes
 
-`hapi doctor clean`:
+`shapi doctor clean`:
 1. `findRunawayHappyProcesses()` filters for likely orphans
 2. `killRunawayHappyProcesses()`:
    - Sends SIGTERM

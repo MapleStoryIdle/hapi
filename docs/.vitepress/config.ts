@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'HAPI',
+  title: 'SHAPI',
   description: 'Control your AI agents from anywhere',
   base: '/docs/',
 
@@ -14,7 +14,7 @@ export default defineConfig({
 
     nav: [
       { text: 'Quick Start', link: '/guide/quick-start' },
-      { text: 'App', link: 'https://app.hapi.run', target: '_blank' }
+      { text: 'GitHub', link: 'https://github.com/MapleStoryIdle/shapi', target: '_blank' }
     ],
 
     sidebar: [
@@ -24,27 +24,21 @@ export default defineConfig({
       { text: 'How it Works', link: '/guide/how-it-works' },
       { text: 'Cursor Agent', link: '/guide/cursor' },
       { text: 'Voice Assistant', link: '/guide/voice-assistant' },
-      { text: 'Why HAPI', link: '/guide/why-hapi' },
+      { text: 'Why SHAPI', link: '/guide/why-hapi' },
       { text: 'FAQ', link: '/guide/faq' }
     ],
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/tiann/hapi' }
+      { icon: 'github', link: 'https://github.com/MapleStoryIdle/shapi' }
     ],
 
     footer: {
-      message: 'Released under the LGPL-3.0 License.',
+      message: 'Released under the AGPL-3.0-only License.',
       copyright: 'Copyright © 2024-present'
     },
 
     search: {
       provider: 'local'
-    }
-  },
-
-  vite: {
-    server: {
-      allowedHosts: true
     }
   }
 })

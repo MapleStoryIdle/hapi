@@ -177,7 +177,7 @@ async function resolveSessionId(api: ApiClient, machineId: string, args: string[
         for (const [index, session] of sessions.entries()) {
             console.log(formatSessionLine(session, index))
         }
-        throw new Error('Run: hapi resume <session-id>')
+        throw new Error('Run: shapi resume <session-id>')
     }
 
     return await selectSession(sessions)

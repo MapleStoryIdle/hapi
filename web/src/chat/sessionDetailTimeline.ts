@@ -9,7 +9,7 @@ import { groupAssistantResultDetails } from '@/chat/assistantResultGrouping'
 import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 
 /**
- * Display options shared by the HAPI and native Codex detail timelines.
+ * Display options shared by the SHAPI and native Codex detail timelines.
  * Fetching and mutation stay source-specific; once records are ChatBlocks,
  * both routes use this same grouping and compact-result policy.
  */

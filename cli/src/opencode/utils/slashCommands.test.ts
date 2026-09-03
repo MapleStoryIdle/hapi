@@ -122,11 +122,11 @@ describe('resolveOpencodeSlashCommand', () => {
     it('returns a not-yet-supported message for /clear and /compact', () => {
         expect(resolveOpencodeSlashCommand('/clear', state)).toEqual({
             kind: 'handled',
-            message: '/clear is not yet supported in HAPI OpenCode sessions.'
+            message: '/clear is not yet supported in SHAPI OpenCode sessions.'
         });
         expect(resolveOpencodeSlashCommand('/compact', state)).toEqual({
             kind: 'handled',
-            message: '/compact is not yet supported in HAPI OpenCode sessions.'
+            message: '/compact is not yet supported in SHAPI OpenCode sessions.'
         });
     });
 

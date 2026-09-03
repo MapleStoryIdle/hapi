@@ -8,7 +8,7 @@
  * This is intentionally NOT a full ACP client (those live in cli/src/agent/...).
  * It speaks only the three calls verify needs: initialize, session/load, and
  * (optionally) session/prompt. It is decoupled from the launcher loop so it
- * can spawn against a temp $HOME without engaging any of HAPI's per-session
+ * can spawn against a temp $HOME without engaging any of SHAPI's per-session
  * machinery.
  */
 

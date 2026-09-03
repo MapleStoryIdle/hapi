@@ -18,7 +18,7 @@ export type NativeCodexDirectMessageDeliveryPhase =
 
 /**
  * A browser-side receipt for a native Codex prompt. Native transcripts have
- * no HAPI message id, so this stays visible until the matching transcript
+ * no SHAPI message id, so this stays visible until the matching transcript
  * row arrives from the runner.
  */
 export type NativeCodexDirectMessageEcho = {

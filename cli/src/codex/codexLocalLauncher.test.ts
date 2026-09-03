@@ -354,7 +354,7 @@ describe('codexLocalLauncher', () => {
         });
     });
 
-    it('replays existing transcript messages when importing a Codex thread into a new Hapi session', async () => {
+    it('replays existing transcript messages when importing a Codex thread into a new SHAPI session', async () => {
         const transcriptPath = join(tempDir, 'codex-import-transcript.jsonl');
         const { session, agentMessages } = createSessionStub('default', undefined, '/tmp/worktree', null, true);
         let releaseRunBarrier: (() => void) | undefined;
@@ -390,7 +390,7 @@ describe('codexLocalLauncher', () => {
         });
     });
 
-    it('replays existing response_item chat messages when importing a Codex thread into a new Hapi session', async () => {
+    it('replays existing response_item chat messages when importing a Codex thread into a new SHAPI session', async () => {
         const transcriptPath = join(tempDir, 'codex-import-response-item-transcript.jsonl');
         const { session, userMessages, agentMessages } = createSessionStub('default', undefined, '/tmp/worktree', null, true);
         let releaseRunBarrier: (() => void) | undefined;

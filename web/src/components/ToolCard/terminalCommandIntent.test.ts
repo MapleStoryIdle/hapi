@@ -64,6 +64,7 @@ describe('terminal command intent', () => {
             service: 'app'
         })
         expect(getTerminalCommandIntent({ command: '/opt/tools/upgrade_remote_hapi_hub.sh server-alias' })).toEqual({ kind: 'manage-hapi' })
+        expect(getTerminalCommandIntent({ command: 'shapi runner status' })).toEqual({ kind: 'manage-hapi' })
         expect(getTerminalCommandIntent({ command: 'kill 12345' })).toEqual({ kind: 'stop-process' })
         expect(getTerminalCommandIntent({ command: 'find . -name tmp -delete' })).toEqual({
             kind: 'manage-files',

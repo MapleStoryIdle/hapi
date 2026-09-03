@@ -1,5 +1,5 @@
 /**
- * Sync Engine for HAPI Telegram Bot (Direct Connect)
+ * Sync Engine for SHAPI Telegram Bot (Direct Connect)
  *
  * In the direct-connect architecture:
  * - hapi-hub is the hub (Socket.IO + REST)
@@ -789,7 +789,7 @@ export class SyncEngine {
                 if (result.result === 'session-active') return { ok: false, reason: 'session_active' as const }
                 return { ok: false, reason: 'version_mismatch_or_missing' as const }
             },
-            // tiann/hapi#872: size sanity check needs to compare HAPI's known
+            // tiann/hapi#872: size sanity check needs to compare SHAPI's known
             // message history against the candidate legacy store's blob
             // count. The store-handle stays on the engine; we only thread
             // the count through so the migrator stays free of a direct

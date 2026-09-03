@@ -38,7 +38,7 @@ export function ChevronUpIcon(props: { className?: string }) {
 }
 
 /**
- * Shared compact entry point for HAPI and native Codex queues.  The drawer
+ * Shared compact entry point for SHAPI and native Codex queues.  The drawer
  * behind it can have different capabilities, but the affordance stays in the
  * same place, with the same hit target and visual hierarchy.
  */

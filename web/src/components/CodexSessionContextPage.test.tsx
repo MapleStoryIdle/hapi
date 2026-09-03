@@ -950,7 +950,7 @@ describe('CodexSessionContextPage', () => {
 
         const notice = await screen.findByTestId('codex-native-external-writer')
         expect(notice).toHaveTextContent('Unable to send messages right now')
-        expect(notice).toHaveTextContent('HAPI will keep syncing new transcript updates')
+        expect(notice).toHaveTextContent('SHAPI will keep syncing new transcript updates')
         await waitFor(() => {
             expect(screen.queryByText('Ignore this locked prompt')).not.toBeInTheDocument()
         })
@@ -1459,7 +1459,7 @@ describe('CodexSessionContextPage', () => {
         expect(await screen.findByRole('button', { name: 'Renamed native task' })).toBeInTheDocument()
     })
 
-    it('uses the shared capability-scoped header menu without HAPI-only actions', async () => {
+    it('uses the shared capability-scoped header menu without SHAPI-only actions', async () => {
         const { api } = renderPage()
 
         await screen.findByText('Original response')
@@ -1511,7 +1511,7 @@ describe('CodexSessionContextPage', () => {
     })
 
 
-    it('matches the HAPI conversation skeleton while native context loads', () => {
+    it('matches the SHAPI conversation skeleton while native context loads', () => {
         const api = createApi()
         let resolveContext: (() => void) | undefined
         const getContext = api.getCodexSessionContext as ReturnType<typeof vi.fn>
@@ -1612,7 +1612,7 @@ describe('CodexSessionContextPage', () => {
         })
     })
 
-    it('forks the read-only Codex transcript into a normal HAPI session', async () => {
+    it('forks the read-only Codex transcript into a normal SHAPI session', async () => {
         const { api, onForked } = renderPage()
 
         await screen.findByText('Original response')
@@ -1643,7 +1643,7 @@ describe('CodexSessionContextPage', () => {
 
         expect(screen.queryByRole('menu', { name: 'More actions' })).toBeNull()
         expect(screen.getByText('Creating new session')).toBeInTheDocument()
-        expect(screen.getByText('Copying the original context into a new HAPI session…')).toBeInTheDocument()
+        expect(screen.getByText('Copying the original context into a new SHAPI session…')).toBeInTheDocument()
 
         resolveFork({ type: 'success', sessionId: 'new-hapi-session' })
         await waitFor(() => expect(onForked).toHaveBeenCalledWith('new-hapi-session'))

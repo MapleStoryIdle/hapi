@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Post a local image inline to a HAPI session via the session CLI's display_image MCP tool.
+ * Post a local image inline to a SHAPI session via the session CLI's display_image MCP tool.
  *
  * Uses session.metadata.hapiMcpUrl (published at MCP server start) so we hit the MCP
  * endpoint, not the session hook server on another loopback port in the same process.

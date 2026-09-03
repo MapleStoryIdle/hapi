@@ -1,5 +1,5 @@
 /**
- * Telegram Bot for HAPI
+ * Telegram Bot for SHAPI
  *
  * Simplified bot that only handles notifications (permission requests and ready events).
  * All interactive features are handled by the Telegram Mini App.
@@ -25,7 +25,7 @@ export interface HappyBotConfig {
 }
 
 /**
- * HAPI Telegram Bot - Notification-only mode
+ * SHAPI Telegram Bot - Notification-only mode
  */
 export class HappyBot implements NotificationChannel {
     private bot: Bot<BotContext>
@@ -112,14 +112,14 @@ export class HappyBot implements NotificationChannel {
         // /app - Open Telegram Mini App (primary entry point)
         this.bot.command('app', async (ctx) => {
             const keyboard = new InlineKeyboard().webApp('Open App', this.publicUrl)
-            await ctx.reply('Open HAPI Mini App:', { reply_markup: keyboard })
+            await ctx.reply('Open SHAPI Mini App:', { reply_markup: keyboard })
         })
 
         // /start - Simple welcome with Mini App link
         this.bot.command('start', async (ctx) => {
             const keyboard = new InlineKeyboard().webApp('Open App', this.publicUrl)
             await ctx.reply(
-                'Welcome to HAPI Bot!\n\n' +
+                'Welcome to SHAPI Bot!\n\n' +
                 'Use the Mini App for full session management.',
                 { reply_markup: keyboard }
             )

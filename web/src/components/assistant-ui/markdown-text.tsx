@@ -216,7 +216,7 @@ function hasScheme(href: string): boolean {
 // Relative paths (no colon, or colon only in path/query) have no scheme and
 // are always passed through — they are safe and used for img src etc.
 //
-// data: remains denied. First-party image previews should use HAPI's blob/file
+// data: remains denied. First-party image previews should use SHAPI's blob/file
 // routes instead of embedding base64 data URLs in message content.
 export function denyOnlyTransform(url: string): string {
     if (!url) return url

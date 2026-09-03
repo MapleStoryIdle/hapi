@@ -5,7 +5,7 @@ const path = require('path');
 
 const platform = process.platform;
 const arch = process.arch;
-const RELEASE_URL = 'https://github.com/tiann/hapi/releases';
+const RELEASE_URL = 'https://github.com/MapleStoryIdle/shapi/releases';
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org';
 const SUPPORTED_PLATFORMS = [
     {

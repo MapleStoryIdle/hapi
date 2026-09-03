@@ -1,7 +1,7 @@
 {
   "name": "hapi-docs",
   "version": "1.0.0",
-  "description": "HAPI Documentation",
+  "description": "SHAPI Documentation",
   "type": "module",
   "scripts": {
     "docs:dev": "vitepress dev",

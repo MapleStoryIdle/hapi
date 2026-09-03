@@ -860,7 +860,7 @@ describe('CursorLegacyMigrator.migrateOne — size sanity (tiann/hapi#872)', () 
     beforeEach(() => { h = makeHarness() })
     afterEach(() => cleanupHarness(h))
 
-    it('refuses with size_mismatch when HAPI has > 100 messages and candidate has <messageCount/4 blobs', async () => {
+    it('refuses with size_mismatch when SHAPI has > 100 messages and candidate has <messageCount/4 blobs', async () => {
         const cursorSessionId = 'sm-tiny-uuid'
         // Synthetic store has a tiny number of blobs (single seed row).
         const sourceStore = h.placeLegacyStore(cursorSessionId)
@@ -873,7 +873,7 @@ describe('CursorLegacyMigrator.migrateOne — size sanity (tiann/hapi#872)', () 
         expect(out.ok).toBe(false)
         if (out.ok) return
         expect(out.reason).toBe('size_mismatch')
-        expect(out.message).toMatch(/HAPI tracks 6000 message/)
+        expect(out.message).toMatch(/SHAPI tracks 6000 message/)
         // Source untouched, no ACP placement.
         expect(existsSync(sourceStore)).toBe(true)
         expect(existsSync(join(h.acpSessionsDir, cursorSessionId))).toBe(false)
@@ -912,7 +912,7 @@ describe('CursorLegacyMigrator.migrateOne — size sanity (tiann/hapi#872)', () 
         expect(existsSync(join(h.acpSessionsDir, cursorSessionId, 'store.db'))).toBe(true)
     })
 
-    it('skips the sanity check when HAPI message count is 0 (brand new session)', async () => {
+    it('skips the sanity check when SHAPI message count is 0 (brand new session)', async () => {
         const cursorSessionId = 'sm-zero-uuid'
         h.placeLegacyStore(cursorSessionId)
         const session = h.makeSession({

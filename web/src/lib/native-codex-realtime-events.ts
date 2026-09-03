@@ -10,7 +10,7 @@ const listeners = new Set<NativeCodexSessionUpdatedListener>()
 
 /**
  * The SSE hook owns transport parsing. Native session surfaces subscribe here
- * so they can refresh their runner-local transcript without faking a HAPI
+ * so they can refresh their runner-local transcript without faking a SHAPI
  * session id or putting transcript bodies into the global event stream.
  */
 export function publishNativeCodexSessionUpdated(event: NativeCodexSessionUpdatedEvent): void {

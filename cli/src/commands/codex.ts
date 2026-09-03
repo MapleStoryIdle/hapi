@@ -37,23 +37,23 @@ function parseServiceTier(value: string): 'fast' | 'standard' {
 
 function showHelp(): void {
     console.log(`
-${chalk.bold('hapi codex')} - Start, resume, or fork a Codex CLI conversation
+${chalk.bold('shapi codex')} - Start, resume, or fork a Codex CLI conversation
 
 ${chalk.bold('Usage:')}
-  hapi codex
-  hapi codex resume <session-id>
-  hapi codex fork <source-session-id>
-  hapi codex notifications enable
+  shapi codex
+  shapi codex resume <session-id>
+  shapi codex fork <source-session-id>
+  shapi codex notifications enable
 
 ${chalk.bold('Fork semantics:')}
   Uses native Codex thread/fork. The source conversation history, model,
   reasoning effort, service tier, and native policy are inherited by Codex.
-  HAPI starts a separate session for the fork; it does not modify the source.
+  SHAPI starts a separate session for the fork; it does not modify the source.
   A remote fork reads the source from the selected runner's own CODEX_HOME;
   that runner must also be allowed to spawn in the transcript workspace.
 
 ${chalk.bold('Machine-readable help:')}
-  hapi codex --hapi-help-json
+  shapi codex --hapi-help-json
 `)
 }
 
@@ -72,16 +72,16 @@ export const codexCommand: CommandDefinition = {
             }
             if (commandArgs[0] === 'notifications') {
                 if (commandArgs.length !== 2 || commandArgs[1] !== 'enable') {
-                    throw new Error('Usage: hapi codex notifications enable')
+                    throw new Error('Usage: shapi codex notifications enable')
                 }
                 const { installExternalCodexNotificationHooks } = await import('@/codex/utils/externalCodexNotificationHooks')
                 const result = await installExternalCodexNotificationHooks()
                 if (result.addedKinds.length === 0) {
-                    console.log(`HAPI Codex mobile notification hooks are already installed in ${result.hooksPath}`)
+                    console.log(`SHAPI Codex mobile notification hooks are already installed in ${result.hooksPath}`)
                 } else {
-                    console.log(`Installed HAPI Codex mobile notification hooks in ${result.hooksPath}`)
+                    console.log(`Installed SHAPI Codex mobile notification hooks in ${result.hooksPath}`)
                 }
-                console.log('In Codex, run /hooks once and trust the new HAPI hooks to activate them.')
+                console.log('In Codex, run /hooks once and trust the new SHAPI hooks to activate them.')
                 return
             }
             const { runCodex } = await import('@/codex/runCodex')

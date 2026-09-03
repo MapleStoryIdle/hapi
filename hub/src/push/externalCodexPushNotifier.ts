@@ -9,7 +9,7 @@ const DEFAULT_DEDUPE_WINDOW_MS = 30_000
 
 /**
  * PWA-only notifications for native Codex sessions that are not managed by
- * HAPI. These deliberately bypass the in-app toast / Telegram / ServerChan
+ * SHAPI. These deliberately bypass the in-app toast / Telegram / ServerChan
  * channels: the source session remains wholly local to Codex.
  */
 export class ExternalCodexPushNotifier {

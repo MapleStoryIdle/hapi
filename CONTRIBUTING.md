@@ -1,6 +1,6 @@
-# Contributing to HAPI
+# Contributing to SHAPI
 
-Thank you for your interest in contributing to HAPI! We welcome bug fixes, feature suggestions, and thoughtful contributions from the community.
+Thank you for your interest in contributing to SHAPI! We welcome bug fixes, feature suggestions, and thoughtful contributions from the community.
 
 ## Code of Conduct
 
@@ -45,7 +45,7 @@ Bug reports are always welcome! When reporting a bug, please include:
 
 ## Feature Requests
 
-Have an idea to improve HAPI? Open an issue with:
+Have an idea to improve SHAPI? Open an issue with:
 
 - A clear description of the feature
 - The problem it solves

@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://hapi.run/schemas/settings.schema.json",
-  "title": "HAPI Settings",
-  "description": "Configuration file for HAPI (~/.hapi/settings.json)",
+  "$id": "https://raw.githubusercontent.com/MapleStoryIdle/shapi/main/docs/public/schemas/settings.schema.json",
+  "title": "SHAPI Settings",
+  "description": "Configuration file for SHAPI (~/.hapi/settings.json)",
   "type": "object",
   "properties": {
     "cliApiToken": {
@@ -71,7 +71,7 @@
     },
     "runnerAutoStartWhenRunningHappy": {
       "type": "boolean",
-      "description": "Auto-start runner when running hapi command."
+      "description": "Auto-start runner when running shapi command."
     }
   },
   "additionalProperties": false

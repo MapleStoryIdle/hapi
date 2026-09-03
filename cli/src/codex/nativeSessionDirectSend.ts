@@ -663,8 +663,8 @@ export class NativeCodexSessionDirectSender {
     /**
      * Reserve an exact native thread while the caller performs Codex's
      * destructive archive operation. Archiving may stop work owned by another
-     * Codex client, just like HAPI archive stops a managed session. It must not
-     * overlap a HAPI-owned hand-off or saved FIFO receipt, because those have
+     * Codex client, just like SHAPI archive stops a managed session. It must not
+     * overlap a SHAPI-owned hand-off or saved FIFO receipt, because those have
      * stronger delivery guarantees than an external native turn.
      */
     async archive(
@@ -695,7 +695,7 @@ export class NativeCodexSessionDirectSender {
             return {
                 success: false,
                 code: 'session_busy',
-                error: 'HAPI is still delivering a message to this native Codex session'
+                error: 'SHAPI is still delivering a message to this native Codex session'
             }
         }
         if ((this.queues.get(sessionId)?.length ?? 0) > 0) {
@@ -766,7 +766,7 @@ export class NativeCodexSessionDirectSender {
         }
 
         const recentFailure = this.getRecentFailure(sessionId)
-        // A failed HAPI child may leave an error worth showing, but it must
+        // A failed SHAPI child may leave an error worth showing, but it must
         // never override the raw lifecycle state. An external Codex turn can
         // begin between a child exit and this status read.
         return {
@@ -920,7 +920,7 @@ export class NativeCodexSessionDirectSender {
 
     /**
      * Drop a saved runner receipt without attempting to cancel a native Codex
-     * turn. A turn might already have accepted the text, so only the HAPI
+     * turn. A turn might already have accepted the text, so only the SHAPI
      * outbox is changed here.
      */
     discard(sessionId: string, rawClientMessageId: unknown): DiscardCodexLocalSessionMessageRpcResponse {
@@ -1361,7 +1361,7 @@ export class NativeCodexSessionDirectSender {
             client.setNotificationHandler((method, params) => {
                 this.handleBridgeNotification(sessionId, active, method, params)
             })
-            // A short-lived HAPI bridge has no local choice UI. Cancel this
+            // A short-lived SHAPI bridge has no local choice UI. Cancel this
             // primitive so it cannot become a fake "return to local Codex"
             // wait; native Desktop-owned turns remain untouched.
             client.registerRequestHandler?.('item/tool/requestUserInput', () => ({ decision: 'cancel' }))
@@ -1482,10 +1482,10 @@ export class NativeCodexSessionDirectSender {
 
             await active.client.initialize({
                 clientInfo: {
-                    // Keep the bridge distinct from a HAPI-owned session. The
+                    // Keep the bridge distinct from a SHAPI-owned session. The
                     // original native transcript must remain visible as native.
                     name: 'hapi-native-session-bridge',
-                    title: 'HAPI Native Session Bridge',
+                    title: 'SHAPI Native Session Bridge',
                     version: '1.0.0'
                 },
                 capabilities: { experimentalApi: true }

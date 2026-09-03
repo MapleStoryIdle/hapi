@@ -93,7 +93,7 @@ export function useNativeCodexSessionComposerCapabilities(
     const commands = useMemo(() => {
         if (query.data?.success !== true) return []
         // Defense in depth: never offer commands that look actionable but
-        // only make sense in a HAPI-owned Codex process.
+        // only make sense in a SHAPI-owned Codex process.
         return query.data.commands.filter((command) => command.source !== 'builtin')
     }, [query.data])
     const skills = useMemo(() => query.data?.success === true ? query.data.skills : [], [query.data])

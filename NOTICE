@@ -1,0 +1,11 @@
+SHAPI
+
+SHAPI is a modified distribution of HAPI:
+https://github.com/tiann/hapi
+
+HAPI and its contributors retain their copyright in the corresponding work.
+This repository keeps upstream attribution in its documentation. Source code
+is distributed under the license in LICENSE.
+
+Some CLI code is derived from happy-cli under the MIT License. The full
+third-party notice and the affected paths are recorded in cli/NOTICE.

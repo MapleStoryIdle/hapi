@@ -65,7 +65,7 @@ describe('ServerChanChannel', () => {
             const url = call?.[0]
             const init = call?.[1] as RequestInit | undefined
             expect(String(url)).toContain('https://sctapi.ftqq.com/SCT_TEST.send')
-            expect((init?.body as URLSearchParams).get('title')).toBe('HAPI Task failed')
+            expect((init?.body as URLSearchParams).get('title')).toBe('SHAPI Task failed')
         } finally {
             globalThis.fetch = originalFetch
         }
@@ -92,7 +92,7 @@ describe('ServerChanChannel', () => {
             const url = call?.[0]
             const init = call?.[1] as RequestInit | undefined
             expect(String(url)).toContain('https://sctapi.ftqq.com/SCT_TEST.send')
-            expect((init?.body as URLSearchParams).get('title')).toBe('HAPI Session completed')
+            expect((init?.body as URLSearchParams).get('title')).toBe('SHAPI Session completed')
         } finally {
             globalThis.fetch = originalFetch
         }

@@ -109,7 +109,7 @@ export type ShareFeedbackSummary = {
 
 /**
  * The conversation that owns a feedback-enabled Kanban task. Native Codex
- * threads are deliberately not masqueraded as HAPI session ids.
+ * threads are deliberately not masqueraded as SHAPI session ids.
  */
 export type ShareSource =
     | { type: 'hapi'; sessionId: string }

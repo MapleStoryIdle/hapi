@@ -37,7 +37,7 @@ describe('isLinkedGitWorktree', () => {
         try {
             await mkdir(primaryCheckout)
             await runGit(primaryCheckout, 'init')
-            await runGit(primaryCheckout, 'config', 'user.name', 'HAPI Test')
+            await runGit(primaryCheckout, 'config', 'user.name', 'SHAPI Test')
             await runGit(primaryCheckout, 'config', 'user.email', 'test@example.com')
             await writeFile(join(primaryCheckout, 'README.md'), '# test\n')
             await runGit(primaryCheckout, 'add', 'README.md')

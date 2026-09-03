@@ -27,7 +27,7 @@ export type HappyChatContextValue = {
     setToolGroupExpansionState?: (key: string, state: ToolGroupExpansionState) => void
     /** True from turn start until the current turn receives a completion event. */
     toolGroupRunActive?: boolean
-    /** Route message file links through a non-HAPI-session file source. */
+    /** Route message file links through a non-SHAPI-session file source. */
     fileLinkTarget?: HappyChatFileLinkTarget
 }
 

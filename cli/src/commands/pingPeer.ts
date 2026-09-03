@@ -23,19 +23,19 @@ export type ParsedPingPeerArgs = {
 
 function showHelp(): void {
     console.log(`
-${chalk.bold('hapi ping-peer')} - 唤醒（如需要）并向同一 Hub 的另一个会话发送消息
+${chalk.bold('shapi ping-peer')} - 唤醒（如需要）并向同一 Hub 的另一个会话发送消息
 
 ${chalk.bold('Usage:')}
-  hapi ping-peer <session-id-prefix> <message-text>
-  hapi ping-peer <session-id-prefix> --message-file <path>
-  hapi ping-peer <session-id-prefix> --message-file -
-  hapi ping-peer --list
+  shapi ping-peer <session-id-prefix> <message-text>
+  shapi ping-peer <session-id-prefix> --message-file <path>
+  shapi ping-peer <session-id-prefix> --message-file -
+  shapi ping-peer --list
 
 ${chalk.bold('Machine-readable contract:')}
   输入是同一 namespace 下唯一的会话 ID 或前缀；输出仅表示投递结果。
   不支持通过参数指定 Hub 主机，始终使用 HAPI_API_URL / 当前登录配置。
   也可传入 [title](/sessions/<id>) 或 Copy-reference 文本；多个引用会拒绝执行。
-  从 HAPI Agent 会话内调用时，会拒绝向当前会话自身投递，避免自激循环。
+  从 SHAPI Agent 会话内调用时，会拒绝向当前会话自身投递，避免自激循环。
 
 ${chalk.bold('Options:')}
   --list                 列出最近活跃会话（只读）
@@ -126,7 +126,7 @@ export async function handlePingPeerCommand(args: string[]): Promise<void> {
 
     if (!parsed.sessionIdPrefix) {
         showHelp()
-        throw new PingPeerError('bad_args', 'missing session id; usage: hapi ping-peer <session-id> <message>')
+        throw new PingPeerError('bad_args', 'missing session id; usage: shapi ping-peer <session-id> <message>')
     }
     const message = await readMessage(parsed)
     if (!message) {
@@ -137,9 +137,9 @@ export async function handlePingPeerCommand(args: string[]): Promise<void> {
         sessionIdPrefix: parsed.sessionIdPrefix,
         message,
         waitActiveSecs: parsed.waitActiveSecs ?? envWaitActiveSecs(),
-        onProgress: (line) => console.log(`hapi ping-peer: ${line}`)
+        onProgress: (line) => console.log(`shapi ping-peer: ${line}`)
     })
-    console.log(chalk.green(`hapi ping-peer: OK - delivered to ${result.sessionId}`))
+    console.log(chalk.green(`shapi ping-peer: OK - delivered to ${result.sessionId}`))
 }
 
 export const pingPeerCommand: CommandDefinition = {
@@ -150,10 +150,10 @@ export const pingPeerCommand: CommandDefinition = {
             await handlePingPeerCommand(commandArgs)
         } catch (error) {
             if (error instanceof PingPeerError) {
-                console.error(chalk.red('hapi ping-peer:'), error.message)
+                console.error(chalk.red('shapi ping-peer:'), error.message)
                 process.exit(exitCodeForPingPeerError(error))
             }
-            console.error(chalk.red('hapi ping-peer:'), error instanceof Error ? error.message : 'Unknown error')
+            console.error(chalk.red('shapi ping-peer:'), error instanceof Error ? error.message : 'Unknown error')
             process.exit(1)
         }
     }

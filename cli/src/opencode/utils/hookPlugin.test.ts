@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// Stub out `@/configuration` so the helper considers our tmpdir HAPI-managed.
+// Stub out `@/configuration` so the helper considers our tmpdir SHAPI-managed.
 // Tests that exercise the non-managed branch override happyHomeDir explicitly.
 vi.mock('@/configuration', () => ({
     configuration: {
@@ -131,9 +131,9 @@ describe('ensurePluginRuntime (via ensureOpencodeHookPlugin)', () => {
         expect(pkg.dependencies['@opencode-ai/plugin']).toBeDefined();
     });
 
-    it('does NOT write to a non-HAPI-managed dir (user-supplied OPENCODE_CONFIG_DIR)', () => {
+    it('does NOT write to a non-SHAPI-managed dir (user-supplied OPENCODE_CONFIG_DIR)', () => {
         // Simulate a user pointing OPENCODE_CONFIG_DIR at their own ~/.config/opencode.
-        // Even though it's empty, HAPI must not pollute it with a placeholder.
+        // Even though it's empty, SHAPI must not pollute it with a placeholder.
         const userOwned = makeTempDir('hapi-not-managed-');
         try {
             setHapiHome(makeTempDir('hapi-home-elsewhere-'));
@@ -141,7 +141,7 @@ describe('ensurePluginRuntime (via ensureOpencodeHookPlugin)', () => {
             ensureOpencodeHookPlugin(userOwned, 'http://h/hook', 't');
 
             expect(existsSync(join(userOwned, 'package.json'))).toBe(false);
-            // Plugin file is still written — that's HAPI's contract — but the
+            // Plugin file is still written — that's SHAPI's contract — but the
             // package.json side effect is gated.
             expect(existsSync(join(userOwned, 'plugins', 'hapi-hook.ts'))).toBe(true);
         } finally {

@@ -43,7 +43,7 @@ function getOwningMachine(engine: SyncEngine, session: Session, namespace: strin
 }
 
 /**
- * A finished HAPI session removes its session-scoped RPC handler, but its
+ * A finished SHAPI session removes its session-scoped RPC handler, but its
  * runner remains able to read the same project directory. Prefer that durable
  * runner path so message links still work after a session ends. Older runners
  * fall back to the session handler while it is still connected.

@@ -1,7 +1,7 @@
 /**
  * 供脚本、IDE 集成和 Agent 读取的 CLI 功能目录。
  *
- * Human-oriented `--help` 会变动排版；自动化请使用 `hapi --hapi-capabilities`
+ * Human-oriented `--help` 会变动排版；自动化请使用 `shapi --hapi-capabilities`
  * 或子命令的 `--hapi-help-json`，其 JSON 字段是稳定的机器接口。
  */
 export const HAPI_CLI_CAPABILITIES = {
@@ -11,7 +11,7 @@ export const HAPI_CLI_CAPABILITIES = {
             subcommands: {
                 resume: {
                     args: ['sessionId'],
-                    description: 'Resume a native Codex thread in a HAPI session.'
+                    description: 'Resume a native Codex thread in a SHAPI session.'
                 },
                 fork: {
                     args: ['sourceSessionId'],

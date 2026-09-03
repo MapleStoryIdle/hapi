@@ -269,7 +269,7 @@ export class ApiClient {
     }
 
     async syncCodexSession(payload?: CodexDesktopSyncRequest): Promise<CodexDesktopScriptResponse> {
-        // 中文注释：当前按钮语义已改为“从 Codex 导入到 Hapi”；这里提交的是本地 transcript 对应的 Codex thread ID 列表。
+        // 中文注释：当前按钮语义已改为“从 Codex 导入到 SHAPI”；这里提交的是本地 transcript 对应的 Codex thread ID 列表。
         return await this.request<CodexDesktopScriptResponse>('/api/codex/sync-session', {
             method: 'POST',
             ...(payload ? { body: JSON.stringify(payload) } : {})

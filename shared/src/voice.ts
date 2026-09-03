@@ -1,7 +1,7 @@
 /**
  * Shared voice assistant configuration for ElevenLabs ConvAI.
  *
- * This module provides the unified configuration for the Hapi Voice Assistant,
+ * This module provides the unified configuration for the SHAPI Voice Assistant,
  * ensuring consistency between server-side auto-creation and client-side usage.
  */
 
@@ -15,7 +15,8 @@ import {
 export { VOICE_CHINESE_LANGUAGE_BLOCK } from './voicePromptLayers'
 
 export const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io/v1'
-export const VOICE_AGENT_NAME = 'Hapi Voice Assistant'
+export const VOICE_AGENT_NAME = 'SHAPI Voice Assistant'
+export const LEGACY_VOICE_AGENT_NAME = 'Hapi Voice Assistant'
 
 const DEFAULT_COMPOSED_LAYERS: VoicePromptLayerInput = {
     identity: '',
@@ -93,7 +94,7 @@ no ${name} equivalent.`
 }
 
 /** ElevenLabs first message — language controlled by ElevenLabs language field */
-export const VOICE_FIRST_MESSAGE = "Hey! Hapi here — what can I help you with?"
+export const VOICE_FIRST_MESSAGE = "Hey! SHAPI here — what can I help you with?"
 
 export const VOICE_TOOLS = [
     {
@@ -180,7 +181,7 @@ export interface VoiceAgentConfig {
 }
 
 /**
- * Build the agent configuration for Hapi Voice Assistant.
+ * Build the agent configuration for SHAPI Voice Assistant.
  * Used by both server-side auto-creation and client-side configuration.
  */
 export function buildVoiceAgentConfig(): VoiceAgentConfig {

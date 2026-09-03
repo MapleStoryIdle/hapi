@@ -26,13 +26,25 @@ jobs:
             - uses: oven-sh/setup-bun@v2
               with:
                   bun-version: 1.3.14
-            - run: bun install
+            - run: bun install --frozen-lockfile
+            - name: Configure Pages base path
+              env:
+                  SHAPI_PAGES_DOMAIN: ${{ vars.SHAPI_PAGES_DOMAIN }}
+              run: |
+                  if [ -n "$SHAPI_PAGES_DOMAIN" ]; then
+                    echo "VITE_BASE_URL=/" >> "$GITHUB_ENV"
+                  else
+                    echo "VITE_BASE_URL=/${GITHUB_REPOSITORY#*/}/" >> "$GITHUB_ENV"
+                  fi
             - name: Build web app
               env:
                   VITE_REQUIRE_HUB_URL: '1'
               run: bun run --cwd web build
             - name: Add CNAME for custom domain
-              run: echo "app.hapi.run" > web/dist/CNAME
+              if: ${{ vars.SHAPI_PAGES_DOMAIN != '' }}
+              env:
+                  SHAPI_PAGES_DOMAIN: ${{ vars.SHAPI_PAGES_DOMAIN }}
+              run: printf '%s\n' "$SHAPI_PAGES_DOMAIN" > web/dist/CNAME
             - name: Setup Pages
               uses: actions/configure-pages@v5
             - name: Upload artifact

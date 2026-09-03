@@ -1,6 +1,6 @@
 # How it Works
 
-HAPI consists of three interconnected components that work together to provide remote AI agent control.
+SHAPI consists of three interconnected components that work together to provide remote AI agent control.
 
 ## Architecture Overview
 
@@ -10,7 +10,7 @@ HAPI consists of three interconnected components that work together to provide r
 │                                                                            │
 │   ┌──────────────┐         ┌──────────────┐         ┌──────────────┐       │
 │   │              │         │              │         │              │       │
-│   │   HAPI CLI   │◄───────►│  HAPI Hub    │◄───────►│   Web App    │       │
+│   │   SHAPI CLI   │◄───────►│  SHAPI Hub    │◄───────►│   Web App    │       │
 │   │              │ Socket  │              │   SSE   │  (embedded)  │       │
 │   │  + AI Agent  │   .IO   │  + SQLite    │         │              │       │
 │   │              │         │  + REST API  │         │              │       │
@@ -45,26 +45,26 @@ HAPI consists of three interconnected components that work together to provide r
 
 ## Components
 
-### HAPI CLI
+### SHAPI CLI
 
 The CLI is a wrapper around AI coding agents (Claude Code, Codex, Cursor Agent, Gemini, OpenCode). It:
 
 - Starts and manages coding sessions
-- Registers sessions with the HAPI hub
+- Registers sessions with the SHAPI hub
 - Relays messages and permission requests
 - Provides MCP (Model Context Protocol) tools
 
 **Key Commands:**
 ```bash
-hapi              # Start Claude Code session
-hapi codex       # Start OpenAI Codex session
-hapi cursor      # Start Cursor Agent session
-hapi gemini      # Start Google Gemini session
-hapi opencode    # Start OpenCode session
-hapi runner start # Run background service for remote session spawning
+shapi              # Start Claude Code session
+shapi codex        # Start OpenAI Codex session
+shapi cursor       # Start Cursor Agent session
+shapi gemini       # Start Google Gemini session
+shapi opencode     # Start OpenCode session
+shapi runner start # Run background service for remote session spawning
 ```
 
-### HAPI Hub
+### SHAPI Hub
 
 The hub is the central service that connects everything:
 
@@ -89,7 +89,7 @@ A React-based PWA that provides the mobile interface:
 ### Starting a Session
 
 ```
-1. User runs `hapi` in terminal
+1. User runs `shapi` in terminal
          │
          ▼
 2. CLI starts Claude Code (or other agent)
@@ -171,7 +171,7 @@ For remote access outside your local network:
 
 ## Seamless Handoff
 
-HAPI's defining feature is the ability to seamlessly hand off control between local terminal and remote devices without losing session state.
+SHAPI's defining feature is the ability to seamlessly hand off control between local terminal and remote devices without losing session state.
 
 ### Local Mode
 

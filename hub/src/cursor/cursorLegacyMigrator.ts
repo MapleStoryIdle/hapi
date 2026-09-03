@@ -11,7 +11,7 @@
  *   3. The on-disk SQLite schema is byte-identical between the two stores
  *      (blobs content-addressed Merkle tree + meta key-value).
  *   4. Therefore: cp legacy store.db into the ACP location, synthesize the
- *      meta.json sidecar, verify session/load works, then flip HAPI's
+ *      meta.json sidecar, verify session/load works, then flip SHAPI's
  *      cursorSessionProtocol = 'acp' so the existing cursorAcpRemoteLauncher
  *      (already in #799) picks the session up on next resume.
  *
@@ -153,10 +153,10 @@ export interface CursorLegacyMigratorDeps {
     /** Used to update hapi.db sessions.metadata.cursorSessionProtocol = 'acp' and session.model. */
     updateSessionAfterMigrate?: (sessionId: string, namespace: string, lastUsedModel: string | null) => UpdateAfterMigrateResult
     /**
-     * Best-effort count of messages HAPI has already synced for this session
+     * Best-effort count of messages SHAPI has already synced for this session
      * (read from hapi.db, see hub/src/store/messages.ts). Used to refuse a
      * transplant when the candidate legacy store contains an order-of-
-     * magnitude fewer blobs than HAPI's known history - the canonical
+     * magnitude fewer blobs than SHAPI's known history - the canonical
      * symptom of the #844 ambiguous-source regression where a sibling
      * workspace-hash drawer with stale or unrelated content gets picked
      * up by the readdir scan. Return 0 (or omit the dep) to disable the
@@ -684,11 +684,11 @@ export class CursorLegacyMigrator {
         // picked legacy store may be a stale sibling that happens to be
         // the only on-disk artifact for this session id (e.g. operator
         // deleted the canonical workspace and a diagnostic location is
-        // all that's left). If HAPI already synced a meaningful history
+        // all that's left). If SHAPI already synced a meaningful history
         // for the session and the candidate store has wildly fewer blobs
         // than that history, refuse rather than transplant a shrunken
         // alien snapshot over the live ACP target. Skips entirely when
-        // HAPI message count is 0 (brand-new / never-synced session).
+        // SHAPI message count is 0 (brand-new / never-synced session).
         // tiann/hapi#872.
         const sizeMismatch = this.checkSizeSanity(session, cursorSessionId, legacy.storeDbPath, log)
         if (sizeMismatch) {
@@ -1041,7 +1041,7 @@ export class CursorLegacyMigrator {
 
     /**
      * Refuse a transplant when the candidate legacy store carries
-     * dramatically fewer blobs than HAPI's known message history for
+     * dramatically fewer blobs than SHAPI's known message history for
      * the session - the canonical symptom of the #844 ambiguous-source
      * regression where a stale sibling drawer gets picked up by the
      * readdir scan even when no explicit ambiguity exists (e.g. the
@@ -1050,7 +1050,7 @@ export class CursorLegacyMigrator {
      * payload otherwise. Skipped entirely when:
      *   - no `getHapiMessageCount` dep is wired (e.g. unit tests, CLI
      *     callers that don't have a store handle)
-     *   - HAPI message count is 0 (brand-new / never-synced session)
+     *   - SHAPI message count is 0 (brand-new / never-synced session)
      *   - candidate blob count cannot be read (treated as fail-open
      *     so a corrupted store still goes through the normal verify path
      *     and surfaces verify_load_failed there)
@@ -1080,7 +1080,7 @@ export class CursorLegacyMigrator {
         const minExpectedBlobs = Math.floor(messageCount / 4)
         if (blobCount >= minExpectedBlobs) return null
         return {
-            message: `legacy store size mismatch: HAPI tracks ${messageCount} message(s) for session ${cursorSessionId} but candidate store has only ${blobCount} blob(s) (< messageCount/4 = ${minExpectedBlobs}). Refusing to transplant likely-alien content; resolve manually.`,
+            message: `legacy store size mismatch: SHAPI tracks ${messageCount} message(s) for session ${cursorSessionId} but candidate store has only ${blobCount} blob(s) (< messageCount/4 = ${minExpectedBlobs}). Refusing to transplant likely-alien content; resolve manually.`,
             context: { messageCount, blobCount, minExpectedBlobs, legacyStoreDbPath }
         }
     }

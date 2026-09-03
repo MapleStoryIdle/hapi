@@ -224,7 +224,7 @@ describe('buildVisibleChatBlocks', () => {
         const visible = buildVisibleChatBlocks([
             makeTextBlock('intro', '使用 `imagegen`：生成预览图。'),
             makeToolBlock('read-skill', 'CodexBash', {
-                command: "/bin/zsh -lc 'cat /Users/dev/.codex/skills/.system/imagegen/SKILL.md'"
+                command: "/bin/zsh -lc 'cat /Users/alice/.codex/skills/.system/imagegen/SKILL.md'"
             })
         ], {
             hasMoreMessages: false,

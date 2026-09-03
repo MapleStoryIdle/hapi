@@ -216,10 +216,10 @@ describe('SettingsPage', () => {
     it('displays the website link with correct URL and security attributes', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getAllByText('Website').length).toBeGreaterThanOrEqual(1)
-        const links = screen.getAllByRole('link', { name: 'hapi.run' })
+        const links = screen.getAllByRole('link', { name: 'GitHub' })
         expect(links.length).toBeGreaterThanOrEqual(1)
         const link = links[0]
-        expect(link).toHaveAttribute('href', 'https://hapi.run')
+        expect(link).toHaveAttribute('href', 'https://github.com/MapleStoryIdle/shapi')
         expect(link).toHaveAttribute('target', '_blank')
         expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     })

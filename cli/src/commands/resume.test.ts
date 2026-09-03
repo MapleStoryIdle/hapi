@@ -80,7 +80,7 @@ describe('resumeCommand', () => {
         existsSyncMock.mockReturnValue(true)
     })
 
-    it('resumes a Codex target by HAPI session id', async () => {
+    it('resumes a Codex target by SHAPI session id', async () => {
         getLocalResumeTargetMock.mockResolvedValue({
             sessionId: 'hapi-session-1',
             flavor: 'codex',
@@ -341,7 +341,7 @@ describe('resumeCommand', () => {
             await expect(resumeCommand.run(createContext([]))).rejects.toThrow('process.exit:1')
             expect(renderMock).not.toHaveBeenCalled()
             expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('hapi-session-1'))
-            expect(consoleErrorSpy).toHaveBeenCalledWith(expect.any(String), 'Run: hapi resume <session-id>')
+            expect(consoleErrorSpy).toHaveBeenCalledWith(expect.any(String), 'Run: shapi resume <session-id>')
         } finally {
             Object.defineProperty(process.stdin, 'isTTY', {
                 configurable: true,

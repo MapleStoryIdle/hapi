@@ -118,7 +118,7 @@ describe('RecentCodexSessions', () => {
         expect(formatKanbanSessionTime(new Date(2026, 7, 31, 9, 15, 0).getTime(), now, 'en-US', english)).toBe('09:15:00')
     })
 
-    it('merges recent HAPI and native Codex rows, filters older/non-Codex rows, and de-duplicates managed transcripts', () => {
+    it('merges recent SHAPI and native Codex rows, filters older/non-Codex rows, and de-duplicates managed transcripts', () => {
         const now = 1_800_000_000_000
         const recent = now - 60_000
         const old = now - RECENT_CODEX_WINDOW_MS - 1
@@ -282,7 +282,7 @@ describe('RecentCodexSessions', () => {
         ])
     })
 
-    it('uses true work state for HAPI and native Kanban groups', () => {
+    it('uses true work state for SHAPI and native Kanban groups', () => {
         const now = 1_800_000_000_000
         const base = {
             id: 'base',
@@ -623,7 +623,7 @@ describe('RecentCodexSessions', () => {
         expect(onOpen).not.toHaveBeenCalled()
     })
 
-    it('uses the HAPI archive endpoint for a managed card', async () => {
+    it('uses the SHAPI archive endpoint for a managed card', async () => {
         const api = createApi()
         const hapiSession = {
             id: 'hapi-idle',
@@ -631,7 +631,7 @@ describe('RecentCodexSessions', () => {
             thinking: false,
             activeAt: Date.now(),
             updatedAt: Date.now(),
-            metadata: { path: '/workspace/project', flavor: 'codex', name: 'HAPI idle task' },
+            metadata: { path: '/workspace/project', flavor: 'codex', name: 'SHAPI idle task' },
             todoProgress: null,
             pendingRequestsCount: 0,
             pendingRequestKinds: [],
@@ -658,7 +658,7 @@ describe('RecentCodexSessions', () => {
             </I18nProvider>
         )
 
-        await screen.findByText('HAPI idle task')
+        await screen.findByText('SHAPI idle task')
         const board = screen.getByTestId('session-kanban-board')
         expect(board.querySelector('[data-kanban-date-group]')).not.toBeNull()
         expect(board.querySelector('.cupertino-kanban-timeline-rail')).toBeNull()
@@ -666,7 +666,7 @@ describe('RecentCodexSessions', () => {
         expect(board.querySelector('.cupertino-kanban-time-line')).toBeNull()
         expect(board.querySelector('.cupertino-kanban-card-time')).not.toBeNull()
         expect(screen.getByText('Today')).toBeInTheDocument()
-        const card = screen.getByText('HAPI idle task').closest('li')!
+        const card = screen.getByText('SHAPI idle task').closest('li')!
         fireEvent.click(card.querySelector('[data-kanban-archive]')!)
         const archiveButtons = screen.getAllByRole('button', { name: 'Archive' })
         fireEvent.click(archiveButtons.at(-1)!)

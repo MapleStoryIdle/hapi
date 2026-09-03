@@ -82,7 +82,7 @@ describe('remarkFilePathLinks', () => {
     })
 
     it('parses encoded absolute project paths with Unicode, spaces, and coordinates', () => {
-        const workspacePath = '/Users/dev/IdeaProjects/homebar-cloud'
+        const workspacePath = '/Users/alice/Projects/example-app'
         const rawPath = `${workspacePath}/doc/${encodeURIComponent('中文 文件.md')}:42:7`
 
         expect(parseProjectFilePathHref(rawPath, { workspacePath })).toEqual({
@@ -152,7 +152,7 @@ describe('remarkFilePathLinks', () => {
     })
 
     it('auto-links encoded absolute project paths only with the session workspace', () => {
-        const workspacePath = '/Users/dev/IdeaProjects/homebar-cloud'
+        const workspacePath = '/Users/alice/Projects/example-app'
         const rawPath = `${workspacePath}/doc/${encodeURIComponent('中文 文件.md')}:42`
         const nodes = transform(`Open ${rawPath}`, { workspacePath })
         const link = nodes.find((node) => node.type === 'link')
@@ -164,20 +164,20 @@ describe('remarkFilePathLinks', () => {
     })
 
     it('identifies external absolute file paths without granting project-file access', () => {
-        const workspacePath = '/Users/dev/IdeaProjects/homebar-cloud'
-        const externalHref = '/Users/dev/IdeaProjects/other-project/doc/%E4%B8%AD%E6%96%87%20%E6%96%87%E4%BB%B6.md:42'
+        const workspacePath = '/Users/alice/Projects/example-app'
+        const externalHref = '/Users/alice/Projects/other-project/doc/%E4%B8%AD%E6%96%87%20%E6%96%87%E4%BB%B6.md:42'
 
         expect(parseProjectFilePathHref(externalHref, { workspacePath })).toBeNull()
         expect(parseAbsoluteFilePathHref(externalHref)).toEqual({
-            path: '/Users/dev/IdeaProjects/other-project/doc/中文 文件.md',
+            path: '/Users/alice/Projects/other-project/doc/中文 文件.md',
             line: 42
         })
     })
 
     it('recognizes encoded absolute traversal for unavailable chips but rejects viewer access', () => {
-        const workspacePath = '/Users/dev/project'
-        const posixHref = '/Users/dev/project/%2E%2E/other/README.md'
-        const posixPath = '/Users/dev/project/../other/README.md'
+        const workspacePath = '/Users/alice/project'
+        const posixHref = '/Users/alice/project/%2E%2E/other/README.md'
+        const posixPath = '/Users/alice/project/../other/README.md'
         const windowsHref = 'C:/repo/%2E%2E/other/README.md'
         const windowsPath = 'C:/repo/../other/README.md'
 
@@ -197,7 +197,7 @@ describe('remarkFilePathLinks', () => {
     })
 
     it('uses path safety rather than Markdown file heuristics for protocol targets', () => {
-        const workspacePath = '/Users/dev/project'
+        const workspacePath = '/Users/alice/project'
 
         for (const path of ['a', 'go', 'Makefile', 'src\\App.tsx']) {
             expect(isProjectFilePathTarget({ path }, { workspacePath })).toBe(true)
@@ -225,14 +225,14 @@ describe('remarkFilePathLinks', () => {
     })
 
     it('does not link auto-detected paths that are outside the session workspace', () => {
-        const nodes = transform('Skip /Users/dev/project/a.png, ~/a.png, ../a.png and C:\\tmp\\a.png')
+        const nodes = transform('Skip /Users/alice/project/a.png, ~/a.png, ../a.png and C:\\tmp\\a.png')
 
         expect(nodes.some((node) => node.type === 'link')).toBe(false)
     })
 
     it('leaves project-external absolute paths and ordinary URLs for anchor classification', () => {
-        const workspacePath = '/Users/dev/IdeaProjects/homebar-cloud'
-        const externalPath = '/Users/dev/IdeaProjects/other-project/doc/README.md'
+        const workspacePath = '/Users/alice/Projects/example-app'
+        const externalPath = '/Users/alice/Projects/other-project/doc/README.md'
         const external = transformExplicitLink(externalPath, { workspacePath })
         const https = transformExplicitLink('https://example.com/docs/README.md', { workspacePath })
         const http = transformExplicitLink('http://example.com/components/App.tsx', { workspacePath })
@@ -243,11 +243,11 @@ describe('remarkFilePathLinks', () => {
     })
 
     it('does not classify routes, traversal, query, anchor, or custom-scheme hrefs as files', () => {
-        const workspacePath = '/Users/dev/IdeaProjects/homebar-cloud'
+        const workspacePath = '/Users/alice/Projects/example-app'
         expect(parseProjectFilePathHref('/settings', { workspacePath })).toBeNull()
         expect(parseProjectFilePathHref('/etc/hosts.md', { workspacePath })).toBeNull()
         expect(parseProjectFilePathHref('../secrets.md', { workspacePath })).toBeNull()
-        expect(parseProjectFilePathHref('file:///Users/dev/IdeaProjects/homebar-cloud/doc/README.md', { workspacePath })).toBeNull()
+        expect(parseProjectFilePathHref('file:///Users/alice/Projects/example-app/doc/README.md', { workspacePath })).toBeNull()
         expect(parseProjectFilePathHref('#readme', { workspacePath })).toBeNull()
         expect(parseProjectFilePathHref('README.md?raw=1', { workspacePath })).toBeNull()
         expect(parseProjectFilePathHref('vscode://file/README.md', { workspacePath })).toBeNull()

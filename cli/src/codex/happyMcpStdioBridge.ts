@@ -1,8 +1,8 @@
 /**
- * HAPI MCP STDIO Bridge
+ * SHAPI MCP STDIO Bridge
  *
- * STDIO MCP server exposing the HAPI tool capability set, including A2A peer tools.
- * On invocation it forwards the tool call to an existing HAPI HTTP MCP server
+ * STDIO MCP server exposing the SHAPI tool capability set, including A2A peer tools.
+ * On invocation it forwards the tool call to an existing SHAPI HTTP MCP server
  * using the StreamableHTTPClientTransport.
  *
  * Configure the target HTTP MCP URL via env var `HAPI_HTTP_MCP_URL` or
@@ -88,7 +88,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
 
     // Create STDIO MCP server
     const server = new McpServer({
-      name: 'HAPI MCP Bridge',
+      name: 'SHAPI MCP Bridge',
       version: '1.0.0',
     });
 
@@ -131,7 +131,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
     server.registerTool<any, any>(
       'display_image',
       {
-        description: 'Display a local image file inline in the current HAPI chat session',
+        description: 'Display a local image file inline in the current SHAPI chat session',
         title: 'Display Image',
         inputSchema: displayImageInputSchema,
       },
@@ -159,7 +159,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
     server.registerTool<any, any>(
       'list_peers',
       {
-        description: 'List peer HAPI sessions on the same hub/namespace. Then use inspect_peer or ping_peer with a listed id.',
+        description: 'List peer SHAPI sessions on the same hub/namespace. Then use inspect_peer or ping_peer with a listed id.',
         title: 'List Peer Sessions',
         inputSchema: listPeersInputSchema,
       },

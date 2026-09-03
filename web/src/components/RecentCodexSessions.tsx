@@ -106,7 +106,7 @@ export type RecentCodexDirectoryGroup = {
 
 export type CodexSessionSource = 'hapi' | 'native'
 
-/** A display-only row shared by managed HAPI and runner-local Codex records. */
+/** A display-only row shared by managed SHAPI and runner-local Codex records. */
 export type MergedCodexSession = {
     key: string
     id: string
@@ -405,7 +405,7 @@ function groupMergedCodexSessionsByDirectory(
 }
 
 /**
- * Build the single Codex list shown on the sessions index. HAPI rows win over
+ * Build the single Codex list shown on the sessions index. SHAPI rows win over
  * their matching transcript so an app-server thread is not shown twice.
  */
 export function mergeRecentCodexSessions(
@@ -904,7 +904,7 @@ function MergedCodexSessionRow(props: {
 }
 
 /**
- * Native Codex transcripts use the same list language as HAPI sessions. In
+ * Native Codex transcripts use the same list language as SHAPI sessions. In
  * merged mode (`hapiSessions` supplied), this is the complete three-day Codex
  * index; without it, the component keeps its standalone native-history mode.
  */
@@ -916,7 +916,7 @@ export function RecentCodexSessions(props: {
     hapiSessions?: SessionSummary[]
     hapiIsLoading?: boolean
     selectedSessionId?: string | null
-    /** Render as a non-scrolling section inside the main HAPI session list. */
+    /** Render as a non-scrolling section inside the main SHAPI session list. */
     embedded?: boolean
     /** Optional heading override used by source panels such as running. */
     title?: string
@@ -934,7 +934,7 @@ export function RecentCodexSessions(props: {
     realtimeAvailable?: boolean
     /** Optional empty-state copy for filtered views such as running. */
     emptyMessage?: string
-    /** Create a fresh HAPI session using a known session directory. */
+    /** Create a fresh SHAPI session using a known session directory. */
     onNewSessionInDirectory?: (directory: string) => Promise<boolean>
     /** Disable directory creation actions while a session is being created. */
     isNewSessionPending?: boolean
@@ -1050,7 +1050,7 @@ export function RecentCodexSessions(props: {
     }, [])
 
     // Do not leave disclosure state for directories that are no longer present,
-    // and make sure opening a selected HAPI session never leaves it hidden.
+    // and make sure opening a selected SHAPI session never leaves it hidden.
     useEffect(() => {
         const knownKeys = new Set(directoryGroupsForDisclosure.map((group) => getDirectoryKey(group.directory)))
         setCollapsedDirectories((current) => {

@@ -56,7 +56,7 @@ const messages = [
                 type: 'codex',
                 data: {
                     type: 'message',
-                    message: 'Codex fixture response visible in HAPI Web.',
+                    message: 'Codex fixture response visible in SHAPI Web.',
                     id: 'fixture-msg-1'
                 }
             },

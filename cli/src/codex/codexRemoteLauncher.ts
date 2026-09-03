@@ -2984,7 +2984,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client, {
             // In app-server/collab mode, child agents share this MCP bridge.
             // If the MCP handler writes the title directly, child title calls
-            // leak into the parent HAPI session. Defer the side effect until
+            // leak into the parent SHAPI session. Defer the side effect until
             // parent-thread mcp_tool_call_end reaches this launcher; child
             // events are filtered above by thread id.
             emitTitleSummary: false
@@ -3566,10 +3566,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         };
 
         const sideSessionForkPrompt = [
-            'Create a HAPI side session from the current conversation.',
+            'Create a SHAPI side session from the current conversation.',
             'Call spawn_agent exactly once with fork_context: true.',
             'Do not set agent_type, subagent_type, model, or reasoning_effort.',
-            'Use this child message: "Initialize a HAPI side session forked from the current conversation. Do not make code changes or take actions yet. Reply only: Side session ready."',
+            'Use this child message: "Initialize a SHAPI side session forked from the current conversation. Do not make code changes or take actions yet. Reply only: Side session ready."',
             'Do not write normal assistant text before or after the tool call.'
         ].join('\n');
 

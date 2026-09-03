@@ -1,5 +1,8 @@
-hapi CLI
+SHAPI CLI
 Copyright (c) 2024-2025 weishu
+
+SHAPI is derived from HAPI (https://github.com/tiann/hapi). HAPI's retained
+copyright and license notices continue to apply to the corresponding code.
 
 This software contains code derived from happy-cli
 (https://github.com/slopus/happy-cli), which is licensed

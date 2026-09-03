@@ -95,6 +95,6 @@ describe('hapi binary launcher error reporting', () => {
         expect(lines).toContain('Try reinstalling with the official npm registry:');
         expect(lines).toContain('  npm install -g @twsxtd/hapi --registry=https://registry.npmjs.org');
         expect(lines).toContain('Or download the binary manually from:');
-        expect(lines).toContain('  https://github.com/tiann/hapi/releases');
+        expect(lines).toContain('  https://github.com/MapleStoryIdle/shapi/releases');
     });
 });

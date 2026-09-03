@@ -327,7 +327,7 @@ export class ApiMachineClient {
             { getSummary: (sessionId) => this.getNativeCodexSessionSummary(sessionId) },
             // One short-lived bridge per native hand-off. Never reuse this
             // client across original Codex sessions: their local owner can
-            // continue editing the transcript outside HAPI.
+            // continue editing the transcript outside SHAPI.
             () => new CodexAppServerClient(),
             new FileNativeCodexSessionDirectSendStore(join(configuration.happyHomeDir, 'native-codex-direct-outbox.json')),
             (sessionId, guard) => this.nativeKanbanFeedbackStore.verify(sessionId, guard)
@@ -513,7 +513,7 @@ export class ApiMachineClient {
                 ])
                 return {
                     success: true,
-                    // Native direct delivery cannot update HAPI-owned
+                    // Native direct delivery cannot update SHAPI-owned
                     // model/plan/permission state. Only expose prompts that
                     // expand into a normal Codex message.
                     commands: commands.filter((command) => command.source !== 'builtin'),
@@ -582,7 +582,7 @@ export class ApiMachineClient {
 
                 // A Kanban card has not necessarily opened the native drawer,
                 // so warm this exact summary before checking ownership and
-                // reserving it against HAPI delivery. Message bodies stay cold.
+                // reserving it against SHAPI delivery. Message bodies stay cold.
                 const summary = this.getNativeCodexSessionSummary(sessionId)
                 if (!summary) {
                     return { success: false, code: 'session_not_found', error: 'Codex session not found' }
@@ -596,7 +596,7 @@ export class ApiMachineClient {
                         await appServer.initialize({
                             clientInfo: {
                                 name: 'hapi-native-session-archive',
-                                title: 'HAPI Native Session Archive',
+                                title: 'SHAPI Native Session Archive',
                                 version: '1.0.0'
                             },
                             capabilities: { experimentalApi: true }
@@ -655,7 +655,7 @@ export class ApiMachineClient {
                 }
 
                 // A project header belongs to a directory, not to an active
-                // HAPI process. Match session creation's unrestricted cwd
+                // SHAPI process. Match session creation's unrestricted cwd
                 // policy so historical session groups can still show branch.
                 const cwd = await this.resolveForWorkspaceCheck(rawCwd)
                 return await getGitBranchStatusForCwd(cwd)
@@ -918,7 +918,7 @@ export class ApiMachineClient {
     }
 
     /**
-     * Forward a pending request from a locally launched, non-HAPI Codex
+     * Forward a pending request from a locally launched, non-SHAPI Codex
      * session. This is intentionally best-effort, but Socket.IO may queue a
      * request during the runner's initial connection handshake.
      */

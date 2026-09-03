@@ -193,7 +193,7 @@ describe('spawnHappyCLI windowsHide behavior', () => {
     expect(command.command).toBe(process.execPath);
   });
 
-  it('passes the resolved compiled executable to child HAPI processes', async () => {
+  it('passes the resolved compiled executable to child SHAPI processes', async () => {
     isBunCompiledMock.mockReturnValue(true);
     process.env.HAPI_CLI_EXECUTABLE = 'C:\\Users\\Administrator\\.hapi\\patched\\hapi.exe';
     const { spawnHappyCLI } = await import('./spawnHappyCLI');

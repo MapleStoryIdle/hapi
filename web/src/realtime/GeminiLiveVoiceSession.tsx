@@ -152,7 +152,7 @@ class GeminiLiveVoiceSessionImpl implements VoiceSession {
             ws.onopen = () => {
                 if (DEBUG) console.log('[GeminiLive] WebSocket connected', isProxy ? '(hub sends setup)' : ', sending setup')
 
-                // Proxied sessions: hub sends HAPI-owned setup server-side (see gemini-ws proxy).
+                // Proxied sessions: hub sends SHAPI-owned setup server-side (see gemini-ws proxy).
                 if (!isProxy) {
                     ws.send(JSON.stringify(buildGeminiLiveSetupMessage(
                         config.language,

@@ -140,7 +140,7 @@ requireMatch(viewportHeight, /data-ios-system-top-chrome', 'unreachable'/, 'view
 requireMatch(viewportHeight, /safeAreaTopInset\s*<=\s*0/, 'iOS top-chrome detection must require a zero browser safe-area inset')
 requireMatch(queuedMessages, /<Dialog\.Root/, 'queued messages must open from a controlled dialog root')
 requireMatch(queuedMessages, /<Dialog\.Portal>/, 'queued-message detail must render in a portal')
-requireMatch(queuedMessages, /<SessionDetailQueueTrigger[\s\S]*testId="queued-messages-trigger"/, 'HAPI queue must use the shared compact entry target')
+requireMatch(queuedMessages, /<SessionDetailQueueTrigger[\s\S]*testId="queued-messages-trigger"/, 'SHAPI queue must use the shared compact entry target')
 requireMatch(queueTrigger, /data-testid=\{testId\}/, 'shared queue trigger must expose its compact entry target')
 requireMatch(queuedMessages, /data-testid="queued-messages-drawer"/, 'queued messages must expose a drawer target')
 requireMatch(bottomDock, /SESSION_DETAIL_BOTTOM_ACCESSORY_GAP_PX/, 'detail pages must share one accessory gap')

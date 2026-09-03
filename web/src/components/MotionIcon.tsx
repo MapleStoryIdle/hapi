@@ -12,7 +12,7 @@ type MotionIconProps = Omit<
 const lucideInputs = new WeakMap<LucideIconNode, IconInput>()
 
 /**
- * The version of `lucide` aligned with HAPI's existing `lucide-react`
+ * The version of `lucide` aligned with SHAPI's existing `lucide-react`
  * exposes one root `<svg>` tuple. Morphicons consumes its child path tuples.
  * Convert once, retaining an object identity so Morphicons can cache plans.
  */

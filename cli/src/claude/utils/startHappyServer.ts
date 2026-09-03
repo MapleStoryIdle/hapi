@@ -1,6 +1,6 @@
 /**
- * HAPI MCP server
- * Provides HAPI CLI specific tools including chat session title management
+ * SHAPI MCP server
+ * Provides SHAPI CLI specific tools including chat session title management
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -33,7 +33,7 @@ type StartHappyServerOptions = {
 };
 
 /**
- * HAPI MCP 对外暴露的能力清单。
+ * SHAPI MCP 对外暴露的能力清单。
  *
  * 该常量既是 Agent 侧可发现能力的机器可读来源，也用于桥接配置和测试；不要
  * 只注册工具却忘记更新这里。
@@ -74,7 +74,7 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
     };
 
     const mcp = new McpServer({
-        name: "HAPI MCP",
+        name: "SHAPI MCP",
         version: "1.0.0",
     });
 
@@ -134,7 +134,7 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
     });
 
     mcp.registerTool<any, any>('display_image', {
-        description: 'Display a local image file inline in the current HAPI chat session',
+        description: 'Display a local image file inline in the current SHAPI chat session',
         title: 'Display Image',
         inputSchema: displayImageInputSchema,
     }, async (args: { path: string; title?: string }) => {
@@ -206,7 +206,7 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
 
 
     mcp.registerTool<any, any>('list_peers', {
-        description: 'List peer HAPI sessions on the same hub/namespace. Returns id, active state, flavor and name only. Then use inspect_peer or ping_peer with an id.',
+        description: 'List peer SHAPI sessions on the same hub/namespace. Returns id, active state, flavor and name only. Then use inspect_peer or ping_peer with an id.',
         title: 'List Peer Sessions',
         inputSchema: listPeersInputSchema
     }, async (args: { limit?: number }) => {

@@ -188,6 +188,11 @@ describe('POST /api/voice/token', () => {
 
         expect(patchCalls.length).toBeGreaterThanOrEqual(1)
         const patchedBody = patchCalls[0]?.body as {
+            name?: string
+            conversation_config?: {
+                agent?: { first_message?: string }
+                tts?: { voice_id?: string }
+            }
             platform_settings?: {
                 overrides?: {
                     conversation_config_override?: {
@@ -203,6 +208,9 @@ describe('POST /api/voice/token', () => {
                 }
             }
         }
+        expect(patchedBody.name).toBe(`SHAPI Voice Assistant [voice:${voiceId}]`)
+        expect(patchedBody.conversation_config?.agent?.first_message).toContain('SHAPI')
+        expect(patchedBody.conversation_config?.tts?.voice_id).toBe(voiceId)
         const overrides = patchedBody.platform_settings?.overrides?.conversation_config_override
         expect(overrides?.agent?.language).toBe(true)
         expect(overrides?.agent?.prompt?.prompt).toBe(true)
