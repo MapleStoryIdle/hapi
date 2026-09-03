@@ -1495,8 +1495,8 @@ export function RecentCodexSessions(props: {
                 </div>
             ) : isMerged ? (
                 <div className={embedded
-                    ? 'cupertino-session-groups mt-1 flex min-h-0 flex-col gap-1'
-                    : 'cupertino-session-groups mt-4 flex min-h-0 flex-col gap-2 overflow-y-auto pr-1'}>
+                    ? 'cupertino-session-groups mt-1 flex shrink-0 flex-col gap-1'
+                    : 'cupertino-session-groups mt-4 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1'}>
                     {mergedDirectoryGroups.map((group) => {
                         const directoryLabel = group.directory
                             ? getDirectoryDisplayName(group.directory)
@@ -1504,7 +1504,7 @@ export function RecentCodexSessions(props: {
                         const directoryKey = getDirectoryKey(group.directory)
                         const collapsed = collapsedDirectories.has(directoryKey)
                         return (
-                            <section key={directoryKey} className="cupertino-session-directory-group min-w-0 py-1" data-directory={directoryKey} data-directory-collapsed={collapsed || undefined}>
+                            <section key={directoryKey} className="cupertino-session-directory-group min-w-0 shrink-0 py-1" data-directory={directoryKey} data-directory-collapsed={collapsed || undefined}>
                                 <DirectoryGroupHeader
                                     directory={group.directory}
                                     label={directoryLabel}
@@ -1545,8 +1545,8 @@ export function RecentCodexSessions(props: {
                 </div>
             ) : (
                 <div className={embedded
-                    ? 'cupertino-session-groups mt-3 flex min-h-0 flex-col gap-1'
-                    : 'cupertino-session-groups mt-4 flex min-h-0 flex-col gap-2 overflow-y-auto pr-1'}>
+                    ? 'cupertino-session-groups mt-3 flex shrink-0 flex-col gap-1'
+                    : 'cupertino-session-groups mt-4 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1'}>
                     {directoryGroups.map((group) => {
                         const directoryLabel = group.directory
                             ? getDirectoryDisplayName(group.directory)
@@ -1554,7 +1554,7 @@ export function RecentCodexSessions(props: {
                         const directoryKey = getDirectoryKey(group.directory)
                         const collapsed = collapsedDirectories.has(directoryKey)
                         return (
-                            <section key={directoryKey} className="cupertino-session-directory-group min-w-0 py-1" data-directory={directoryKey} data-directory-collapsed={collapsed || undefined}>
+                            <section key={directoryKey} className="cupertino-session-directory-group min-w-0 shrink-0 py-1" data-directory={directoryKey} data-directory-collapsed={collapsed || undefined}>
                                 <DirectoryGroupHeader
                                     directory={group.directory}
                                     label={directoryLabel}

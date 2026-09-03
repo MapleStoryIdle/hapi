@@ -699,6 +699,53 @@ describe('RecentCodexSessions', () => {
         expect(api.forkCodexSession).not.toHaveBeenCalled()
     })
 
+    it('keeps embedded directory cards at their intrinsic height instead of shrinking them to the viewport', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({
+            success: true as const,
+            sessions: [
+                {
+                    id: 'codex-thread-project-a',
+                    title: 'Project A task',
+                    cwd: '/workspace/project-a',
+                    file: '/tmp/project-a-rollout.jsonl',
+                    modifiedAt: Date.now()
+                },
+                {
+                    id: 'codex-thread-project-b',
+                    title: 'Project B task',
+                    cwd: '/workspace/project-b',
+                    file: '/tmp/project-b-rollout.jsonl',
+                    modifiedAt: Date.now() - 1
+                }
+            ]
+        }))
+
+        const view = render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    onOpen={vi.fn()}
+                    hapiSessions={[]}
+                    embedded
+                    hideHeader
+                    viewMode="list"
+                />
+            </I18nProvider>
+        )
+
+        await screen.findByText('Project A task')
+        const groups = view.container.querySelector('.cupertino-session-groups')
+        expect(groups).toHaveClass('shrink-0')
+
+        const directoryCards = view.container.querySelectorAll('.cupertino-session-directory-group')
+        expect(directoryCards).toHaveLength(2)
+        for (const card of directoryCards) {
+            expect(card).toHaveClass('shrink-0')
+        }
+    })
+
     it('shows the runner Git branch below each directory name without a session count', async () => {
         const api = createApi()
         api.getCodexSessions = vi.fn(async () => ({
