@@ -561,6 +561,319 @@ select {
     box-shadow: inset 2px 0 0 var(--app-link);
 }
 
+/*
+ * Sessions index only: compact iOS-style grouped surfaces. The tokens live on
+ * the index shell so Telegram/app colors and every other route stay intact.
+ */
+.cupertino-session-index {
+    --cupertino-session-canvas: #F2F2F7;
+    --cupertino-session-surface: #FFFFFF;
+    --cupertino-session-label: #1C1C1E;
+    --cupertino-session-secondary-label: #636366;
+    --cupertino-session-separator: rgba(60, 60, 67, 0.18);
+    --cupertino-session-accent: #007AFF;
+    --cupertino-session-active: #30D158;
+    --cupertino-session-control-fill: rgba(255, 255, 255, 0.88);
+    --cupertino-session-pressed-fill: #E5E5EA;
+    --cupertino-session-selected-fill: rgba(0, 122, 255, 0.12);
+    --cupertino-session-folder-fill: #E8F2FF;
+    --cupertino-session-shadow: 0 1px 2px rgba(60, 60, 67, 0.08);
+    --cupertino-session-focus-ring: color-mix(in srgb, var(--cupertino-session-accent) 42%, transparent);
+    background: var(--cupertino-session-canvas);
+    color: var(--cupertino-session-label);
+}
+
+[data-theme="dark"] .cupertino-session-index {
+    --cupertino-session-canvas: #000000;
+    --cupertino-session-surface: #1C1C1E;
+    --cupertino-session-label: #F2F2F7;
+    --cupertino-session-secondary-label: #AEAEB2;
+    --cupertino-session-separator: rgba(84, 84, 88, 0.65);
+    --cupertino-session-accent: #0A84FF;
+    --cupertino-session-active: #30D158;
+    --cupertino-session-control-fill: #2C2C2E;
+    --cupertino-session-pressed-fill: #3A3A3C;
+    --cupertino-session-selected-fill: rgba(10, 132, 255, 0.2);
+    --cupertino-session-folder-fill: rgba(10, 132, 255, 0.18);
+    --cupertino-session-shadow: 0 1px 2px rgba(0, 0, 0, 0.26);
+}
+
+[data-theme="oled"] .cupertino-session-index {
+    --cupertino-session-canvas: #000000;
+    --cupertino-session-surface: #000000;
+    --cupertino-session-label: #F2F2F7;
+    --cupertino-session-secondary-label: #AEAEB2;
+    --cupertino-session-separator: rgba(255, 255, 255, 0.14);
+    --cupertino-session-accent: #0A84FF;
+    --cupertino-session-active: #30D158;
+    --cupertino-session-control-fill: #000000;
+    --cupertino-session-pressed-fill: #1C1C1E;
+    --cupertino-session-selected-fill: rgba(10, 132, 255, 0.22);
+    --cupertino-session-folder-fill: rgba(10, 132, 255, 0.18);
+    --cupertino-session-shadow: none;
+    --cupertino-session-focus-ring: color-mix(in srgb, var(--cupertino-session-accent) 42%, transparent);
+}
+
+.cupertino-session-index .cupertino-session-index-header {
+    background: var(--cupertino-session-canvas);
+    border-bottom: 1px solid var(--cupertino-session-separator);
+}
+
+.cupertino-session-index .cupertino-session-index-toolbar {
+    min-height: 60px;
+}
+
+.cupertino-session-index .cupertino-toolbar-control {
+    color: var(--cupertino-session-label);
+}
+
+.cupertino-session-index .cupertino-toolbar-menu,
+.cupertino-session-index .cupertino-toolbar-button,
+.cupertino-session-index .cupertino-runner-switcher {
+    height: 44px;
+    width: 44px;
+    border: 1px solid var(--cupertino-session-separator);
+    background: var(--cupertino-session-control-fill);
+    box-shadow: var(--cupertino-session-shadow);
+}
+
+.cupertino-session-index .cupertino-toolbar-menu,
+.cupertino-session-index .cupertino-toolbar-button {
+    border-radius: 12px;
+}
+
+.cupertino-session-index .cupertino-runner-switcher {
+    border-radius: 999px;
+    color: var(--cupertino-session-secondary-label);
+}
+
+.cupertino-session-index .cupertino-runner-control {
+    color: var(--cupertino-session-secondary-label);
+}
+
+.cupertino-session-index .cupertino-runner-capsule {
+    min-height: 44px;
+    max-width: 100%;
+    border: 1px solid var(--cupertino-session-separator);
+    border-radius: 999px;
+    background: var(--cupertino-session-control-fill);
+    box-shadow: var(--cupertino-session-shadow);
+    color: var(--cupertino-session-secondary-label);
+}
+
+.cupertino-session-index .cupertino-runner-status[data-runner-active="true"] {
+    background-color: var(--cupertino-session-active);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cupertino-session-active) 18%, transparent);
+}
+
+.cupertino-session-index .cupertino-runner-status[data-runner-active="false"] {
+    background-color: var(--cupertino-session-secondary-label);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] {
+    background: var(--cupertino-session-canvas);
+    color: var(--cupertino-session-label);
+    padding-bottom: 1.25rem;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] > * {
+    width: 100%;
+    max-width: 680px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-groups {
+    gap: 0.875rem;
+    padding-top: 0.25rem;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-directory-group {
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid var(--cupertino-session-separator);
+    border-radius: 13px;
+    background: var(--cupertino-session-surface);
+    box-shadow: var(--cupertino-session-shadow);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-header {
+    min-height: 3.75rem;
+    padding: 0.25rem 0.5rem 0.25rem 0.75rem;
+    border-radius: 0;
+    background: var(--cupertino-session-surface);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-directory-group:not([data-directory-collapsed]) .cupertino-directory-header {
+    border-bottom: 1px solid var(--cupertino-session-separator);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-toggle {
+    min-height: 3.25rem;
+    gap: 0.625rem;
+    border-radius: 9px;
+    color: var(--cupertino-session-label);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-folder-tile {
+    border-radius: 9px;
+    background: var(--cupertino-session-folder-fill);
+    color: var(--cupertino-session-accent);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-folder-glyph {
+    color: var(--cupertino-session-accent);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-name,
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-title {
+    color: var(--cupertino-session-label);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-name {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-branch {
+    color: var(--cupertino-session-secondary-label);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.6875rem;
+    letter-spacing: -0.01em;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-disclosure,
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-row-disclosure {
+    color: var(--cupertino-session-secondary-label);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-add {
+    height: 44px;
+    width: 44px;
+    border-radius: 999px;
+    color: var(--cupertino-session-accent);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-group-list {
+    margin: 0;
+    border-left: 0;
+    padding: 0;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-row-item + .cupertino-session-row-item {
+    border-top: 1px solid var(--cupertino-session-separator);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-row {
+    min-height: 3.25rem;
+    padding: 0.5rem 0.75rem 0.5rem 1rem;
+    border-radius: 0;
+    background: var(--cupertino-session-surface);
+    color: var(--cupertino-session-label);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-row[aria-current="page"] {
+    background: var(--cupertino-session-selected-fill);
+    box-shadow: inset 3px 0 0 var(--cupertino-session-accent);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-title {
+    font-size: 0.9375rem;
+    font-weight: 500;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-time {
+    color: var(--cupertino-session-secondary-label);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] [data-session-source="hapi"] .cupertino-session-source-glyph {
+    color: var(--cupertino-session-accent);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] [data-session-source="native"] .cupertino-session-source-glyph {
+    color: var(--cupertino-session-secondary-label);
+}
+
+@keyframes cupertino-session-live-signal {
+    0%, 100% {
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--cupertino-session-active) 16%, transparent);
+    }
+    50% {
+        box-shadow: 0 0 0 5px color-mix(in srgb, var(--cupertino-session-active) 0%, transparent);
+    }
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-live-signal {
+    border-color: var(--cupertino-session-surface);
+    background-color: var(--cupertino-session-active);
+    animation: cupertino-session-live-signal 1.8s ease-in-out infinite;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-callout,
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-state {
+    border-color: var(--cupertino-session-separator);
+    border-radius: 13px;
+    background: var(--cupertino-session-surface);
+    box-shadow: var(--cupertino-session-shadow);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-state {
+    padding: 0.75rem 1rem;
+    color: var(--cupertino-session-secondary-label);
+}
+
+.cupertino-session-index :is(
+    .cupertino-toolbar-button,
+    .cupertino-runner-capsule,
+    .cupertino-runner-switcher,
+    .cupertino-directory-toggle,
+    .cupertino-directory-add,
+    .cupertino-session-row
+):focus-visible,
+.cupertino-session-index .cupertino-toolbar-menu:focus-within {
+    outline: 2px solid var(--cupertino-session-accent);
+    outline-offset: -2px;
+    box-shadow: 0 0 0 3px var(--cupertino-session-focus-ring);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .cupertino-session-index .cupertino-toolbar-menu:hover,
+    .cupertino-session-index .cupertino-toolbar-button:hover,
+    .cupertino-session-index .cupertino-runner-switcher:hover,
+    .cupertino-session-index .cupertino-runner-capsule:hover,
+    .cupertino-session-index .cupertino-directory-add:hover {
+        background: var(--cupertino-session-pressed-fill);
+        color: var(--cupertino-session-label);
+    }
+
+    .cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-header:hover,
+    .cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-row:hover {
+        background: var(--cupertino-session-pressed-fill);
+    }
+}
+
+.cupertino-session-index :is(
+    .cupertino-toolbar-button,
+    .cupertino-runner-capsule,
+    .cupertino-runner-switcher,
+    .cupertino-directory-toggle,
+    .cupertino-directory-add,
+    .cupertino-session-row
+):active {
+    background: var(--cupertino-session-pressed-fill);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-live-signal,
+    .cupertino-session-index .cupertino-directory-disclosure {
+        animation: none;
+        transition: none;
+    }
+}
+
 /* Collapsible panel animation */
 .collapsible-panel {
     display: grid;

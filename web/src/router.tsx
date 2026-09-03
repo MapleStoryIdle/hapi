@@ -875,12 +875,12 @@ function SessionsPage() {
         <>
             <div className="flex h-full min-h-0">
             <div
-                className={`session-list-screen ${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)] [font-family:var(--app-control-font-family)]`}
+                className={`session-list-screen ${isSessionsIndex && sessionListViewMode !== 'kanban' ? 'cupertino-session-index' : ''} ${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)] [font-family:var(--app-control-font-family)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
-                <div className="bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">
-                    <div className="mx-auto grid w-full max-w-[680px] grid-cols-[52px_1fr_52px] items-center px-4 pb-2 pt-3 sm:px-6">
-                        <div className="relative flex h-[52px] w-[52px] items-center justify-center rounded-xl text-[var(--app-fg)] transition-colors hover:opacity-70 focus-within:bg-[var(--app-subtle-bg)]">
+                <div className="cupertino-session-index-header bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">
+                    <div className="cupertino-session-index-toolbar mx-auto grid w-full max-w-[680px] grid-cols-[52px_1fr_52px] items-center px-4 pb-2 pt-3 sm:px-6">
+                        <div className="cupertino-toolbar-control cupertino-toolbar-menu relative flex h-[52px] w-[52px] items-center justify-center rounded-xl text-[var(--app-fg)] transition-colors hover:opacity-70 focus-within:bg-[var(--app-subtle-bg)]">
                             <SettingsIcon className="pointer-events-none h-6 w-6" />
                             <select
                                 aria-label={t('session.more')}
@@ -906,19 +906,23 @@ function SessionsPage() {
                                 <option value="settings">{t('settings.title')}</option>
                             </select>
                         </div>
-                        <div ref={runnerControlRef} className="relative flex min-w-0 items-center justify-center gap-1.5 text-sm font-medium leading-5 text-[var(--app-hint)]">
+                        <div ref={runnerControlRef} className="cupertino-runner-control relative flex min-w-0 items-center justify-center gap-1.5 text-sm font-medium leading-5 text-[var(--app-hint)]">
                                 <button
                                     type="button"
                                     onClick={() => {
                                         setIsRunnerDetailsOpen((open) => !open)
                                         setIsRunnerSwitcherOpen(false)
                                     }}
-                                    className="group/runner flex min-w-0 items-center gap-2 rounded-xl px-2.5 py-1.5 transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                    className="cupertino-runner-capsule group/runner flex min-w-0 items-center gap-2 rounded-xl px-2.5 py-1.5 transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                     title="Runner 状态"
                                     aria-haspopup="dialog"
                                     aria-expanded={isRunnerDetailsOpen}
                                 >
-                                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${selectedRunnerMachine?.active ? 'bg-[#22c55e]' : 'bg-[#a3a3a3]'}`} aria-hidden="true" />
+                                    <span
+                                        className={`cupertino-runner-status h-2.5 w-2.5 shrink-0 rounded-full ${selectedRunnerMachine?.active ? 'bg-[#22c55e]' : 'bg-[#a3a3a3]'}`}
+                                        data-runner-active={selectedRunnerMachine?.active ? 'true' : 'false'}
+                                        aria-hidden="true"
+                                    />
                                     <LaptopIcon className="h-[18px] w-[18px] shrink-0" />
                                     <span className="truncate">{selectedRunnerLabel}</span>
                                 </button>
@@ -929,7 +933,7 @@ function SessionsPage() {
                                             setIsRunnerSwitcherOpen((open) => !open)
                                             setIsRunnerDetailsOpen(false)
                                         }}
-                                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                        className="cupertino-runner-switcher flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                         title="切换 runner"
                                         aria-label="切换 runner"
                                         aria-haspopup="menu"
@@ -949,11 +953,11 @@ function SessionsPage() {
                                     />
                                 ) : null}
                             </div>
-                        <div className="flex h-[52px] w-[52px] items-center justify-center">
+                        <div className="cupertino-toolbar-control flex h-[52px] w-[52px] items-center justify-center">
                             <button
                                 type="button"
                                 onClick={() => setSessionListViewMode(sessionListViewMode === 'kanban' ? 'list' : 'kanban')}
-                                className="flex h-[52px] w-[52px] items-center justify-center rounded-xl text-[var(--app-fg)] transition-colors hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                className="cupertino-toolbar-button flex h-[52px] w-[52px] items-center justify-center rounded-xl text-[var(--app-fg)] transition-colors hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                 title={t(sessionListViewMode === 'kanban' ? 'sessions.view.list' : 'sessions.view.kanban')}
                                 aria-label={t(sessionListViewMode === 'kanban' ? 'sessions.view.list' : 'sessions.view.kanban')}
                                 aria-pressed={sessionListViewMode === 'kanban'}

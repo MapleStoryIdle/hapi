@@ -11,7 +11,7 @@ import {
     RefreshCw as RefreshIconNode,
     TreePine as TreePineIconNode
 } from 'lucide'
-import { Activity, Archive as ArchiveIconNode, ChevronDown, History, Pin } from 'lucide-react'
+import { Activity, Archive as ArchiveIconNode, ChevronDown, ChevronRight, History, Pin } from 'lucide-react'
 import type { ApiClient } from '@/api/client'
 import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import { formatRelativeTime } from '@/lib/relativeTime'
@@ -473,23 +473,29 @@ export function mergeRecentCodexSessions(
 function CodexSourceIcon(props: { source: CodexSessionSource; active?: boolean }) {
     const { t } = useTranslation()
     const isHapi = props.source === 'hapi'
+    const sourceLabel = isHapi ? t('recentCodex.source.hapi') : t('recentCodex.source.native')
+    const accessibleLabel = props.active
+        ? t(isHapi ? 'recentCodex.status.hapiProcessing' : 'recentCodex.status.processing')
+        : sourceLabel
     return (
         <span
-            className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
-            title={isHapi ? t('recentCodex.source.hapi') : t('recentCodex.source.native')}
-            aria-hidden="true"
+            className="cupertino-session-source relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
+            title={sourceLabel}
+            role="img"
+            aria-label={accessibleLabel}
             data-session-source={props.source}
             data-session-agent="codex"
             data-session-active={props.active || undefined}
         >
             <AgentFlavorIcon
                 flavor="codex"
-                className={`h-5 w-5 ${isHapi ? 'text-[#4EA1FF]' : 'text-[var(--app-fg)]'}`}
+                className={`cupertino-session-source-glyph h-5 w-5 ${isHapi ? 'text-[#4EA1FF]' : 'text-[var(--app-fg)]'}`}
             />
             {props.active ? (
                 <span
                     data-session-running-indicator
-                    className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--app-bg)] bg-[#34C759] motion-safe:animate-pulse"
+                    className="cupertino-session-live-signal absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--app-bg)] bg-[#34C759] motion-safe:animate-pulse"
+                    aria-hidden="true"
                 />
             ) : null}
         </span>
@@ -772,26 +778,29 @@ function DirectoryGroupHeader(props: {
     }, [createPending, directory, onNewSessionInDirectory])
 
     return (
-        <div className="group/project flex min-h-12 w-full min-w-0 items-center gap-1 rounded-2xl px-2.5 py-0.5 transition-colors hover:bg-[var(--app-subtle-bg)]">
+        <div className="cupertino-directory-header group/project flex min-h-12 w-full min-w-0 items-center gap-1 rounded-2xl px-2.5 py-0.5 transition-colors hover:bg-[var(--app-subtle-bg)]">
             <button
                 type="button"
                 onClick={onToggle}
-                className="flex min-h-11 min-w-0 flex-1 cursor-pointer select-none items-center gap-2 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation"
+                className="cupertino-directory-toggle flex min-h-11 min-w-0 flex-1 cursor-pointer select-none items-center gap-2 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation"
                 title={directory ?? undefined}
                 aria-label={actionLabel}
                 aria-expanded={!collapsed}
                 data-directory-toggle={getDirectoryKey(directory)}
             >
-                <MotionIcon
-                    icon={folderIcon}
-                    className="h-[27.5px] w-[27.5px] shrink-0 text-[var(--app-fg)]"
-                    data-motion-icon={collapsed ? 'folder' : 'folder-open'}
-                />
-                <span className="min-w-0 flex-1">
+                <span className="cupertino-directory-folder-tile flex h-8 w-8 shrink-0 items-center justify-center">
+                    <MotionIcon
+                        icon={folderIcon}
+                        className="cupertino-directory-folder-glyph h-[27.5px] w-[27.5px] shrink-0 text-[var(--app-fg)]"
+                        data-motion-icon={collapsed ? 'folder' : 'folder-open'}
+                        aria-hidden="true"
+                    />
+                </span>
+                <span className="cupertino-directory-summary min-w-0 flex-1">
                     <span className="flex min-w-0 items-center gap-1.5">
                         <span
                             data-testid="recent-codex-directory-name"
-                            className="block min-w-0 truncate text-[17px] font-semibold leading-6 text-[var(--app-fg)]"
+                            className="cupertino-directory-name block min-w-0 truncate text-[17px] font-semibold leading-6 text-[var(--app-fg)]"
                         >
                             {label}
                         </span>
@@ -803,7 +812,7 @@ function DirectoryGroupHeader(props: {
                         <span
                             data-testid="recent-codex-directory-branch"
                             data-git-kind={isWorktree ? 'worktree' : 'branch'}
-                            className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] leading-4 text-[var(--app-hint)]"
+                            className="cupertino-directory-branch mt-0.5 flex min-w-0 items-center gap-1 text-[11px] leading-4 text-[var(--app-hint)]"
                             title={isWorktree ? `${t('session.item.worktree')} · ${branchLabel}` : branchLabel}
                         >
                             <MotionIcon
@@ -819,7 +828,7 @@ function DirectoryGroupHeader(props: {
                     ) : null}
                 </span>
                 <ChevronDown
-                    className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`}
+                    className={`cupertino-directory-disclosure h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`}
                     aria-hidden="true"
                 />
             </button>
@@ -828,7 +837,7 @@ function DirectoryGroupHeader(props: {
                     type="button"
                     onClick={() => void createSession()}
                     disabled={createPending}
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation disabled:cursor-not-allowed disabled:opacity-45"
+                    className="cupertino-directory-add flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] touch-manipulation disabled:cursor-not-allowed disabled:opacity-45"
                     title={t('sessions.group.new')}
                     aria-label={t('sessions.group.new')}
                     aria-busy={createPending || undefined}
@@ -853,27 +862,28 @@ function MergedCodexSessionRow(props: {
     const { session, onOpen, selected = false, t } = props
     const lastActiveLabel = formatRelativeTime(session.modifiedAt, t) ?? formatTimestamp(session.modifiedAt)
     return (
-        <li className="min-w-0">
+        <li className="cupertino-session-row-item min-w-0">
             <button
                 type="button"
                 onClick={onOpen}
-                className={`session-list-item flex min-h-[3.5rem] w-full min-w-0 items-center justify-between gap-3 rounded-2xl px-2.5 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
+                className={`cupertino-session-row session-list-item flex min-h-[3.5rem] w-full min-w-0 items-center justify-between gap-3 rounded-2xl px-2.5 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
                 aria-label={t('recentCodex.open', { title: session.title })}
                 aria-current={selected ? 'page' : undefined}
             >
                 <span className="flex min-w-0 flex-1 items-center gap-3">
                     <CodexSourceIcon source={session.source} active={session.active} />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium leading-5 tracking-normal text-[var(--app-fg)]" title={session.title}>
+                    <span className="cupertino-session-title min-w-0 flex-1 truncate text-sm font-medium leading-5 tracking-normal text-[var(--app-fg)]" title={session.title}>
                         {session.title}
                     </span>
                 </span>
-                <span className="flex shrink-0 items-center">
+                <span className="flex shrink-0 items-center gap-1.5">
                     <time
-                        className="text-[11px] font-medium tabular-nums text-[var(--app-hint)]"
+                        className="cupertino-session-time text-[11px] font-medium tabular-nums text-[var(--app-hint)]"
                         title={formatTimestamp(session.modifiedAt)}
                     >
                         {lastActiveLabel}
                     </time>
+                    <ChevronRight className="cupertino-session-row-disclosure h-4 w-4 shrink-0" aria-hidden="true" />
                 </span>
             </button>
         </li>
@@ -933,6 +943,7 @@ export function RecentCodexSessions(props: {
     const description = props.description === undefined ? t('recentCodex.description') : props.description
     const onlyProcessing = props.onlyProcessing ?? false
     const isMerged = props.hapiSessions !== undefined
+    const isCupertinoList = isMerged && embedded && props.viewMode !== 'kanban'
     const shouldFilterRecent = props.recentOnly ?? isMerged
     const limit = props.limit ?? (isMerged ? 100 : 5)
     const SectionIcon = onlyProcessing ? Activity : History
@@ -1268,11 +1279,12 @@ export function RecentCodexSessions(props: {
     return (
         <section
             className={embedded
-                ? 'app-scroll-y flex min-h-0 w-full flex-1 flex-col px-4 pb-3 pt-1 sm:px-6 [font-family:var(--app-control-font-family)]'
-                : 'flex min-h-0 w-full flex-1 flex-col px-4 pb-4 pt-3 sm:px-6 [font-family:var(--app-control-font-family)]'}
+                ? 'cupertino-session-list app-scroll-y flex min-h-0 w-full flex-1 flex-col px-4 pb-3 pt-1 sm:px-6 [font-family:var(--app-control-font-family)]'
+                : 'cupertino-session-list flex min-h-0 w-full flex-1 flex-col px-4 pb-4 pt-3 sm:px-6 [font-family:var(--app-control-font-family)]'}
             aria-label={title}
             aria-busy={busy || undefined}
             data-testid="recent-codex-sessions"
+            data-session-list-presentation={isCupertinoList ? 'cupertino' : undefined}
         >
             {!props.hideHeader ? (
                 <div className={`flex items-center justify-between gap-3 ${embedded ? '' : 'pr-10'}`}>
@@ -1317,8 +1329,8 @@ export function RecentCodexSessions(props: {
 
             {loadError ? (
                 <div className={isDefaultNamespaceUnavailable
-                    ? 'mt-2 flex items-center justify-between gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-xs text-[var(--app-hint)]'
-                    : 'mt-2 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-2 text-xs text-red-600'} role="status">
+                    ? 'cupertino-session-callout mt-2 flex items-center justify-between gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-xs text-[var(--app-hint)]'
+                    : 'cupertino-session-callout mt-2 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-2 text-xs text-red-600'} role="status" data-session-callout-tone={isDefaultNamespaceUnavailable ? 'warning' : 'error'}>
                     <span className="min-w-0 break-words">
                         {isDefaultNamespaceUnavailable ? t('recentCodex.defaultNamespaceOnly') : loadError}
                     </span>
@@ -1335,13 +1347,13 @@ export function RecentCodexSessions(props: {
             ) : null}
 
             {busy && !hasRows ? (
-                <div className="mt-3 px-2 text-sm text-[var(--app-hint)]">{t('loading')}</div>
+                <div className="cupertino-session-state mt-3 px-2 text-sm text-[var(--app-hint)]">{t('loading')}</div>
             ) : !props.machineId ? (
-                <div className="mt-3 px-2 py-2 text-xs leading-5 text-[var(--app-hint)]">
+                <div className="cupertino-session-state mt-3 px-2 py-2 text-xs leading-5 text-[var(--app-hint)]">
                     {t('recentCodex.runnerRequired')}
                 </div>
             ) : loadError && !hasRows ? null : !hasRows ? (
-                <div className="mt-3 px-2 py-2 text-xs leading-5 text-[var(--app-hint)]">
+                <div className="cupertino-session-state mt-3 px-2 py-2 text-xs leading-5 text-[var(--app-hint)]">
                     {props.emptyMessage ?? t('recentCodex.empty')}
                 </div>
             ) : isMerged && props.viewMode === 'kanban' ? (
@@ -1483,8 +1495,8 @@ export function RecentCodexSessions(props: {
                 </div>
             ) : isMerged ? (
                 <div className={embedded
-                    ? 'mt-1 flex min-h-0 flex-col gap-1'
-                    : 'mt-4 flex min-h-0 flex-col gap-2 overflow-y-auto pr-1'}>
+                    ? 'cupertino-session-groups mt-1 flex min-h-0 flex-col gap-1'
+                    : 'cupertino-session-groups mt-4 flex min-h-0 flex-col gap-2 overflow-y-auto pr-1'}>
                     {mergedDirectoryGroups.map((group) => {
                         const directoryLabel = group.directory
                             ? getDirectoryDisplayName(group.directory)
@@ -1492,7 +1504,7 @@ export function RecentCodexSessions(props: {
                         const directoryKey = getDirectoryKey(group.directory)
                         const collapsed = collapsedDirectories.has(directoryKey)
                         return (
-                            <section key={directoryKey} className="min-w-0 py-1" data-directory={directoryKey} data-directory-collapsed={collapsed || undefined}>
+                            <section key={directoryKey} className="cupertino-session-directory-group min-w-0 py-1" data-directory={directoryKey} data-directory-collapsed={collapsed || undefined}>
                                 <DirectoryGroupHeader
                                     directory={group.directory}
                                     label={directoryLabel}
@@ -1507,7 +1519,7 @@ export function RecentCodexSessions(props: {
                                 {!collapsed ? (
                                     <div className="collapsible-panel" data-open>
                                         <div className="collapsible-inner">
-                                            <ul className="relative mt-1 ml-5 flex flex-col border-l border-[var(--app-divider)] py-1 pl-3.5">
+                                            <ul className="cupertino-session-group-list relative mt-1 ml-5 flex flex-col border-l border-[var(--app-divider)] py-1 pl-3.5">
                                                 {group.sessions.map((session) => (
                                                     <MergedCodexSessionRow
                                                         key={session.key}
@@ -1533,8 +1545,8 @@ export function RecentCodexSessions(props: {
                 </div>
             ) : (
                 <div className={embedded
-                    ? 'mt-3 flex min-h-0 flex-col gap-1'
-                    : 'mt-4 flex min-h-0 flex-col gap-2 overflow-y-auto pr-1'}>
+                    ? 'cupertino-session-groups mt-3 flex min-h-0 flex-col gap-1'
+                    : 'cupertino-session-groups mt-4 flex min-h-0 flex-col gap-2 overflow-y-auto pr-1'}>
                     {directoryGroups.map((group) => {
                         const directoryLabel = group.directory
                             ? getDirectoryDisplayName(group.directory)
@@ -1542,7 +1554,7 @@ export function RecentCodexSessions(props: {
                         const directoryKey = getDirectoryKey(group.directory)
                         const collapsed = collapsedDirectories.has(directoryKey)
                         return (
-                            <section key={directoryKey} className="min-w-0 py-1" data-directory={directoryKey} data-directory-collapsed={collapsed || undefined}>
+                            <section key={directoryKey} className="cupertino-session-directory-group min-w-0 py-1" data-directory={directoryKey} data-directory-collapsed={collapsed || undefined}>
                                 <DirectoryGroupHeader
                                     directory={group.directory}
                                     label={directoryLabel}
@@ -1557,7 +1569,7 @@ export function RecentCodexSessions(props: {
                                 {!collapsed ? (
                                     <div className="collapsible-panel" data-open>
                                         <div className="collapsible-inner">
-                                            <ul className="relative mt-1 ml-5 flex flex-col border-l border-[var(--app-divider)] py-1 pl-3.5">
+                                            <ul className="cupertino-session-group-list relative mt-1 ml-5 flex flex-col border-l border-[var(--app-divider)] py-1 pl-3.5">
                                                 {group.sessions.map((session) => {
                                                     const lastActiveLabel = formatRelativeTime(session.modifiedAt, t) ?? formatTimestamp(session.modifiedAt)
                                                     return (
