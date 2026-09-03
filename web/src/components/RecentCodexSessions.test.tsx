@@ -510,6 +510,8 @@ describe('RecentCodexSessions', () => {
         )
 
         const board = await screen.findByTestId('session-kanban-board')
+        expect(screen.getByTestId('recent-codex-sessions')).toHaveAttribute('data-session-list-presentation', 'cupertino')
+        expect(screen.getByTestId('recent-codex-sessions')).toHaveAttribute('data-session-list-view', 'kanban')
         expect([...board.querySelectorAll('[data-kanban-group]')].map((group) => group.getAttribute('data-kanban-group'))).toEqual([
             'pending',
             'processing',
@@ -539,17 +541,19 @@ describe('RecentCodexSessions', () => {
         const completedDivider = completedGroup?.querySelector('[data-kanban-completed-divider]')
         expect(completedDivider).toHaveAttribute('role', 'separator')
         expect(completedDivider).toHaveTextContent('Completed·1')
-        expect(completedDivider?.querySelectorAll('[data-kanban-divider-line]')).toHaveLength(2)
+        expect(completedDivider).toHaveClass('justify-center')
+        expect(completedDivider?.querySelectorAll('[data-kanban-divider-line]')).toHaveLength(0)
         expect(completedDivider?.querySelector('[data-motion-icon="completed"]')).not.toBeNull()
         expect(board.querySelectorAll('[data-kanban-card-column]')).toHaveLength(4)
         for (const column of board.querySelectorAll('[data-kanban-card-column]')) {
-            expect(column).toHaveClass('pl-5')
+            expect(column).not.toHaveClass('pl-5')
         }
         const pendingCard = board.querySelector('[data-kanban-card-status="pending"]')
         expect(pendingCard?.querySelector('time')).toBeNull()
-        expect(pendingCard?.closest('li')?.querySelector('[data-kanban-card-time]')).not.toBeNull()
+        expect(pendingCard?.closest('li')?.querySelector('[data-kanban-card-time]')).toBeNull()
         expect(pendingCard).not.toHaveAttribute('data-kanban-directory-color')
         const completedCard = board.querySelector('[data-kanban-card-status="completed"]')
+        expect(completedCard?.querySelector('[data-kanban-card-time]')).toHaveClass('cupertino-kanban-card-time')
         const projectColor = getCompletedSessionDirectoryColor('/workspace/project')
         expect(completedCard).toHaveAttribute('data-kanban-directory-color', projectColor)
         expect(completedCard).toHaveStyle({ borderLeftColor: projectColor })
@@ -589,7 +593,7 @@ describe('RecentCodexSessions', () => {
 
         const board = await screen.findByTestId('session-kanban-board')
         const card = board.querySelector('.session-kanban-card')
-        expect(card).toHaveClass('min-h-24')
+        expect(card).toHaveClass('min-h-[5.625rem]')
         expect(card).not.toHaveClass('min-h-[9.75rem]')
         const topRow = card?.querySelector('[data-kanban-card-top-row]')
         expect(topRow?.querySelector('[data-session-source="native"]')).not.toBeNull()
@@ -600,7 +604,7 @@ describe('RecentCodexSessions', () => {
         expect(directoryRow?.querySelector('[data-kanban-directory]')).toHaveClass('font-normal')
         const cardTime = board.querySelector('[data-kanban-card-time]')
         expect(cardTime).toHaveTextContent('just now')
-        expect(cardTime?.nextElementSibling?.querySelector('.session-kanban-card')).toBe(card)
+        expect(card?.contains(cardTime)).toBe(true)
         expect(card?.querySelector('.text-\\[17px\\]')).toHaveTextContent('Recent Codex task')
         expect(screen.getByRole('button', { name: 'Pin session' })).toBeInTheDocument()
         const archiveButton = board.querySelector('[data-kanban-archive]') as HTMLButtonElement
@@ -655,7 +659,12 @@ describe('RecentCodexSessions', () => {
         )
 
         await screen.findByText('HAPI idle task')
-        expect(screen.getByTestId('session-kanban-board').querySelector('[data-kanban-date-group]')).not.toBeNull()
+        const board = screen.getByTestId('session-kanban-board')
+        expect(board.querySelector('[data-kanban-date-group]')).not.toBeNull()
+        expect(board.querySelector('.cupertino-kanban-timeline-rail')).toBeNull()
+        expect(board.querySelector('.cupertino-kanban-timeline-node')).toBeNull()
+        expect(board.querySelector('.cupertino-kanban-time-line')).toBeNull()
+        expect(board.querySelector('.cupertino-kanban-card-time')).not.toBeNull()
         expect(screen.getByText('Today')).toBeInTheDocument()
         const card = screen.getByText('HAPI idle task').closest('li')!
         fireEvent.click(card.querySelector('[data-kanban-archive]')!)
@@ -736,6 +745,9 @@ describe('RecentCodexSessions', () => {
         )
 
         await screen.findByText('Project A task')
+        expect(screen.getByTestId('recent-codex-sessions')).toHaveAttribute('data-session-list-presentation', 'cupertino')
+        expect(screen.getByTestId('recent-codex-sessions')).toHaveAttribute('data-session-list-view', 'list')
+        expect(screen.queryByRole('heading', { name: 'Directories' })).not.toBeInTheDocument()
         const groups = view.container.querySelector('.cupertino-session-groups')
         expect(groups).toHaveClass('shrink-0')
 

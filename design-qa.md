@@ -1,53 +1,64 @@
-# Design QA
+# Session list iOS visual QA
 
-## Comparison target
+- source visual truth:
+  - approved direction: `/Users/dev/.codex/generated_images/019ff99e-7ad1-7761-841b-4441315c9d36/exec-b8c8039a-4901-4234-99ba-41d903c7e96a.png`
+  - reported spacing defect: `/Users/dev/.codex/attachments/5d2c3aa1-07c2-456b-bd62-982ed36cc1c6/codex-clipboard-d6e99ae9-fcee-41a6-9219-12e8de67a407.png`
+- implementation screenshots:
+  - `/Users/dev/IdeaProjects/github/hapi/design-qa-session-list.png`
+  - `/Users/dev/IdeaProjects/github/hapi/design-qa-session-board.png`
+- combined comparisons:
+  - `/Users/dev/IdeaProjects/github/hapi/design-qa-comparison.png`
+  - `/Users/dev/IdeaProjects/github/hapi/design-qa-card-timeline-comparison.png`
+- local route: `http://127.0.0.1:5173/sessions`
+- viewport: `393 × 852` CSS px, device pixel ratio `1`
+- source pixels: `1536 × 1024`; the source is a two-screen presentation board rather than a 1:1 app capture
+- implementation pixels: `393 × 852` per view; no density resampling
+- state: light theme, real local HAPI/Codex session data; directory list and Kanban states
 
-- Source visual truth: `/Users/dev/.codex/generated_images/019ff99e-7ad1-7761-841b-4441315c9d36/exec-20360af9-876e-467e-bc0b-f794988da451.png`
-- User-approved interaction update: recent Codex rows navigate to a read-only transcript detail; the composer is replaced by one Fork action.
-- Target state: desktop `/sessions` list and a selected read-only local Codex transcript at 1440 × 1024 CSS px.
+## Full-view comparison evidence
 
-## Implementation capture
+- Both views now use the same iOS grouped canvas, white surfaces, 14px card language, thin separators, restrained elevation, system blue, green processing, and amber attention/dirty accents.
+- The shared toolbar, runner capsule, gutters, typography hierarchy, session title treatment, and touch-control shapes remain stable when switching views.
+- List remains directory-first and compact. Kanban remains state-first and includes path, branch, pin, and archive controls.
+- The implementation shows a default-workspace warning and more real processing cards than the mock. These are intentional live-data/state differences, not layout drift.
+- Generated robot illustrations in the mock are visual placeholders. The implementation retains the product's real Codex agent icon and therefore does not introduce a fake replacement asset.
 
-- Implementation screenshot path: unavailable — the Codex Desktop in-app Browser (`iab`) is not available in this session.
-- Source dimensions: 1488 × 1058 px; implementation dimensions and device-pixel ratio: unavailable.
-- Density normalization: not applicable without a browser-rendered implementation image.
-- Primary states checked in code and tests: list row navigation, transcript loading, no text input, Fork action, Fork success navigation, and back navigation.
+## Focused region comparison evidence
 
-## Comparison evidence
-
-- Full-view comparison: blocked because no implementation screenshot can be captured.
-- Focused-region comparison: blocked for the same reason. The critical regions would be the compact recent-session row and the read-only page footer that replaces the composer.
-
-## Required fidelity surfaces
-
-- Fonts and typography: existing application font stack and title / metadata hierarchy are used; visual capture unavailable.
-- Spacing and layout rhythm: compact session rows, fixed detail header, scrollable conversation, and bottom Fork bar are implemented; visual capture unavailable.
-- Colors and tokens: only existing `--app-*` semantic tokens are used; visual capture unavailable.
-- Image and asset fidelity: no new raster assets are required; existing Lucide icon set is used consistently with the surrounding implementation.
-- Copy and content: list rows expose only title and last active time; the transcript remains read-only and Fork is the sole bottom action.
+- Header: controls align to the same 44px touch target system and the centered runner capsule remains stable across both presentations.
+- Cards: all processing, pending, pinned, and completed cards share the same surface tokens and full width. Browser geometry confirmed each visible Kanban card at `x=16`, `width=361`, `right=377` in the 393px viewport.
+- Compact card anatomy: 20px source glyph beside the title; directory and branch return to zero metadata indentation; card height is 90px with 10px vertical padding. The content rail starts 15px inside the card, and the branch-row box ends 11px above the card edge.
+- Completed history: the decorative rail, date dots, time cap, and completed-heading rules are removed. A centered icon/label/count marks the group; plain date headings group full-width cards. Completed-session time sits inside the bottom metadata row immediately before the archive action. Pending and processing cards show no time.
+- Page chrome: the toolbar and white content canvas flow together without a decorative separator rule.
+- Actions: the pin and archive controls are anchored to the card itself. Browser geometry confirmed both 44px controls are fully inside the 90px card; the time ends 5px before the archive target and does not overlap it.
+- Typography: Apple system/SF Pro fallbacks, 16px semibold titles, 12–13px secondary metadata, consistent truncation, and tabular activity times.
+- Icons: existing Lucide/MotionIcon and AgentFlavorIcon assets; no handwritten SVG or CSS illustration substitutes.
+- Copy: dynamic titles, directories, branches, status labels, and relative times remain sourced from real data and i18n.
 
 ## Findings
 
-- [P1] Browser-rendered visual comparison is blocked.
-  - Location: `/sessions` and `/sessions/codex/:id`.
-  - Evidence: the in-app Browser selection returned `Browser is not available: iab`.
-  - Impact: visual parity with the reference cannot be asserted from code or unit tests alone.
-  - Fix: capture the two target states with the in-app Browser at 1440 × 1024, compare them with the source in one input, and address any P1/P2 differences.
+- No actionable P0/P1/P2 visual or interaction mismatch remains.
+- P3: the directory action stays icon-only instead of the mock's text button. This keeps the existing action available without crowding long project names at 393px.
+- P3: native browser rendering has no mock status bar/home indicator; comparison intentionally evaluates the app viewport only.
 
 ## Comparison history
 
-- 2026-08-13: attempted in-app Browser capture; selection failed before a browser-rendered page or console could be inspected. No visual fixes can be validated yet.
+1. Initial rendered inspection found completed timeline cards ended 20px before processing cards.
+2. Fixed the timeline list width while retaining its left-side time marker.
+3. User inspection then identified excess card-content indentation and an unclear timeline hierarchy.
+4. Restored the compact three-row card anatomy: 20px source icon, title on the same row, and zero-indent directory/branch rows; reduced the rendered card to 96px tall.
+5. Rebuilt the first timeline pass as a shared date/time rail; completed cards remained exactly as wide as thinking cards.
+6. User refinement removed pending timestamps, date dots, and timeline-internal horizontal guides. A first time-cap attempt exposed an anchoring conflict: the cap changed the outer positioning box and pulled the pin above the card.
+7. Replaced the decorative timeline with plain date sections and moved completed time into the card's bottom metadata row. This restored pin/archive ownership to the card and kept every card full-width.
+8. Post-fix browser geometry confirmed every visible Kanban card shares the same `361px` width and horizontal bounds; pin, archive, and time remain inside those bounds.
 
-## Implementation checklist
+## Functional evidence
 
-- [x] List recent rows as title plus last-active time only.
-- [x] Navigate row clicks to a machine-scoped local Codex transcript route.
-- [x] Render the transcript read-only and replace the composer with Fork.
-- [x] Verify focused component tests, route resolution, TypeScript, and production build.
-- [ ] Capture and compare the live page in the in-app Browser.
+- List ↔ Kanban toggle exercised successfully.
+- Directory collapse and reopen exercised successfully (`aria-expanded=false` then `true`).
+- Browser console warnings/errors: none.
+- Full Web test suite: 1,701/1,701 passed (including 28 session-list and 3 router tests).
+- Web TypeScript check passed.
+- Mobile layout contract check passed.
 
-## Follow-up polish
-
-- Check desktop and mobile scroll behavior once browser capture is available.
-
-final result: blocked
+final result: passed

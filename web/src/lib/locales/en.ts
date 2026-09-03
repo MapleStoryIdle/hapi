@@ -56,6 +56,7 @@ export default {
   'sessions.running.noCodex': 'No native Codex session is running right now.',
   'sessions.running.empty': 'No HAPI or Codex session is running right now.',
   'sessions.new': 'New Session',
+  'sessions.directory.heading': 'Directories',
   'sessions.view.kanban': 'Switch to Kanban view',
   'sessions.view.list': 'Switch to list view',
   'sessions.kanban.pinned': 'Pinned',

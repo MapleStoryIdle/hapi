@@ -534,6 +534,9 @@ function KanbanSessionCard(props: {
     const { branch, isWorktree, isDirty } = useMachineGitBranch(api, machineId, session.cwd)
     const branchLabel = branch ? getDetachedBranchLabel(branch, t) : null
     const branchIcon = isWorktree ? TreePineIconNode : GitBranchIconNode
+    const completedTime = status === 'completed'
+        ? formatKanbanSessionTime(modifiedAt, now, dateLocale, t)
+        : null
     const archiveDescription = session.source === 'native'
         ? t('recentCodex.archive.nativeDescription', { name: session.title })
         : t('recentCodex.archive.hapiDescription', { name: session.title })
@@ -556,21 +559,11 @@ function KanbanSessionCard(props: {
 
     return (
         <li className="min-w-0">
-            {status !== 'processing' ? (
-                <time
-                    dateTime={new Date(modifiedAt).toISOString()}
-                    className="mb-1 block px-1 text-xs tabular-nums text-[var(--app-hint)]"
-                    title={formatTimestamp(session.modifiedAt)}
-                    data-kanban-card-time
-                >
-                    {formatKanbanSessionTime(modifiedAt, now, dateLocale, t)}
-                </time>
-            ) : null}
             <div className="relative min-w-0">
                 <button
                     type="button"
                     onClick={onOpen}
-                    className={`session-kanban-card flex min-h-24 w-full min-w-0 flex-col rounded-[14px] border border-l-[3px] border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5 pr-12 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[background-color,box-shadow] hover:bg-[var(--app-subtle-bg)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${presentation.borderClassName} ${status === 'processing' ? 'session-kanban-card-thinking' : ''} ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
+                    className={`cupertino-session-card session-kanban-card flex min-h-[5.625rem] w-full min-w-0 flex-col rounded-[14px] border border-l-[3px] border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5 pr-12 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[background-color,box-shadow,transform] hover:bg-[var(--app-subtle-bg)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${presentation.borderClassName} ${status === 'processing' ? 'session-kanban-card-thinking' : ''} ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
                     style={completedDirectoryColor ? { borderLeftColor: completedDirectoryColor } : undefined}
                     aria-label={t('recentCodex.open', { title: session.title })}
                     aria-current={selected ? 'page' : undefined}
@@ -579,7 +572,7 @@ function KanbanSessionCard(props: {
                 >
                     <span className="flex w-full min-w-0 items-center gap-2 pr-2" data-kanban-card-top-row>
                         <CodexSourceIcon source={session.source} active={status === 'processing'} />
-                        <span className="min-w-0 flex-1 truncate text-[17px] font-semibold leading-6 text-[var(--app-fg)]" title={session.title}>
+                        <span className="cupertino-session-card-title min-w-0 flex-1 truncate text-[17px] font-semibold leading-6 text-[var(--app-fg)]" title={session.title}>
                             {session.title}
                         </span>
                     </span>
@@ -607,6 +600,7 @@ function KanbanSessionCard(props: {
                     {branchLabel ? (
                         <span
                             className="mt-1.5 flex min-w-0 items-center gap-2 text-xs leading-4 text-[var(--app-hint)]"
+                            data-kanban-branch-row
                             data-git-kind={isWorktree ? 'worktree' : 'branch'}
                             title={isWorktree ? `${t('session.item.worktree')} · ${branchLabel}` : branchLabel}
                         >
@@ -619,7 +613,26 @@ function KanbanSessionCard(props: {
                             />
                             <span className="truncate">{branchLabel}</span>
                             {isDirty ? <GitDirtyIndicator label={t('recentCodex.gitDirty')} /> : null}
+                            {completedTime ? (
+                                <time
+                                    dateTime={new Date(modifiedAt).toISOString()}
+                                    className="cupertino-kanban-card-time ml-auto shrink-0 tabular-nums"
+                                    title={formatTimestamp(session.modifiedAt)}
+                                    data-kanban-card-time
+                                >
+                                    {completedTime}
+                                </time>
+                            ) : null}
                         </span>
+                    ) : completedTime ? (
+                        <time
+                            dateTime={new Date(modifiedAt).toISOString()}
+                            className="cupertino-kanban-card-time mt-1 ml-auto shrink-0 tabular-nums"
+                            title={formatTimestamp(session.modifiedAt)}
+                            data-kanban-card-time
+                        >
+                            {completedTime}
+                        </time>
                     ) : null}
                 </button>
 
@@ -943,7 +956,7 @@ export function RecentCodexSessions(props: {
     const description = props.description === undefined ? t('recentCodex.description') : props.description
     const onlyProcessing = props.onlyProcessing ?? false
     const isMerged = props.hapiSessions !== undefined
-    const isCupertinoList = isMerged && embedded && props.viewMode !== 'kanban'
+    const isCupertinoPresentation = isMerged && embedded
     const shouldFilterRecent = props.recentOnly ?? isMerged
     const limit = props.limit ?? (isMerged ? 100 : 5)
     const SectionIcon = onlyProcessing ? Activity : History
@@ -1284,7 +1297,8 @@ export function RecentCodexSessions(props: {
             aria-label={title}
             aria-busy={busy || undefined}
             data-testid="recent-codex-sessions"
-            data-session-list-presentation={isCupertinoList ? 'cupertino' : undefined}
+            data-session-list-presentation={isCupertinoPresentation ? 'cupertino' : undefined}
+            data-session-list-view={isCupertinoPresentation ? (props.viewMode ?? 'list') : undefined}
         >
             {!props.hideHeader ? (
                 <div className={`flex items-center justify-between gap-3 ${embedded ? '' : 'pr-10'}`}>
@@ -1359,7 +1373,7 @@ export function RecentCodexSessions(props: {
             ) : isMerged && props.viewMode === 'kanban' ? (
                 <div
                     className={embedded
-                        ? 'mt-1 flex min-h-0 flex-col gap-6 pb-3'
+                        ? 'cupertino-session-board mt-1 flex min-h-0 flex-col gap-6 pb-3'
                         : 'mt-4 flex min-h-0 flex-col gap-6 overflow-y-auto pb-3 pr-1'}
                     data-testid="session-kanban-board"
                 >
@@ -1369,7 +1383,7 @@ export function RecentCodexSessions(props: {
                         const presentation = KANBAN_GROUP_PRESENTATION[group.id]
                         return (
                             <section key={group.id} className="min-w-0" data-kanban-group={group.id}>
-                                <div className="flex items-center gap-2 px-1">
+                                <div className="cupertino-kanban-heading flex items-center gap-2 px-1">
                                     {group.id === 'pinned' ? (
                                         <Pin className={`h-3.5 w-3.5 shrink-0 ${presentation.dotClassName}`} fill="currentColor" aria-hidden="true" />
                                     ) : (
@@ -1384,7 +1398,7 @@ export function RecentCodexSessions(props: {
                                         ) : t(presentation.labelKey)}
                                     </h2>
                                 </div>
-                                <ul className="mt-2 flex flex-col gap-2.5 pl-5" data-kanban-card-column>
+                                <ul className="cupertino-kanban-card-column mt-2 flex flex-col gap-2.5" data-kanban-card-column>
                                     {group.sessions.map((session) => (
                                         <KanbanSessionCard
                                             key={session.key}
@@ -1415,16 +1429,11 @@ export function RecentCodexSessions(props: {
                     {completedTimelineGroups.length > 0 ? (
                         <section className="min-w-0" data-kanban-group="completed">
                             <div
-                                className="flex items-center gap-2 px-1"
+                                className="cupertino-kanban-completed-divider flex items-center justify-center px-1"
                                 role="separator"
                                 aria-label={`${t('sessions.kanban.completed')} ${completedTimelineGroups.reduce((count, group) => count + group.shares.length, 0)}`}
                                 data-kanban-completed-divider
                             >
-                                <span
-                                    className="h-px min-w-3 flex-1 bg-[color-mix(in_srgb,var(--app-border)_72%,transparent)]"
-                                    aria-hidden="true"
-                                    data-kanban-divider-line
-                                />
                                 <h2 className="inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-[var(--app-hint)]">
                                     <MotionIcon
                                         icon={toMotionIcon(CircleCheck)}
@@ -1438,30 +1447,15 @@ export function RecentCodexSessions(props: {
                                         {completedTimelineGroups.reduce((count, group) => count + group.shares.length, 0)}
                                     </span>
                                 </h2>
-                                <span
-                                    className="h-px min-w-3 flex-1 bg-[color-mix(in_srgb,var(--app-border)_72%,transparent)]"
-                                    aria-hidden="true"
-                                    data-kanban-divider-line
-                                />
                             </div>
-                            <div className="relative mt-3 pl-5" data-kanban-card-column>
-                                <div aria-hidden="true" className="absolute bottom-2 left-[5px] top-2 w-px bg-gradient-to-b from-transparent via-[var(--app-divider)] to-transparent" />
+                            <div className="cupertino-kanban-date-groups mt-3" data-kanban-card-column>
                                 <div className="space-y-5">
                                     {completedTimelineGroups.map((group) => (
-                                        <section key={group.key} className="relative" data-kanban-date-group={group.key}>
-                                            <span
-                                                aria-hidden="true"
-                                                className="absolute -left-[21px] top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_1px_3px_rgba(15,23,42,0.12)]"
-                                            >
-                                                <span className="h-1.5 w-1.5 rounded-full bg-[var(--app-hint)]" />
-                                            </span>
-                                            <div className="flex min-w-0 items-center gap-2">
-                                                <h3 className="shrink-0 text-[11px] font-semibold tracking-[0.04em] text-[var(--app-hint)]">
-                                                    {group.label}
-                                                </h3>
-                                                <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-gradient-to-r from-[var(--app-divider)] to-transparent" />
-                                            </div>
-                                            <ul className="mt-2 flex flex-col gap-2.5">
+                                        <section key={group.key} data-kanban-date-group={group.key}>
+                                            <h3 className="cupertino-kanban-date-heading px-1 text-xs font-semibold text-[var(--app-hint)]">
+                                                {group.label}
+                                            </h3>
+                                            <ul className="cupertino-kanban-card-column mt-2 flex flex-col gap-2.5">
                                                 {group.shares.map((session) => (
                                                     <KanbanSessionCard
                                                         key={session.key}

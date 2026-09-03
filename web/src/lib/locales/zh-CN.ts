@@ -56,6 +56,7 @@ export default {
   'sessions.running.noCodex': '当前没有正在运行的原生 Codex 会话。',
   'sessions.running.empty': '当前没有正在运行的 HAPI 或 Codex 会话。',
   'sessions.new': '新建会话',
+  'sessions.directory.heading': '目录',
   'sessions.view.kanban': '切换到看板视图',
   'sessions.view.list': '切换到列表视图',
   'sessions.kanban.pinned': '置顶',

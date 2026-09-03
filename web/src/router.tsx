@@ -875,7 +875,7 @@ function SessionsPage() {
         <>
             <div className="flex h-full min-h-0">
             <div
-                className={`session-list-screen ${isSessionsIndex && sessionListViewMode !== 'kanban' ? 'cupertino-session-index' : ''} ${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)] [font-family:var(--app-control-font-family)]`}
+                className={`session-list-screen ${isSessionsIndex ? 'cupertino-session-index' : ''} ${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)] [font-family:var(--app-control-font-family)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="cupertino-session-index-header bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">

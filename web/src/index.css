@@ -566,7 +566,7 @@ select {
  * the index shell so Telegram/app colors and every other route stay intact.
  */
 .cupertino-session-index {
-    --cupertino-session-canvas: #F2F2F7;
+    --cupertino-session-canvas: #FFFFFF;
     --cupertino-session-surface: #FFFFFF;
     --cupertino-session-label: #1C1C1E;
     --cupertino-session-secondary-label: #636366;
@@ -577,10 +577,11 @@ select {
     --cupertino-session-pressed-fill: #E5E5EA;
     --cupertino-session-selected-fill: rgba(0, 122, 255, 0.12);
     --cupertino-session-folder-fill: #E8F2FF;
-    --cupertino-session-shadow: 0 1px 2px rgba(60, 60, 67, 0.08);
+    --cupertino-session-shadow: 0 1px 2px rgba(60, 60, 67, 0.08), 0 5px 18px rgba(60, 60, 67, 0.035);
     --cupertino-session-focus-ring: color-mix(in srgb, var(--cupertino-session-accent) 42%, transparent);
     background: var(--cupertino-session-canvas);
     color: var(--cupertino-session-label);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
 }
 
 [data-theme="dark"] .cupertino-session-index {
@@ -616,7 +617,6 @@ select {
 
 .cupertino-session-index .cupertino-session-index-header {
     background: var(--cupertino-session-canvas);
-    border-bottom: 1px solid var(--cupertino-session-separator);
 }
 
 .cupertino-session-index .cupertino-session-index-toolbar {
@@ -717,7 +717,7 @@ select {
 
 .cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-folder-tile {
     border-radius: 9px;
-    background: var(--cupertino-session-folder-fill);
+    background: transparent;
     color: var(--cupertino-session-accent);
 }
 
@@ -779,8 +779,9 @@ select {
 }
 
 .cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-title {
-    font-size: 0.9375rem;
-    font-weight: 500;
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
 }
 
 .cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-time {
@@ -825,13 +826,120 @@ select {
     color: var(--cupertino-session-secondary-label);
 }
 
+/* Both session presentations share the same iOS surface language. List mode
+ * stays directory-first; Kanban keeps richer metadata and task actions. */
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-board {
+    gap: 1.75rem;
+    padding-top: 0.625rem;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-heading {
+    min-height: 1.5rem;
+    color: var(--cupertino-session-secondary-label);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-heading h2 {
+    color: var(--cupertino-session-label);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-card-column {
+    width: 100%;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-card {
+    min-height: 5.625rem;
+    border-color: var(--cupertino-session-separator);
+    border-left-width: 3px;
+    border-radius: 14px;
+    background: var(--cupertino-session-surface);
+    box-shadow: var(--cupertino-session-shadow);
+    color: var(--cupertino-session-label);
+    padding: 0.625rem 3.25rem 0.625rem 0.75rem;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-card[aria-current="page"] {
+    background: var(--cupertino-session-selected-fill);
+    box-shadow: inset 3px 0 0 var(--cupertino-session-accent), var(--cupertino-session-shadow);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-card[data-kanban-card-status="processing"] {
+    border-left-color: #34C759;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-card[data-kanban-card-status="pending"] {
+    border-left-color: #F59E0B;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-card-title {
+    color: var(--cupertino-session-label);
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-source {
+    height: 1.25rem;
+    width: 1.25rem;
+    background: transparent;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-source-glyph {
+    height: 1.25rem;
+    width: 1.25rem;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] [data-kanban-directory-row],
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] [data-kanban-branch-row] {
+    margin-top: 0.25rem;
+    padding-left: 0;
+    color: var(--cupertino-session-secondary-label);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-card-time {
+    color: var(--cupertino-session-secondary-label);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1rem;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] [data-kanban-archive],
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .session-kanban-card + button {
+    color: var(--cupertino-session-secondary-label);
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-completed-divider h2 {
+    color: var(--cupertino-session-secondary-label);
+    font-size: 0.75rem;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-date-heading {
+    color: var(--cupertino-session-secondary-label);
+    letter-spacing: -0.01em;
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="list"] .cupertino-session-row .cupertino-session-source {
+    height: 2rem;
+    width: 2rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--cupertino-session-accent) 8%, var(--cupertino-session-surface));
+}
+
+.cupertino-session-index .cupertino-session-list[data-session-list-view="list"] .cupertino-session-row .cupertino-session-source-glyph {
+    height: 1.375rem;
+    width: 1.375rem;
+}
+
 .cupertino-session-index :is(
     .cupertino-toolbar-button,
     .cupertino-runner-capsule,
     .cupertino-runner-switcher,
     .cupertino-directory-toggle,
     .cupertino-directory-add,
-    .cupertino-session-row
+    .cupertino-session-row,
+    .cupertino-session-card
 ):focus-visible,
 .cupertino-session-index .cupertino-toolbar-menu:focus-within {
     outline: 2px solid var(--cupertino-session-accent);
@@ -850,7 +958,8 @@ select {
     }
 
     .cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-directory-header:hover,
-    .cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-row:hover {
+    .cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-row:hover,
+    .cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] .cupertino-session-card:hover {
         background: var(--cupertino-session-pressed-fill);
     }
 }
@@ -861,7 +970,8 @@ select {
     .cupertino-runner-switcher,
     .cupertino-directory-toggle,
     .cupertino-directory-add,
-    .cupertino-session-row
+    .cupertino-session-row,
+    .cupertino-session-card
 ):active {
     background: var(--cupertino-session-pressed-fill);
 }
