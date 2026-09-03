@@ -39,6 +39,26 @@ function renderEvent(event: AgentEvent) {
 afterEach(() => cleanup())
 
 describe('HappySystemMessage — quota events', () => {
+    it('shows the quota reason and its settings action', () => {
+        renderEvent({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'usage_limit',
+            message: "You've hit your usage limit.",
+            recoverable: false,
+            actionUrl: 'https://chatgpt.com/codex/settings/usage',
+            resetAtText: 'Sep 7th, 2026 10:26 AM'
+        })
+
+        expect(screen.getByText('taskStatus.usage.title')).toBeInTheDocument()
+        expect(screen.getByText('taskStatus.usage.bodyWithReset')).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'taskStatus.usage.action' })).toHaveAttribute(
+            'href',
+            'https://chatgpt.com/codex/settings/usage'
+        )
+    })
+
     it('uses the compact context-divider treatment for Codex usage updates', () => {
         const rawMessage = 'Codex usage updated · GPT-5.3-Codex-Spark: primary 0% / 300 min, secondary 0% / 10080 min'
         renderEvent({ type: 'codex-usage-updated', message: rawMessage })

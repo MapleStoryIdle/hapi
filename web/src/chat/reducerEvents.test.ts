@@ -116,6 +116,29 @@ describe('foldTaskStatusEvents', () => {
         expect(foldTaskStatusEvents([retrying, failed])).toEqual([failed])
     })
 
+    it('keeps a specific failure instead of a trailing generic failure', () => {
+        const usageLimit = makeTaskStatusBlock('usage-limit', {
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'usage_limit',
+            message: "You've hit your usage limit.",
+            recoverable: false,
+            actionUrl: 'https://chatgpt.com/codex/settings/usage',
+            resetAtText: 'Sep 7th, 2026 10:26 AM'
+        })
+        const genericFailure = makeTaskStatusBlock('generic-failure', {
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'unknown',
+            message: 'Task failed',
+            recoverable: false
+        })
+
+        expect(foldTaskStatusEvents([usageLimit, genericFailure])).toEqual([usageLimit])
+    })
+
     it('does not fold task statuses across normal messages', () => {
         const retrying = makeTaskStatusBlock('retrying', {
             type: 'task-status',

@@ -162,14 +162,24 @@ export function foldTaskStatusEvents(blocks: ChatBlock[]): ChatBlock[] {
             continue
         }
 
-        const event = block.event as { type: string }
+        const event = block.event as { type: string; status?: unknown; code?: unknown }
         if (event.type !== 'task-status') {
             result.push(block)
             continue
         }
 
         const prev = result[result.length - 1] as AgentEventBlock | undefined
-        if (prev?.kind === 'agent-event' && (prev.event as { type: string }).type === 'task-status') {
+        const previousEvent = prev?.kind === 'agent-event'
+            ? prev.event as { type: string; status?: unknown; code?: unknown }
+            : null
+        if (previousEvent?.type === 'task-status') {
+            const preserveSpecificFailure = previousEvent.status === 'failed'
+                && previousEvent.code !== 'unknown'
+                && event.status === 'failed'
+                && event.code === 'unknown'
+            if (preserveSpecificFailure) {
+                continue
+            }
             result[result.length - 1] = block
             continue
         }

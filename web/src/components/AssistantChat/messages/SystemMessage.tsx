@@ -288,12 +288,12 @@ export function HappySystemMessage() {
 
     if (role !== 'system') return null
 
-    if (event && isUsageLimitEvent(event)) {
-        return <UsageLimitDivider event={event} messageId={messageId} />
-    }
-
     if (isTaskStatusEvent(event)) {
         return <TaskStatusCard event={event} messageId={messageId} />
+    }
+
+    if (event && isUsageLimitEvent(event)) {
+        return <UsageLimitDivider event={event} messageId={messageId} />
     }
 
     if (isAutomationHeartbeatEvent(event)) {
