@@ -226,10 +226,36 @@ export type CodexLocalSessionContextMessage = {
     }
 }
 
+/** Direct native child thread rendered through the shared CodexAgent card. */
+export type CodexLocalSessionSubagent = {
+    id: string
+    parentSessionId: string
+    name?: string | null
+    role?: string | null
+    agentPath?: string | null
+    model?: string | null
+    modelReasoningEffort?: string | null
+    status: 'running' | 'completed' | 'failed' | 'canceled' | 'unknown'
+    statusText?: string | null
+    startedAt: number
+    updatedAt: number
+    completedAt?: number
+    traceMessages: Array<{
+        createdAt?: number
+        role: 'agent'
+        content: {
+            type: 'codex'
+            data: unknown
+        }
+        meta?: unknown
+    }>
+}
+
 export type CodexLocalSessionContextResponse = {
     success: true
     session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort' | 'controlledByCodexSsh'>
     messages: CodexLocalSessionContextMessage[]
+    subagents?: CodexLocalSessionSubagent[]
     page: {
         limit: number
         nextBefore: number | null
@@ -375,6 +401,8 @@ export type DiscardCodexLocalSessionMessageResponse =
     | {
         success: true
         discarded: boolean
+        /** The receipt may still belong to an active native Codex turn. */
+        active?: boolean
         queuedMessages: CodexLocalSessionQueuedMessage[]
     }
     | {

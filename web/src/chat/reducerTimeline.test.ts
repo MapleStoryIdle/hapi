@@ -580,7 +580,14 @@ describe('reduceTimeline', () => {
                 content: {
                     type: 'agent-run-start',
                     cardId: 'spawn-1',
-                    input: { message: 'inspect files', agent_type: 'explorer' },
+                    input: {
+                        message: 'inspect files',
+                        agent_type: 'explorer',
+                        hapiSubagentConfig: {
+                            parentModel: 'gpt-5.6',
+                            parentReasoningEffort: 'high'
+                        }
+                    },
                     status: 'starting',
                     statusText: 'Starting',
                     summary: 'Inspect files',
@@ -600,7 +607,11 @@ describe('reduceTimeline', () => {
                     agentId: 'agent-1',
                     status: 'running',
                     statusText: 'Running',
-                    activity: 'Running command: ls'
+                    activity: 'Running command: ls',
+                    hapiSubagentConfig: {
+                        childModel: 'gpt-5.6-mini',
+                        childReasoningEffort: 'medium'
+                    }
                 },
                 isSidechain: false
             } as TracedMessage,
@@ -687,7 +698,13 @@ describe('reduceTimeline', () => {
             agentId: 'agent-1',
             statusText: 'Completed',
             summary: 'Inspect files',
-            activity: 'Completed: agent done'
+            activity: 'Completed: agent done',
+            hapiSubagentConfig: {
+                parentModel: 'gpt-5.6',
+                parentReasoningEffort: 'high',
+                childModel: 'gpt-5.6-mini',
+                childReasoningEffort: 'medium'
+            }
         })
         expect(agentBlock.children.some((child: any) => child.kind === 'tool-call' && child.tool.id === 'codex-agent:agent-1:call:cmd-1')).toBe(true)
         expect(agentBlock.children.some((child: any) => child.kind === 'agent-text' && child.text === 'agent done')).toBe(true)

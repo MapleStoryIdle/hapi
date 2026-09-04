@@ -272,8 +272,8 @@ describe('RecentCodexSessions', () => {
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
             ['pending', ['hapi-pending']],
             ['processing', ['hapi-processing']],
-            ['pinned', ['native-completed']],
             ['unviewed', []],
+            ['pinned', ['native-completed']],
             ['completed', ['native-newer-completed']]
         ])
     })
@@ -316,8 +316,8 @@ describe('RecentCodexSessions', () => {
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
             ['pending', []],
             ['processing', []],
-            ['pinned', ['hapi-seen-pinned', 'native-pinned']],
             ['unviewed', ['hapi-unviewed-newer', 'hapi-unviewed-older']],
+            ['pinned', ['hapi-seen-pinned', 'native-pinned']],
             ['completed', ['native-completed']]
         ])
     })
@@ -640,6 +640,9 @@ describe('RecentCodexSessions', () => {
         await waitFor(() => {
             const unviewed = board.querySelector('[data-kanban-group="unviewed"]')
             expect(unviewed).toHaveTextContent('Fresh completion')
+            const icon = unviewed?.querySelector('[data-kanban-group-icon="unviewed"]')
+            expect(icon).toHaveAttribute('aria-hidden', 'true')
+            expect(icon).toHaveClass('text-[#4E7CF5]')
             expect(board.querySelector('[data-kanban-group="pinned"]')).toBeNull()
         })
 
@@ -880,11 +883,11 @@ describe('RecentCodexSessions', () => {
         expect(pinnedGroup).toHaveTextContent('Pinned')
         expect(pinnedGroup).toHaveTextContent('Pinned Codex task')
         const pendingGroup = board.querySelector('[data-kanban-group="pending"]')
-        expect(pendingGroup).toHaveTextContent('Needs confirmation')
+        expect(pendingGroup).toHaveTextContent('Needs Confirmation')
         expect(pendingGroup?.querySelector('[data-kanban-group-count]')).toBeNull()
         const processingGroup = board.querySelector('[data-kanban-group="processing"]')
-        expect(processingGroup).toHaveTextContent('thinking')
-        expect(processingGroup?.querySelector('[data-kanban-thinking-label]')).toHaveTextContent('thinking...')
+        expect(processingGroup).toHaveTextContent('Thinking')
+        expect(processingGroup?.querySelector('[data-kanban-thinking-label]')).toHaveTextContent('Thinking...')
         expect(processingGroup?.querySelector('.session-kanban-thinking-dot-second')).not.toBeNull()
         expect(processingGroup?.querySelector('.session-kanban-thinking-dot-third')).not.toBeNull()
         expect(processingGroup?.querySelector('[data-kanban-group-count]')).toBeNull()
@@ -924,6 +927,19 @@ describe('RecentCodexSessions', () => {
         expect(gitDirty).toHaveTextContent('*')
         expect(gitDirty).toHaveClass('font-bold')
         expect(gitDirty).not.toHaveClass('bg-[#F5A524]')
+
+        for (const [group, id, color] of [
+            [pendingGroup, 'pending', 'text-[#F59E0B]'],
+            [processingGroup, 'processing', 'text-[#34C759]'],
+            [pinnedGroup, 'pinned', 'text-[var(--app-hint)]']
+        ] as const) {
+            expect(group?.querySelector('h2')).toHaveClass('font-semibold')
+            const icon = group?.querySelector(`[data-kanban-group-icon="${id}"]`)
+            expect(icon).toHaveAttribute('aria-hidden', 'true')
+            expect(icon).toHaveClass(color)
+        }
+        expect(processingGroup?.querySelector('[data-kanban-group-icon="processing"]')).toHaveClass('motion-safe:animate-pulse')
+        expect(pinnedGroup?.querySelector('[data-kanban-group-icon="pinned"]')).toHaveAttribute('fill', 'currentColor')
 
         const unpinButton = screen.getByRole('button', { name: 'Unpin session' })
         expect(unpinButton).toHaveClass('text-[var(--app-link)]')
@@ -1032,6 +1048,48 @@ describe('RecentCodexSessions', () => {
         const archiveButtons = screen.getAllByRole('button', { name: 'Archive' })
         fireEvent.click(archiveButtons.at(-1)!)
         await waitFor(() => expect(api.archiveSession).toHaveBeenCalledWith('hapi-idle'))
+    })
+
+    it('adds a bot subagent nameplate only to HAPI side-session Kanban cards', async () => {
+        const api = createApi()
+        const parent = createManagedCodexSession('hapi-parent', Date.now(), { title: 'Parent task' })
+        const child = createManagedCodexSession('hapi-side', Date.now() - 1, { title: 'Review helper' })
+        child.metadata = {
+            ...child.metadata!,
+            sideSession: {
+                parentSessionId: parent.id,
+                parentCodexThreadId: 'parent-thread',
+                childCodexThreadId: 'child-thread',
+                createdAt: Date.now(),
+                mode: 'fork_context'
+            }
+        }
+
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    hapiSessions={[parent, child]}
+                    onOpen={vi.fn()}
+                    onOpenHapi={vi.fn()}
+                    embedded
+                    hideHeader
+                    recentOnly
+                    viewMode="kanban"
+                />
+            </I18nProvider>
+        )
+
+        const childCard = await screen.findByRole('button', { name: 'Open Review helper' })
+        const parentCard = screen.getByRole('button', { name: 'Open Parent task' })
+        expect(childCard).toHaveAttribute('data-kanban-subagent', 'true')
+        const badge = childCard.querySelector('[data-kanban-subagent-badge]')
+        expect(badge).toHaveTextContent('Subagent')
+        expect(badge).toHaveAttribute('title', 'HAPI side session')
+        expect(badge?.querySelector('[data-kanban-subagent-icon]')).not.toBeNull()
+        expect(parentCard).not.toHaveAttribute('data-kanban-subagent')
+        expect(parentCard.querySelector('[data-kanban-subagent-badge]')).toBeNull()
     })
 
     it('groups sessions by directory and shows only title and activity time', async () => {

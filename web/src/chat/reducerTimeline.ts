@@ -102,10 +102,12 @@ function getAgentRunDisplayPatch(event: Record<string, unknown>): Record<string,
     const summary = getEventString(event, 'summary')
     const activity = getEventString(event, 'activity')
     const activityKind = getEventString(event, 'activityKind') ?? getEventString(event, 'activity_kind')
+    const hapiSubagentConfig = isObject(event.hapiSubagentConfig) ? event.hapiSubagentConfig : null
 
     if (summary) patch.summary = summary
     if (activity) patch.activity = activity
     if (activityKind) patch.activityKind = activityKind
+    if (hapiSubagentConfig) patch.hapiSubagentConfig = hapiSubagentConfig
 
     return patch
 }
@@ -340,11 +342,21 @@ export function reduceTimeline(
 
     const patchAgentRunInput = (block: ToolCallBlock, patch: Record<string, unknown>): void => {
         const current = isObject(block.tool.input) ? block.tool.input : {}
+        const currentHapiSubagentConfig = isObject(current.hapiSubagentConfig) ? current.hapiSubagentConfig : null
+        const nextHapiSubagentConfig = isObject(patch.hapiSubagentConfig) ? patch.hapiSubagentConfig : null
         block.tool = {
             ...block.tool,
             input: {
                 ...current,
-                ...patch
+                ...patch,
+                ...(currentHapiSubagentConfig || nextHapiSubagentConfig
+                    ? {
+                        hapiSubagentConfig: {
+                            ...(currentHapiSubagentConfig ?? {}),
+                            ...(nextHapiSubagentConfig ?? {})
+                        }
+                    }
+                    : {})
             }
         }
     }

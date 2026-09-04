@@ -117,6 +117,11 @@ type CodexSubagentSnapshot = {
     completedAt?: number;
 };
 
+type CodexSubagentConfiguration = {
+    childModel?: string;
+    childReasoningEffort?: string;
+};
+
 const AGENT_RUN_UPDATE_THROTTLE_MS = 300;
 const AGENT_RUN_START_TIMEOUT_MS = 30 * 1000;
 const SIDE_SESSION_FORK_TIMEOUT_MS = 60 * 1000;
@@ -824,6 +829,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const pendingAgentTracesByAgentId = new Map<string, unknown[]>();
         const pendingAgentToolInputByCallId = new Map<string, { name: string; input: unknown }>();
         const childAgentRuntimeById = new Map<string, ChildAgentRuntime>();
+        const childAgentConfigurationById = new Map<string, CodexSubagentConfiguration>();
         const subagentSnapshotById = new Map<string, CodexSubagentSnapshot>();
         const lastAgentRunUpdateAtByAgentId = new Map<string, number>();
         const lastAgentRunUpdateSignatureByAgentId = new Map<string, string>();
@@ -1058,15 +1064,42 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
         let failAgentStartCard = (_cardId: string, _error: unknown): void => {};
 
+        const getParentSubagentConfiguration = (): Record<string, string> => {
+            const parentModel = asString(session.getModel());
+            const parentReasoningEffort = asString(session.getModelReasoningEffort());
+            return {
+                ...(parentModel ? { parentModel } : {}),
+                ...(parentReasoningEffort ? { parentReasoningEffort } : {})
+            };
+        };
+
+        const addParentSubagentConfiguration = (input: unknown): unknown => {
+            const record = asRecord(input);
+            const parentConfiguration = getParentSubagentConfiguration();
+            if (!record || Object.keys(parentConfiguration).length === 0) {
+                return input;
+            }
+
+            const existingConfiguration = asRecord(record.hapiSubagentConfig) ?? {};
+            return {
+                ...record,
+                hapiSubagentConfig: {
+                    ...existingConfiguration,
+                    ...parentConfiguration
+                }
+            };
+        };
+
         const emitAgentRunStart = (cardId: string, input: unknown): void => {
             childAgentActivityInCurrentTurn = true;
             const startedAt = Date.now();
+            const cardInput = addParentSubagentConfiguration(input);
             agentStartedAtByCardId.set(cardId, startedAt);
-            const agentType = extractAgentType(input);
+            const agentType = extractAgentType(cardInput);
             if (agentType) {
                 agentTypeByCardId.set(cardId, agentType);
             }
-            const summary = summarizeAgentInput(input);
+            const summary = summarizeAgentInput(cardInput);
             if (summary) {
                 agentSummaryByCardId.set(cardId, summary);
             }
@@ -1083,7 +1116,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             emitAgentRunEvent({
                 type: 'agent-run-start',
                 cardId,
-                input,
+                input: cardInput,
                 startedAt,
                 status: 'starting',
                 statusText: 'Starting',
@@ -1302,6 +1335,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (nextStatus) {
                 agentStatusByAgentId.set(agentId, nextStatus);
             }
+            const hapiSubagentConfig = {
+                ...(asRecord(update.hapiSubagentConfig) ?? {}),
+                ...(childAgentConfigurationById.get(agentId) ?? {})
+            };
             const event = {
                 type: 'agent-run-update',
                 agentId,
@@ -1309,7 +1346,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 startedAt,
                 ...(isTerminalAgentRunStatus(nextStatus) ? { completedAt: Date.now() } : {}),
                 ...(agentSummaryByAgentId.has(agentId) ? { summary: agentSummaryByAgentId.get(agentId) } : {}),
-                ...update
+                ...update,
+                ...(Object.keys(hapiSubagentConfig).length > 0 ? { hapiSubagentConfig } : {})
             };
             const signature = getAgentRunUpdateSignature(agentId, event, cardIdOverride);
             if (lastAgentRunUpdateSignatureByAgentId.get(agentId) === signature) {
@@ -1348,6 +1386,74 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
 
             scheduleThrottledAgentRunUpdate(agentId, update, cardIdOverride);
+        };
+
+        const getFirstChildConfigurationValue = (
+            records: Array<Record<string, unknown> | null>,
+            keys: string[]
+        ): string | null => {
+            for (const record of records) {
+                if (!record) continue;
+                for (const key of keys) {
+                    const value = asString(record[key]);
+                    if (value) return value;
+                }
+            }
+            return null;
+        };
+
+        const extractChildAgentConfiguration = (event: Record<string, unknown>): CodexSubagentConfiguration => {
+            const turn = asRecord(event.turn);
+            const thread = asRecord(event.thread);
+            const records = [
+                event,
+                turn,
+                thread,
+                asRecord(event.config),
+                asRecord(event.configuration),
+                asRecord(event.turnContext),
+                asRecord(event.turn_context),
+                asRecord(turn?.config),
+                asRecord(turn?.configuration),
+                asRecord(thread?.config),
+                asRecord(thread?.configuration)
+            ];
+            const childModel = getFirstChildConfigurationValue(records, ['model', 'modelId', 'model_id']);
+            const childReasoningEffort = getFirstChildConfigurationValue(records, [
+                'reasoningEffort',
+                'reasoning_effort',
+                'modelReasoningEffort',
+                'model_reasoning_effort'
+            ]);
+            return {
+                ...(childModel ? { childModel } : {}),
+                ...(childReasoningEffort ? { childReasoningEffort } : {})
+            };
+        };
+
+        const captureChildAgentConfiguration = (agentId: string, event: Record<string, unknown>): void => {
+            const nextValues = extractChildAgentConfiguration(event);
+            if (Object.keys(nextValues).length === 0) return;
+
+            const previous = childAgentConfigurationById.get(agentId) ?? {};
+            const next = { ...previous, ...nextValues };
+            if (
+                next.childModel === previous.childModel
+                && next.childReasoningEffort === previous.childReasoningEffort
+            ) {
+                return;
+            }
+            childAgentConfigurationById.set(agentId, next);
+
+            const cardId = agentCardByAgentId.get(agentId);
+            if (!cardId) return;
+
+            const snapshot = subagentSnapshotById.get(agentId);
+            const status = snapshot?.status ?? agentStatusByAgentId.get(agentId) ?? 'running';
+            emitAgentRunUpdate(agentId, {
+                status,
+                statusText: snapshot?.statusText ?? status
+            }, cardId);
         };
 
         failAgentStartCard = (cardId: string, error: unknown): void => {
@@ -2383,10 +2489,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         this.currentThreadId = threadId;
                         session.onSessionFound(threadId);
                     } else {
-                        logger.debug(
-                            `[Codex] Ignoring thread_started for non-active thread; ` +
-                            `eventThreadId=${threadId}, activeThread=${this.currentThreadId}`
-                        );
+                        captureChildAgentConfiguration(threadId, msg);
                     }
                 }
                 return;
@@ -2402,6 +2505,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     `[Codex] Routing event from non-active thread into agent trace; ` +
                     `type=${msgType}, eventThreadId=${eventThreadId}, activeThread=${this.currentThreadId}`
                 );
+                captureChildAgentConfiguration(eventThreadId, msg);
                 if (msgType === 'task_started') {
                     if (eventTurnId) {
                         this.activeChildTurns.set(eventThreadId, eventTurnId);

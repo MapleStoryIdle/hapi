@@ -17,6 +17,40 @@ describe('AppServerEventConverter', () => {
         expect(events).toEqual([{ type: 'thread_started', thread_id: 'thread-2' }]);
     });
 
+    it('preserves child thread configuration from thread and turn contexts', () => {
+        const converter = new AppServerEventConverter();
+
+        expect(converter.handleNotification('thread/started', {
+            thread: {
+                id: 'child-thread',
+                model: 'gpt-5.6',
+                config: { model_reasoning_effort: 'high' }
+            }
+        })).toEqual([{
+            type: 'thread_started',
+            thread_id: 'child-thread',
+            model: 'gpt-5.6',
+            reasoning_effort: 'high'
+        }]);
+
+        expect(converter.handleNotification('turn/started', {
+            turn: {
+                id: 'child-turn',
+                threadId: 'child-thread',
+                configuration: {
+                    model: 'gpt-5.6-mini',
+                    reasoningEffort: 'medium'
+                }
+            }
+        })).toEqual([{
+            type: 'task_started',
+            thread_id: 'child-thread',
+            turn_id: 'child-turn',
+            model: 'gpt-5.6-mini',
+            reasoning_effort: 'medium'
+        }]);
+    });
+
     it('maps thread goal updates and clears', () => {
         const converter = new AppServerEventConverter();
         const goal = {

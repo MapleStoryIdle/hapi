@@ -1,5 +1,6 @@
 import { readdirSync, statSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
+import { getCodexSessionIdFromTranscriptFilePath } from '@hapi/protocol/codexTranscript'
 import { startFileWatcher as defaultStartFileWatcher } from '@/modules/watcher/startFileWatcher'
 import { logger } from '@/ui/logger'
 import { getCodexHomePath } from './codexHome'
@@ -13,11 +14,6 @@ const DEFAULT_DEBOUNCE_MS = 120
 // pin a small number of transcripts that a browser is actively reading.
 const MAX_WATCHED_TRANSCRIPTS = 128
 const MAX_OBSERVED_TRANSCRIPTS = 16
-
-// Codex currently prefixes rollout files with their creation timestamp, for
-// example `rollout-2026-08-13T13-35-40-<session-id>.jsonl`. Keep accepting the
-// older compact form too; both identify the thread by the final UUID.
-const SESSION_ID_PATTERN = /(?:^|[\\/])rollout-(?:[^\\/]*-)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i
 
 export type NativeCodexSessionChange = {
     codexSessionId: string
@@ -55,7 +51,7 @@ type PendingChange = {
 }
 
 export function getCodexSessionIdFromTranscriptPath(filePath: string): string | null {
-    return SESSION_ID_PATTERN.exec(filePath)?.[1] ?? null
+    return getCodexSessionIdFromTranscriptFilePath(filePath)
 }
 
 function collectTranscriptFiles(root: string, files: TranscriptCandidate[]): void {

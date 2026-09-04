@@ -9,6 +9,7 @@ import {
     FileNativeCodexSessionDirectSendStore,
     NativeCodexSessionDirectSender,
     type NativeCodexAppServerClient,
+    type NativeCodexSessionDirectSendStoredItem,
     type SpawnNativeCodexProcess
 } from './nativeSessionDirectSend'
 import { NativeKanbanFeedbackStore } from './nativeKanbanFeedbackStore'
@@ -37,9 +38,13 @@ class FakeAppServerClient implements NativeCodexAppServerClient {
     initializeCalls: InitializeParams[] = []
     resumeCalls: ThreadResumeParams[] = []
     startTurnCalls: TurnStartParams[] = []
+    requestCalls: Array<{ method: string; params: unknown }> = []
     disconnectCalls = 0
     resumeError: Error | null = null
     startTurnError: Error | null = null
+    requestError: Error | null = null
+    queueAddResponse: unknown | null = null
+    initializeHook: (() => void) | null = null
 
     async connect(): Promise<void> {
         this.connectCalls += 1
@@ -47,6 +52,7 @@ class FakeAppServerClient implements NativeCodexAppServerClient {
 
     async initialize(params: InitializeParams): Promise<unknown> {
         this.initializeCalls.push(params)
+        this.initializeHook?.()
         return {}
     }
 
@@ -60,6 +66,21 @@ class FakeAppServerClient implements NativeCodexAppServerClient {
         this.startTurnCalls.push(params)
         if (this.startTurnError) throw this.startTurnError
         return { turn: { id: 'native-turn-1' } }
+    }
+
+    async request(method: string, params?: unknown): Promise<unknown> {
+        this.requestCalls.push({ method, params })
+        if (this.requestError) throw this.requestError
+        if (method === 'thread/queue/add') {
+            const input = params as { clientUserMessageId?: unknown }
+            return this.queueAddResponse ?? {
+                queuedSubmission: {
+                    id: 'native-queued-submission-1',
+                    clientUserMessageId: input.clientUserMessageId
+                }
+            }
+        }
+        return {}
     }
 
     async disconnect(): Promise<void> {
@@ -113,7 +134,7 @@ function writeTranscript(options: {
 }
 
 describe('NativeCodexSessionDirectSender', () => {
-    it('rejects fresh SSH-controlled send and archive requests before creating a receipt or app-server call', async () => {
+    it('submits an idle SSH-controlled ordinary message with queue/add while archive stays locked', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-controlled-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789099'
         const lookup = () => ({
@@ -126,6 +147,7 @@ describe('NativeCodexSessionDirectSender', () => {
         })
         const spawn = vi.fn<SpawnNativeCodexProcess>()
         const externalControlChecker = vi.fn(async () => true)
+        const sharedClient = new FakeAppServerClient()
         const sender = new NativeCodexSessionDirectSender(
             spawn,
             () => 123,
@@ -134,24 +156,1192 @@ describe('NativeCodexSessionDirectSender', () => {
             null,
             null,
             null,
-            externalControlChecker
+            externalControlChecker,
+            () => sharedClient
         )
         const archiveAttempt = vi.fn(async () => ({ success: true as const }))
 
         try {
-            await expect(sender.sendWithExternalControlCheck(sessionId, 'Do not queue this')).resolves.toMatchObject({
-                success: false,
-                code: 'external_writer_active'
+            await expect(sender.sendWithExternalControlCheck(sessionId, 'Use the existing SSH server', undefined, 'ssh:idle-1')).resolves.toMatchObject({
+                success: true,
+                status: 'queued'
             })
+            await flushAsyncWork()
+            expect(sharedClient.requestCalls).toEqual([
+                {
+                    method: 'thread/queue/add',
+                    params: {
+                        threadId: sessionId,
+                        clientUserMessageId: 'ssh:idle-1',
+                        input: [{ type: 'text', text: 'Use the existing SSH server' }]
+                    }
+                }
+            ])
+            expect(sharedClient.resumeCalls).toEqual([])
+            expect(sharedClient.startTurnCalls).toEqual([])
+            expect(sharedClient.disconnectCalls).toBe(1)
             await expect(sender.archive(sessionId, archiveAttempt)).resolves.toMatchObject({
                 success: false,
-                code: 'external_writer_active'
+                code: 'session_busy'
             })
             expect(spawn).not.toHaveBeenCalled()
             expect(archiveAttempt).not.toHaveBeenCalled()
-            expect(externalControlChecker).toHaveBeenCalledTimes(2)
+            expect(externalControlChecker).toHaveBeenCalledTimes(1)
         } finally {
             sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps an SSH-shared message local while active, then queue-adds only after a fresh idle observation', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-shared-queue-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789096'
+        const sharedClient = new FakeAppServerClient()
+        let runState: 'idle' | 'processing' = 'processing'
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState
+                })
+            },
+            null,
+            null,
+            null,
+            async () => true,
+            () => sharedClient
+        )
+
+        try {
+            await expect(sender.sendWithExternalControlCheck(sessionId, 'Wait for SSH', undefined, 'ssh:active-1')).resolves.toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            await flushAsyncWork()
+
+            expect(sharedClient.requestCalls).toEqual([])
+            expect(sharedClient.resumeCalls).toEqual([])
+            expect(sharedClient.startTurnCalls).toEqual([])
+            expect(spawn).not.toHaveBeenCalled()
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                queuedMessages: [expect.objectContaining({ id: 'ssh:active-1', text: 'Wait for SSH' })]
+            })
+
+            runState = 'idle'
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            await flushAsyncWork()
+            await flushAsyncWork()
+
+            expect(sharedClient.requestCalls).toEqual([expect.objectContaining({ method: 'thread/queue/add' })])
+            expect(sharedClient.resumeCalls).toEqual([])
+            expect(sharedClient.startTurnCalls).toEqual([])
+            expect(spawn).not.toHaveBeenCalled()
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not turn-start when the transcript changes during SSH queue setup', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-idle-race-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789091'
+        let runState: 'idle' | 'processing' = 'idle'
+        const sharedClient = new FakeAppServerClient()
+        sharedClient.initializeHook = () => {
+            runState = 'processing'
+        }
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState
+                })
+            },
+            () => new FakeAppServerClient(),
+            null,
+            null,
+            async () => true,
+            () => sharedClient
+        )
+
+        try {
+            await sender.sendWithExternalControlCheck(sessionId, 'Do not steer a raced turn', undefined, 'ssh:race-1')
+            await flushAsyncWork()
+            expect(sharedClient.requestCalls).toEqual([])
+            expect(sharedClient.resumeCalls).toEqual([])
+            expect(sharedClient.startTurnCalls).toEqual([])
+
+            sharedClient.initializeHook = null
+            runState = 'idle'
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            await flushAsyncWork()
+            await flushAsyncWork()
+
+            expect(sharedClient.requestCalls).toEqual([expect.objectContaining({
+                method: 'thread/queue/add',
+                params: expect.objectContaining({ clientUserMessageId: 'ssh:race-1' })
+            })])
+            expect(sharedClient.resumeCalls).toEqual([])
+            expect(sharedClient.startTurnCalls).toEqual([])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps an SSH-shared untrusted review queued until the Desktop owner releases it', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-review-queue-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789095'
+        let held = true
+        const sharedClient = new FakeAppServerClient()
+        const privateClient = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            () => privateClient,
+            null,
+            acceptsReviewGuard,
+            async () => held,
+            () => sharedClient
+        )
+
+        try {
+            await expect(sender.sendWithExternalControlCheck(
+                sessionId,
+                'Review only after SSH releases',
+                undefined,
+                'ssh:review-1',
+                false,
+                'untrusted-review',
+                reviewGuard
+            )).resolves.toMatchObject({ success: true, status: 'queued' })
+            expect(sharedClient.connectCalls).toBe(0)
+            expect(privateClient.connectCalls).toBe(0)
+
+            held = false
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            await flushAsyncWork()
+            await flushAsyncWork()
+
+            expect(sharedClient.connectCalls).toBe(0)
+            expect(privateClient.startTurnCalls).toEqual([{
+                threadId: sessionId,
+                input: [{ type: 'text', text: 'Review only after SSH releases' }]
+            }])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('persists a queue-add acknowledgement as non-terminal recovery work across restart', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-ack-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789094'
+        const sharedClient = new FakeAppServerClient()
+        const stored: import('./nativeSessionDirectSend').NativeCodexSessionDirectSendStoredItem[] = []
+        const store = {
+            load: () => [...stored],
+            save: (items: readonly import('./nativeSessionDirectSend').NativeCodexSessionDirectSendStoredItem[]) => {
+                stored.splice(0, stored.length, ...items)
+            }
+        }
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'idle' as const
+        })
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            { getSummary: lookup },
+            null,
+            store,
+            null,
+            async () => true,
+            () => sharedClient
+        )
+
+        try {
+            await sender.sendWithExternalControlCheck(sessionId, 'Persist once', undefined, 'ssh:ack-1')
+            await flushAsyncWork()
+            expect(stored).toEqual([expect.objectContaining({
+                id: 'ssh:ack-1',
+                accepted: true
+            })])
+            expect(stored[0]?.completed).toBeUndefined()
+            expect(stored[0]?.terminalAt).toBeUndefined()
+            expect(sharedClient.resumeCalls).toEqual([])
+            expect(sharedClient.startTurnCalls).toEqual([])
+
+            const replacementClient = new FakeAppServerClient()
+            const replacement = new NativeCodexSessionDirectSender(
+                vi.fn<SpawnNativeCodexProcess>(),
+                () => 124,
+                1_000,
+                { getSummary: lookup },
+                () => new FakeAppServerClient(),
+                store,
+                null,
+                async () => true,
+                () => replacementClient
+            )
+            try {
+                await expect(replacement.sendWithExternalControlCheck(sessionId, 'Persist once', undefined, 'ssh:ack-1')).resolves.toMatchObject({
+                    success: true,
+                    status: 'queued',
+                    queuedMessages: [expect.objectContaining({
+                        id: 'ssh:ack-1',
+                        recoveryRequired: true,
+                        recoveryReason: 'runner_restarted'
+                    })]
+                })
+                expect(replacementClient.requestCalls).toEqual([])
+                expect(replacementClient.resumeCalls).toEqual([])
+                expect(replacementClient.startTurnCalls).toEqual([])
+            } finally {
+                replacement.dispose()
+            }
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('restores every later FIFO receipt when an incomplete shared ACK fills the normal queue cap', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-restore-cap-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789082'
+        const acceptedId = 'ssh:restore-accepted'
+        const lastQueuedId = 'ssh:restore-50'
+        const stored: NativeCodexSessionDirectSendStoredItem[] = [
+            {
+                sessionId,
+                id: acceptedId,
+                text: 'Ambiguous shared acknowledgement',
+                deliveryText: 'Ambiguous shared acknowledgement',
+                queuedAt: 1,
+                recoveryRequired: false,
+                accepted: true
+            },
+            ...Array.from({ length: 50 }, (_, index): NativeCodexSessionDirectSendStoredItem => ({
+                sessionId,
+                id: `ssh:restore-${index + 1}`,
+                text: `Later FIFO item ${index + 1}`,
+                deliveryText: `Later FIFO item ${index + 1}`,
+                queuedAt: index + 2,
+                recoveryRequired: false
+            }))
+        ]
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            null,
+            {
+                load: () => [...stored],
+                save: () => {}
+            }
+        )
+
+        try {
+            const status = sender.getStatus(sessionId)
+            if (!status.success) throw new Error('Expected native queue status')
+            expect(status.queuedMessages).toHaveLength(51)
+            expect(status.queuedMessages?.[0]).toMatchObject({
+                id: acceptedId,
+                recoveryRequired: true,
+                recoveryReason: 'runner_restarted'
+            })
+            expect(status.queuedMessages?.[50]).toMatchObject({ id: lastQueuedId })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps an in-flight SSH queue-add receipt when discard races its acknowledgement', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-discard-race-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789089'
+        const clientMessageId = 'ssh:discard-race-1'
+        const sharedClient = new FakeAppServerClient()
+        const privateClient = new FakeAppServerClient()
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const stored: NativeCodexSessionDirectSendStoredItem[] = []
+        const store = {
+            load: () => [...stored],
+            save: (items: readonly NativeCodexSessionDirectSendStoredItem[]) => {
+                stored.splice(0, stored.length, ...items)
+            }
+        }
+        let acknowledgeQueueAdd!: (value: unknown) => void
+        const queueAddAcknowledgement = new Promise<unknown>((resolve) => {
+            acknowledgeQueueAdd = resolve
+        })
+        sharedClient.request = async (method, params) => {
+            sharedClient.requestCalls.push({ method, params })
+            return method === 'thread/queue/add' ? queueAddAcknowledgement : {}
+        }
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'idle' as const
+        })
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            60_000,
+            { getSummary: lookup },
+            () => privateClient,
+            store,
+            null,
+            async () => true,
+            () => sharedClient
+        )
+
+        try {
+            await expect(sender.sendWithExternalControlCheck(
+                sessionId,
+                'Keep this receipt until Codex answers',
+                undefined,
+                clientMessageId
+            )).resolves.toMatchObject({ success: true, status: 'queued' })
+            await flushMicrotasks()
+
+            expect(sharedClient.requestCalls).toEqual([expect.objectContaining({
+                method: 'thread/queue/add',
+                params: expect.objectContaining({ clientUserMessageId: clientMessageId })
+            })])
+            expect(stored).toEqual([{
+                sessionId,
+                id: clientMessageId,
+                text: 'Keep this receipt until Codex answers',
+                deliveryText: 'Keep this receipt until Codex answers',
+                queuedAt: 123,
+                recoveryRequired: true,
+                recoveryReason: 'runner_restarted'
+            }])
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                startedAt: 123,
+                queuedMessages: [expect.objectContaining({ id: clientMessageId })]
+            })
+            expect(sender.discard(sessionId, clientMessageId)).toEqual({
+                success: true,
+                discarded: false,
+                active: true,
+                queuedMessages: [{
+                    id: clientMessageId,
+                    text: 'Keep this receipt until Codex answers',
+                    queuedAt: 123,
+                    recoveryRequired: true,
+                    recoveryReason: 'runner_restarted'
+                }]
+            })
+            expect(stored).toHaveLength(1)
+
+            acknowledgeQueueAdd({
+                queuedSubmission: {
+                    id: 'native-queued-submission-1',
+                    clientUserMessageId: clientMessageId
+                }
+            })
+            await flushMicrotasks()
+
+            expect(stored).toEqual([expect.objectContaining({
+                id: clientMessageId,
+                accepted: true
+            })])
+            expect(stored[0]?.completed).toBeUndefined()
+            expect(stored[0]?.terminalAt).toBeUndefined()
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                startedAt: 123,
+                queuedMessages: []
+            })
+            expect(sharedClient.requestCalls).toHaveLength(1)
+            expect(privateClient.connectCalls).toBe(0)
+            expect(spawn).not.toHaveBeenCalled()
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('never releases a shared queue/add acknowledgement from transcript processing or idle states', async () => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-ack-barrier-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789088'
+        let runState: 'idle' | 'processing' = 'idle'
+        let modifiedAt = 100
+        const firstClient = new FakeAppServerClient()
+        const secondClient = new FakeAppServerClient()
+        const sharedClients = [firstClient, secondClient]
+        const stored: NativeCodexSessionDirectSendStoredItem[] = []
+        const store = {
+            load: () => [...stored],
+            save: (items: readonly NativeCodexSessionDirectSendStoredItem[]) => {
+                stored.splice(0, stored.length, ...items)
+            }
+        }
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            Date.now,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt,
+                    runState
+                })
+            },
+            null,
+            store,
+            null,
+            async () => true,
+            () => {
+                const client = sharedClients.shift()
+                if (!client) throw new Error('Unexpected shared queue client')
+                return client
+            }
+        )
+
+        try {
+            await expect(sender.sendWithExternalControlCheck(sessionId, 'First shared item', undefined, 'ssh:barrier-a')).resolves.toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            await flushMicrotasks()
+            expect(firstClient.requestCalls).toEqual([expect.objectContaining({
+                method: 'thread/queue/add',
+                params: expect.objectContaining({ clientUserMessageId: 'ssh:barrier-a' })
+            })])
+
+            await expect(sender.sendWithExternalControlCheck(sessionId, 'Second shared item', undefined, 'ssh:barrier-b')).resolves.toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            await flushMicrotasks()
+            expect(firstClient.requestCalls).toHaveLength(1)
+            expect(secondClient.requestCalls).toEqual([])
+
+            runState = 'processing'
+            modifiedAt = 101
+            sender.notifyTranscriptChanged(sessionId)
+            runState = 'idle'
+            modifiedAt = 102
+            sender.notifyTranscriptChanged(sessionId)
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            await flushMicrotasks()
+
+            expect(stored.find((item) => item.id === 'ssh:barrier-a')).toMatchObject({ accepted: true })
+            expect(stored.find((item) => item.id === 'ssh:barrier-a')?.completed).toBeUndefined()
+            expect(secondClient.requestCalls).toEqual([])
+
+            // A can be ACKed while the local transcript already says idle.
+            // Its per-thread lease remains the FIFO barrier, so B must not
+            // make the status look terminal or ready for another send.
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                startedAt: expect.any(Number),
+                queuedMessages: [expect.objectContaining({ id: 'ssh:barrier-b' })]
+            })
+
+            await vi.advanceTimersByTimeAsync(20_000)
+
+            const status = sender.getStatus(sessionId)
+            expect(status.success).toBe(true)
+            if (!status.success) throw new Error('Expected native queue status')
+            expect(status.status).toBe('idle')
+            expect(status.lastErrorCode).toBe('session_status_unknown')
+            expect(status.queuedMessages).toEqual([
+                expect.objectContaining({
+                    id: 'ssh:barrier-a',
+                    recoveryRequired: true,
+                    recoveryReason: 'session_status_unknown'
+                }),
+                expect.objectContaining({ id: 'ssh:barrier-b' })
+            ])
+            expect(secondClient.requestCalls).toEqual([])
+
+            // Only an explicit person-controlled resolution of the ambiguous
+            // A receipt can free B. Transcript state never does it for us.
+            expect(sender.discard(sessionId, 'ssh:barrier-a')).toMatchObject({
+                success: true,
+                discarded: true
+            })
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            await flushMicrotasks()
+            expect(secondClient.requestCalls).toEqual([expect.objectContaining({
+                method: 'thread/queue/add',
+                params: expect.objectContaining({ clientUserMessageId: 'ssh:barrier-b' })
+            })])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not start a private bridge when SSH setup is in flight and ownership flips false', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-setup-lease-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789087'
+        let held = true
+        let releaseConnect = () => {}
+        const connectGate = new Promise<void>((resolve) => {
+            releaseConnect = resolve
+        })
+        const sharedClient = new FakeAppServerClient()
+        sharedClient.connect = async () => {
+            sharedClient.connectCalls += 1
+            await connectGate
+        }
+        const privateClient = new FakeAppServerClient()
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            () => privateClient,
+            null,
+            null,
+            async () => held,
+            () => sharedClient
+        )
+
+        try {
+            await expect(sender.sendWithExternalControlCheck(sessionId, 'Shared setup item', undefined, 'ssh:setup-a')).resolves.toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            await flushMicrotasks()
+            expect(sharedClient.connectCalls).toBe(1)
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                startedAt: 123,
+                queuedMessages: [expect.objectContaining({ id: 'ssh:setup-a' })]
+            })
+
+            held = false
+            await expect(sender.sendWithExternalControlCheck(sessionId, 'Must wait behind setup', undefined, 'ssh:setup-b')).resolves.toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            await flushMicrotasks()
+
+            expect(privateClient.connectCalls).toBe(0)
+            expect(privateClient.startTurnCalls).toEqual([])
+            expect(spawn).not.toHaveBeenCalled()
+        } finally {
+            sender.dispose()
+            releaseConnect()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('releases a hung shared setup lease and retries only the FIFO head', async () => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-setup-timeout-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789082'
+        let releaseInitialize = () => {}
+        const initializeGate = new Promise<void>((resolve) => {
+            releaseInitialize = resolve
+        })
+        const firstClient = new FakeAppServerClient()
+        firstClient.initialize = async (params) => {
+            firstClient.initializeCalls.push(params)
+            await initializeGate
+            return {}
+        }
+        const secondClient = new FakeAppServerClient()
+        const clients = [firstClient, secondClient]
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            Date.now,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            null,
+            null,
+            null,
+            async () => true,
+            () => {
+                const client = clients.shift()
+                if (!client) throw new Error('Unexpected shared queue client')
+                return client
+            }
+        )
+
+        try {
+            await sender.sendWithExternalControlCheck(sessionId, 'Retry the first FIFO item', undefined, 'ssh:setup-timeout-a')
+            await flushMicrotasks()
+            await sender.sendWithExternalControlCheck(sessionId, 'Do not skip the first FIFO item', undefined, 'ssh:setup-timeout-b')
+            await flushMicrotasks()
+
+            expect(firstClient.connectCalls).toBe(1)
+            expect(firstClient.initializeCalls).toHaveLength(1)
+            expect(firstClient.requestCalls).toEqual([])
+            expect(sender.getStatus(sessionId)).toMatchObject({ success: true, status: 'processing' })
+
+            await vi.advanceTimersByTimeAsync(15_000)
+
+            expect(firstClient.disconnectCalls).toBe(1)
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'idle',
+                queuedMessages: [
+                    expect.objectContaining({ id: 'ssh:setup-timeout-a' }),
+                    expect.objectContaining({ id: 'ssh:setup-timeout-b' })
+                ]
+            })
+            expect(secondClient.requestCalls).toEqual([])
+
+            // A late setup continuation is inert: it cannot submit the
+            // expired socket after the retry lease is gone.
+            releaseInitialize()
+            await flushMicrotasks()
+            expect(firstClient.requestCalls).toEqual([])
+
+            await vi.advanceTimersByTimeAsync(5_000)
+            await flushMicrotasks()
+
+            expect(secondClient.requestCalls).toEqual([expect.objectContaining({
+                method: 'thread/queue/add',
+                params: expect.objectContaining({ clientUserMessageId: 'ssh:setup-timeout-a' })
+            })])
+        } finally {
+            sender.dispose()
+            releaseInitialize()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('turns a hung shared queue-add into head recovery without sending its FIFO successor', async () => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-submit-timeout-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789081'
+        let resolveQueueAdd: (value: unknown) => void = () => {}
+        const queueAddGate = new Promise<unknown>((resolve) => {
+            resolveQueueAdd = resolve
+        })
+        const sharedClient = new FakeAppServerClient()
+        sharedClient.request = async (method, params) => {
+            sharedClient.requestCalls.push({ method, params })
+            return method === 'thread/queue/add' ? queueAddGate : {}
+        }
+        const stored: NativeCodexSessionDirectSendStoredItem[] = []
+        const store = {
+            load: () => [...stored],
+            save: (items: readonly NativeCodexSessionDirectSendStoredItem[]) => {
+                stored.splice(0, stored.length, ...items)
+            }
+        }
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            Date.now,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            null,
+            store,
+            null,
+            async () => true,
+            () => sharedClient
+        )
+
+        try {
+            await sender.sendWithExternalControlCheck(sessionId, 'Ambiguous first FIFO item', undefined, 'ssh:submit-timeout-a')
+            await flushMicrotasks()
+            await sender.sendWithExternalControlCheck(sessionId, 'Later FIFO item', undefined, 'ssh:submit-timeout-b')
+            await flushMicrotasks()
+
+            expect(sharedClient.requestCalls).toEqual([expect.objectContaining({
+                method: 'thread/queue/add',
+                params: expect.objectContaining({ clientUserMessageId: 'ssh:submit-timeout-a' })
+            })])
+            expect(sender.getStatus(sessionId)).toMatchObject({ success: true, status: 'processing' })
+
+            await vi.advanceTimersByTimeAsync(20_000)
+
+            expect(sharedClient.disconnectCalls).toBe(1)
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'idle',
+                lastErrorCode: 'session_status_unknown',
+                queuedMessages: [
+                    expect.objectContaining({
+                        id: 'ssh:submit-timeout-a',
+                        recoveryRequired: true,
+                        recoveryReason: 'session_status_unknown'
+                    }),
+                    expect.objectContaining({ id: 'ssh:submit-timeout-b' })
+                ]
+            })
+            expect(stored.map((item) => ({ id: item.id, recoveryRequired: item.recoveryRequired, recoveryReason: item.recoveryReason }))).toEqual([
+                {
+                    id: 'ssh:submit-timeout-a',
+                    recoveryRequired: true,
+                    recoveryReason: 'session_status_unknown'
+                },
+                {
+                    id: 'ssh:submit-timeout-b',
+                    recoveryRequired: false,
+                    recoveryReason: undefined
+                }
+            ])
+            await expect(sender.sendWithExternalControlCheck(
+                sessionId,
+                'Later FIFO item',
+                undefined,
+                'ssh:submit-timeout-b',
+                true
+            )).resolves.toMatchObject({ success: false, code: 'session_busy' })
+
+            // A response arriving after timeout cannot turn A into an ACK
+            // receipt or release B around its manual-recovery barrier.
+            resolveQueueAdd({
+                queuedSubmission: {
+                    id: 'native-queued-submission-1',
+                    clientUserMessageId: 'ssh:submit-timeout-a'
+                }
+            })
+            await flushMicrotasks()
+            expect(sharedClient.requestCalls).toHaveLength(1)
+            const finalStatus = sender.getStatus(sessionId)
+            if (!finalStatus.success) throw new Error('Expected native queue status')
+            expect(finalStatus.queuedMessages).toEqual([
+                expect.objectContaining({
+                    id: 'ssh:submit-timeout-a',
+                    recoveryRequired: true,
+                    recoveryReason: 'session_status_unknown'
+                }),
+                expect.objectContaining({ id: 'ssh:submit-timeout-b' })
+            ])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps a pre-write shared setup receipt discardable without stranding the next FIFO item', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-setup-discard-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789084'
+        let releaseConnect = () => {}
+        const connectGate = new Promise<void>((resolve) => {
+            releaseConnect = resolve
+        })
+        const firstClient = new FakeAppServerClient()
+        firstClient.connect = async () => {
+            firstClient.connectCalls += 1
+            await connectGate
+        }
+        const secondClient = new FakeAppServerClient()
+        const clients = [firstClient, secondClient]
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            null,
+            null,
+            null,
+            async () => true,
+            () => {
+                const client = clients.shift()
+                if (!client) throw new Error('Unexpected shared queue client')
+                return client
+            }
+        )
+
+        try {
+            await sender.sendWithExternalControlCheck(sessionId, 'Discard before queue/add', undefined, 'ssh:setup-discard-a')
+            await flushMicrotasks()
+            await sender.sendWithExternalControlCheck(sessionId, 'Keep next FIFO item', undefined, 'ssh:setup-discard-b')
+            expect(sender.discard(sessionId, 'ssh:setup-discard-a')).toMatchObject({
+                success: true,
+                discarded: true,
+                queuedMessages: [expect.objectContaining({ id: 'ssh:setup-discard-b' })]
+            })
+
+            releaseConnect()
+            await flushAsyncWork()
+            await flushAsyncWork()
+
+            expect(secondClient.requestCalls).toEqual([expect.objectContaining({
+                method: 'thread/queue/add',
+                params: expect.objectContaining({ clientUserMessageId: 'ssh:setup-discard-b' })
+            })])
+        } finally {
+            sender.dispose()
+            releaseConnect()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not start a private bridge while a shared ACK still awaits terminal transcript evidence', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-ack-lease-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789085'
+        let held = true
+        const sharedClient = new FakeAppServerClient()
+        const privateClient = new FakeAppServerClient()
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            () => privateClient,
+            null,
+            null,
+            async () => held,
+            () => sharedClient
+        )
+
+        try {
+            await sender.sendWithExternalControlCheck(sessionId, 'ACK barrier item', undefined, 'ssh:ack-lease-a')
+            await flushMicrotasks()
+            expect(sharedClient.requestCalls).toHaveLength(1)
+
+            held = false
+            await expect(sender.sendWithExternalControlCheck(sessionId, 'Must stay behind ACK barrier', undefined, 'ssh:ack-lease-b')).resolves.toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            await flushMicrotasks()
+
+            expect(sharedClient.requestCalls).toHaveLength(1)
+            expect(privateClient.connectCalls).toBe(0)
+            expect(privateClient.startTurnCalls).toEqual([])
+            expect(spawn).not.toHaveBeenCalled()
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('turns an unbound shared ACK into recovery before draining later FIFO work', async () => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-ack-timeout-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789086'
+        const firstClient = new FakeAppServerClient()
+        const secondClient = new FakeAppServerClient()
+        const sharedClients = [firstClient, secondClient]
+        let runState: 'idle' | 'processing' = 'idle'
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            Date.now,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState
+                })
+            },
+            null,
+            null,
+            null,
+            async () => true,
+            () => {
+                const client = sharedClients.shift()
+                if (!client) throw new Error('Unexpected shared queue client')
+                return client
+            }
+        )
+
+        try {
+            await sender.sendWithExternalControlCheck(sessionId, 'Ambiguous shared item', undefined, 'ssh:timeout-a')
+            await flushMicrotasks()
+            await sender.sendWithExternalControlCheck(sessionId, 'Later local FIFO item', undefined, 'ssh:timeout-b')
+            await flushMicrotasks()
+            expect(firstClient.requestCalls).toHaveLength(1)
+            expect(secondClient.requestCalls).toEqual([])
+
+            runState = 'processing'
+            await vi.advanceTimersByTimeAsync(20_000)
+
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                lastErrorCode: 'session_status_unknown',
+                queuedMessages: [
+                    expect.objectContaining({
+                        id: 'ssh:timeout-a',
+                        recoveryRequired: true,
+                        recoveryReason: 'session_status_unknown'
+                    }),
+                    expect.objectContaining({ id: 'ssh:timeout-b' })
+                ]
+            })
+            expect(firstClient.requestCalls).toHaveLength(1)
+            expect(secondClient.requestCalls).toEqual([])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps a lost SSH queue-add response as an explicit recovery receipt without private fallback', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-ambiguous-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789093'
+        const sharedClient = new FakeAppServerClient()
+        sharedClient.requestError = new Error('shared queue response lost')
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const privateClient = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            () => privateClient,
+            null,
+            null,
+            async () => true,
+            () => sharedClient
+        )
+
+        try {
+            await sender.sendWithExternalControlCheck(sessionId, 'Never replay automatically', undefined, 'ssh:ambiguous-1')
+            await flushAsyncWork()
+
+            expect(spawn).not.toHaveBeenCalled()
+            expect(sharedClient.resumeCalls).toEqual([])
+            expect(sharedClient.startTurnCalls).toEqual([])
+            expect(privateClient.connectCalls).toBe(0)
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                lastError: 'shared queue response lost',
+                lastErrorClientMessageId: 'ssh:ambiguous-1',
+                queuedMessages: [expect.objectContaining({
+                    id: 'ssh:ambiguous-1',
+                    recoveryRequired: true,
+                    recoveryReason: 'session_status_unknown'
+                })]
+            })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('treats an untyped invalid SSH queue-add failure as ambiguous instead of retrying it', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-invalid-response-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789090'
+        const sharedClient = new FakeAppServerClient()
+        sharedClient.requestError = new Error('Invalid JSON-RPC message from Codex SSH app-server')
+        const privateClient = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            () => privateClient,
+            null,
+            null,
+            async () => true,
+            () => sharedClient
+        )
+
+        try {
+            await sender.sendWithExternalControlCheck(sessionId, 'Never replay an ambiguous rejection', undefined, 'ssh:invalid-1')
+            await flushAsyncWork()
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                lastErrorCode: 'session_status_unknown',
+                queuedMessages: [expect.objectContaining({
+                    id: 'ssh:invalid-1',
+                    recoveryRequired: true,
+                    recoveryReason: 'session_status_unknown'
+                })]
+            })
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            await flushAsyncWork()
+            await flushAsyncWork()
+            expect(sharedClient.requestCalls).toHaveLength(1)
+            expect(privateClient.connectCalls).toBe(0)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps a completed ordinary client message id across a runner restart', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-client-id-tombstone-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789092'
+        const stored: import('./nativeSessionDirectSend').NativeCodexSessionDirectSendStoredItem[] = []
+        const store = {
+            load: () => [...stored],
+            save: (items: readonly import('./nativeSessionDirectSend').NativeCodexSessionDirectSendStoredItem[]) => {
+                stored.splice(0, stored.length, ...items)
+            }
+        }
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'idle' as const
+        })
+        const firstClient = new FakeAppServerClient()
+        const first = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            { getSummary: lookup },
+            () => firstClient,
+            store
+        )
+
+        try {
+            expect(first.send(sessionId, 'Only once', undefined, 'browser:once-1')).toMatchObject({ success: true, status: 'processing' })
+            await flushAsyncWork()
+            firstClient.emit('turn/completed', {
+                thread: { id: sessionId },
+                turn: { id: 'native-turn-1' },
+                status: 'completed'
+            })
+            expect(stored).toEqual([expect.objectContaining({
+                id: 'browser:once-1',
+                accepted: true,
+                completed: true,
+                terminalAt: 123
+            })])
+
+            const secondClient = new FakeAppServerClient()
+            const second = new NativeCodexSessionDirectSender(
+                vi.fn<SpawnNativeCodexProcess>(),
+                () => 124,
+                1_000,
+                { getSummary: lookup },
+                () => secondClient,
+                store
+            )
+            try {
+                expect(second.send(sessionId, 'Only once', undefined, 'browser:once-1')).toMatchObject({
+                    success: true,
+                    status: 'processing'
+                })
+                expect(secondClient.connectCalls).toBe(0)
+            } finally {
+                second.dispose()
+            }
+        } finally {
+            first.dispose()
             rmSync(cwd, { recursive: true, force: true })
         }
     })
@@ -766,6 +1956,129 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
+    it('keeps a new guard-rejected review behind earlier FIFO work', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-review-guard-order-workspace-'))
+        const sessionId = '83345678-1234-4234-8234-123456789011'
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'processing' as const
+                })
+            },
+            null,
+            null,
+            () => ({ success: false as const, error: 'The staged review changed' })
+        )
+
+        try {
+            expect(sender.send(sessionId, 'Earlier FIFO work', undefined, 'native:guard-order-a')).toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            expect(sender.send(
+                sessionId,
+                'Review only the staged file',
+                'Review feedback: changed.md',
+                'hapi-kanban-review:guard-order-b',
+                false,
+                'untrusted-review',
+                reviewGuard
+            )).toMatchObject({
+                success: false,
+                code: 'launch_failed'
+            })
+
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                queuedMessages: [
+                    expect.objectContaining({ id: 'native:guard-order-a' }),
+                    expect.objectContaining({
+                        id: 'hapi-kanban-review:guard-order-b',
+                        recoveryRequired: true,
+                        recoveryReason: 'launch_failed'
+                    })
+                ]
+            })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not duplicate a recovery review when its guard check fails again', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-review-guard-recovery-workspace-'))
+        const sessionId = '83345678-1234-4234-8234-123456789010'
+        const reviewId = 'hapi-kanban-review:guard-recovery-b'
+        const stored: NativeCodexSessionDirectSendStoredItem[] = [{
+            sessionId,
+            id: reviewId,
+            text: 'Review feedback: changed.md',
+            deliveryText: 'Review only the staged file',
+            queuedAt: 100,
+            recoveryRequired: true,
+            recoveryReason: 'launch_failed',
+            deliveryPolicy: 'untrusted-review',
+            reviewGuard
+        }]
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            null,
+            {
+                load: () => [...stored],
+                save: (items: readonly NativeCodexSessionDirectSendStoredItem[]) => {
+                    stored.splice(0, stored.length, ...items)
+                }
+            },
+            () => ({ success: false as const, error: 'The staged review changed again' })
+        )
+
+        try {
+            expect(sender.send(
+                sessionId,
+                'Review only the staged file',
+                'Review feedback: changed.md',
+                reviewId,
+                true,
+                'untrusted-review',
+                reviewGuard
+            )).toMatchObject({
+                success: false,
+                code: 'launch_failed'
+            })
+            const status = sender.getStatus(sessionId)
+            expect(status.success).toBe(true)
+            if (!status.success) throw new Error('Expected native queue status')
+            expect(status.queuedMessages).toEqual([expect.objectContaining({
+                id: reviewId,
+                recoveryRequired: true,
+                recoveryReason: 'launch_failed'
+            })])
+            expect(stored.map((item) => item.id)).toEqual([reviewId])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('uses one short-lived app-server bridge for an exact native thread', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-bridge-workspace-'))
         const sessionId = '80345678-1234-4234-8234-123456789012'
@@ -911,7 +2224,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('drops an external native writer conflict before turn/start without queueing the prompt', async () => {
+    it('keeps an external native writer conflict before turn/start in the durable FIFO', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-active-writer-workspace-'))
         const sessionId = '81845678-1234-4234-8234-123456789012'
         const lookup = vi.fn(() => ({
@@ -924,9 +2237,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }))
         const blockedClient = new FakeAppServerClient()
         blockedClient.resumeError = new Error('thread-store conflict: thread already has an active writer')
-        const readyClient = new FakeAppServerClient()
-        let nextClient = 0
-        const createClient = vi.fn(() => [blockedClient, readyClient][nextClient++]!)
+        const createClient = vi.fn(() => blockedClient)
         const spawn = vi.fn<SpawnNativeCodexProcess>()
         const store = {
             load: vi.fn(() => []),
@@ -952,26 +2263,15 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
                 status: 'idle',
-                lastError: 'This native Codex session is currently controlled by another Codex client',
-                lastErrorClientMessageId: 'native:active-writer',
-                lastErrorCode: 'external_writer_active',
-                queuedMessages: []
+                queuedMessages: [expect.objectContaining({
+                    id: 'native:active-writer',
+                    text: 'Ignore this locked prompt'
+                })]
             })
-            expect(store.save).toHaveBeenLastCalledWith([])
-
-            // Once the Desktop owner releases the thread, a later message is
-            // a fresh hand-off rather than a retry of the discarded prompt.
-            expect(sender.send(sessionId, 'Send after the owner releases it', undefined, 'native:after-active-writer')).toMatchObject({
-                success: true,
-                status: 'processing'
-            })
-            await flushMicrotasks()
-
-            expect(createClient).toHaveBeenCalledTimes(2)
-            expect(readyClient.startTurnCalls).toEqual([{
-                threadId: sessionId,
-                input: [{ type: 'text', text: 'Send after the owner releases it' }]
-            }])
+            expect(store.save).toHaveBeenLastCalledWith([expect.objectContaining({
+                id: 'native:active-writer',
+                recoveryRequired: false
+            })])
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
@@ -1819,6 +3119,56 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
+    it('does not let an orphan recovery bypass an earlier local FIFO receipt', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-recovery-fifo-workspace-'))
+        const sessionId = '26445678-1234-4234-8234-123456789013'
+        let runState: 'idle' | 'processing' = 'processing'
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 500,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState
+                })
+            }
+        )
+
+        try {
+            expect(sender.send(sessionId, 'Earlier FIFO message', undefined, 'native:fifo-a')).toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            runState = 'idle'
+
+            expect(sender.send(
+                sessionId,
+                'Orphan recovery must wait',
+                undefined,
+                'native:fifo-b',
+                true
+            )).toEqual({
+                success: false,
+                code: 'session_busy',
+                error: 'An earlier native message must be recovered first'
+            })
+            expect(spawn).not.toHaveBeenCalled()
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                queuedMessages: [expect.objectContaining({ id: 'native:fifo-a' })]
+            })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('notifies the runner when direct-send lifecycle state changes', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-direct-notify-'))
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-notify-workspace-'))
@@ -1844,7 +3194,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('queues while the native transcript is processing and keeps unknown state locked', () => {
+    it('queues while the native transcript is processing and keeps unknown receipts safe', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-direct-state-'))
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-workspace-'))
         const activeSessionId = '22345678-1234-4234-8234-123456789012'
@@ -1868,14 +3218,90 @@ describe('NativeCodexSessionDirectSender', () => {
                 status: 'processing',
                 queuedMessages: [{ text: 'hello' }]
             })
-            expect(sender.send(legacySessionId, 'hello')).toMatchObject({
-                success: false,
-                code: 'session_status_unknown'
+            expect(sender.send(legacySessionId, 'hello', undefined, 'native:unknown-receipt')).toMatchObject({
+                success: true,
+                status: 'queued',
+                queuePosition: 1,
+                queuedMessages: [{ id: 'native:unknown-receipt', text: 'hello' }]
+            })
+            expect(sender.getStatus(legacySessionId)).toMatchObject({
+                success: true,
+                status: 'unknown',
+                queuedMessages: [{ id: 'native:unknown-receipt', text: 'hello' }]
             })
             expect(spawn).not.toHaveBeenCalled()
         } finally {
             sender.dispose()
             rmSync(codexHome, { recursive: true, force: true })
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('persists unknown-state receipts in FIFO and starts only after an idle observation', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-unknown-queue-workspace-'))
+        const sessionId = '33345678-1234-4234-8234-123456789012'
+        let runState: 'idle' | 'unknown' = 'unknown'
+        const persisted: NativeCodexSessionDirectSendStoredItem[] = []
+        const store = {
+            load: () => [...persisted],
+            save: (items: readonly NativeCodexSessionDirectSendStoredItem[]) => {
+                persisted.splice(0, persisted.length, ...items)
+            }
+        }
+        const child = new FakeChildProcess()
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState
+                })
+            },
+            null,
+            store
+        )
+
+        try {
+            expect(sender.send(sessionId, 'first unknown receipt', undefined, 'native:unknown-first')).toMatchObject({
+                success: true,
+                status: 'queued',
+                queuePosition: 1
+            })
+            expect(sender.send(sessionId, 'second unknown receipt', undefined, 'native:unknown-second')).toMatchObject({
+                success: true,
+                status: 'queued',
+                queuePosition: 2
+            })
+            expect(persisted.map((item) => ({ id: item.id, recoveryRequired: item.recoveryRequired }))).toEqual([
+                { id: 'native:unknown-first', recoveryRequired: false },
+                { id: 'native:unknown-second', recoveryRequired: false }
+            ])
+
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            expect(spawn).not.toHaveBeenCalled()
+
+            runState = 'idle'
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+
+            expect(spawn).toHaveBeenCalledTimes(1)
+            expect(spawn).toHaveBeenCalledWith(
+                ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, 'first unknown receipt'],
+                cwd
+            )
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                queuedMessages: [{ id: 'native:unknown-second', text: 'second unknown receipt' }]
+            })
+        } finally {
+            sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
         }
     })

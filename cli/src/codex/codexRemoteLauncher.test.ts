@@ -35,6 +35,7 @@ const harness = vi.hoisted(() => ({
     failNextCompact: false,
     deferThreadStatusNotifications: false,
     emitChildThreadEvents: false,
+    emitChildThreadConfiguration: false,
     emitChildUsageEvents: false,
     emitChildSessionEvent: false,
     emitChildGoalEvent: false,
@@ -492,6 +493,18 @@ vi.mock('./codexAppServerClient', () => {
                 const childTurnId = 'child-turn';
                 const childMessage = 'child output should stay hidden';
                 const secondChildMessage = 'final child output should win';
+
+                if (harness.emitChildThreadConfiguration) {
+                    const childThreadStarted = {
+                        thread: {
+                            id: childThreadId,
+                            model: 'gpt-5.6',
+                            config: { model_reasoning_effort: 'high' }
+                        }
+                    };
+                    harness.notifications.push({ method: 'thread/started', params: childThreadStarted });
+                    this.notificationHandler?.('thread/started', childThreadStarted);
+                }
 
                 const emitChildDone = () => {
                     const childDone = {
@@ -1061,6 +1074,7 @@ describe('codexRemoteLauncher', () => {
         harness.failNextCompact = false;
         harness.deferThreadStatusNotifications = false;
         harness.emitChildThreadEvents = false;
+        harness.emitChildThreadConfiguration = false;
         harness.emitChildUsageEvents = false;
         harness.emitChildSessionEvent = false;
         harness.emitChildGoalEvent = false;
@@ -1798,6 +1812,41 @@ describe('codexRemoteLauncher', () => {
             output: expect.objectContaining({
                 output: 'ok\n'
             })
+        }));
+    });
+
+    it('supplements spawn-agent cards with parent and child effective configuration', async () => {
+        harness.emitParentSpawnStartWithoutEnd = true;
+        harness.emitChildTaskStartedAfterParentSpawnStart = true;
+        harness.emitChildThreadEvents = true;
+        harness.emitChildThreadConfiguration = true;
+        const mode: EnhancedMode = {
+            ...createMode(),
+            model: 'gpt-5.6-parent',
+            modelReasoningEffort: 'xhigh'
+        };
+        const { session, codexMessages } = createSessionStub(['hello from launcher test'], mode);
+
+        await codexRemoteLauncher(session as never);
+
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'agent-run-start',
+            cardId: 'failed-spawn',
+            input: expect.objectContaining({
+                reasoning_effort: 'medium',
+                hapiSubagentConfig: {
+                    parentModel: 'gpt-5.4',
+                    parentReasoningEffort: 'xhigh'
+                }
+            })
+        }));
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'agent-run-update',
+            agentId: 'child-thread',
+            hapiSubagentConfig: {
+                childModel: 'gpt-5.6',
+                childReasoningEffort: 'high'
+            }
         }));
     });
 

@@ -19,6 +19,7 @@ import {
     type CodexLocalSessionData as RunnerCodexLocalSessionData,
     type CodexLocalSessionPlan,
     type CodexLocalSessionReadTiming,
+    type CodexLocalSessionSubagent,
     type CodexLocalSessionSnapshotReadOptions,
     type CodexLocalSessionSnapshotVersion,
     type CodexLocalSessionStatusRpcResponse,
@@ -112,6 +113,8 @@ type CodexLocalSessionContextResponse = {
     success: true
     session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort' | 'controlledByCodexSsh'>
     messages: CodexLocalSessionContextMessage[]
+    /** Direct native child threads; parent pagination never includes them. */
+    subagents?: CodexLocalSessionSubagent[]
     page: {
         limit: number
         nextBefore: number | null
@@ -647,11 +650,12 @@ function createRunnerCodexSessionContextResponse(
     revision: number,
     version?: CodexLocalSessionSnapshotVersion
 ): CodexLocalSessionContextResponse & { revision: number; version?: CodexLocalSessionSnapshotVersion } {
-    const { session, importedMessages } = data
+    const { session, importedMessages, subagents } = data
     return {
         success: true,
         session: createRunnerCodexSessionDisplaySummary(session),
         messages: createCodexTranscriptContextMessages(session.id, importedMessages, data.startIndex, session.modifiedAt),
+        subagents,
         page: data.page,
         revision,
         ...(version === undefined ? {} : { version })
@@ -2018,6 +2022,7 @@ export function createCodexDesktopRoutes(options: {
                     controlledByCodexSsh: session.controlledByCodexSsh ?? false
                 },
                 messages: createCodexTranscriptContextMessages(session.id, importedMessages, result.data.startIndex, session.modifiedAt),
+                subagents: result.data.subagents,
                 page: result.data.page
             } satisfies CodexLocalSessionContextResponse)
         } catch (error) {

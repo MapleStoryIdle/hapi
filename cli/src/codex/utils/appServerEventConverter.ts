@@ -355,6 +355,51 @@ function extractStringArray(value: unknown): string[] {
         : [];
 }
 
+function getFirstConfigString(
+    records: Array<Record<string, unknown> | null>,
+    keys: string[]
+): string | null {
+    for (const record of records) {
+        if (!record) continue;
+        for (const key of keys) {
+            const value = asString(record[key]);
+            if (value) return value;
+        }
+    }
+    return null;
+}
+
+/** Preserve a child thread's effective configuration for the HAPI subagent card. */
+function extractThreadConfiguration(
+    params: Record<string, unknown>,
+    thread: Record<string, unknown>
+): Record<string, string> {
+    const turn = asRecord(params.turn);
+    const records = [
+        turn,
+        asRecord(turn?.config),
+        asRecord(turn?.configuration),
+        thread,
+        asRecord(thread.config),
+        asRecord(thread.configuration),
+        asRecord(params.config),
+        asRecord(params.configuration),
+        params
+    ];
+    const model = getFirstConfigString(records, ['model', 'modelId', 'model_id']);
+    const reasoningEffort = getFirstConfigString(records, [
+        'reasoningEffort',
+        'reasoning_effort',
+        'modelReasoningEffort',
+        'model_reasoning_effort'
+    ]);
+
+    return {
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {})
+    };
+}
+
 function buildCollabAgentInput(item: Record<string, unknown>, toolName: string): Record<string, unknown> {
     const targets = extractStringArray(item.receiverThreadIds ?? item.receiver_thread_ids ?? item.targets);
     const input: Record<string, unknown> = {};
@@ -720,7 +765,11 @@ export class AppServerEventConverter {
             const thread = asRecord(paramsRecord.thread) ?? paramsRecord;
             const threadId = asString(thread.threadId ?? thread.thread_id ?? thread.id);
             if (threadId) {
-                events.push({ type: 'thread_started', thread_id: threadId });
+                events.push({
+                    type: 'thread_started',
+                    thread_id: threadId,
+                    ...extractThreadConfiguration(paramsRecord, thread)
+                });
             }
             return events;
         }
@@ -746,7 +795,21 @@ export class AppServerEventConverter {
         if (method === 'turn/started') {
             const turn = asRecord(paramsRecord.turn) ?? paramsRecord;
             const turnId = asString(turn.turnId ?? turn.turn_id ?? turn.id);
-            events.push(scoped({ type: 'task_started', ...(turnId ? { turn_id: turnId } : {}) }));
+            const thread = asRecord(paramsRecord.thread) ?? paramsRecord;
+            const threadId = asString(
+                turn.threadId
+                ?? turn.thread_id
+                ?? thread.threadId
+                ?? thread.thread_id
+                ?? thread.id
+                ?? eventScope.thread_id
+            );
+            events.push(scoped({
+                type: 'task_started',
+                ...(threadId ? { thread_id: threadId } : {}),
+                ...(turnId ? { turn_id: turnId } : {}),
+                ...extractThreadConfiguration(paramsRecord, thread)
+            }));
             return events;
         }
 

@@ -13,6 +13,7 @@ import {
     getCodexTranscriptUserInputState,
     getLocalCodexSessionData,
     getLocalCodexSessionRunState,
+    listLocalCodexSessionSubagents,
     listLocalCodexSessions,
     normalizeCodexCustomToolOutput,
     readLocalCodexSessionSummary
@@ -42,6 +43,101 @@ describe('getCodexSessionDisplayTitle', () => {
 })
 
 describe('getLocalCodexSessionData', () => {
+    it('associates native child rollouts with their direct parent only', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-native-subagent-test-'))
+        const parentId = '10101010-1010-4010-8010-101010101010'
+        const childId = '20202020-2020-4020-8020-202020202020'
+        const nestedId = '30303030-3030-4030-8030-303030303030'
+        const turnId = '40404040-4040-4040-8040-404040404040'
+        const sessionDir = join(codexHome, 'sessions', '2026', '09', '04')
+        const parentFile = join(sessionDir, `rollout-${parentId}.jsonl`)
+        const childFile = join(sessionDir, `rollout-2026-09-04T10-00-00-${childId}.jsonl`)
+        const childRotation = join(sessionDir, `rollout-2026-09-04T10-01-00-${childId}_${turnId}.jsonl`)
+        const nestedFile = join(sessionDir, `rollout-${nestedId}.jsonl`)
+        mkdirSync(sessionDir, { recursive: true })
+        writeFileSync(parentFile, `${JSON.stringify({
+            type: 'session_meta',
+            payload: { id: parentId, cwd: '/workspace/project' }
+        })}\n`, 'utf8')
+        writeFileSync(childFile, [
+            {
+                type: 'session_meta',
+                payload: {
+                    id: childId,
+                    parent_thread_id: parentId,
+                    source: {
+                        subagent: {
+                            thread_spawn: {
+                                parent_thread_id: parentId,
+                                agent_nickname: 'Peirce',
+                                agent_role: 'reviewer',
+                                agent_path: '/root/reviewer'
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                type: 'turn_context',
+                payload: { model: 'gpt-5.6-terra', effort: 'max' }
+            },
+            {
+                timestamp: '2026-09-04T10:00:00.000Z',
+                type: 'event_msg',
+                payload: { type: 'task_started', turn_id: turnId }
+            },
+            {
+                timestamp: '2026-09-04T10:00:01.000Z',
+                type: 'response_item',
+                payload: {
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'I will inspect the implementation.' }]
+                }
+            }
+        ].map((record) => JSON.stringify(record)).join('\n') + '\n', 'utf8')
+        writeFileSync(childRotation, [
+            {
+                timestamp: '2026-09-04T10:00:02.000Z',
+                type: 'event_msg',
+                payload: { type: 'task_complete', turn_id: turnId }
+            }
+        ].map((record) => JSON.stringify(record)).join('\n') + '\n', 'utf8')
+        writeFileSync(nestedFile, `${JSON.stringify({
+            type: 'session_meta',
+            payload: {
+                id: nestedId,
+                parent_thread_id: childId,
+                source: { subagent: { thread_spawn: { parent_thread_id: childId } } }
+            }
+        })}\n`, 'utf8')
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            const subagents = listLocalCodexSessionSubagents(parentId)
+            expect(subagents).toHaveLength(1)
+            expect(subagents[0]).toMatchObject({
+                id: childId,
+                parentSessionId: parentId,
+                name: 'Peirce',
+                role: 'reviewer',
+                agentPath: '/root/reviewer',
+                model: 'gpt-5.6-terra',
+                modelReasoningEffort: 'max',
+                status: 'completed',
+                statusText: 'Completed',
+                startedAt: Date.parse('2026-09-04T10:00:00.000Z'),
+                completedAt: Date.parse('2026-09-04T10:00:02.000Z')
+            })
+            expect(subagents[0]?.traceMessages).toMatchObject([
+                { role: 'agent', content: { data: { type: 'message', message: 'I will inspect the implementation.' } } }
+            ])
+            expect(getLocalCodexSessionData(parentId, { limit: 50 })?.subagents.map((subagent) => subagent.id)).toEqual([childId])
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
     it('keeps only a confirmed, turn-scoped native update_plan outside the message page', () => {
         const accumulator = createCodexTranscriptImportAccumulator()
         const line = (record: unknown) => JSON.stringify(record)

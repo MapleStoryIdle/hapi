@@ -45,11 +45,12 @@ import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import { FileNativeCodexSessionDirectSendStore, NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
 import { NativeKanbanFeedbackStore } from '@/codex/nativeKanbanFeedbackStore'
 import { CodexAppServerClient } from '@/codex/codexAppServerClient'
+import { CodexSshAppServerClient } from '@/codex/codexSshAppServerClient'
 import { NativeCodexSessionListCache } from '@/codex/nativeSessionListCache'
 import { NativeCodexSessionTitleCache } from '@/codex/nativeSessionTitleCache'
 import { NativeCodexTranscriptCache, type NativeCodexTranscriptRead } from '@/codex/nativeTranscriptCache'
 import { NativeCodexSessionWatcher } from '@/codex/nativeSessionWatcher'
-import { CodexSshSessionOwnershipProbe } from '@/codex/codexSshOwnership'
+import { CodexSshSessionOwnershipProbe, getCodexSshControlSocketPath } from '@/codex/codexSshOwnership'
 import {
     NativeCodexTurnLifecycleTracker,
     normalizeNativeCodexSessionForDisplay,
@@ -298,7 +299,12 @@ export class ApiMachineClient {
     )
     private readonly nativeCodexSessionWatcher = new NativeCodexSessionWatcher({
         onChange: ({ codexSessionId, filePath, modifiedAt }) => {
-            const summaryRead = this.nativeCodexTranscriptCache.refreshSummary(codexSessionId)
+            const read = this.nativeCodexTranscriptCache.refreshCachedFromFile(
+                codexSessionId,
+                filePath,
+                { limit: 50 }
+            )
+            const summaryRead = read ?? this.nativeCodexTranscriptCache.refreshSummaryFromFile(codexSessionId, filePath)
             if (summaryRead) {
                 this.nativeCodexTurnLifecycle.observeTranscriptEvents(codexSessionId, summaryRead.lifecycleEvents)
                 if (this.nativeCodexSessionDirectSender.ownsActiveDelivery(codexSessionId)) {
@@ -308,7 +314,6 @@ export class ApiMachineClient {
                 }
             }
             const listSession = this.nativeCodexSessionListCache.update(filePath, modifiedAt)
-            const read = this.nativeCodexTranscriptCache.refreshCached(codexSessionId, { limit: 50 })
             this.nativeCodexSessionDirectSender.notifyTranscriptChanged(codexSessionId)
             this.reportNativeCodexSessionUpdated(codexSessionId, modifiedAt, read, listSession)
         }
@@ -338,7 +343,8 @@ export class ApiMachineClient {
             () => new CodexAppServerClient(),
             new FileNativeCodexSessionDirectSendStore(join(configuration.happyHomeDir, 'native-codex-direct-outbox.json')),
             (sessionId, guard) => this.nativeKanbanFeedbackStore.verify(sessionId, guard),
-            (sessionId) => this.isNativeCodexSessionControlledBySsh(sessionId, { forceRefresh: true })
+            (sessionId) => this.isNativeCodexSessionControlledBySsh(sessionId, { forceRefresh: true }),
+            () => new CodexSshAppServerClient({ socketPath: getCodexSshControlSocketPath() })
         )
 
         this.rpcHandlerManager = new RpcHandlerManager({

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { appendFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NativeCodexTranscriptCache } from './nativeTranscriptCache'
@@ -19,6 +19,192 @@ function transcriptRecord(value: unknown): string {
 }
 
 describe('NativeCodexTranscriptCache', () => {
+    it('refreshes native child cards when only a direct subagent transcript changes', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-subagent-'))
+        const parentId = 'a1234567-1234-4234-8234-123456789012'
+        const childId = 'b1234567-1234-4234-8234-123456789012'
+        const turnId = 'c1234567-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '09', '04')
+        const parentFile = join(transcriptDir, `rollout-${parentId}.jsonl`)
+        const childFile = join(transcriptDir, `rollout-${childId}.jsonl`)
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(parentFile, [
+            transcriptRecord({ type: 'session_meta', payload: { id: parentId, cwd: '/workspace/project' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'parent-turn' } })
+        ].join(''), 'utf8')
+        writeFileSync(childFile, [
+            transcriptRecord({
+                type: 'session_meta',
+                payload: {
+                    id: childId,
+                    parent_thread_id: parentId,
+                    source: {
+                        subagent: {
+                            thread_spawn: {
+                                parent_thread_id: parentId,
+                                agent_nickname: 'Ada',
+                                agent_role: 'reviewer'
+                            }
+                        }
+                    }
+                }
+            }),
+            transcriptRecord({ type: 'turn_context', payload: { model: 'gpt-5.6-terra', effort: 'high' } }),
+            transcriptRecord({
+                timestamp: '2026-09-04T10:00:00.000Z',
+                type: 'event_msg',
+                payload: { type: 'task_started', turn_id: turnId }
+            })
+        ].join(''), 'utf8')
+        process.env.CODEX_HOME = codexHome
+        let now = 1_000
+        const cache = new NativeCodexTranscriptCache({ now: () => now, runnerEpoch: 'runner-a' })
+
+        try {
+            const first = cache.read(parentId, { limit: 50 })
+            expect(first?.data.subagents).toMatchObject([{
+                id: childId,
+                name: 'Ada',
+                role: 'reviewer',
+                status: 'running',
+                model: 'gpt-5.6-terra',
+                modelReasoningEffort: 'high'
+            }])
+
+            appendFileSync(childFile, transcriptRecord({
+                timestamp: '2026-09-04T10:00:01.000Z',
+                type: 'event_msg',
+                payload: { type: 'task_complete', turn_id: turnId }
+            }))
+            now += 5_001
+            const completed = cache.readCached(parentId, { limit: 50 })
+            expect(completed?.data.subagents).toMatchObject([{
+                id: childId,
+                status: 'completed',
+                completedAt: Date.parse('2026-09-04T10:00:01.000Z')
+            }])
+            expect(completed?.revision).toBeGreaterThan(first?.revision ?? 0)
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('discovers a newly spawned child immediately from the parent control record', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-subagent-spawn-'))
+        const parentId = 'd1234567-1234-4234-8234-123456789012'
+        const childId = 'e1234567-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '09', '04')
+        const parentFile = join(transcriptDir, `rollout-${parentId}.jsonl`)
+        const childFile = join(transcriptDir, `rollout-${childId}.jsonl`)
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(parentFile, transcriptRecord({
+            type: 'session_meta',
+            payload: { id: parentId, cwd: '/workspace/project' }
+        }), 'utf8')
+        process.env.CODEX_HOME = codexHome
+        const cache = new NativeCodexTranscriptCache({ now: () => 1_000, runnerEpoch: 'runner-a' })
+
+        try {
+            expect(cache.read(parentId, { limit: 50 })?.data.subagents).toEqual([])
+            writeFileSync(childFile, [
+                transcriptRecord({
+                    type: 'session_meta',
+                    payload: {
+                        id: childId,
+                        parent_thread_id: parentId,
+                        source: {
+                            subagent: {
+                                thread_spawn: {
+                                    parent_thread_id: parentId,
+                                    agent_nickname: 'Grace'
+                                }
+                            }
+                        }
+                    }
+                }),
+                transcriptRecord({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'child-turn' } })
+            ].join(''), 'utf8')
+            appendFileSync(parentFile, transcriptRecord({
+                type: 'response_item',
+                payload: { type: 'function_call', name: 'spawn_agent', call_id: 'spawn-child' }
+            }))
+
+            expect(cache.refreshCached(parentId, { limit: 50 })?.data.subagents).toMatchObject([{
+                id: childId,
+                name: 'Grace',
+                status: 'running'
+            }])
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('switches a hot thread to a rotated active transcript and keeps earlier history', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-rotation-'))
+        const sessionId = 'a1234567-1234-4234-8234-123456789012'
+        const turnId = 'b1234567-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '09', '04')
+        const firstFile = join(transcriptDir, `rollout-2026-09-04T10-00-00-${sessionId}.jsonl`)
+        const rotatedFile = join(transcriptDir, `rollout-2026-09-04T10-05-00-${sessionId}_${turnId}.jsonl`)
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(firstFile, [
+            transcriptRecord({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            transcriptRecord({
+                type: 'response_item',
+                payload: {
+                    type: 'message',
+                    role: 'user',
+                    content: [{ type: 'input_text', text: 'Earlier prompt' }]
+                }
+            }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-one' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-one' } })
+        ].join(''), 'utf8')
+        const now = Date.now()
+        utimesSync(firstFile, new Date(now - 10_000), new Date(now - 10_000))
+        process.env.CODEX_HOME = codexHome
+        const cache = new NativeCodexTranscriptCache()
+
+        try {
+            const first = cache.read(sessionId, { limit: 50 })
+            expect(first?.data.session.runState).toBe('idle')
+            expect(first?.data.importedMessages).toMatchObject([
+                { role: 'user', content: { type: 'text', text: 'Earlier prompt' } }
+            ])
+
+            writeFileSync(rotatedFile, [
+                transcriptRecord({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+                transcriptRecord({
+                    type: 'response_item',
+                    payload: {
+                        type: 'message',
+                        role: 'user',
+                        content: [{ type: 'input_text', text: 'Current prompt' }]
+                    }
+                }),
+                transcriptRecord({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-two' } })
+            ].join(''), 'utf8')
+            utimesSync(rotatedFile, new Date(now), new Date(now))
+
+            const rotated = cache.refreshCachedFromFile(sessionId, rotatedFile, { limit: 50 })
+            expect(rotated?.data.session).toMatchObject({ file: rotatedFile, runState: 'processing' })
+            expect(rotated?.lifecycleEvents).toEqual([{ type: 'task_started', turnId: 'turn-two' }])
+            expect(rotated?.data.importedMessages).toMatchObject([
+                { role: 'user', content: { type: 'text', text: 'Earlier prompt' } },
+                { role: 'user', content: { type: 'text', text: 'Current prompt' } }
+            ])
+
+            const coldRead = new NativeCodexTranscriptCache().read(sessionId, { limit: 50 })
+            expect(coldRead?.data.session).toMatchObject({ file: rotatedFile, runState: 'processing' })
+            expect(coldRead?.data.importedMessages).toMatchObject([
+                { role: 'user', content: { type: 'text', text: 'Earlier prompt' } },
+                { role: 'user', content: { type: 'text', text: 'Current prompt' } }
+            ])
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
     it('serves a warm page from memory and advances only appended JSONL records', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-cache-'))
         const sessionId = 'a1234567-1234-4234-8234-123456789012'

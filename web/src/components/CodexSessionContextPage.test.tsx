@@ -12,6 +12,7 @@ import type {
     CodexLocalSessionSnapshotResponse
 } from '@/types/api'
 import {
+    buildNativeCodexBlocks,
     buildReadOnlyCodexBlocks,
     CodexSessionContextPage,
     deriveNativeSessionConnectionHealth,
@@ -211,29 +212,40 @@ describe('CodexSessionContextPage', () => {
 
     it('uses a faster native fallback refresh cadence while a turn is running', () => {
         expect(getNativeContextRefreshInterval({ success: true, status: 'processing' })).toBe(1_000)
-        expect(getNativeContextRefreshInterval({ success: true, status: 'idle', controlledByCodexSsh: true })).toBe(1_000)
+        expect(getNativeContextRefreshInterval({ success: true, status: 'idle', controlledByCodexSsh: true })).toBe(5_000)
         expect(getNativeContextRefreshInterval({ success: true, status: 'idle' })).toBe(5_000)
     })
 
-    it('locks the native composer for Codex Desktop SSH and unlocks on an explicit false realtime status', async () => {
+    it('keeps the native composer usable through the shared Codex Desktop SSH app-server', async () => {
         const api = createApi()
         ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
             success: true,
-            status: 'idle',
+            status: 'processing',
             controlledByCodexSsh: true
         })
         renderPage({ api, realtimeAvailable: true, realtimeConnected: true })
 
-        await screen.findByTestId('codex-native-ssh-controlled')
-        expect(screen.getByRole('textbox')).toBeDisabled()
+        await screen.findByText('Original response')
+        const composer = screen.getByRole('textbox')
+        expect(screen.queryByTestId('codex-native-ssh-controlled')).toBeNull()
+        expect(composer).not.toBeDisabled()
+        expect(composer).toHaveAttribute(
+            'placeholder',
+            'Codex Desktop over SSH is busy. New messages will be queued.'
+        )
         expect(screen.getByTestId('codex-native-session-menu-trigger').querySelector('[title="Codex"]')?.parentElement)
             .toHaveClass('text-[#F5A524]')
-        // The responsive composer has compact and regular variants; both
-        // intentionally render the lock affordance while SSH owns the turn.
-        expect(screen.getAllByTestId('composer-send-lock')).not.toHaveLength(0)
-        expect(screen.getByRole('button', {
-            name: 'Sending is locked while Codex Desktop controls this session'
-        })).toBeDisabled()
+        expect(screen.queryAllByTestId('composer-send-lock')).toHaveLength(0)
+
+        fireEvent.change(composer, { target: { value: 'Queue through SSH' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+        await waitFor(() => {
+            expect(api.sendCodexSessionMessage).toHaveBeenCalledWith('codex-thread-1', {
+                machineId: 'machine-1',
+                message: 'Queue through SSH',
+                clientMessageId: expect.any(String)
+            })
+        })
 
         publishNativeCodexSessionUpdated({
             type: 'codex-session-updated',
@@ -278,15 +290,35 @@ describe('CodexSessionContextPage', () => {
 
         expect(await screen.findByTestId('codex-native-waiting-for-local-input')).toHaveTextContent('Waiting for local input')
         expect(screen.getByTestId('codex-native-waiting-for-local-input')).toHaveTextContent('Return to the local Codex session')
-        const headerControls = screen.getByTestId('session-header-controls')
-        const noticeToggle = screen.getByTestId('codex-native-waiting-for-local-input-toggle')
+        // The compact alert is deliberately absent while the full notice is
+        // open; it appears only after the five-second auto-collapse.
+        expect(screen.queryByTestId('codex-native-waiting-for-local-input-toggle')).not.toBeInTheDocument()
         const composer = screen.getByRole('textbox')
-        expect(headerControls.compareDocumentPosition(noticeToggle) & Node.DOCUMENT_POSITION_FOLLOWING)
-            .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-        expect(noticeToggle.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING)
-            .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+        expect(composer).toBeInTheDocument()
         openNativeSessionMenu()
         expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeDisabled()
+    })
+
+    it('prioritizes manual native recovery over a local-input wait', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            waitingForUserInput: true,
+            queuedMessages: [{
+                id: 'waiting-recovery',
+                text: 'Recover before returning local input',
+                queuedAt: 123,
+                recoveryRequired: true,
+                recoveryReason: 'session_status_unknown'
+            }]
+        })
+        renderPage({ api })
+
+        const recovery = await screen.findByTestId('codex-native-recovery')
+        expect(recovery).toHaveTextContent('Codex did not report this message\'s state')
+        expect(screen.queryByTestId('codex-native-waiting-for-local-input')).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Discard message' })).toBeInTheDocument()
     })
 
     it('describes each native direct-send hand-off phase', () => {
@@ -753,7 +785,8 @@ describe('CodexSessionContextPage', () => {
         })
         renderPage({ api, realtimeAvailable: true, realtimeConnected: true })
 
-        expect(await screen.findByTestId('codex-native-external-writer')).toBeInTheDocument()
+        expect(await screen.findByTestId('composer-send-error')).toBeInTheDocument()
+        expect(screen.queryByTestId('codex-native-external-writer')).toBeNull()
         await waitFor(() => {
             expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
                 .toBeGreaterThanOrEqual(2)
@@ -782,6 +815,7 @@ describe('CodexSessionContextPage', () => {
 
         expect(await screen.findByTestId('codex-direct-send-phase-launching')).toBeInTheDocument()
         expect(screen.queryByTestId('codex-native-external-writer')).toBeNull()
+        expect(screen.queryByTestId('composer-send-error')).toBeNull()
 
         publishNativeCodexSessionUpdated({
             type: 'codex-session-updated',
@@ -964,7 +998,7 @@ describe('CodexSessionContextPage', () => {
         expect(api.forkCodexSession).not.toHaveBeenCalled()
     })
 
-    it('drops an external-writer prompt without blocking later native transcript updates', async () => {
+    it('does not show a floating lock notice for a legacy external-writer result', async () => {
         const api = createApi()
         let rejectedClientMessageId: string | null = null
         ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementation(async (
@@ -1000,14 +1034,11 @@ describe('CodexSessionContextPage', () => {
         fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Ignore this locked prompt' } })
         fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-        const notice = await screen.findByTestId('codex-native-external-writer')
-        expect(notice).toHaveTextContent('Unable to send messages right now')
-        expect(notice).toHaveTextContent('SHAPI will keep syncing new transcript updates')
         await waitFor(() => {
-            expect(screen.queryByText('Ignore this locked prompt')).not.toBeInTheDocument()
+            expect(screen.queryByTestId('codex-native-external-writer')).toBeNull()
+            expect(screen.getByRole('textbox')).not.toBeDisabled()
         })
         expect(screen.queryByTestId('codex-native-recovery')).not.toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: /Open .* queued messages/ })).not.toBeInTheDocument()
 
         ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
             success: true,
@@ -1154,6 +1185,27 @@ describe('CodexSessionContextPage', () => {
         await waitFor(() => {
             expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1)
         })
+    })
+
+    it('keeps an explicitly rejected unknown-status browser receipt for manual recovery', async () => {
+        const api = createApi()
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockRejectedValue(
+            new ApiError('Cannot confirm whether this native Codex session is idle', 409, 'session_status_unknown')
+        )
+        renderPage({ api })
+
+        await screen.findByText('Original response')
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Wait for a confirmed status' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1)
+        })
+        const recovery = await screen.findByTestId('codex-native-recovery')
+        expect(recovery).toHaveTextContent('Codex did not report this message\'s state')
+        expect(screen.getByRole('button', { name: 'Confirm and retry' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Discard message' })).toBeInTheDocument()
+        expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1)
     })
 
     it('keeps a native prompt visible after leaving and reopening the session', async () => {
@@ -1369,6 +1421,82 @@ describe('CodexSessionContextPage', () => {
         })
         expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1)
         await waitFor(() => expect(screen.queryByTestId('codex-native-recovery')).not.toBeInTheDocument())
+    })
+
+    it('keeps a browser recovery receipt when Codex reports that discard is still active', async () => {
+        const createdAt = Date.now() - 20_000
+        localStorage.setItem('hapi:native-codex-direct-messages:v1', JSON.stringify({
+            [JSON.stringify(['machine-1', 'codex-thread-1'])]: [{
+                id: 'active-discard-receipt',
+                text: 'Keep this browser receipt',
+                createdAt,
+                status: 'queued',
+                deliveryPhase: 'queued',
+                phaseStartedAt: createdAt,
+                queueId: 'active-discard-receipt',
+                observedTranscriptMessageIds: [],
+                observedThroughPosition: null
+            }]
+        }))
+        const api = createApi()
+        const queuedMessages = [{
+            id: 'active-discard-receipt',
+            text: 'Keep this browser receipt',
+            queuedAt: createdAt,
+            recoveryRequired: true,
+            recoveryReason: 'session_status_unknown' as const
+        }]
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'idle',
+            queuedMessages
+        })
+        ;(api.discardCodexSessionMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            discarded: false,
+            active: true,
+            queuedMessages
+        })
+        renderPage({ api })
+
+        await screen.findByTestId('codex-native-recovery')
+        expect(await screen.findAllByText('Keep this browser receipt')).not.toHaveLength(0)
+        fireEvent.click(screen.getByRole('button', { name: 'Discard message' }))
+
+        expect(await screen.findByText('Codex may still be handling this message, so it was not discarded. Refresh status before trying again.')).toBeInTheDocument()
+        expect(screen.getByTestId('codex-native-recovery')).toBeInTheDocument()
+        expect(screen.getAllByText('Keep this browser receipt')).not.toHaveLength(0)
+        expect(localStorage.getItem('hapi:native-codex-direct-messages:v1')).toContain('active-discard-receipt')
+    })
+
+    it('does not revive a successfully discarded recovery from a stale status response', async () => {
+        const api = createApi()
+        const staleQueuedMessages = [{
+            id: 'stale-discard-receipt',
+            text: 'Do not revive this receipt',
+            queuedAt: 123,
+            recoveryRequired: true,
+            recoveryReason: 'session_status_unknown' as const
+        }]
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'idle',
+            queuedMessages: staleQueuedMessages
+        })
+        ;(api.discardCodexSessionMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            discarded: true,
+            queuedMessages: []
+        })
+        renderPage({ api })
+
+        await screen.findByTestId('codex-native-recovery')
+        fireEvent.click(screen.getByRole('button', { name: 'Discard message' }))
+
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1)
+            expect(screen.queryByTestId('codex-native-recovery')).not.toBeInTheDocument()
+        })
     })
 
     it('explains a Codex timeout before allowing a saved prompt to be retried', async () => {
@@ -1764,6 +1892,111 @@ describe('CodexSessionContextPage', () => {
             { kind: 'agent-reasoning', text: 'Inspecting the file' }
         ])
         expect(blocks).toHaveLength(3)
+    })
+
+    it('maps native child transcript snapshots to the shared CodexAgent cards', () => {
+        const blocks = buildNativeCodexBlocks([
+            {
+                id: 'codex-local:parent:0',
+                createdAt: 1,
+                content: { role: 'user', content: { type: 'text', text: 'Inspect the implementation' } }
+            },
+            {
+                id: 'codex-local:parent:1',
+                createdAt: 2,
+                content: {
+                    role: 'agent',
+                    content: {
+                        type: 'codex',
+                        data: { type: 'tool-call', callId: 'parent-read', name: 'Read', input: { file_path: 'README.md' } }
+                    }
+                }
+            }
+        ], [], [{
+            id: 'native-child-1',
+            parentSessionId: 'parent-thread-1',
+            name: 'Ada',
+            role: 'reviewer',
+            agentPath: '/root/reviewer',
+            model: 'gpt-5.6-terra',
+            modelReasoningEffort: 'high',
+            status: 'completed',
+            statusText: 'Completed',
+            startedAt: 10,
+            updatedAt: 12,
+            completedAt: 12,
+            traceMessages: [{
+                createdAt: 11,
+                role: 'agent',
+                content: {
+                    type: 'codex',
+                    data: { type: 'message', id: 'native-child-message', message: 'Reviewed the implementation.', final: true }
+                }
+            }]
+        }])
+
+        const parentToolIndex = blocks.findIndex((block) => (
+            block.kind === 'tool-call' && block.tool.id === 'parent-read'
+        ))
+        const agentBlock = blocks.find((block) => (
+            block.kind === 'tool-call' && block.tool.name === 'CodexAgent'
+        ))
+        expect(agentBlock).toMatchObject({
+            kind: 'tool-call',
+            tool: {
+                id: 'native-codex-agent:native-child-1',
+                name: 'CodexAgent',
+                state: 'completed',
+                startedAt: 10,
+                completedAt: 12,
+                input: {
+                    agentId: 'native-child-1',
+                    displayName: 'Ada',
+                    agent_type: 'reviewer',
+                    model: 'gpt-5.6-terra',
+                    reasoningEffort: 'high'
+                }
+            }
+        })
+        expect(blocks.indexOf(agentBlock!)).toBeGreaterThan(parentToolIndex)
+        expect(agentBlock && agentBlock.kind === 'tool-call' ? agentBlock.children : []).toMatchObject([
+            { kind: 'agent-text', text: 'Reviewed the implementation.' }
+        ])
+    })
+
+    it('renders a native child as the existing CodexAgent card', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockImplementation(async (sessionId, machineId, options) => ({
+            ...(await api.getCodexSessionContext(sessionId, machineId, options)),
+            subagents: [{
+                id: 'native-child-card',
+                parentSessionId: sessionId,
+                name: 'Ada',
+                model: 'gpt-5.6-terra',
+                modelReasoningEffort: 'high',
+                status: 'completed' as const,
+                statusText: 'Completed',
+                startedAt: 10,
+                updatedAt: 11,
+                completedAt: 11,
+                traceMessages: []
+            }],
+            status: { success: true as const, status: 'idle' as const },
+            version: { runnerEpoch: 'runner-a', revision: 1 },
+            revision: 1,
+            timing: { cache: 'hit' as const, durationMs: 1 }
+        }))
+
+        renderPage({ api })
+
+        const card = await waitFor(() => {
+            const element = document.querySelector<HTMLButtonElement>('[data-codex-subagent-card]')
+            expect(element).not.toBeNull()
+            return element!
+        })
+        expect(card).toHaveTextContent('Ada')
+        expect(card).toHaveTextContent('gpt-5.6-terra · high')
+        expect(card).toHaveAttribute('data-codex-subagent-status', 'completed')
     })
 
     it('keeps native context compaction as an independent event block', () => {

@@ -928,7 +928,21 @@ describe('Codex Desktop import routes', () => {
     it('returns context and lifecycle from one selected-runner snapshot RPC', async () => {
         const store = new Store(':memory:')
         const sessionId = '13131313-1313-4313-8313-131313131313'
-        const data = createRunnerLocalSessionData(sessionId)
+        const data = {
+            ...createRunnerLocalSessionData(sessionId),
+            subagents: [{
+                id: 'native-child-1',
+                parentSessionId: sessionId,
+                name: 'Ada',
+                model: 'gpt-5.6-terra',
+                modelReasoningEffort: 'high',
+                status: 'running' as const,
+                statusText: 'Working',
+                startedAt: 100,
+                updatedAt: 101,
+                traceMessages: []
+            }]
+        }
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
         const snapshotCalls: unknown[][] = []
         const engine = {
@@ -1005,6 +1019,13 @@ describe('Codex Desktop import routes', () => {
                     steps: [{ text: 'Render the native plan', status: 'in_progress' }]
                 },
                 session: { id: sessionId },
+                subagents: [{
+                    id: 'native-child-1',
+                    name: 'Ada',
+                    status: 'running',
+                    model: 'gpt-5.6-terra',
+                    modelReasoningEffort: 'high'
+                }],
                 messages: [
                     { id: `codex-local:${sessionId}:0`, content: data.importedMessages[0] },
                     { id: `codex-local:${sessionId}:1`, content: data.importedMessages[1] }

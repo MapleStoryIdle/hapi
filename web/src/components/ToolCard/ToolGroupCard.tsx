@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { isObject } from '@hapi/protocol'
 import { getToolGroupActionKind, type ToolGroupBlock } from '@/chat/toolGroups'
 import type { ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
@@ -529,11 +530,26 @@ function getCodexSubagentCardStatusLabel(
     return t('terminal.execution.completed')
 }
 
-function getCodexSubagentCardMetadata(tool: ToolCallBlock, unavailable: string): string {
-    const model = getTrimmedInputString(tool.tool.input, ['model']) ?? (tool.model?.trim() || null)
-    const reasoning = getCodexAgentReasoningEffort(tool.tool.input)?.trim() || null
+function getCodexSubagentCardMetadata(
+    tool: ToolCallBlock,
+    unavailable: string
+): string {
+    const input = tool.tool.input
+    const hapiSubagentConfig = isObject(input) && isObject(input.hapiSubagentConfig)
+        ? input.hapiSubagentConfig
+        : null
+    const explicitModel = getTrimmedInputString(input, ['model'])
+    const explicitReasoning = getCodexAgentReasoningEffort(input)?.trim() || null
+    const childModel = getTrimmedInputString(hapiSubagentConfig, ['childModel', 'child_model'])
+    const childReasoning = getTrimmedInputString(hapiSubagentConfig, ['childReasoningEffort', 'child_reasoning_effort'])
+    const parentModel = getTrimmedInputString(hapiSubagentConfig, ['parentModel', 'parent_model'])
+        ?? (hapiSubagentConfig ? (tool.model?.trim() || null) : null)
+    const parentReasoning = getTrimmedInputString(hapiSubagentConfig, ['parentReasoningEffort', 'parent_reasoning_effort'])
+    const model = explicitModel ?? childModel ?? parentModel ?? (tool.model?.trim() || null)
+    const reasoning = explicitReasoning ?? childReasoning ?? parentReasoning
     const values = [model, reasoning].filter((value): value is string => value !== null)
-    return values.length > 0 ? values.join(' · ') : unavailable
+    if (values.length === 0) return unavailable
+    return values.join(' · ')
 }
 
 function CodexSubagentCards(props: {
@@ -561,7 +577,7 @@ function CodexSubagentCards(props: {
                     <button
                         key={tool.id}
                         type="button"
-                        className="flex min-h-11 min-w-[min(100%,15rem)] flex-1 basis-[15rem] cursor-pointer flex-col items-start gap-1 rounded-xl border border-l-[3px] border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        className="flex min-h-11 w-[calc((100%-0.5rem)/2)] max-w-[calc((100%-0.5rem)/2)] min-w-0 shrink-0 cursor-pointer flex-col items-start gap-1 rounded-xl border border-l-[3px] border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                         style={{ borderLeftColor: color }}
                         onClick={() => props.onSelectTool(tool.id)}
                         aria-haspopup="dialog"

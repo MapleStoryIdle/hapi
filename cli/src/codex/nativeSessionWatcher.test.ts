@@ -42,6 +42,11 @@ describe('NativeCodexSessionWatcher', () => {
         expect(getCodexSessionIdFromTranscriptPath(
             '/Users/alice/.codex/sessions/2026/08/28/rollout-2026-08-28T10-20-30-abcdefab-cdef-4def-8def-abcdefabcdef.jsonl'
         )).toBe('abcdefab-cdef-4def-8def-abcdefabcdef')
+        expect(getCodexSessionIdFromTranscriptPath(
+            '/Users/alice/.codex/sessions/2026/09/04/' +
+            'rollout-2026-09-04T18-04-48-abcdefab-cdef-4def-8def-abcdefabcdef_' +
+            '12345678-1234-4234-8234-123456789012.jsonl'
+        )).toBe('abcdefab-cdef-4def-8def-abcdefabcdef')
         expect(getCodexSessionIdFromTranscriptPath('/tmp/not-a-rollout.jsonl')).toBeNull()
     })
 

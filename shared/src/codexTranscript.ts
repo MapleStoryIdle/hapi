@@ -93,6 +93,34 @@ export type CodexImportedMessageContent = {
     }
 }
 
+/**
+ * A direct child Codex thread discovered from a native parent transcript.
+ * Child rollout files are intentionally kept out of the regular native
+ * session list, but an opened parent can present their progress as the same
+ * Codex-agent cards used by SHAPI-owned sessions.
+ */
+export type CodexLocalSessionSubagent = {
+    /** Native child thread id; never render this as the human-facing label. */
+    id: string
+    parentSessionId: string
+    /** Codex collaboration nickname, when the native transcript provides one. */
+    name?: string | null
+    /** Native collaboration role / specialization, when present. */
+    role?: string | null
+    /** Raw native agent path retained for diagnostics; never a card label by itself. */
+    agentPath?: string | null
+    model?: string | null
+    modelReasoningEffort?: string | null
+    /** The UI intentionally reduces this to running vs terminal card states. */
+    status: 'running' | 'completed' | 'failed' | 'canceled' | 'unknown'
+    statusText?: string | null
+    startedAt: number
+    updatedAt: number
+    completedAt?: number
+    /** Bounded child transcript records for the existing agent detail dialog. */
+    traceMessages: CodexImportedMessageContent[]
+}
+
 export type CodexTranscriptImportData = CodexLocalSessionSummary & {
     messages: CodexImportedMessageContent[]
 }
@@ -119,6 +147,8 @@ export type CodexLocalSessionData = {
     session: CodexLocalSessionSummary
     context: CodexLocalSessionContextMessage[]
     importedMessages: CodexImportedMessageContent[]
+    /** Direct native Codex children, separate from parent pagination. */
+    subagents: CodexLocalSessionSubagent[]
     startIndex: number
     page: CodexLocalSessionPage
 }
@@ -433,6 +463,7 @@ const MAX_CODEX_CONTEXT_MESSAGE_CHARS = 24_000
 const MAX_CODEX_PLAN_STEPS = 32
 const MAX_CODEX_PLAN_STEP_CHARS = 600
 const MAX_CODEX_PLAN_ID_LENGTH = 512
+const MAX_CODEX_SUBAGENT_TRACE_MESSAGES = 160
 // Session lists only need metadata from the transcript header and latest
 // records. Large historical transcripts must not be fully loaded just to
 // render a row in the native-session list.
@@ -546,8 +577,16 @@ function getCodexRolloutTimestampKey(value: string | null): string | null {
     return Number.isFinite(milliseconds) ? String(Math.round(milliseconds / 1_000)) : value
 }
 
-function inferSessionIdFromFileName(filePath: string): string | null {
-    const match = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/.exec(filePath)
+/**
+ * Codex can continue one thread in a rotated rollout file such as
+ * `rollout-...-<thread-id>_<turn-id>.jsonl`. The first UUID remains the
+ * thread id; any later UUID belongs to the rollover turn.
+ */
+export function getCodexSessionIdFromTranscriptFilePath(filePath: string): string | null {
+    const fileName = filePath.split(/[\\/]/).pop() ?? ''
+    if (!/^rollout-.+\.jsonl$/i.test(fileName)) return null
+
+    const match = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/.exec(fileName)
     return match?.[1] ?? null
 }
 
@@ -891,6 +930,81 @@ function isSubagentSource(value: unknown): boolean {
     return record ? Object.prototype.hasOwnProperty.call(record, 'subagent') : false
 }
 
+type CodexSubagentSessionHeader = {
+    sessionId: string | null
+    parentSessionId: string | null
+    name: string | null
+    role: string | null
+    agentPath: string | null
+}
+
+/**
+ * Native child sessions have a `source.subagent` marker in `session_meta`.
+ * Codex has used a few shapes over time, so keep the parent/name extraction
+ * tolerant while requiring a concrete direct parent before surfacing a card.
+ */
+function getCodexSubagentSessionHeader(lines: readonly string[]): CodexSubagentSessionHeader | null {
+    for (const line of lines.slice(0, 200)) {
+        try {
+            const record = asRecord(JSON.parse(line))
+            if (record?.type !== 'session_meta') continue
+            const payload = asRecord(record.payload)
+            const source = asRecord(payload?.source)
+            if (!payload || !source || !Object.prototype.hasOwnProperty.call(source, 'subagent')) continue
+
+            const subagent = asRecord(source.subagent)
+            const threadSpawn = asRecord(subagent?.thread_spawn ?? subagent?.threadSpawn)
+            const parentSessionId = asString(
+                threadSpawn?.parent_thread_id
+                ?? threadSpawn?.parentThreadId
+                ?? subagent?.parent_thread_id
+                ?? subagent?.parentThreadId
+                ?? payload.parent_thread_id
+                ?? payload.parentThreadId
+            )
+            const name = asString(
+                threadSpawn?.agent_nickname
+                ?? threadSpawn?.agentNickname
+                ?? threadSpawn?.agent_name
+                ?? threadSpawn?.agentName
+                ?? subagent?.agent_nickname
+                ?? subagent?.agentNickname
+                ?? subagent?.agent_name
+                ?? subagent?.agentName
+                ?? payload.agent_nickname
+                ?? payload.agentNickname
+            )
+            const role = asString(
+                threadSpawn?.agent_role
+                ?? threadSpawn?.agentRole
+                ?? subagent?.agent_role
+                ?? subagent?.agentRole
+                ?? payload.agent_role
+                ?? payload.agentRole
+            )
+            const agentPath = asString(
+                threadSpawn?.agent_path
+                ?? threadSpawn?.agentPath
+                ?? subagent?.agent_path
+                ?? subagent?.agentPath
+                ?? payload.agent_path
+                ?? payload.agentPath
+            )
+            return {
+                sessionId: asString(payload.id) ?? asString(payload.session_id) ?? asString(payload.sessionId),
+                parentSessionId,
+                name,
+                role,
+                agentPath
+            }
+        } catch {
+            // A native writer can expose a partial final JSONL record. The
+            // header lives at the beginning, so later attempts can recover.
+        }
+    }
+    return null
+}
+
 export function isHapiInitiatedCodexSession(
     session: Pick<CodexLocalSessionSummary, 'originator'>
 ): boolean {
@@ -1012,7 +1126,7 @@ function buildCodexLocalSessionSummary(
 ): CodexLocalSessionSummary | null {
     if (header.isSubagent) return null
 
-    const sessionId = header.sessionId ?? inferSessionIdFromFileName(filePath)
+    const sessionId = header.sessionId ?? getCodexSessionIdFromTranscriptFilePath(filePath)
     if (!sessionId) return null
 
     return {
@@ -1116,6 +1230,20 @@ export function listCodexTranscriptFilesByRecency(): CodexTranscriptFileCandidat
     return files.sort((left, right) => right.modifiedAt - left.modifiedAt)
 }
 
+/**
+ * Return every rollout segment for one native Codex thread in transcript
+ * order. Codex may rotate an active thread into a second JSONL file, so the
+ * newest segment alone is not its complete history.
+ */
+export function listLocalCodexSessionTranscriptFiles(sessionId: string): CodexTranscriptFileCandidate[] {
+    const id = sessionId.trim()
+    if (!id) return []
+
+    return listCodexTranscriptFilesByRecency()
+        .filter((candidate) => getCodexSessionIdFromTranscriptFilePath(candidate.file) === id)
+        .sort((left, right) => left.modifiedAt - right.modifiedAt || left.file.localeCompare(right.file))
+}
+
 export function listLocalCodexSessions(
     limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT,
     options: CodexLocalSessionListOptions = {}
@@ -1135,7 +1263,7 @@ export function listLocalCodexSessions(
 
 export function findLocalCodexSession(sessionId: string): CodexLocalSessionSummary | null {
     for (const candidate of listCodexTranscriptFilesByRecency()) {
-        const inferredId = inferSessionIdFromFileName(candidate.file)
+        const inferredId = getCodexSessionIdFromTranscriptFilePath(candidate.file)
         if (inferredId && inferredId !== sessionId) continue
         const session = readLocalCodexSessionSummary(candidate.file, candidate.modifiedAt, candidate.size)
         if (session?.id === sessionId) return session
@@ -1921,6 +2049,182 @@ export function appendCodexTranscriptImportLines(
     }
 }
 
+type CodexSubagentTranscriptGroup = {
+    id: string
+    header: CodexSubagentSessionHeader
+    files: CodexTranscriptFileCandidate[]
+    filePaths: Set<string>
+}
+
+function addCodexSubagentTranscriptFile(
+    group: CodexSubagentTranscriptGroup,
+    candidate: CodexTranscriptFileCandidate
+): void {
+    if (group.filePaths.has(candidate.file)) return
+    group.filePaths.add(candidate.file)
+    group.files.push(candidate)
+}
+
+function getNativeSubagentStatusText(status: CodexLocalSessionSubagent['status']): string {
+    if (status === 'completed') return 'Completed'
+    if (status === 'failed') return 'Failed'
+    if (status === 'canceled') return 'Canceled'
+    if (status === 'unknown') return 'Unknown'
+    return 'Working'
+}
+
+function normalizeNativeSubagentField(value: string | null): string | null {
+    const normalized = value?.trim()
+    return normalized ? normalized : null
+}
+
+function buildCodexLocalSessionSubagent(
+    parentSessionId: string,
+    group: CodexSubagentTranscriptGroup
+): CodexLocalSessionSubagent {
+    const files = [...group.files].sort((left, right) => (
+        left.modifiedAt - right.modifiedAt || left.file.localeCompare(right.file)
+    ))
+    const accumulator = createCodexTranscriptImportAccumulator()
+    let model: string | null = null
+    let modelReasoningEffort: string | null = null
+    let status: CodexLocalSessionSubagent['status'] = 'unknown'
+    let currentTurnId: string | null = null
+    let startedAt: number | null = null
+    let completedAt: number | undefined
+    let updatedAt = files.reduce((latest, file) => Math.max(latest, file.modifiedAt), 0)
+
+    for (const file of files) {
+        let content: string
+        try {
+            content = readFileSync(file.file, 'utf-8')
+        } catch {
+            // Native archive can remove a rotated old segment while the
+            // newest child segment remains readable.
+            continue
+        }
+        const lines = content.split(/\r?\n/).filter(Boolean)
+        const config = getLatestCodexSessionConfig(lines)
+        if (config.model) model = config.model
+        if (config.modelReasoningEffort) modelReasoningEffort = config.modelReasoningEffort
+        appendCodexTranscriptImportLines(accumulator, lines)
+
+        for (const line of lines) {
+            try {
+                const record = asRecord(JSON.parse(line))
+                if (record?.type !== 'event_msg') continue
+                const payload = asRecord(record.payload)
+                const eventType = asString(payload?.type)
+                if (!payload || !eventType) continue
+                const eventAt = getCodexRecordTimestamp(record) ?? file.modifiedAt
+                updatedAt = Math.max(updatedAt, eventAt)
+                const turnId = extractCodexTurnId(record, payload)
+                if (eventType === 'task_started') {
+                    status = 'running'
+                    currentTurnId = turnId
+                    startedAt = eventAt
+                    completedAt = undefined
+                    continue
+                }
+                if (eventType !== 'task_complete' && eventType !== 'task_failed' && eventType !== 'turn_aborted') {
+                    continue
+                }
+                // A delayed terminal from an older turn must not close a
+                // newer child run in a rotated transcript segment.
+                if (currentTurnId && turnId && currentTurnId !== turnId) continue
+                status = eventType === 'task_complete'
+                    ? 'completed'
+                    : eventType === 'task_failed'
+                        ? 'failed'
+                        : 'canceled'
+                currentTurnId = turnId ?? currentTurnId
+                startedAt ??= eventAt
+                completedAt = eventAt
+            } catch {
+                // Ignore malformed/partially written JSONL lines.
+            }
+        }
+    }
+
+    const traceMessages = accumulator.messages.filter((message) => message.role === 'agent')
+    const boundedTraceMessages = traceMessages.length > MAX_CODEX_SUBAGENT_TRACE_MESSAGES
+        ? traceMessages.slice(-MAX_CODEX_SUBAGENT_TRACE_MESSAGES)
+        : traceMessages
+    const fallbackStartedAt = files[0]?.modifiedAt ?? updatedAt ?? Date.now()
+    const name = normalizeNativeSubagentField(group.header.name)
+    const role = normalizeNativeSubagentField(group.header.role)
+    const agentPath = normalizeNativeSubagentField(group.header.agentPath)
+
+    return {
+        id: group.id,
+        parentSessionId,
+        ...(name ? { name } : {}),
+        ...(role ? { role } : {}),
+        ...(agentPath ? { agentPath } : {}),
+        model,
+        modelReasoningEffort,
+        status,
+        statusText: getNativeSubagentStatusText(status),
+        startedAt: startedAt ?? fallbackStartedAt,
+        updatedAt: Math.max(updatedAt, completedAt ?? 0),
+        ...(completedAt === undefined ? {} : { completedAt }),
+        traceMessages: boundedTraceMessages
+    }
+}
+
+/**
+ * Return direct native Codex children for one parent thread. These files are
+ * hidden from the native session list, so association must happen before the
+ * normal summary filter discards their `source.subagent` metadata.
+ */
+export function listLocalCodexSessionSubagents(parentSessionId: string): CodexLocalSessionSubagent[] {
+    const parentId = parentSessionId.trim()
+    if (!parentId) return []
+
+    const candidates = listCodexTranscriptFilesByRecency()
+    const groups = new Map<string, CodexSubagentTranscriptGroup>()
+    const childIdByTranscriptId = new Map<string, string>()
+
+    for (const candidate of candidates) {
+        const lines = getCodexSummaryHeadLines(candidate.file, candidate.size)
+        const header = lines ? getCodexSubagentSessionHeader(lines) : null
+        if (!header || header.parentSessionId !== parentId) continue
+        const transcriptId = getCodexSessionIdFromTranscriptFilePath(candidate.file)
+        const childId = header.sessionId ?? transcriptId
+        if (!childId) continue
+
+        const group = groups.get(childId) ?? {
+            id: childId,
+            header,
+            files: [],
+            filePaths: new Set<string>()
+        }
+        groups.set(childId, group)
+        addCodexSubagentTranscriptFile(group, candidate)
+        if (transcriptId) childIdByTranscriptId.set(transcriptId, childId)
+    }
+
+    // A rotated follow-up segment can omit the full subagent header. Once a
+    // first segment identifies the child, keep every same-thread segment in
+    // its ordered history exactly as the parent transcript cache does.
+    for (const candidate of candidates) {
+        const transcriptId = getCodexSessionIdFromTranscriptFilePath(candidate.file)
+        if (!transcriptId) continue
+        const childId = childIdByTranscriptId.get(transcriptId) ?? (groups.has(transcriptId) ? transcriptId : null)
+        if (!childId) continue
+        const group = groups.get(childId)
+        if (group) addCodexSubagentTranscriptFile(group, candidate)
+    }
+
+    return Array.from(groups.values())
+        .map((group) => buildCodexLocalSessionSubagent(parentId, group))
+        .sort((left, right) => (
+            left.startedAt - right.startedAt
+            || left.updatedAt - right.updatedAt
+            || left.id.localeCompare(right.id)
+        ))
+}
+
 export function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): CodexTranscriptImportData | null {
     let content: string
     try {
@@ -1986,13 +2290,15 @@ function getCodexTranscriptMessagePage(
 export function createLocalCodexSessionData(
     session: CodexLocalSessionSummary,
     importedMessages: CodexImportedMessageContent[],
-    options: CodexLocalSessionReadOptions = {}
+    options: CodexLocalSessionReadOptions = {},
+    subagents: CodexLocalSessionSubagent[] = []
 ): CodexLocalSessionData {
     const transcriptPage = getCodexTranscriptMessagePage(importedMessages, options)
     return {
         session,
         context: getCodexTranscriptContextFromImportedMessages(transcriptPage.messages),
         importedMessages: transcriptPage.messages,
+        subagents,
         startIndex: transcriptPage.startIndex,
         page: transcriptPage.page
     }
@@ -2005,5 +2311,10 @@ export function getLocalCodexSessionData(
     const session = findLocalCodexSession(sessionId)
     if (!session) return null
     const importedMessages = parseCodexTranscriptImportData(session)?.messages ?? []
-    return createLocalCodexSessionData(session, importedMessages, options)
+    return createLocalCodexSessionData(
+        session,
+        importedMessages,
+        options,
+        listLocalCodexSessionSubagents(session.id)
+    )
 }

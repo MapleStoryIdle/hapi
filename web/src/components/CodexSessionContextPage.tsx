@@ -13,6 +13,7 @@ import type {
     CodexLocalSessionRunState,
     CodexLocalSessionSnapshotResponse,
     CodexLocalSessionStatusResponse,
+    CodexLocalSessionSubagent,
     DecryptedMessage,
     SessionMetadataSummary,
     SkillSummary
@@ -217,9 +218,17 @@ function NativeContextTypingIndicator(props: { label: string }) {
 export function getNativeContextRefreshInterval(
     status: CodexLocalSessionStatusResponse | undefined
 ): number | false {
-    return status?.success === true && (status.status === 'processing' || status.controlledByCodexSsh === true)
+    return status?.success === true && status.status === 'processing'
         ? NATIVE_CONTEXT_ACTIVE_REFRESH_INTERVAL_MS
         : NATIVE_CONTEXT_REFRESH_INTERVAL_MS
+}
+
+function hasActiveNativeCodexSubagent(
+    subagents: readonly CodexLocalSessionSubagent[] | undefined
+): boolean {
+    return subagents?.some((subagent) => (
+        subagent.status === 'running' || subagent.status === 'unknown'
+    )) ?? false
 }
 
 export function deriveNativeSessionConnectionHealth(input: {
@@ -482,6 +491,115 @@ function buildNativeDirectEchoMessages(
     }))
 }
 
+function getNativeCodexSubagentDisplayName(subagent: CodexLocalSessionSubagent): string | null {
+    const name = subagent.name?.trim()
+    return name || null
+}
+
+function buildNativeCodexSubagentInput(subagent: CodexLocalSessionSubagent): Record<string, unknown> {
+    const displayName = getNativeCodexSubagentDisplayName(subagent)
+    const role = subagent.role?.trim()
+    const agentPath = subagent.agentPath?.trim()
+    const model = subagent.model?.trim()
+    const reasoningEffort = subagent.modelReasoningEffort?.trim()
+    return {
+        agentId: subagent.id,
+        ...(displayName ? { displayName } : {}),
+        ...(role ? { agent_type: role } : {}),
+        ...(agentPath ? { agent_path: agentPath } : {}),
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {})
+    }
+}
+
+/**
+ * Translate native child transcript snapshots to the exact `agent-run-*`
+ * events consumed by the existing SHAPI CodexAgent reducer. Keeping these
+ * after the parent transcript makes cards live below Processed instead of
+ * folding them into the parent tool group.
+ */
+function buildNativeCodexSubagentMessages(
+    subagents: readonly CodexLocalSessionSubagent[]
+): DecryptedMessage[] {
+    const messages: DecryptedMessage[] = []
+    for (const subagent of subagents) {
+        const cardId = `native-codex-agent:${subagent.id}`
+        const startedAt = subagent.startedAt
+        const updateAt = Math.max(startedAt, subagent.completedAt ?? subagent.updatedAt)
+        const input = buildNativeCodexSubagentInput(subagent)
+        messages.push({
+            id: `${cardId}:start`,
+            seq: null,
+            localId: null,
+            content: {
+                role: 'agent',
+                content: {
+                    type: 'codex',
+                    data: {
+                        type: 'agent-run-start',
+                        agentId: subagent.id,
+                        cardId,
+                        input,
+                        startedAt,
+                        status: 'running',
+                        statusText: 'Working',
+                        activity: 'Working',
+                        activityKind: 'starting'
+                    }
+                }
+            },
+            createdAt: startedAt
+        })
+
+        for (const [index, trace] of (subagent.traceMessages ?? []).entries()) {
+            messages.push({
+                id: `${cardId}:trace:${index}`,
+                seq: null,
+                localId: null,
+                content: {
+                    role: 'agent',
+                    content: {
+                        type: 'codex',
+                        data: {
+                            type: 'agent-run-trace',
+                            agentId: subagent.id,
+                            cardId,
+                            startedAt,
+                            message: trace.content.data
+                        }
+                    }
+                },
+                createdAt: Math.max(startedAt, trace.createdAt ?? updateAt)
+            })
+        }
+
+        messages.push({
+            id: `${cardId}:update`,
+            seq: null,
+            localId: null,
+            content: {
+                role: 'agent',
+                content: {
+                    type: 'codex',
+                    data: {
+                        type: 'agent-run-update',
+                        agentId: subagent.id,
+                        cardId,
+                        startedAt,
+                        ...(subagent.completedAt === undefined ? {} : { completedAt: subagent.completedAt }),
+                        status: subagent.status,
+                        statusText: subagent.statusText ?? subagent.status,
+                        activity: subagent.statusText ?? subagent.status,
+                        activityKind: subagent.status
+                    }
+                }
+            },
+            createdAt: updateAt
+        })
+    }
+    return messages
+}
+
 function buildCodexBlocksFromDecryptedMessages(messages: readonly DecryptedMessage[]): ChatBlock[] {
     const normalizedMessages: NormalizedMessage[] = []
     for (const message of messages) {
@@ -494,11 +612,13 @@ function buildCodexBlocksFromDecryptedMessages(messages: readonly DecryptedMessa
 /** Build a native transcript plus any unconfirmed direct-send bubbles. */
 export function buildNativeCodexBlocks(
     messages: readonly CodexLocalSessionContextMessage[],
-    echoes: readonly NativeDirectMessageEcho[] = []
+    echoes: readonly NativeDirectMessageEcho[] = [],
+    subagents: readonly CodexLocalSessionSubagent[] = []
 ): ChatBlock[] {
     return buildCodexBlocksFromDecryptedMessages([
         ...buildReadOnlyCodexMessages(messages),
-        ...buildNativeDirectEchoMessages(echoes)
+        ...buildNativeDirectEchoMessages(echoes),
+        ...buildNativeCodexSubagentMessages(subagents)
     ])
 }
 
@@ -547,6 +667,7 @@ function NativeCodexThread(props: {
     metadata: SessionMetadataSummary
     messages: readonly CodexLocalSessionContextMessage[]
     directMessageEchoes: readonly NativeDirectMessageEcho[]
+    subagents: readonly CodexLocalSessionSubagent[]
     version: number
     hasMoreMessages: boolean
     isLoadingMoreMessages: boolean
@@ -559,7 +680,6 @@ function NativeCodexThread(props: {
     plan?: CodexLocalSessionPlan | null
     queuedMessages: readonly CodexLocalSessionQueuedMessage[]
     composerDisabled: boolean
-    composerLocked: boolean
     composerNotice: string | null
     sendError: ComposerSendError | null
     autocompleteSuggestions: (query: string) => Promise<Suggestion[]>
@@ -584,8 +704,8 @@ function NativeCodexThread(props: {
         [props.messages]
     )
     const ungroupedBlocks = useMemo(
-        () => buildNativeCodexBlocks(props.messages, props.directMessageEchoes),
-        [props.directMessageEchoes, props.messages]
+        () => buildNativeCodexBlocks(props.messages, props.directMessageEchoes, props.subagents),
+        [props.directMessageEchoes, props.messages, props.subagents]
     )
     const nativePlan = useMemo(
         () => getNativeCodexPlanStatus(props.plan, props.runState, props.activeTurnId),
@@ -726,7 +846,6 @@ function NativeCodexThread(props: {
                                 sessionId={`codex-native-${props.sessionId}`}
                                 projectPath={props.projectPath}
                                 disabled={props.composerDisabled}
-                                locked={props.composerLocked}
                                 active
                                 agentFlavor={null}
                                 showStatusBar={false}
@@ -866,12 +985,22 @@ export function CodexSessionContextPage(props: {
         // The page coordinator owns bounded retry/backoff. Query-level retry
         // would double every attempt, including permanent 4xx responses.
         retry: false,
-        // A native realtime payload updates this cache directly. Poll only
-        // when an older runner cannot provide that stream, except while SSH
-        // owns this thread: bounded polling recovers a missed release event.
+        // A native realtime payload updates this cache directly. A thread
+        // merely being loaded by Desktop SSH is not activity and must not
+        // force a full snapshot every second. A processing parent, however,
+        // can spawn a child which then writes only its own rollout file; keep
+        // the conditional snapshot alive to discover and refresh those cards.
         refetchInterval: (query) => {
-            const status = (query.state.data as CodexLocalSessionSnapshotResponse | undefined)?.status
-            if (hasRealtimeUpdates && status?.controlledByCodexSsh !== true) return false
+            const snapshot = query.state.data as CodexLocalSessionSnapshotResponse | undefined
+            const status = snapshot?.status
+            if (hasActiveNativeCodexSubagent(snapshot?.subagents)) {
+                return NATIVE_CONTEXT_ACTIVE_REFRESH_INTERVAL_MS
+            }
+            if (hasRealtimeUpdates) {
+                return status?.success === true && status.status === 'processing'
+                    ? NATIVE_CONTEXT_ACTIVE_REFRESH_INTERVAL_MS
+                    : false
+            }
             return getNativeContextRefreshInterval(status)
         },
         refetchIntervalInBackground: false,
@@ -926,6 +1055,9 @@ export function CodexSessionContextPage(props: {
     const nativeDirectMessageScopeKeyRef = useRef(nativeDirectMessageScopeKey)
     const nativeDirectMessagePageMountedRef = useRef(true)
     const attemptedNativeDirectMessageIdsRef = useRef(new Set<string>())
+    // A successful discard is authoritative even if an older status response
+    // arrives after it. Keep its receipt hidden until the next page scope.
+    const discardedNativeRecoveryIdsRef = useRef(new Set<string>())
     const connectionRecoveryTokenRef = useRef(0)
     const nativeRecoveryAbortControllerRef = useRef<AbortController | null>(null)
     const nativeRecoveryRequestTokenRef = useRef(0)
@@ -983,6 +1115,7 @@ export function CodexSessionContextPage(props: {
         setDismissedRunnerError(null)
         setConnectionNow(Date.now())
         attemptedNativeDirectMessageIdsRef.current.clear()
+        discardedNativeRecoveryIdsRef.current.clear()
         setOutlineOpen(false)
         setMenuOpen(false)
         connectionRecoveryTokenRef.current += 1
@@ -991,17 +1124,24 @@ export function CodexSessionContextPage(props: {
     useEffect(() => {
         const response = statusQuery.data
         if (response?.success === true) {
-            const queuedMessages = Array.isArray(response.queuedMessages) ? response.queuedMessages : null
+            const queuedMessages = Array.isArray(response.queuedMessages)
+                ? response.queuedMessages.filter((message) => !discardedNativeRecoveryIdsRef.current.has(message.id))
+                : null
             // Do not clear a locally confirmed queue from a response produced
             // by an older runner (or from the short processing window before
             // the runner has published its queue). Once the native turn is
             // idle, an explicit empty array is authoritative and clears it.
             if (queuedMessages) {
-                setNativeQueuedMessages((current) => queuedMessages.length === 0
-                    && current.length > 0
-                    && response.status !== 'idle'
-                    ? current
-                    : queuedMessages)
+                setNativeQueuedMessages((current) => {
+                    const visibleCurrent = current.filter(
+                        (message) => !discardedNativeRecoveryIdsRef.current.has(message.id)
+                    )
+                    return queuedMessages.length === 0
+                        && visibleCurrent.length > 0
+                        && response.status !== 'idle'
+                        ? visibleCurrent
+                        : queuedMessages
+                })
             }
             const queuedMessageIds = new Set(queuedMessages?.map((message) => message.id) ?? [])
             const discardedExternalWriterEchoId = response.lastErrorCode === 'external_writer_active'
@@ -1146,12 +1286,11 @@ export function CodexSessionContextPage(props: {
     const controlledByCodexSsh = statusQuery.data?.success === true
         ? statusQuery.data.controlledByCodexSsh
         : undefined
-    // A current runner explicitly sends false on release. The old
-    // post-resume conflict remains a compatibility fallback only when this
-    // field is absent, so a stale `lastErrorCode` cannot keep a new UI locked.
-    const legacyExternalWriterActive = controlledByCodexSsh === undefined
-        && directStatusErrorCode === 'external_writer_active'
-    const sshControlled = controlledByCodexSsh === true || legacyExternalWriterActive
+    // `controlledByCodexSsh` means the same Desktop SSH app-server has this
+    // thread loaded. It is now a shared transport, not an input lock: SHAPI
+    // can enqueue while that Codex turn is busy and send on the same channel
+    // once it becomes idle.
+    const sshControlled = controlledByCodexSsh === true
     const directStatusErrorClientMessageId = statusQuery.data?.success === true
         ? statusQuery.data.lastErrorClientMessageId ?? null
         : null
@@ -1162,7 +1301,7 @@ export function CodexSessionContextPage(props: {
             : rawDirectStatusError
     const nativeStalledSince = statusQuery.data?.success === true ? statusQuery.data.stalledSince ?? null : null
     const runnerQueuedMessages = statusQuery.data?.success === true && Array.isArray(statusQuery.data.queuedMessages)
-        ? statusQuery.data.queuedMessages
+        ? statusQuery.data.queuedMessages.filter((message) => !discardedNativeRecoveryIdsRef.current.has(message.id))
         : null
     const nativeRecoveryCandidate = useMemo(() => {
         if (directStatusErrorCode === 'external_writer_active') {
@@ -1174,9 +1313,19 @@ export function CodexSessionContextPage(props: {
         const runnerQueueIds = new Set(runnerQueuedMessages?.map((message) => message.id) ?? [])
         const recoveryRequired = nativeQueuedMessages.find((message) => message.recoveryRequired)
         const staleQueued = nativeStalledSince !== null ? nativeQueuedMessages[0] : null
-        const failedEcho = directStatusErrorCode && directStatusErrorClientMessageId
+        const runnerFailedEcho = directStatusErrorCode && directStatusErrorClientMessageId
             ? currentNativeDirectMessageEchoes.find((echo) => echo.id === directStatusErrorClientMessageId) ?? null
             : null
+        // Older runners can explicitly reject a send while their transcript
+        // state is unknown. Preserve that browser receipt as manual-only
+        // recovery: failed + queued with no runner queue id is never eligible
+        // for the short implicit resend window.
+        const rejectedUnknownStatusEcho = currentNativeDirectMessageEchoes.find((echo) => (
+            echo.status === 'failed'
+            && echo.deliveryPhase === 'queued'
+            && echo.queueId === null
+        )) ?? null
+        const failedEcho = runnerFailedEcho ?? rejectedUnknownStatusEcho
         const orphanedQueued = runnerQueuedMessages
             ? nativeQueuedMessages.find((message) => (
                 !runnerQueueIds.has(message.id)
@@ -1206,7 +1355,7 @@ export function CodexSessionContextPage(props: {
         const id = queued?.id ?? orphanedEcho?.id ?? failedEcho?.id ?? null
         const reason = recoveryRequired?.recoveryReason
             ?? (nativeStalledSince !== null ? 'codex_timeout' : null)
-            ?? (failedEcho ? directStatusErrorCode : null)
+            ?? (failedEcho ? (rejectedUnknownStatusEcho ? 'session_status_unknown' : directStatusErrorCode) : null)
             ?? (orphanedQueued || orphanedEcho ? 'runner_restarted' : null)
         if (!id) {
             return {
@@ -1482,7 +1631,6 @@ export function CodexSessionContextPage(props: {
     const nativeNeedsManualRecovery = nativeRecoveryCandidate.candidate !== null
         && (nativeStalledSince !== null || nativeRecoveryCandidate.uncertain)
     const canRecoverNativeDelivery = nativeRecoveryCandidate.candidate !== null
-        && !sshControlled
         && (directStatus === 'idle' || nativeStalledSince !== null)
     const directSendPhase = getNativeCodexDirectSendPhase({
         pendingDirectSendCount,
@@ -1509,24 +1657,23 @@ export function CodexSessionContextPage(props: {
     const isNativeQueueWaiting = hasNativeQueuedMessages && directStatus === 'idle'
     const isNativeIdle = !isSendingDirect && directStatus === 'idle' && !hasNativeQueuedMessages
     const canFork = Boolean(props.machineId) && !isForking && isNativeIdle
-    const composerDisabled = sshControlled
-        || !props.machineId
+    const composerDisabled = !props.machineId
         || statusQuery.isLoading
         || statusQuery.isError
         || directStatus === null
         || directStatus === 'unknown'
-    const composerNotice = sshControlled
-        ? t('recentCodex.sshControl.detail')
+    const composerNotice = nativeNeedsManualRecovery
+        ? getNativeRecoveryDetail(
+            nativeRecoveryCandidate.reason,
+            nativeRecoveryCandidate.uncertain,
+            t
+        )
         : nativeWaitingForUserInput
-        ? t('recentCodex.status.waitingForLocalInput')
-        : isNativeProcessing
-        ? nativeNeedsManualRecovery
-            ? getNativeRecoveryDetail(
-                nativeRecoveryCandidate.reason,
-                nativeRecoveryCandidate.uncertain,
-                t
-            )
-            : t('recentCodex.direct.processing')
+            ? t('recentCodex.status.waitingForLocalInput')
+            : isNativeProcessing
+                ? sshControlled
+                    ? t('recentCodex.sshControl.queueing')
+                    : t('recentCodex.direct.processing')
         : isNativeQueueWaiting
             ? t('recentCodex.status.queued')
             : directStatus === 'idle'
@@ -1538,9 +1685,8 @@ export function CodexSessionContextPage(props: {
                         : statusQuery.isError || directStatus === null
                             ? t('recentCodex.direct.statusFailed')
                             : null
-    const externalWriterActive = sshControlled
     const visibleRunnerError = directStatusError === dismissedRunnerError ? null : directStatusError
-    const composerSendError = directSendError ?? (!externalWriterActive && visibleRunnerError
+    const composerSendError = directSendError ?? (visibleRunnerError
         ? {
             id: statusQuery.dataUpdatedAt,
             text: '',
@@ -1553,9 +1699,9 @@ export function CodexSessionContextPage(props: {
         ? 'bg-[#FF3B30]'
         : nativeConnectionHealth === 'degraded' || nativeConnectionHealth === 'recovering'
             ? 'bg-[#FF9500] animate-pulse'
-            : nativeWaitingForUserInput
-                ? 'bg-[#FF9500] animate-pulse'
             : nativeNeedsManualRecovery
+                ? 'bg-[#FF9500] animate-pulse'
+            : nativeWaitingForUserInput
                 ? 'bg-[#FF9500] animate-pulse'
             : isNativeProcessing
                 ? 'bg-[#007AFF] animate-pulse'
@@ -1593,7 +1739,7 @@ export function CodexSessionContextPage(props: {
 
     const recoverNativeDelivery = useCallback(async () => {
         const candidate = nativeRecoveryCandidate.candidate
-        if (!props.machineId || !candidate || !canRecoverNativeDelivery || isRecoveringNativeDelivery || sshControlled) {
+        if (!props.machineId || !candidate || !canRecoverNativeDelivery || isRecoveringNativeDelivery) {
             return
         }
 
@@ -1671,8 +1817,20 @@ export function CodexSessionContextPage(props: {
             ) {
                 return
             }
+            const rejectedByUnknownStatus = error instanceof ApiError
+                && error.code === 'session_status_unknown'
             updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
-                message.id === candidate.id ? { ...message, status: 'failed' as const } : message
+                message.id === candidate.id
+                    ? rejectedByUnknownStatus
+                        ? {
+                            ...message,
+                            status: 'failed' as const,
+                            deliveryPhase: 'queued' as const,
+                            phaseStartedAt: Date.now(),
+                            queueId: null
+                        }
+                        : { ...message, status: 'failed' as const }
+                    : message
             )))
             if (pageScopeRef.current === requestScope) {
                 setDirectSendError({
@@ -1681,6 +1839,9 @@ export function CodexSessionContextPage(props: {
                     message: formatDirectSendError(error, t),
                     scheduledAt: null
                 })
+                if (rejectedByUnknownStatus) {
+                    void refetchNativeSnapshot()
+                }
             }
         } finally {
             if (nativeRecoveryAbortControllerRef.current === abortController) {
@@ -1703,7 +1864,6 @@ export function CodexSessionContextPage(props: {
         props.machineId,
         props.sessionId,
         refetchNativeSnapshot,
-        sshControlled,
         t,
         updateNativeDirectMessageEchoes
     ])
@@ -1734,13 +1894,30 @@ export function CodexSessionContextPage(props: {
             if (response.success !== true) {
                 throw new ApiError(response.error, 409, response.code)
             }
+            if (response.discarded !== true) {
+                if (pageScopeRef.current === requestScope) {
+                    setDirectSendError({
+                        id: Date.now(),
+                        text: candidate.text,
+                        message: response.active === true
+                            ? t('recentCodex.direct.recovery.discardActive')
+                            : t('recentCodex.direct.recovery.discardFailed'),
+                        scheduledAt: null
+                    })
+                    void refetchNativeSnapshot()
+                }
+                return
+            }
             updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => (
                 current.filter((message) => message.id !== candidate.id)
             ))
             if (pageScopeRef.current !== requestScope) {
                 return
             }
-            setNativeQueuedMessages(response.queuedMessages)
+            discardedNativeRecoveryIdsRef.current.add(candidate.id)
+            setNativeQueuedMessages(response.queuedMessages.filter(
+                (message) => !discardedNativeRecoveryIdsRef.current.has(message.id)
+            ))
             if (directStatusError) {
                 setDismissedRunnerError(directStatusError)
             }
@@ -1774,7 +1951,7 @@ export function CodexSessionContextPage(props: {
     ])
 
     const sendDirectMessage = useCallback((text: string) => {
-        if (!props.machineId || sshControlled || directStatus === null || directStatus === 'unknown') {
+        if (!props.machineId || directStatus === null || directStatus === 'unknown') {
             return
         }
         const deliveryText = expandCodexCustomPrompt(text, nativeComposerCapabilities.commands) ?? text
@@ -1856,6 +2033,8 @@ export function CodexSessionContextPage(props: {
                 const needsVerification = shouldVerifyDirectSendReceipt(error)
                 const rejectedByExternalWriter = error instanceof ApiError
                     && error.code === 'external_writer_active'
+                const rejectedByUnknownStatus = error instanceof ApiError
+                    && error.code === 'session_status_unknown'
                 // A transport timeout is not proof that Codex rejected the
                 // prompt. Retain a pending receipt while the status stream
                 // checks it, then expose explicit recovery rather than
@@ -1873,7 +2052,19 @@ export function CodexSessionContextPage(props: {
                                         deliveryPhase: 'matching' as const,
                                         phaseStartedAt: Date.now()
                                     }
-                                    : { ...message, status: 'failed' as const }
+                                    : rejectedByUnknownStatus
+                                        ? {
+                                            ...message,
+                                            status: 'failed' as const,
+                                            // Preserve an explicit old-runner
+                                            // state rejection as a manual-only
+                                            // receipt. It cannot be retried by
+                                            // the short implicit resend path.
+                                            deliveryPhase: 'queued' as const,
+                                            phaseStartedAt: Date.now(),
+                                            queueId: null
+                                        }
+                                        : { ...message, status: 'failed' as const }
                         ))
                 ))
                 if (pageScopeRef.current !== requestScope) {
@@ -1887,7 +2078,7 @@ export function CodexSessionContextPage(props: {
                         scheduledAt: null
                     })
                 }
-                if (needsVerification || rejectedByExternalWriter) {
+                if (needsVerification || rejectedByExternalWriter || rejectedByUnknownStatus) {
                     void refetchNativeSnapshot()
                 }
             } finally {
@@ -1906,7 +2097,6 @@ export function CodexSessionContextPage(props: {
         props.machineId,
         props.sessionId,
         refetchNativeSnapshot,
-        sshControlled,
         t,
         updateNativeDirectMessageEchoes
     ])
@@ -1916,7 +2106,7 @@ export function CodexSessionContextPage(props: {
     // receipts need an explicit recovery action: after a runner restart the
     // former in-memory dedupe is gone, so silent retry could duplicate work.
     useEffect(() => {
-        if (!props.machineId || sshControlled || directStatus === null || directStatus === 'unknown' || nativeStalledSince !== null) {
+        if (!props.machineId || directStatus === null || directStatus === 'unknown' || nativeStalledSince !== null) {
             return
         }
 
@@ -1993,7 +2183,6 @@ export function CodexSessionContextPage(props: {
         props.machineId,
         props.sessionId,
         refetchNativeSnapshot,
-        sshControlled,
         t,
         updateNativeDirectMessageEchoes
     ])
@@ -2086,32 +2275,6 @@ export function CodexSessionContextPage(props: {
                         statusLabel={t('recentCodex.fork.failed.title')}
                         testId="codex-fork-error"
                     />
-                ) : sshControlled ? (
-                    <NativeCodexFloatingStatusNotice
-                        tone="warning"
-                        title={legacyExternalWriterActive
-                            ? t('recentCodex.direct.externalWriter.title')
-                            : t('recentCodex.sshControl.title')}
-                        detail={legacyExternalWriterActive
-                            ? t('recentCodex.direct.externalWriter.detail')
-                            : t('recentCodex.sshControl.detail')}
-                        noticeKey={legacyExternalWriterActive ? 'external-writer-active' : 'ssh-controlled'}
-                        statusLabel={legacyExternalWriterActive
-                            ? t('recentCodex.direct.externalWriter.title')
-                            : t('recentCodex.sshControl.title')}
-                        testId={legacyExternalWriterActive
-                            ? 'codex-native-external-writer'
-                            : 'codex-native-ssh-controlled'}
-                    />
-                ) : nativeWaitingForUserInput ? (
-                    <NativeCodexFloatingStatusNotice
-                        tone="warning"
-                        title={t('recentCodex.status.waitingForLocalInput')}
-                        detail={t('recentCodex.status.waitingForLocalInput.detail')}
-                        noticeKey="waiting-for-local-input"
-                        statusLabel={t('recentCodex.status.waitingForLocalInput')}
-                        testId="codex-native-waiting-for-local-input"
-                    />
                 ) : nativeNeedsManualRecovery ? (
                     <NativeCodexFloatingStatusNotice
                         tone="warning"
@@ -2145,6 +2308,15 @@ export function CodexSessionContextPage(props: {
                         ].join(':')}
                         statusLabel={t('recentCodex.direct.recovery.title')}
                         testId="codex-native-recovery"
+                    />
+                ) : nativeWaitingForUserInput ? (
+                    <NativeCodexFloatingStatusNotice
+                        tone="warning"
+                        title={t('recentCodex.status.waitingForLocalInput')}
+                        detail={t('recentCodex.status.waitingForLocalInput.detail')}
+                        noticeKey="waiting-for-local-input"
+                        statusLabel={t('recentCodex.status.waitingForLocalInput')}
+                        testId="codex-native-waiting-for-local-input"
                     />
                 ) : directSendPhase ? (
                     <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
@@ -2212,6 +2384,7 @@ export function CodexSessionContextPage(props: {
                             metadata={nativeMetadata}
                             messages={messages}
                             directMessageEchoes={visibleNativeDirectMessageEchoes}
+                            subagents={context.subagents ?? []}
                             version={contextQuery.dataUpdatedAt + olderPages.length + nativeForceScrollToken}
                             hasMoreMessages={hasMoreMessages}
                             isLoadingMoreMessages={isLoadingMore}
@@ -2226,7 +2399,6 @@ export function CodexSessionContextPage(props: {
                             plan={context?.plan ?? null}
                             queuedMessages={nativeQueuedMessages}
                             composerDisabled={composerDisabled}
-                            composerLocked={sshControlled}
                             composerNotice={composerNotice}
                             sendError={composerSendError}
                             autocompleteSuggestions={nativeComposerCapabilities.getSuggestions}

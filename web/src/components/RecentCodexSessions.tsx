@@ -11,7 +11,20 @@ import {
     RefreshCw as RefreshIconNode,
     TreePine as TreePineIconNode
 } from 'lucide'
-import { Activity, Archive as ArchiveIconNode, ChevronDown, ChevronRight, History, Pin } from 'lucide-react'
+import {
+    Activity,
+    Archive as ArchiveIconNode,
+    Bot as BotIcon,
+    ChevronDown,
+    ChevronRight,
+    CircleAlert as CircleAlertIcon,
+    CircleCheck as CircleCheckIcon,
+    Eye as EyeIcon,
+    History,
+    LoaderCircle as LoaderCircleIcon,
+    Pin,
+    type LucideIcon
+} from 'lucide-react'
 import type { ApiClient } from '@/api/client'
 import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import { formatRelativeTime } from '@/lib/relativeTime'
@@ -220,32 +233,38 @@ function getAssignedCompletedSessionDirectoryColor(
 
 const KANBAN_GROUP_PRESENTATION: Record<MergedCodexKanbanGroupId, {
     labelKey: string
-    dotClassName: string
+    Icon: LucideIcon
+    iconClassName: string
     borderClassName: string
 }> = {
     pinned: {
         labelKey: 'sessions.kanban.pinned',
-        dotClassName: 'text-[var(--app-hint)]',
+        Icon: Pin,
+        iconClassName: 'text-[var(--app-hint)]',
         borderClassName: 'border-l-[var(--app-divider)]'
     },
     pending: {
         labelKey: 'sessions.kanban.pending',
-        dotClassName: 'bg-[#F59E0B]',
+        Icon: CircleAlertIcon,
+        iconClassName: 'text-[#F59E0B]',
         borderClassName: 'border-l-[#F59E0B]'
     },
     processing: {
         labelKey: 'sessions.kanban.processing',
-        dotClassName: 'bg-[#34C759]',
+        Icon: LoaderCircleIcon,
+        iconClassName: 'text-[#34C759] motion-safe:animate-pulse',
         borderClassName: 'border-l-[#34C759]'
     },
     unviewed: {
         labelKey: 'sessions.kanban.unviewed',
-        dotClassName: 'bg-[#4E7CF5]',
+        Icon: EyeIcon,
+        iconClassName: 'text-[#4E7CF5]',
         borderClassName: 'border-l-[#4E7CF5]'
     },
     completed: {
         labelKey: 'sessions.kanban.completed',
-        dotClassName: 'bg-[var(--app-hint)]',
+        Icon: CircleCheckIcon,
+        iconClassName: 'text-[var(--app-hint)]',
         borderClassName: 'border-l-[var(--app-divider)]'
     }
 }
@@ -336,8 +355,8 @@ export function groupMergedCodexSessionsForKanban(
     const groups: MergedCodexKanbanGroup[] = [
         { id: 'pending', sessions: [] },
         { id: 'processing', sessions: [] },
-        { id: 'pinned', sessions: [] },
         { id: 'unviewed', sessions: [] },
+        { id: 'pinned', sessions: [] },
         { id: 'completed', sessions: [] }
     ]
     const groupsById = new Map(groups.map((group) => [group.id, group]))
@@ -541,6 +560,28 @@ function getKanbanDirectoryLabel(directory: string | null): string | null {
     return parts.slice(-2).join('/') || directory
 }
 
+function isHapiSideSession(session: MergedCodexSession): boolean {
+    return session.source === 'hapi'
+        && Boolean(session.hapiSession?.metadata?.sideSession?.parentSessionId?.trim())
+}
+
+function KanbanSubagentBadge(props: { label: string; title: string }) {
+    return (
+        <span
+            className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-[#7254D6]/20 bg-[#7254D6]/10 px-1.5 text-[10px] font-semibold leading-none text-[#7254D6]"
+            title={props.title}
+            data-kanban-subagent-badge
+        >
+            <BotIcon
+                className="h-3 w-3 shrink-0"
+                aria-hidden="true"
+                data-kanban-subagent-icon
+            />
+            <span>{props.label}</span>
+        </span>
+    )
+}
+
 function KanbanSessionCard(props: {
     api: ApiClient
     machineId: string | null
@@ -570,6 +611,7 @@ function KanbanSessionCard(props: {
     const completedTime = status === 'completed'
         ? formatKanbanSessionTime(modifiedAt, now, dateLocale, t)
         : null
+    const isSubagent = isHapiSideSession(session)
     const archiveDescription = session.source === 'native'
         ? t('recentCodex.archive.nativeDescription', { name: session.title })
         : t('recentCodex.archive.hapiDescription', { name: session.title })
@@ -602,6 +644,7 @@ function KanbanSessionCard(props: {
                     aria-current={selected ? 'page' : undefined}
                     data-kanban-card-status={status}
                     data-kanban-directory-color={completedDirectoryColor ?? undefined}
+                    data-kanban-subagent={isSubagent ? 'true' : undefined}
                 >
                     <span className="flex w-full min-w-0 items-center gap-2 pr-2" data-kanban-card-top-row>
                         <CodexSourceIcon
@@ -609,6 +652,12 @@ function KanbanSessionCard(props: {
                             active={status === 'processing'}
                             sshControlled={session.source === 'native' && session.nativeSession?.controlledByCodexSsh === true}
                         />
+                        {isSubagent ? (
+                            <KanbanSubagentBadge
+                                label={t('recentCodex.sideSession.badge')}
+                                title={t('recentCodex.sideSession.badgeTitle')}
+                            />
+                        ) : null}
                         <span className="cupertino-session-card-title min-w-0 flex-1 truncate text-[17px] font-semibold leading-6 text-[var(--app-fg)]" title={session.title}>
                             {session.title}
                         </span>
@@ -1469,17 +1518,16 @@ export function RecentCodexSessions(props: {
                         .filter((group) => group.id !== 'completed' && group.sessions.length > 0)
                         .map((group) => {
                         const presentation = KANBAN_GROUP_PRESENTATION[group.id]
+                        const GroupIcon = presentation.Icon
                         return (
                             <section key={group.id} className="min-w-0" data-kanban-group={group.id}>
                                 <div className="cupertino-kanban-heading flex items-center gap-2 px-1">
-                                    {group.id === 'pinned' ? (
-                                        <Pin className={`h-3.5 w-3.5 shrink-0 ${presentation.dotClassName}`} fill="currentColor" aria-hidden="true" />
-                                    ) : (
-                                        <span
-                                            className={`h-2 w-2 shrink-0 rounded-full ${presentation.dotClassName} ${group.id === 'processing' ? 'motion-safe:animate-pulse' : ''}`}
-                                            aria-hidden="true"
-                                        />
-                                    )}
+                                    <GroupIcon
+                                        className={`h-3.5 w-3.5 shrink-0 ${presentation.iconClassName}`}
+                                        {...(group.id === 'pinned' ? { fill: 'currentColor' } : {})}
+                                        aria-hidden="true"
+                                        data-kanban-group-icon={group.id}
+                                    />
                                     <h2 className="text-xs font-semibold tracking-[0.04em] text-[var(--app-hint)]">
                                         {group.id === 'processing' ? (
                                             <ThinkingKanbanLabel label={t(presentation.labelKey)} />

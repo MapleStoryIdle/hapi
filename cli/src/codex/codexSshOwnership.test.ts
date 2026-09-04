@@ -11,6 +11,8 @@ import {
     loadCodexSshHeldSessionIds,
     parseCodexSshLoadedThreadIds
 } from './codexSshOwnership'
+import { CodexSshAppServerClient } from './codexSshAppServerClient'
+import type { NativeCodexAppServerClient } from './nativeSessionDirectSend'
 
 const temporaryDirectories: string[] = []
 const WEBSOCKET_ACCEPT_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
@@ -81,8 +83,12 @@ function parseMaskedClientTextFrame(buffer: Buffer): { consumed: number; text: s
     }
 }
 
-function createRawWebSocketServer(onText: (text: string, sendText: (text: string) => void) => void): Server {
+function createRawWebSocketServer(
+    onText: (text: string, sendText: (text: string) => void) => void,
+    onConnection?: () => void
+): Server {
     return createServer((socket: Socket) => {
+        onConnection?.()
         let upgraded = false
         let received = Buffer.alloc(0)
         const consume = () => {
@@ -284,5 +290,109 @@ describe('CodexSshSessionOwnershipProbe', () => {
 
         await expect(probe.isHeld('desktop-thread', { forceRefresh: true })).resolves.toBe(false)
         expect(loadHeldSessionIds).not.toHaveBeenCalled()
+    })
+})
+
+describe('CodexSshAppServerClient', () => {
+    it.runIf(process.platform !== 'win32')('uses the existing app-server connection for resume, turn notifications, and server requests', async () => {
+        const socketPath = makeSocketPath()
+        const received: Array<Record<string, unknown>> = []
+        let receiveServerRequestResponse: ((value: Record<string, unknown>) => void) | null = null
+        const serverRequestResponse = new Promise<Record<string, unknown>>((resolve) => {
+            receiveServerRequestResponse = resolve
+        })
+        const server = createRawWebSocketServer((text, sendText) => {
+            const message = JSON.parse(text) as Record<string, unknown>
+            received.push(message)
+            if (message.id === 1 && message.method === 'initialize') {
+                sendText(JSON.stringify({ id: 1, result: { userAgent: 'codex-ssh' } }))
+                return
+            }
+            if (message.id === 2 && message.method === 'thread/resume') {
+                sendText(JSON.stringify({ id: 2, result: { thread: { id: 'thread-a' }, model: 'gpt-5.6' } }))
+                return
+            }
+            if (message.id === 3 && message.method === 'turn/start') {
+                sendText(JSON.stringify({ id: 3, result: { turn: { id: 'turn-a', status: 'inProgress' } } }))
+                sendText(JSON.stringify({ method: 'turn/started', params: { threadId: 'thread-a', turn: { id: 'turn-a' } } }))
+                sendText(JSON.stringify({
+                    id: 'input-a',
+                    method: 'item/tool/requestUserInput',
+                    params: { threadId: 'thread-a', itemId: 'item-a' }
+                }))
+                sendText(JSON.stringify({ method: 'turn/completed', params: { threadId: 'thread-a', turn: { id: 'turn-a', status: 'completed' } } }))
+                return
+            }
+            if (message.id === 'input-a') receiveServerRequestResponse?.(message)
+        })
+        await listenOnSocket(server, socketPath)
+
+        try {
+            const client = new CodexSshAppServerClient({ socketPath, connectTimeoutMs: 1_000 })
+            const nativeClient: NativeCodexAppServerClient = client
+            const notifications: Array<{ method: string; params: unknown }> = []
+            client.setNotificationHandler((method, params) => notifications.push({ method, params }))
+            client.registerRequestHandler('item/tool/requestUserInput', () => ({ decision: 'cancel' }))
+
+            await nativeClient.connect()
+            await nativeClient.initialize({
+                clientInfo: { name: 'hapi-test', version: '1.0.0' },
+                capabilities: { experimentalApi: true }
+            })
+            await expect(nativeClient.resumeThread({ threadId: 'thread-a' })).resolves.toMatchObject({
+                thread: { id: 'thread-a' }
+            })
+            await expect(nativeClient.startTurn({
+                threadId: 'thread-a',
+                input: [{ type: 'text', text: 'Hello from SHAPI' }]
+            })).resolves.toMatchObject({ turn: { id: 'turn-a' } })
+            await expect(serverRequestResponse).resolves.toEqual({ id: 'input-a', result: { decision: 'cancel' } })
+            expect(notifications).toEqual([
+                { method: 'turn/started', params: { threadId: 'thread-a', turn: { id: 'turn-a' } } },
+                { method: 'turn/completed', params: { threadId: 'thread-a', turn: { id: 'turn-a', status: 'completed' } } }
+            ])
+            expect(received).toEqual(expect.arrayContaining([
+                expect.objectContaining({ id: 1, method: 'initialize' }),
+                expect.objectContaining({ method: 'initialized' }),
+                expect.objectContaining({ id: 2, method: 'thread/resume' }),
+                expect.objectContaining({ id: 3, method: 'turn/start' })
+            ]))
+            await nativeClient.disconnect()
+        } finally {
+            await closeServer(server)
+        }
+    })
+
+    it.runIf(process.platform !== 'win32')('disconnects only its own socket so the SSH app-server accepts a later connection', async () => {
+        const socketPath = makeSocketPath()
+        let connections = 0
+        const server = createRawWebSocketServer((text, sendText) => {
+            const message = JSON.parse(text) as { id?: number; method?: string }
+            if (message.id === 1 && message.method === 'initialize') {
+                sendText(JSON.stringify({ id: 1, result: {} }))
+            }
+        }, () => { connections += 1 })
+        await listenOnSocket(server, socketPath)
+
+        try {
+            const first = new CodexSshAppServerClient({ socketPath, connectTimeoutMs: 1_000 })
+            await first.connect()
+            await first.initialize({
+                clientInfo: { name: 'hapi-test', version: '1.0.0' },
+                capabilities: { experimentalApi: true }
+            })
+            await first.disconnect()
+
+            const second = new CodexSshAppServerClient({ socketPath, connectTimeoutMs: 1_000 })
+            await second.connect()
+            await second.initialize({
+                clientInfo: { name: 'hapi-test', version: '1.0.0' },
+                capabilities: { experimentalApi: true }
+            })
+            expect(connections).toBe(2)
+            await second.disconnect()
+        } finally {
+            await closeServer(server)
+        }
     })
 })

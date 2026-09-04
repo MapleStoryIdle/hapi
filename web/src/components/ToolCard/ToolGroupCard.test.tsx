@@ -224,6 +224,55 @@ describe('ToolGroupCard', () => {
         expect(within(cards[2]).getByText('unavailable')).toBeInTheDocument()
     })
 
+    it('uses explicit, child, then parent configuration for Codex subagent cards', () => {
+        const explicitlyConfigured = makeToolBlock('explicit-agent', 'CodexAgent', {
+            summary: 'Explicit configuration',
+            model: 'gpt-explicit',
+            reasoning_effort: 'max',
+            hapiSubagentConfig: {
+                childModel: 'gpt-child',
+                childReasoningEffort: 'medium',
+                parentModel: 'gpt-parent',
+                parentReasoningEffort: 'high'
+            }
+        })
+        const childConfigured: ToolCallBlock = {
+            ...makeToolBlock('child-agent', 'CodexAgent', {
+                summary: 'Child configuration',
+                hapiSubagentConfig: {
+                    childModel: 'gpt-child',
+                    childReasoningEffort: 'medium',
+                    parentModel: 'gpt-parent',
+                    parentReasoningEffort: 'high'
+                }
+            }),
+            model: 'gpt-parent-message'
+        }
+        const inheritedConfiguration = makeToolBlock('inherited-agent', 'CodexAgent', {
+            summary: 'Inherited configuration',
+            hapiSubagentConfig: {
+                parentModel: 'gpt-parent',
+                parentReasoningEffort: 'high'
+            }
+        })
+        const view = renderCard(makeGroup({
+            tools: [explicitlyConfigured, childConfigured, inheritedConfiguration],
+            forceCompact: true,
+            forceGenericCompactTitle: true,
+        }))
+        const cards = Array.from(view.container.querySelectorAll<HTMLButtonElement>('[data-codex-subagent-card]'))
+
+        expect(cards).toHaveLength(3)
+        expect(cards[0]).toHaveTextContent('gpt-explicit · max')
+        expect(cards[0]).not.toHaveTextContent('inherited')
+        expect(cards[1]).toHaveTextContent('gpt-child · medium')
+        expect(cards[1]).not.toHaveTextContent('inherited')
+        expect(cards[2]).toHaveTextContent('gpt-parent · high')
+        expect(cards[2]).not.toHaveTextContent('inherited')
+        expect(cards[0]).toHaveClass('w-[calc((100%-0.5rem)/2)]', 'max-w-[calc((100%-0.5rem)/2)]')
+        expect(cards[0]).not.toHaveClass('flex-1')
+    })
+
     it('uses friendly card identities, deterministic colors, and icon-only tool states', () => {
         const named = makeToolBlock('agent-alpha', 'CodexAgent', {
             displayName: 'Ada',
