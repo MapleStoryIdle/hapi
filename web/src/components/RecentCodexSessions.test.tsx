@@ -938,7 +938,8 @@ describe('RecentCodexSessions', () => {
             expect(icon).toHaveAttribute('aria-hidden', 'true')
             expect(icon).toHaveClass(color)
         }
-        expect(processingGroup?.querySelector('[data-kanban-group-icon="processing"]')).toHaveClass('motion-safe:animate-pulse')
+        expect(processingGroup?.querySelector('[data-kanban-thinking-spinner]')).toHaveClass('motion-safe:animate-spin')
+        expect(processingGroup?.querySelector('[data-kanban-thinking-spinner] path')).toBeInTheDocument()
         expect(pinnedGroup?.querySelector('[data-kanban-group-icon="pinned"]')).toHaveAttribute('fill', 'currentColor')
 
         const unpinButton = screen.getByRole('button', { name: 'Unpin session' })

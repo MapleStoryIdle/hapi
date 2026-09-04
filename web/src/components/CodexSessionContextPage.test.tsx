@@ -1964,6 +1964,45 @@ describe('CodexSessionContextPage', () => {
         ])
     })
 
+    it('places native child cards in the parent message timeline', () => {
+        const blocks = buildNativeCodexBlocks([
+            {
+                id: 'codex-local:parent:0',
+                createdAt: 1,
+                content: { role: 'user', content: { type: 'text', text: 'Start the task' } }
+            },
+            {
+                id: 'codex-local:parent:1',
+                createdAt: 30,
+                content: {
+                    role: 'agent',
+                    content: { type: 'codex', data: { type: 'message', message: 'Parent continued after the child started.' } }
+                }
+            }
+        ], [], [{
+            id: 'native-child-timeline',
+            parentSessionId: 'parent-thread-1',
+            name: 'Ada',
+            model: 'gpt-5.6-terra',
+            modelReasoningEffort: 'high',
+            status: 'completed',
+            statusText: 'Completed',
+            startedAt: 10,
+            updatedAt: 12,
+            completedAt: 12,
+            traceMessages: []
+        }])
+
+        const childCardIndex = blocks.findIndex((block) => (
+            block.kind === 'tool-call' && block.tool.id === 'native-codex-agent:native-child-timeline'
+        ))
+        const laterParentMessageIndex = blocks.findIndex((block) => (
+            block.kind === 'agent-text' && block.text === 'Parent continued after the child started.'
+        ))
+        expect(childCardIndex).toBeGreaterThan(0)
+        expect(childCardIndex).toBeLessThan(laterParentMessageIndex)
+    })
+
     it('renders a native child as the existing CodexAgent card', async () => {
         const api = createApi()
         ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockImplementation(async (sessionId, machineId, options) => ({

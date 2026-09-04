@@ -514,9 +514,9 @@ function buildNativeCodexSubagentInput(subagent: CodexLocalSessionSubagent): Rec
 
 /**
  * Translate native child transcript snapshots to the exact `agent-run-*`
- * events consumed by the existing SHAPI CodexAgent reducer. Keeping these
- * after the parent transcript makes cards live below Processed instead of
- * folding them into the parent tool group.
+ * events consumed by the existing SHAPI CodexAgent reducer. Their original
+ * timestamps keep cards as standalone entries in the parent timeline instead
+ * of folding them into the parent tool group.
  */
 function buildNativeCodexSubagentMessages(
     subagents: readonly CodexLocalSessionSubagent[]
@@ -615,11 +615,16 @@ export function buildNativeCodexBlocks(
     echoes: readonly NativeDirectMessageEcho[] = [],
     subagents: readonly CodexLocalSessionSubagent[] = []
 ): ChatBlock[] {
-    return buildCodexBlocksFromDecryptedMessages([
-        ...buildReadOnlyCodexMessages(messages),
-        ...buildNativeDirectEchoMessages(echoes),
-        ...buildNativeCodexSubagentMessages(subagents)
-    ])
+    const orderedMessages = [
+        ...buildReadOnlyCodexMessages(messages).map((message, index) => ({ message, source: 0, index })),
+        ...buildNativeDirectEchoMessages(echoes).map((message, index) => ({ message, source: 1, index })),
+        ...buildNativeCodexSubagentMessages(subagents).map((message, index) => ({ message, source: 2, index }))
+    ].sort((left, right) => (
+        left.message.createdAt - right.message.createdAt
+        || left.source - right.source
+        || left.index - right.index
+    ))
+    return buildCodexBlocksFromDecryptedMessages(orderedMessages.map(({ message }) => message))
 }
 
 /**

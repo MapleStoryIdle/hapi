@@ -35,6 +35,7 @@ import {
     type CodexLocalSessionSnapshotVersion,
     type CodexLocalSessionStatusRpcResponse,
     type CodexLocalSessionSummary,
+    type CodexImportedMessageContent,
     type CodexLocalSessionsRpcResponse,
     type NativeCodexDeliveryPolicy,
     type NativeKanbanFeedbackReviewGuard,
@@ -42,7 +43,11 @@ import {
     isHapiInitiatedCodexSession
 } from '@hapi/protocol/codexTranscript'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
-import { FileNativeCodexSessionDirectSendStore, NativeCodexSessionDirectSender } from '@/codex/nativeSessionDirectSend'
+import {
+    FileNativeCodexSessionDirectSendStore,
+    NativeCodexSessionDirectSender,
+    type NativeCodexTranscriptUserMessageEvidence
+} from '@/codex/nativeSessionDirectSend'
 import { NativeKanbanFeedbackStore } from '@/codex/nativeKanbanFeedbackStore'
 import { CodexAppServerClient } from '@/codex/codexAppServerClient'
 import { CodexSshAppServerClient } from '@/codex/codexSshAppServerClient'
@@ -146,6 +151,20 @@ interface DiscardCodexLocalSessionMessageRequest {
 
 interface ArchiveCodexLocalSessionRequest {
     sessionId?: unknown
+}
+
+function getNativeCodexTranscriptUserMessageEvidence(
+    messages: readonly CodexImportedMessageContent[]
+): NativeCodexTranscriptUserMessageEvidence[] {
+    const evidence: NativeCodexTranscriptUserMessageEvidence[] = []
+    for (const message of messages) {
+        if (message.role !== 'user' || message.content.type !== 'text') continue
+        const text = message.content.text.trim()
+        const createdAt = message.createdAt
+        if (!text || createdAt === undefined || !Number.isFinite(createdAt) || createdAt < 0) continue
+        evidence.push({ text, createdAt })
+    }
+    return evidence
 }
 
 function toNativeCodexSessionListUpdate(session: CodexLocalSessionSummary): CodexLocalSessionListUpdate {
@@ -299,11 +318,14 @@ export class ApiMachineClient {
     )
     private readonly nativeCodexSessionWatcher = new NativeCodexSessionWatcher({
         onChange: ({ codexSessionId, filePath, modifiedAt }) => {
-            const read = this.nativeCodexTranscriptCache.refreshCachedFromFile(
+            let read = this.nativeCodexTranscriptCache.refreshCachedFromFile(
                 codexSessionId,
                 filePath,
                 { limit: 50 }
             )
+            if (!read && this.nativeCodexSessionDirectSender.needsTranscriptDeliveryEvidence(codexSessionId)) {
+                read = this.nativeCodexTranscriptCache.read(codexSessionId, { limit: 50 })
+            }
             const summaryRead = read ?? this.nativeCodexTranscriptCache.refreshSummaryFromFile(codexSessionId, filePath)
             if (summaryRead) {
                 this.nativeCodexTurnLifecycle.observeTranscriptEvents(codexSessionId, summaryRead.lifecycleEvents)
@@ -314,7 +336,10 @@ export class ApiMachineClient {
                 }
             }
             const listSession = this.nativeCodexSessionListCache.update(filePath, modifiedAt)
-            this.nativeCodexSessionDirectSender.notifyTranscriptChanged(codexSessionId)
+            this.nativeCodexSessionDirectSender.notifyTranscriptChanged(
+                codexSessionId,
+                read ? getNativeCodexTranscriptUserMessageEvidence(read.data.importedMessages) : []
+            )
             this.reportNativeCodexSessionUpdated(codexSessionId, modifiedAt, read, listSession)
         }
     })
@@ -1056,12 +1081,13 @@ export class ApiMachineClient {
                 sessionId,
                 initialRead.userInputEvents
             )
-        if (lifecycleChanged || userInputChanged) {
-            this.nativeCodexSessionDirectSender.notifyTranscriptChanged(sessionId)
-        }
         const read = lifecycleChanged || userInputChanged
             ? this.nativeCodexTranscriptCache.readCached(sessionId, options) ?? initialRead
             : initialRead
+        this.nativeCodexSessionDirectSender.notifyTranscriptChanged(
+            sessionId,
+            getNativeCodexTranscriptUserMessageEvidence(read.data.importedMessages)
+        )
         return this.withNativeCodexTitle(read)
     }
 

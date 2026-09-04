@@ -53,7 +53,7 @@ export function DirectiveChip(props: { value: string }) {
         <span
             className={cn(
                 'inline-flex items-center justify-center gap-[0.2rem] whitespace-nowrap rounded-full border border-[var(--app-chat-user-border)] bg-[var(--app-chat-user-chip-bg)] px-2 py-px align-middle text-[length:var(--app-chat-font-size)] font-normal leading-[1.4] shadow-none',
-                isSkill ? 'text-[var(--app-link)]' : 'text-[var(--app-chat-user-chip-fg)]'
+                isSkill ? 'text-[var(--app-markdown-link)]' : 'text-[var(--app-chat-user-chip-fg)]'
             )}
             title={props.value}
             aria-label={props.value}

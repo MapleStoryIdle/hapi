@@ -612,7 +612,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('never releases a shared queue/add acknowledgement from transcript processing or idle states', async () => {
+    it('releases a shared queue/add acknowledgement only after exact transcript delivery evidence', async () => {
         vi.useFakeTimers()
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-ack-barrier-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789088'
@@ -672,58 +672,118 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(firstClient.requestCalls).toHaveLength(1)
             expect(secondClient.requestCalls).toEqual([])
 
-            runState = 'processing'
-            modifiedAt = 101
-            sender.notifyTranscriptChanged(sessionId)
+            // Generic lifecycle state must not release A: it could describe
+            // another Desktop turn in this shared thread.
             runState = 'idle'
-            modifiedAt = 102
-            sender.notifyTranscriptChanged(sessionId)
-            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
-            await flushMicrotasks()
-
+            modifiedAt = 101
+            sender.notifyTranscriptChanged(sessionId, [{
+                text: 'A different native prompt',
+                createdAt: Date.now()
+            }])
             expect(stored.find((item) => item.id === 'ssh:barrier-a')).toMatchObject({ accepted: true })
             expect(stored.find((item) => item.id === 'ssh:barrier-a')?.completed).toBeUndefined()
             expect(secondClient.requestCalls).toEqual([])
 
-            // A can be ACKed while the local transcript already says idle.
-            // Its per-thread lease remains the FIFO barrier, so B must not
-            // make the status look terminal or ready for another send.
+            // A matching prompt record is receipt-specific. It clears the
+            // false recovery barrier, but B still waits for the actual native
+            // turn to leave processing.
+            runState = 'processing'
+            modifiedAt = Date.now()
+            sender.notifyTranscriptChanged(sessionId, [{
+                text: 'First shared item',
+                createdAt: Date.now()
+            }])
+            await flushMicrotasks()
+
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
                 status: 'processing',
-                startedAt: expect.any(Number),
                 queuedMessages: [expect.objectContaining({ id: 'ssh:barrier-b' })]
             })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('lastErrorCode')
+            expect(stored.find((item) => item.id === 'ssh:barrier-a')).toMatchObject({
+                accepted: true,
+                transcriptConfirmed: true
+            })
+            expect(secondClient.requestCalls).toEqual([])
 
             await vi.advanceTimersByTimeAsync(20_000)
-
             const status = sender.getStatus(sessionId)
             expect(status.success).toBe(true)
             if (!status.success) throw new Error('Expected native queue status')
-            expect(status.status).toBe('idle')
-            expect(status.lastErrorCode).toBe('session_status_unknown')
-            expect(status.queuedMessages).toEqual([
-                expect.objectContaining({
-                    id: 'ssh:barrier-a',
-                    recoveryRequired: true,
-                    recoveryReason: 'session_status_unknown'
-                }),
-                expect.objectContaining({ id: 'ssh:barrier-b' })
-            ])
+            expect(status.status).toBe('processing')
+            expect(status).not.toHaveProperty('lastErrorCode')
+            expect(status.queuedMessages).toEqual([expect.objectContaining({ id: 'ssh:barrier-b' })])
             expect(secondClient.requestCalls).toEqual([])
 
-            // Only an explicit person-controlled resolution of the ambiguous
-            // A receipt can free B. Transcript state never does it for us.
-            expect(sender.discard(sessionId, 'ssh:barrier-a')).toMatchObject({
-                success: true,
-                discarded: true
-            })
+            runState = 'idle'
+            modifiedAt = Date.now()
             ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
             await flushMicrotasks()
             expect(secondClient.requestCalls).toEqual([expect.objectContaining({
                 method: 'thread/queue/add',
                 params: expect.objectContaining({ clientUserMessageId: 'ssh:barrier-b' })
             })])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('resolves a persisted shared recovery receipt when the native transcript proves delivery', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-recovery-evidence-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789086'
+        const stored: NativeCodexSessionDirectSendStoredItem[] = [{
+            sessionId,
+            id: 'ssh:recovered-a',
+            text: 'Already delivered prompt',
+            deliveryText: 'Already delivered prompt',
+            queuedAt: 1_000,
+            recoveryRequired: true,
+            recoveryReason: 'session_status_unknown'
+        }]
+        const store = {
+            load: () => [...stored],
+            save: (items: readonly NativeCodexSessionDirectSendStoredItem[]) => {
+                stored.splice(0, stored.length, ...items)
+            }
+        }
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 2_000,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 1_001,
+                    runState: 'processing' as const
+                })
+            },
+            null,
+            store
+        )
+
+        try {
+            sender.notifyTranscriptChanged(sessionId, [{
+                text: 'Already delivered prompt',
+                createdAt: 1_001
+            }])
+
+            expect(stored).toEqual([expect.objectContaining({
+                id: 'ssh:recovered-a',
+                accepted: true,
+                transcriptConfirmed: true,
+                recoveryRequired: false
+            })])
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                queuedMessages: []
+            })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('lastErrorCode')
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })

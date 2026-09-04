@@ -50,6 +50,16 @@ export type NativeCodexSessionLookup = {
     getSummary: (sessionId: string) => CodexLocalSessionSummary | null
 }
 
+/**
+ * A bounded, local-only proof that Codex wrote this user turn to its native
+ * transcript. It lets an SSH `thread/queue/add` receipt stop presenting a
+ * false recovery warning without exporting transcript content to the hub.
+ */
+export type NativeCodexTranscriptUserMessageEvidence = {
+    text: string
+    createdAt: number
+}
+
 export type NativeCodexSessionDirectSendStoredItem = {
     sessionId: string
     id: string
@@ -62,6 +72,10 @@ export type NativeCodexSessionDirectSendStoredItem = {
     deliveryPolicy?: 'untrusted-review'
     /** Durable acceptance receipt; prevents a repeated browser id from replaying a turn. */
     accepted?: true
+    /** Exact native user-turn evidence confirms that an SSH queue receipt reached Codex. */
+    transcriptConfirmed?: true
+    /** Confirmation clock for pruning ordinary idempotency tombstones. */
+    transcriptConfirmedAt?: number
     /** Set after a durable terminal native turn outcome. */
     completed?: true
     /** Completion clock for pruning ordinary-message idempotency tombstones. */
@@ -132,10 +146,19 @@ function parseStoredItem(value: unknown): NativeCodexSessionDirectSendStoredItem
     const recoveryRequired = record.recoveryRequired === true
     const deliveryPolicy = record.deliveryPolicy === 'untrusted-review' ? 'untrusted-review' : undefined
     const accepted = record.accepted === true
+    const transcriptConfirmed = record.transcriptConfirmed === true
+    const transcriptConfirmedAt = typeof record.transcriptConfirmedAt === 'number'
+        ? record.transcriptConfirmedAt
+        : undefined
     const completed = record.completed === true
     const terminalAt = typeof record.terminalAt === 'number' ? record.terminalAt : undefined
     const reviewGuard = parseReviewGuard(record.reviewGuard)
     if (completed && !accepted) return null
+    if (transcriptConfirmed && !accepted) return null
+    if (
+        transcriptConfirmedAt !== undefined
+        && (!Number.isFinite(transcriptConfirmedAt) || transcriptConfirmedAt < queuedAt || !transcriptConfirmed)
+    ) return null
     if (terminalAt !== undefined && (!Number.isFinite(terminalAt) || terminalAt < queuedAt || !completed)) return null
     if (record.reviewGuard !== undefined && !reviewGuard) return null
     return {
@@ -148,6 +171,8 @@ function parseStoredItem(value: unknown): NativeCodexSessionDirectSendStoredItem
         ...(recoveryRequired && recoveryReason ? { recoveryReason } : {}),
         ...(deliveryPolicy ? { deliveryPolicy } : {}),
         ...(accepted ? { accepted: true as const } : {}),
+        ...(transcriptConfirmed ? { transcriptConfirmed: true as const } : {}),
+        ...(transcriptConfirmedAt === undefined ? {} : { transcriptConfirmedAt }),
         ...(completed ? { completed: true as const } : {}),
         ...(terminalAt === undefined ? {} : { terminalAt }),
         ...(reviewGuard ? { reviewGuard } : {})
@@ -275,6 +300,8 @@ type SharedQueueDelivery = {
 const RECENT_FAILURE_TTL_MS = 60_000
 const MAX_FAILURE_MESSAGE_LENGTH = 400
 const MAX_NATIVE_QUEUE_LENGTH = 50
+const MAX_NATIVE_TRANSCRIPT_DELIVERY_EVIDENCE = 64
+const NATIVE_TRANSCRIPT_DELIVERY_TIME_SKEW_MS = 1_000
 const NATIVE_QUEUE_POLL_INTERVAL_MS = 1_000
 const NATIVE_QUEUE_RETRY_INTERVAL_MS = 5_000
 const MAX_CLIENT_MESSAGE_ID_LENGTH = 160
@@ -411,13 +438,15 @@ export class NativeCodexSessionDirectSender {
     private readonly queueTimers = new Map<string, ReturnType<typeof setTimeout>>()
     private readonly queueOwnershipChecks = new Set<string>()
     /**
-     * At most one shared delivery lease per native thread.  It covers socket
-     * setup, queue/add in flight, and a successful ACK until explicit
-     * recovery. A native transcript status cannot be bound to this receipt.
+     * At most one shared delivery lease per native thread. It covers socket
+     * setup, queue/add in flight, and a successful ACK until an exact native
+     * user-turn record confirms the receipt or recovery remains necessary.
      */
     private readonly sharedQueueDeliveries = new Map<string, SharedQueueDelivery>()
     /** Only these short-lived sockets belong to SHAPI and may be closed here. */
     private readonly sharedQueueClients = new Set<NativeCodexAppServerClient>()
+    /** Recent native user turns, retained only long enough to settle a local SSH receipt. */
+    private readonly transcriptUserMessageEvidence = new Map<string, NativeCodexTranscriptUserMessageEvidence[]>()
     /**
      * A native archive must be atomic with respect to direct delivery.  This
      * is deliberately runner-local: it closes the gap between an idle check
@@ -453,8 +482,12 @@ export class NativeCodexSessionDirectSender {
         const restoredRecoveryQueues = new Map<string, QueuedSend[]>()
         for (const item of restored) {
             if (item.accepted === true) {
-                if (this.isExpiredCompletedDefaultReceipt(item)) continue
-                if (item.deliveryPolicy !== 'untrusted-review' && item.completed !== true) {
+                if (this.isExpiredResolvedDefaultReceipt(item)) continue
+                if (
+                    item.deliveryPolicy !== 'untrusted-review'
+                    && item.completed !== true
+                    && item.transcriptConfirmed !== true
+                ) {
                     const queue = restoredRecoveryQueues.get(item.sessionId) ?? []
                     if (!queue.some((queued) => queued.id === item.id)) {
                         queue.push({
@@ -545,7 +578,7 @@ export class NativeCodexSessionDirectSender {
     private getPersistedItems(extra: readonly NativeCodexSessionDirectSendStoredItem[] = []): NativeCodexSessionDirectSendStoredItem[] {
         const items: NativeCodexSessionDirectSendStoredItem[] = []
         for (const [key, receipt] of this.acceptedReceipts) {
-            if (this.isExpiredCompletedDefaultReceipt(receipt)) {
+            if (this.isExpiredResolvedDefaultReceipt(receipt)) {
                 this.acceptedReceipts.delete(key)
                 continue
             }
@@ -595,11 +628,15 @@ export class NativeCodexSessionDirectSender {
         return `${sessionId}\u0000${clientMessageId}`
     }
 
-    private isExpiredCompletedDefaultReceipt(receipt: NativeCodexSessionDirectSendStoredItem): boolean {
-        return receipt.deliveryPolicy !== 'untrusted-review'
-            && receipt.completed === true
-            && typeof receipt.terminalAt === 'number'
-            && this.now() - receipt.terminalAt >= DEFAULT_COMPLETED_RECEIPT_TTL_MS
+    private isExpiredResolvedDefaultReceipt(receipt: NativeCodexSessionDirectSendStoredItem): boolean {
+        if (receipt.deliveryPolicy === 'untrusted-review') return false
+        const resolvedAt = receipt.completed === true
+            ? receipt.terminalAt
+            : receipt.transcriptConfirmed === true
+                ? receipt.transcriptConfirmedAt
+                : undefined
+        return typeof resolvedAt === 'number'
+            && this.now() - resolvedAt >= DEFAULT_COMPLETED_RECEIPT_TTL_MS
     }
 
     private markAccepted(sessionId: string, active: ActiveSend): void {
@@ -762,6 +799,7 @@ export class NativeCodexSessionDirectSender {
             }
         }
         this.sharedQueueDeliveries.clear()
+        this.transcriptUserMessageEvidence.clear()
         // Keep the already-persisted active entries as recovery-required
         // receipts for the replacement runner. Do not silently retry them.
         this.persistOutbox()
@@ -780,6 +818,18 @@ export class NativeCodexSessionDirectSender {
         const active = this.activeSends.get(sessionId)
         return active?.kind === 'exec-resume'
             || active?.turnStartAttempted === true
+    }
+
+    /** A cold transcript must be read once when it can settle an SSH receipt. */
+    needsTranscriptDeliveryEvidence(sessionId: string): boolean {
+        if (this.sharedQueueDeliveries.has(sessionId)) return true
+        const recovery = this.queues.get(sessionId)?.[0]
+        return Boolean(
+            recovery
+            && recovery.deliveryPolicy === 'default'
+            && recovery.recoveryRequired
+            && (recovery.recoveryReason === 'session_status_unknown' || recovery.recoveryReason === 'runner_restarted')
+        )
     }
 
     /**
@@ -863,14 +913,169 @@ export class NativeCodexSessionDirectSender {
         }
     }
 
-    /** Update private-bridge progress; shared ACK leases never trust transcript state alone. */
-    notifyTranscriptChanged(sessionId: string): void {
+    /**
+     * Update direct-delivery progress after a native transcript change. An
+     * exact, post-submit user record is receipt-specific enough to resolve an
+     * ordinary SSH `thread/queue/add` hand-off; generic processing/idle state
+     * remains insufficient on its own.
+     */
+    notifyTranscriptChanged(
+        sessionId: string,
+        userMessageEvidence: readonly NativeCodexTranscriptUserMessageEvidence[] = []
+    ): void {
+        this.rememberTranscriptUserMessageEvidence(sessionId, userMessageEvidence)
         const session = this.sessionLookup.getSummary(sessionId)
         this.reconcileActiveWithTranscript(sessionId, session)
+        const reconciledSharedReceipt = this.reconcileSharedQueueDeliveryWithTranscript(sessionId)
+        const reconciledRecoveryReceipt = this.reconcileRecoveryQueueWithTranscript(sessionId)
+        if (reconciledSharedReceipt || reconciledRecoveryReceipt) {
+            this.notifyStateChange(sessionId)
+        }
         if (this.archiveReservations.has(sessionId) || this.hasDeliveryLease(sessionId) || !this.queues.get(sessionId)?.length) {
+            if (!this.hasDeliveryLease(sessionId) && !this.queues.get(sessionId)?.length) {
+                this.transcriptUserMessageEvidence.delete(sessionId)
+            }
             return
         }
         this.scheduleQueuePump(sessionId, 0, { replacePending: true })
+    }
+
+    private rememberTranscriptUserMessageEvidence(
+        sessionId: string,
+        evidence: readonly NativeCodexTranscriptUserMessageEvidence[]
+    ): void {
+        if (evidence.length === 0) return
+        const byKey = new Map<string, NativeCodexTranscriptUserMessageEvidence>()
+        for (const candidate of [
+            ...(this.transcriptUserMessageEvidence.get(sessionId) ?? []),
+            ...evidence
+        ]) {
+            const text = typeof candidate.text === 'string' ? candidate.text.trim() : ''
+            const createdAt = candidate.createdAt
+            if (!text || !Number.isFinite(createdAt) || createdAt < 0) continue
+            byKey.set(`${createdAt}\u0000${text}`, { text, createdAt })
+        }
+        const remembered = [...byKey.values()]
+            .sort((left, right) => left.createdAt - right.createdAt || left.text.localeCompare(right.text))
+            .slice(-MAX_NATIVE_TRANSCRIPT_DELIVERY_EVIDENCE)
+        if (remembered.length > 0) {
+            this.transcriptUserMessageEvidence.set(sessionId, remembered)
+        }
+    }
+
+    private hasTranscriptDeliveryEvidence(
+        sessionId: string,
+        receipt: Pick<NativeCodexSessionDirectSendStoredItem, 'text' | 'deliveryText' | 'queuedAt'> & {
+            deliveryPolicy?: NativeCodexDeliveryPolicy
+        }
+    ): boolean {
+        if (receipt.deliveryPolicy === 'untrusted-review') return false
+        const expectedTexts = new Set([receipt.text.trim(), receipt.deliveryText.trim()].filter(Boolean))
+        if (expectedTexts.size === 0) return false
+        const earliestAllowedAt = receipt.queuedAt - NATIVE_TRANSCRIPT_DELIVERY_TIME_SKEW_MS
+        return (this.transcriptUserMessageEvidence.get(sessionId) ?? []).some((candidate) => (
+            candidate.createdAt >= earliestAllowedAt && expectedTexts.has(candidate.text)
+        ))
+    }
+
+    /**
+     * `thread/queue/add` includes our client id in its ACK, while native
+     * transcript records only contain user text. Match both exact text and a
+     * post-submit timestamp before releasing the per-thread FIFO lease.
+     */
+    private reconcileSharedQueueDeliveryWithTranscript(sessionId: string): boolean {
+        const delivery = this.sharedQueueDeliveries.get(sessionId)
+        const receipt = delivery?.receipt
+        if (!delivery || delivery.phase !== 'accepted' || !receipt || !this.hasTranscriptDeliveryEvidence(sessionId, receipt)) {
+            return false
+        }
+
+        const acceptedKey = this.acceptedKey(sessionId, receipt.id)
+        const previousReceipt = this.acceptedReceipts.get(acceptedKey)
+        const previousTranscriptConfirmed = receipt.transcriptConfirmed
+        const previousTranscriptConfirmedAt = receipt.transcriptConfirmedAt
+        receipt.transcriptConfirmed = true
+        receipt.transcriptConfirmedAt = Math.max(this.now(), receipt.queuedAt)
+        this.acceptedReceipts.set(acceptedKey, receipt)
+        if (!this.persistOutbox()) {
+            if (previousReceipt) {
+                this.acceptedReceipts.set(acceptedKey, previousReceipt)
+            } else {
+                this.acceptedReceipts.delete(acceptedKey)
+            }
+            if (previousTranscriptConfirmed) {
+                receipt.transcriptConfirmed = true
+            } else {
+                delete receipt.transcriptConfirmed
+            }
+            if (previousTranscriptConfirmedAt === undefined) {
+                delete receipt.transcriptConfirmedAt
+            } else {
+                receipt.transcriptConfirmedAt = previousTranscriptConfirmedAt
+            }
+            return false
+        }
+
+        this.clearSharedQueueDeliveryTimer(delivery)
+        this.sharedQueueDeliveries.delete(sessionId)
+        this.recentFailures.delete(sessionId)
+        return true
+    }
+
+    /**
+     * A previous runner may already have converted a shared ACK into an
+     * explicit recovery queue item. The same exact transcript proof can turn
+     * that item into a durable idempotency tombstone instead of showing a
+     * false retry/discard prompt forever.
+     */
+    private reconcileRecoveryQueueWithTranscript(sessionId: string): boolean {
+        const queue = this.queues.get(sessionId)
+        const recovery = queue?.[0]
+        if (
+            !queue
+            || !recovery
+            || recovery.deliveryPolicy !== 'default'
+            || !recovery.recoveryRequired
+            || (recovery.recoveryReason !== 'session_status_unknown' && recovery.recoveryReason !== 'runner_restarted')
+            || !this.hasTranscriptDeliveryEvidence(sessionId, recovery)
+        ) {
+            return false
+        }
+
+        const acceptedKey = this.acceptedKey(sessionId, recovery.id)
+        const previousReceipt = this.acceptedReceipts.get(acceptedKey)
+        const receipt: AcceptedReceipt = {
+            sessionId,
+            id: recovery.id,
+            text: recovery.text,
+            deliveryText: recovery.deliveryText,
+            queuedAt: recovery.queuedAt,
+            recoveryRequired: false,
+            accepted: true,
+            transcriptConfirmed: true,
+            transcriptConfirmedAt: Math.max(this.now(), recovery.queuedAt)
+        }
+        queue.shift()
+        if (queue.length === 0) {
+            this.queues.delete(sessionId)
+        }
+        this.acceptedReceipts.set(acceptedKey, receipt)
+        if (!this.persistOutbox()) {
+            if (previousReceipt) {
+                this.acceptedReceipts.set(acceptedKey, previousReceipt)
+            } else {
+                this.acceptedReceipts.delete(acceptedKey)
+            }
+            queue.unshift(recovery)
+            this.queues.set(sessionId, queue)
+            return false
+        }
+
+        const failure = this.recentFailures.get(sessionId)
+        if (failure?.clientMessageId === recovery.id) {
+            this.recentFailures.delete(sessionId)
+        }
+        return true
     }
 
     private getStatusForSession(
@@ -2765,8 +2970,8 @@ export class NativeCodexSessionDirectSender {
 
     /**
      * Persist a queue/add ACK as non-terminal, then retain its per-session
-     * lease. The native transcript has no receipt/turn binding, so it may
-     * never release later local FIFO work automatically.
+     * lease until an exact native user-turn record proves this receipt reached
+     * Codex. Generic lifecycle state alone still cannot release FIFO work.
      */
     private completeSharedQueueSubmission(
         sessionId: string,
@@ -2824,7 +3029,13 @@ export class NativeCodexSessionDirectSender {
         delivery.receipt = receipt
         delivery.acceptedAt = this.now()
         this.recentFailures.delete(sessionId)
-        this.scheduleSharedQueueLifecycleCheck(sessionId, delivery)
+        if (this.reconcileSharedQueueDeliveryWithTranscript(sessionId)) {
+            if (this.queues.get(sessionId)?.length && !this.queues.get(sessionId)?.[0]?.recoveryRequired) {
+                this.scheduleQueuePump(sessionId, 0, { replacePending: true })
+            }
+        } else {
+            this.scheduleSharedQueueLifecycleCheck(sessionId, delivery)
+        }
         this.notifyStateChange(sessionId)
     }
 
@@ -2850,10 +3061,10 @@ export class NativeCodexSessionDirectSender {
             if (acceptedAt === null) return
             const elapsed = this.now() - acceptedAt
             if (elapsed >= NATIVE_SHARED_QUEUE_ACK_RECOVERY_TIMEOUT_MS) {
-                // `thread/queue/add` ACK proves Codex accepted this local
-                // receipt, but the native transcript does not identify it.
-                // Never infer completion from processing/idle or mtime; that
-                // could let an older native turn release a later FIFO item.
+                // `thread/queue/add` ACK alone remains ambiguous. Exact
+                // transcript user-turn evidence can release it earlier; raw
+                // processing/idle and mtime never can, because an older
+                // native turn could otherwise release later FIFO work.
                 this.expireSharedQueueDelivery(
                     sessionId,
                     delivery,

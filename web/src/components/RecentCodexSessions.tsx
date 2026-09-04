@@ -252,7 +252,7 @@ const KANBAN_GROUP_PRESENTATION: Record<MergedCodexKanbanGroupId, {
     processing: {
         labelKey: 'sessions.kanban.processing',
         Icon: LoaderCircleIcon,
-        iconClassName: 'text-[#34C759] motion-safe:animate-pulse',
+        iconClassName: 'text-[#34C759]',
         borderClassName: 'border-l-[#34C759]'
     },
     unviewed: {
@@ -798,6 +798,22 @@ function ThinkingKanbanLabel(props: { label: string }) {
                 <span className="session-kanban-thinking-dot-third">.</span>
             </span>
         </span>
+    )
+}
+
+function ThinkingKanbanSpinner() {
+    return (
+        <svg
+            viewBox="0 0 20 20"
+            fill="none"
+            className="h-3.5 w-3.5 shrink-0 text-[#34C759] motion-safe:animate-spin"
+            aria-hidden="true"
+            data-kanban-group-icon="processing"
+            data-kanban-thinking-spinner
+        >
+            <circle cx="10" cy="10" r="8" stroke="var(--app-border)" strokeWidth="2" />
+            <path d="M10 2a8 8 0 0 1 8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
     )
 }
 
@@ -1522,12 +1538,16 @@ export function RecentCodexSessions(props: {
                         return (
                             <section key={group.id} className="min-w-0" data-kanban-group={group.id}>
                                 <div className="cupertino-kanban-heading flex items-center gap-2 px-1">
-                                    <GroupIcon
-                                        className={`h-3.5 w-3.5 shrink-0 ${presentation.iconClassName}`}
-                                        {...(group.id === 'pinned' ? { fill: 'currentColor' } : {})}
-                                        aria-hidden="true"
-                                        data-kanban-group-icon={group.id}
-                                    />
+                                    {group.id === 'processing' ? (
+                                        <ThinkingKanbanSpinner />
+                                    ) : (
+                                        <GroupIcon
+                                            className={`h-3.5 w-3.5 shrink-0 ${presentation.iconClassName}`}
+                                            {...(group.id === 'pinned' ? { fill: 'currentColor' } : {})}
+                                            aria-hidden="true"
+                                            data-kanban-group-icon={group.id}
+                                        />
+                                    )}
                                     <h2 className="text-xs font-semibold tracking-[0.04em] text-[var(--app-hint)]">
                                         {group.id === 'processing' ? (
                                             <ThinkingKanbanLabel label={t(presentation.labelKey)} />

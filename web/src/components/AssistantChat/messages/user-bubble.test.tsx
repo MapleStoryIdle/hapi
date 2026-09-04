@@ -53,7 +53,7 @@ describe('UserBubbleContent', () => {
         expect(screen.getByTitle('$ralplan')).toBeInTheDocument()
         expect(screen.getByTestId('lazy-rainbow-text')).toHaveAttribute('data-inline', 'true')
         const skill = container.querySelector('[data-user-directive-kind="skill"]')
-        expect(skill).toHaveClass('text-[var(--app-link)]')
+        expect(skill).toHaveClass('text-[var(--app-markdown-link)]')
         expect(skill?.querySelector('svg')).toBeInTheDocument()
     })
 
@@ -62,7 +62,7 @@ describe('UserBubbleContent', () => {
 
         const command = container.querySelector('[data-user-directive-kind="command"]')
         expect(command).toHaveClass('text-[var(--app-chat-user-chip-fg)]')
-        expect(command).not.toHaveClass('text-[var(--app-link)]')
+        expect(command).not.toHaveClass('text-[var(--app-markdown-link)]')
     })
 
     it('asks LazyRainbowText to preserve single newlines in sent prompt bodies', () => {
