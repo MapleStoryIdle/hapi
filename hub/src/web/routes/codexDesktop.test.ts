@@ -1026,7 +1026,8 @@ describe('Codex Desktop import routes', () => {
                     id: sessionId,
                     title: 'Renamed native task',
                     cwd: '/runner/workspace/project',
-                    modifiedAt: 123
+                    modifiedAt: 123,
+                    controlledByCodexSsh: false
                 },
                 status: {
                     success: true,
@@ -1187,6 +1188,7 @@ describe('Codex Desktop import routes', () => {
             { code: 'session_busy', status: 409 },
             { code: 'session_status_unknown', status: 409 },
             { code: 'session_queued', status: 409 },
+            { code: 'external_writer_active', status: 409 },
             { code: 'archive_unsupported', status: 501 },
             { code: 'archive_failed', status: 502 },
             { code: 'session_not_found', status: 404 }

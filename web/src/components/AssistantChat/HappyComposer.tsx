@@ -253,6 +253,8 @@ export function HappyComposer(props: {
     /** Workspace identity for project-scoped skill shortcuts. */
     projectPath?: string | null
     disabled?: boolean
+    /** Replaces the send glyph with a lock while preserving the current draft. */
+    locked?: boolean
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
     threadGoal?: ThreadGoal | null
@@ -333,6 +335,7 @@ export function HappyComposer(props: {
     const {
         sessionId,
         disabled = false,
+        locked = false,
         permissionMode: rawPermissionMode,
         collaborationMode: rawCollaborationMode,
         threadGoal,
@@ -1820,6 +1823,7 @@ export function HappyComposer(props: {
                                         voiceStatus={voiceStatus}
                                         voiceEnabled={voiceEnabled}
                                         controlsDisabled={controlsDisabled}
+                                        locked={locked}
                                         onSend={sendComposerMessage}
                                         onVoiceToggle={onVoiceToggle ?? (() => {})}
                                         showAbortButton={showAbortButton}
@@ -1844,6 +1848,7 @@ export function HappyComposer(props: {
                             <ComposerButtons
                                 canSend={canSend}
                                 controlsDisabled={controlsDisabled}
+                                locked={locked}
                                 showSettingsButton={showSettingsButton}
                                 onSettingsToggle={handleSettingsToggle}
                                 settingsButtonRef={settingsButtonRef}

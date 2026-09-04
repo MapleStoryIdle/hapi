@@ -347,6 +347,62 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
         }
     })
 
+    it('emits explicit SSH ownership acquire and release summaries', async () => {
+        const machine = makeMachine('machine-codex-ssh-ownership')
+        const sessionId = '18345678-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '13')
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(join(transcriptDir, `rollout-${sessionId}.jsonl`), [
+            JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: '/workspace/project' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })
+        ].join('\n'))
+
+        let cachedHeld = new Set<string>()
+        let nextHeld = new Set<string>([sessionId])
+        const client = new ApiMachineClient('cli-token', machine)
+        const emit = vi.fn()
+        const internals = client as unknown as {
+            socket: { emit: typeof emit; close: () => void }
+            nativeCodexSshOwnership: {
+                getCachedHeldSessionIds: () => ReadonlySet<string>
+                getHeldSessionIds: (options?: { forceRefresh?: boolean }) => Promise<ReadonlySet<string>>
+            }
+            refreshNativeCodexSshOwnership: (options?: { forceRefresh?: boolean }) => Promise<ReadonlySet<string>>
+        }
+        internals.socket = { emit, close: () => {} }
+        internals.nativeCodexSshOwnership = {
+            getCachedHeldSessionIds: () => new Set(cachedHeld),
+            getHeldSessionIds: async () => {
+                cachedHeld = new Set(nextHeld)
+                return new Set(cachedHeld)
+            }
+        }
+
+        try {
+            await internals.refreshNativeCodexSshOwnership({ forceRefresh: true })
+            nextHeld = new Set()
+            await internals.refreshNativeCodexSshOwnership({ forceRefresh: true })
+
+            const updates = emit.mock.calls
+                .filter(([event]) => event === 'codex-session-updated')
+                .map(([, payload]) => payload)
+            expect(updates).toHaveLength(2)
+            expect(updates[0]).toEqual(expect.objectContaining({
+                machineId: machine.id,
+                codexSessionId: sessionId,
+                summary: expect.objectContaining({ controlledByCodexSsh: true })
+            }))
+            expect(updates[1]).toEqual(expect.objectContaining({
+                machineId: machine.id,
+                codexSessionId: sessionId,
+                summary: expect.objectContaining({ controlledByCodexSsh: false })
+            }))
+        } finally {
+            client.shutdown()
+        }
+    })
+
     it('returns one cached native snapshot for context and lifecycle state', async () => {
         const machine = makeMachine('machine-codex-snapshot')
         const sessionId = '22345678-1234-4234-8234-123456789012'

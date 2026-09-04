@@ -34,6 +34,8 @@ export type CodexLocalSessionSummary = {
      * native delivery must continue to treat the session as processing.
      */
     waitingForUserInput?: boolean
+    /** Explicit current Codex Desktop SSH ownership; false clears a stale UI lock. */
+    controlledByCodexSsh?: boolean
 }
 
 /** Runner-to-browser list update; the local transcript path stays private. */
@@ -42,7 +44,7 @@ export type CodexLocalSessionListUpdate = Omit<CodexLocalSessionSummary, 'file'>
 /** Small metadata that may change while a transcript revision stays stable. */
 export type CodexLocalSessionDisplaySummary = Pick<
     CodexLocalSessionSummary,
-    'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort'
+    'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort' | 'controlledByCodexSsh'
 >
 
 export type CodexLocalSessionConfig = {
@@ -231,6 +233,8 @@ export type CodexLocalSessionStatusRpcResponse = {
     activeTurnId?: string
     /** Native Codex is blocked on an answer in its own local UI. */
     waitingForUserInput?: boolean
+    /** Explicit current Codex Desktop SSH ownership; false clears a stale UI lock. */
+    controlledByCodexSsh?: boolean
     /**
      * The native transcript still says a turn is running but has not changed
      * for a long time. This is only a recovery hint: SHAPI never retries a
@@ -375,7 +379,7 @@ export type SendCodexLocalSessionMessageRpcResponse = {
 } | {
     success: false
     error: string
-    code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'invalid_client_message_id' | 'launch_failed' | 'queue_full' | 'not_native_session'
+    code: 'session_not_found' | 'session_busy' | 'session_status_unknown' | 'workspace_unavailable' | 'invalid_message' | 'invalid_client_message_id' | 'launch_failed' | 'queue_full' | 'not_native_session' | 'external_writer_active'
 }
 
 /**
@@ -414,6 +418,7 @@ export type ArchiveCodexLocalSessionRpcResponse = {
         | 'archive_in_progress'
         | 'archive_unsupported'
         | 'archive_failed'
+        | 'external_writer_active'
 }
 
 export type CodexTranscriptFileCandidate = {

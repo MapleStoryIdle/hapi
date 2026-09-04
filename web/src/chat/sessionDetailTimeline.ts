@@ -18,6 +18,8 @@ export type SessionDetailTimelineOptions = {
     previousGroups?: readonly ToolGroupBlock[]
     terminalToolDisplayMode?: TerminalToolDisplayMode
     runActive?: boolean
+    /** Native Codex: keep one process row across reasoning/tool snapshots. */
+    aggregateActiveProcess?: boolean
 }
 
 export type SessionDetailTimeline = {
@@ -38,6 +40,7 @@ export type SessionDetailTimelineCache = {
     hasMoreMessages: boolean
     terminalToolDisplayMode: TerminalToolDisplayMode | undefined
     runActive: boolean | undefined
+    aggregateActiveProcess: boolean | undefined
     timeline: SessionDetailTimeline
 }
 
@@ -101,6 +104,7 @@ function createTimelineCache(
         hasMoreMessages: options.hasMoreMessages,
         terminalToolDisplayMode: options.terminalToolDisplayMode,
         runActive: options.runActive,
+        aggregateActiveProcess: options.aggregateActiveProcess,
         timeline
     }
 }
@@ -112,6 +116,7 @@ function canReuseTimelinePrefix(
     return cache.hasMoreMessages === options.hasMoreMessages
         && cache.terminalToolDisplayMode === options.terminalToolDisplayMode
         && cache.runActive === options.runActive
+        && cache.aggregateActiveProcess === options.aggregateActiveProcess
 }
 
 /**
@@ -202,7 +207,8 @@ export function buildSessionDetailTimeline(
     return {
         grouped,
         visible: groupAssistantResultDetails(grouped, {
-            runActive: options.runActive
+            runActive: options.runActive,
+            aggregateActiveProcess: options.aggregateActiveProcess
         })
     }
 }
@@ -268,7 +274,8 @@ export function buildIncrementalSessionDetailTimeline(
         hasMoreMessages: false,
         previousGroups: getTailPreviousGroups(previousCache.timeline, tailBlocks),
         terminalToolDisplayMode: options.terminalToolDisplayMode,
-        runActive: options.runActive
+        runActive: options.runActive,
+        aggregateActiveProcess: options.aggregateActiveProcess
     })
     const timeline: SessionDetailTimeline = {
         grouped: [...groupedPrefix, ...tail.grouped],

@@ -71,6 +71,9 @@ export type NativeKanbanFeedbackReviewGuardVerifier = (
     guard: NativeKanbanFeedbackReviewGuard
 ) => { success: true } | { success: false; error: string }
 
+/** Fresh runner-side check before a new hand-off can touch an original thread. */
+export type NativeCodexExternalControlChecker = (sessionId: string) => Promise<boolean>
+
 /**
  * Runner-local outbox for original Codex threads. A queue is deliberately
  * saved outside the browser so a runner handoff cannot silently drop it.
@@ -365,6 +368,7 @@ export class NativeCodexSessionDirectSender {
     private readonly recentFailures = new Map<string, RecentFailure>()
     private readonly queues = new Map<string, QueuedSend[]>()
     private readonly queueTimers = new Map<string, ReturnType<typeof setTimeout>>()
+    private readonly queueOwnershipChecks = new Set<string>()
     /**
      * A native archive must be atomic with respect to direct delivery.  This
      * is deliberately runner-local: it closes the gap between an idle check
@@ -372,6 +376,8 @@ export class NativeCodexSessionDirectSender {
      */
     private readonly archiveReservations = new Set<string>()
     private stateChangeListener: ((sessionId: string) => void) | null = null
+    private disposed = false
+    private ownershipCheckGeneration = 0
 
     constructor(
         private readonly spawnProcess: SpawnNativeCodexProcess = defaultSpawnNativeCodexProcess,
@@ -380,7 +386,8 @@ export class NativeCodexSessionDirectSender {
         private readonly sessionLookup: NativeCodexSessionLookup = defaultSessionLookup,
         private readonly createAppServerClient: CreateNativeCodexAppServerClient | null = null,
         private readonly store: NativeCodexSessionDirectSendStore | null = null,
-        private readonly reviewGuardVerifier: NativeKanbanFeedbackReviewGuardVerifier | null = null
+        private readonly reviewGuardVerifier: NativeKanbanFeedbackReviewGuardVerifier | null = null,
+        private readonly externalControlChecker: NativeCodexExternalControlChecker | null = null
     ) {
         this.restorePersistedQueues()
         for (const sessionId of this.queues.keys()) {
@@ -628,6 +635,8 @@ export class NativeCodexSessionDirectSender {
 
     /** Release timers and our short-lived bridge processes on runner shutdown. */
     dispose(): void {
+        this.disposed = true
+        this.ownershipCheckGeneration += 1
         for (const timer of this.queueTimers.values()) {
             clearTimeout(timer)
         }
@@ -662,10 +671,8 @@ export class NativeCodexSessionDirectSender {
 
     /**
      * Reserve an exact native thread while the caller performs Codex's
-     * destructive archive operation. Archiving may stop work owned by another
-     * Codex client, just like SHAPI archive stops a managed session. It must not
-     * overlap a SHAPI-owned hand-off or saved FIFO receipt, because those have
-     * stronger delivery guarantees than an external native turn.
+     * destructive archive operation. It must not overlap a SHAPI-owned hand-off,
+     * saved FIFO receipt, or a freshly detected external owner.
      */
     async archive(
         sessionId: string,
@@ -690,7 +697,6 @@ export class NativeCodexSessionDirectSender {
                 error: 'Only original native Codex sessions can be archived here'
             }
         }
-
         if (this.activeSends.has(sessionId)) {
             return {
                 success: false,
@@ -713,6 +719,12 @@ export class NativeCodexSessionDirectSender {
             this.queueTimers.delete(sessionId)
         }
         try {
+            // Reserve before awaiting the optional ownership probe: a
+            // concurrent direct-send must not slip between archive's initial
+            // idle check and the destructive app-server call.
+            if (this.externalControlChecker && await this.isExternallyControlled(sessionId)) {
+                return this.externalControlArchiveFailure()
+            }
             return await attempt()
         } catch (error) {
             return {
@@ -916,6 +928,34 @@ export class NativeCodexSessionDirectSender {
         }
 
         return this.start(sessionId, message, displayMessage, cwd, session.modifiedAt, clientMessageId, deliveryPolicy, reviewGuard)
+    }
+
+    /**
+     * Used by RPC entrypoints. Keep the legacy synchronous `send` surface for
+     * local callers/tests, while ensuring a fresh ownership probe runs before
+     * a request can create a queue receipt or start `thread/resume`.
+     */
+    async sendWithExternalControlCheck(
+        sessionId: string,
+        rawMessage: unknown,
+        rawDisplayMessage?: unknown,
+        rawClientMessageId?: unknown,
+        rawForceRecovery?: unknown,
+        rawDeliveryPolicy?: unknown,
+        rawReviewGuard?: unknown
+    ): Promise<SendCodexLocalSessionMessageRpcResponse> {
+        if (await this.isExternallyControlled(sessionId)) {
+            return this.externalControlSendFailure()
+        }
+        return this.send(
+            sessionId,
+            rawMessage,
+            rawDisplayMessage,
+            rawClientMessageId,
+            rawForceRecovery,
+            rawDeliveryPolicy,
+            rawReviewGuard
+        )
     }
 
     /**
@@ -2107,6 +2147,7 @@ export class NativeCodexSessionDirectSender {
         delay = this.queuePollIntervalMs,
         options: { replacePending?: boolean } = {}
     ): void {
+        if (this.disposed) return
         const existing = this.queueTimers.get(sessionId)
         if (existing && options.replacePending) {
             clearTimeout(existing)
@@ -2127,6 +2168,33 @@ export class NativeCodexSessionDirectSender {
     }
 
     private pumpQueue(sessionId: string): void {
+        if (this.disposed) return
+        if (!this.externalControlChecker) {
+            this.pumpQueueUnchecked(sessionId)
+            return
+        }
+        if (this.queueOwnershipChecks.has(sessionId)) return
+        this.queueOwnershipChecks.add(sessionId)
+        void this.pumpQueueAfterExternalControlCheck(sessionId, this.ownershipCheckGeneration)
+    }
+
+    private async pumpQueueAfterExternalControlCheck(sessionId: string, generation: number): Promise<void> {
+        try {
+            if (await this.isExternallyControlled(sessionId)) {
+                // Keep the durable FIFO receipt intact. A later bounded probe
+                // observes SSH release and permits the normal idle hand-off.
+                this.scheduleQueuePump(sessionId, NATIVE_QUEUE_RETRY_INTERVAL_MS)
+                return
+            }
+            if (this.disposed || generation !== this.ownershipCheckGeneration) return
+            this.pumpQueueUnchecked(sessionId)
+        } finally {
+            this.queueOwnershipChecks.delete(sessionId)
+        }
+    }
+
+    private pumpQueueUnchecked(sessionId: string): void {
+        if (this.disposed) return
         if (this.archiveReservations.has(sessionId)) {
             return
         }
@@ -2228,6 +2296,33 @@ export class NativeCodexSessionDirectSender {
             return existsSync(path) && statSync(path).isDirectory()
         } catch {
             return false
+        }
+    }
+
+    private async isExternallyControlled(sessionId: string): Promise<boolean> {
+        if (!this.externalControlChecker) return false
+        try {
+            return await this.externalControlChecker(sessionId)
+        } catch {
+            // Optional ownership detection must not replace the exact-thread
+            // conflict fallback when its local protocol becomes unavailable.
+            return false
+        }
+    }
+
+    private externalControlSendFailure(): Extract<SendCodexLocalSessionMessageRpcResponse, { success: false }> {
+        return {
+            success: false,
+            code: 'external_writer_active',
+            error: 'This native Codex session is currently controlled by Codex Desktop over SSH'
+        }
+    }
+
+    private externalControlArchiveFailure(): Extract<ArchiveCodexLocalSessionRpcResponse, { success: false }> {
+        return {
+            success: false,
+            code: 'external_writer_active',
+            error: 'This native Codex session is currently controlled by Codex Desktop over SSH'
         }
     }
 

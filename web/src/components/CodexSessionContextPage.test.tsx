@@ -211,7 +211,52 @@ describe('CodexSessionContextPage', () => {
 
     it('uses a faster native fallback refresh cadence while a turn is running', () => {
         expect(getNativeContextRefreshInterval({ success: true, status: 'processing' })).toBe(1_000)
+        expect(getNativeContextRefreshInterval({ success: true, status: 'idle', controlledByCodexSsh: true })).toBe(1_000)
         expect(getNativeContextRefreshInterval({ success: true, status: 'idle' })).toBe(5_000)
+    })
+
+    it('locks the native composer for Codex Desktop SSH and unlocks on an explicit false realtime status', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'idle',
+            controlledByCodexSsh: true
+        })
+        renderPage({ api, realtimeAvailable: true, realtimeConnected: true })
+
+        await screen.findByTestId('codex-native-ssh-controlled')
+        expect(screen.getByRole('textbox')).toBeDisabled()
+        expect(screen.getByTestId('codex-native-session-menu-trigger').querySelector('[title="Codex"]')?.parentElement)
+            .toHaveClass('text-[#F5A524]')
+        // The responsive composer has compact and regular variants; both
+        // intentionally render the lock affordance while SSH owns the turn.
+        expect(screen.getAllByTestId('composer-send-lock')).not.toHaveLength(0)
+        expect(screen.getByRole('button', {
+            name: 'Sending is locked while Codex Desktop controls this session'
+        })).toBeDisabled()
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1',
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 1 },
+                revision: 1,
+                status: {
+                    success: true,
+                    status: 'idle',
+                    controlledByCodexSsh: false
+                },
+                timing: { cache: 'hit', durationMs: 1 }
+            }
+        })
+
+        await waitFor(() => {
+            expect(screen.queryAllByTestId('composer-send-lock')).toHaveLength(0)
+            expect(screen.getByRole('textbox')).not.toBeDisabled()
+            expect(screen.getByTestId('codex-native-session-menu-trigger').querySelector('[title="Codex"]')?.parentElement)
+                .not.toHaveClass('text-[#F5A524]')
+        })
     })
 
     it('shows a local-only input wait while keeping the native turn busy', async () => {

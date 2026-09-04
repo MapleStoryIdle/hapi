@@ -87,6 +87,7 @@ type CodexLocalSessionSummary = {
     modelReasoningEffort?: string | null
     runState?: 'idle' | 'processing' | 'unknown'
     waitingForUserInput?: boolean
+    controlledByCodexSsh?: boolean
 }
 
 type CodexTranscriptFileCandidate = {
@@ -109,7 +110,7 @@ type CodexLocalSessionContextMessage = {
 
 type CodexLocalSessionContextResponse = {
     success: true
-    session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort'>
+    session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort' | 'controlledByCodexSsh'>
     messages: CodexLocalSessionContextMessage[]
     page: {
         limit: number
@@ -660,7 +661,7 @@ function createRunnerCodexSessionContextResponse(
 function createRunnerCodexSessionDisplaySummary(
     session: Pick<
         CodexLocalSessionSummary,
-        'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort'
+        'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort' | 'controlledByCodexSsh'
     >
 ): CodexLocalSessionContextResponse['session'] {
     return {
@@ -669,7 +670,8 @@ function createRunnerCodexSessionDisplaySummary(
         cwd: session.cwd,
         modifiedAt: session.modifiedAt,
         model: session.model,
-        modelReasoningEffort: session.modelReasoningEffort
+        modelReasoningEffort: session.modelReasoningEffort,
+        controlledByCodexSsh: session.controlledByCodexSsh ?? false
     }
 }
 
@@ -1977,7 +1979,8 @@ export function createCodexDesktopRoutes(options: {
                     cwd: summary.cwd,
                     modifiedAt: summary.modifiedAt,
                     model: summary.model,
-                    modelReasoningEffort: summary.modelReasoningEffort
+                    modelReasoningEffort: summary.modelReasoningEffort,
+                    controlledByCodexSsh: false
                 },
                 messages: contextPage.messages,
                 page: contextPage.page
@@ -2011,7 +2014,8 @@ export function createCodexDesktopRoutes(options: {
                     cwd: session.cwd,
                     modifiedAt: session.modifiedAt,
                     model: session.model,
-                    modelReasoningEffort: session.modelReasoningEffort
+                    modelReasoningEffort: session.modelReasoningEffort,
+                    controlledByCodexSsh: session.controlledByCodexSsh ?? false
                 },
                 messages: createCodexTranscriptContextMessages(session.id, importedMessages, result.data.startIndex, session.modifiedAt),
                 page: result.data.page

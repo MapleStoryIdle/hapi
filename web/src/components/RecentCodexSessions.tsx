@@ -470,26 +470,28 @@ export function mergeRecentCodexSessions(
     })
 }
 
-function CodexSourceIcon(props: { source: CodexSessionSource; active?: boolean }) {
+function CodexSourceIcon(props: { source: CodexSessionSource; active?: boolean; sshControlled?: boolean }) {
     const { t } = useTranslation()
     const isHapi = props.source === 'hapi'
     const sourceLabel = isHapi ? t('recentCodex.source.hapi') : t('recentCodex.source.native')
+    const isSshControlled = !isHapi && props.sshControlled === true
     const accessibleLabel = props.active
         ? t(isHapi ? 'recentCodex.status.hapiProcessing' : 'recentCodex.status.processing')
-        : sourceLabel
+        : isSshControlled ? t('recentCodex.sshControl.title') : sourceLabel
     return (
         <span
             className="cupertino-session-source relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
-            title={sourceLabel}
+            title={isSshControlled ? t('recentCodex.sshControl.title') : sourceLabel}
             role="img"
             aria-label={accessibleLabel}
             data-session-source={props.source}
             data-session-agent="codex"
             data-session-active={props.active || undefined}
+            data-session-ssh-controlled={isSshControlled || undefined}
         >
             <AgentFlavorIcon
                 flavor="codex"
-                className={`cupertino-session-source-glyph h-5 w-5 ${isHapi ? 'text-[#4EA1FF]' : 'text-[var(--app-fg)]'}`}
+                className={`cupertino-session-source-glyph h-5 w-5 ${isSshControlled ? 'text-[#F5A524]' : isHapi ? 'text-[#4EA1FF]' : 'text-[var(--app-fg)]'}`}
             />
             {props.active ? (
                 <span
@@ -571,7 +573,11 @@ function KanbanSessionCard(props: {
                     data-kanban-directory-color={completedDirectoryColor ?? undefined}
                 >
                     <span className="flex w-full min-w-0 items-center gap-2 pr-2" data-kanban-card-top-row>
-                        <CodexSourceIcon source={session.source} active={status === 'processing'} />
+                        <CodexSourceIcon
+                            source={session.source}
+                            active={status === 'processing'}
+                            sshControlled={session.source === 'native' && session.nativeSession?.controlledByCodexSsh === true}
+                        />
                         <span className="cupertino-session-card-title min-w-0 flex-1 truncate text-[17px] font-semibold leading-6 text-[var(--app-fg)]" title={session.title}>
                             {session.title}
                         </span>
@@ -884,7 +890,11 @@ function MergedCodexSessionRow(props: {
                 aria-current={selected ? 'page' : undefined}
             >
                 <span className="flex min-w-0 flex-1 items-center gap-3">
-                    <CodexSourceIcon source={session.source} active={session.active} />
+                    <CodexSourceIcon
+                        source={session.source}
+                        active={session.active}
+                        sshControlled={session.source === 'native' && session.nativeSession?.controlledByCodexSsh === true}
+                    />
                     <span className="cupertino-session-title min-w-0 flex-1 truncate text-sm font-medium leading-5 tracking-normal text-[var(--app-fg)]" title={session.title}>
                         {session.title}
                     </span>
@@ -956,11 +966,14 @@ export function RecentCodexSessions(props: {
     const description = props.description === undefined ? t('recentCodex.description') : props.description
     const onlyProcessing = props.onlyProcessing ?? false
     const isMerged = props.hapiSessions !== undefined
-    const isCupertinoPresentation = isMerged && embedded
+    // Keep the richer Cupertino card treatment for Kanban only. The directory
+    // list intentionally uses the earlier compact, nested list presentation.
+    const isCupertinoPresentation = isMerged && embedded && props.viewMode === 'kanban'
     const shouldFilterRecent = props.recentOnly ?? isMerged
     const limit = props.limit ?? (isMerged ? 100 : 5)
     const SectionIcon = onlyProcessing ? Activity : History
     const [sessions, setSessions] = useState<CodexLocalSessionSummary[]>([])
+    const hasSshControlledSession = sessions.some((session) => session.controlledByCodexSsh === true)
     const [isLoading, setIsLoading] = useState(true)
     const [loadError, setLoadError] = useState<string | null>(null)
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null)
@@ -1260,7 +1273,7 @@ export function RecentCodexSessions(props: {
     // Current runners patch this list through SSE. Older runners, or a
     // temporarily disconnected event stream, retain a small polling fallback.
     useEffect(() => {
-        if (!props.machineId || hasRealtimeUpdates) {
+        if (!props.machineId || (hasRealtimeUpdates && !hasSshControlledSession)) {
             return
         }
 
@@ -1277,7 +1290,7 @@ export function RecentCodexSessions(props: {
             window.removeEventListener('focus', refreshIfVisible)
             document.removeEventListener('visibilitychange', refreshIfVisible)
         }
-    }, [hasRealtimeUpdates, props.machineId, refresh])
+    }, [hasRealtimeUpdates, hasSshControlledSession, props.machineId, refresh])
 
     const hasRows = isMerged ? mergedSessions.length > 0 : recentNativeSessions.length > 0
     const busy = isLoading || Boolean(props.hapiIsLoading)
@@ -1575,7 +1588,11 @@ export function RecentCodexSessions(props: {
                                                                 aria-label={t('recentCodex.open', { title: session.title })}
                                                             >
                                                                 <span className="flex min-w-0 flex-1 items-center gap-3">
-                                                                    <CodexSourceIcon source="native" active={session.runState === 'processing'} />
+                                                                    <CodexSourceIcon
+                                                                        source="native"
+                                                                        active={session.runState === 'processing'}
+                                                                        sshControlled={session.controlledByCodexSsh === true}
+                                                                    />
                                                                     <span className="min-w-0 flex-1 truncate text-sm font-medium leading-5 tracking-normal text-[var(--app-fg)]" title={session.title}>
                                                                         {session.title}
                                                                     </span>

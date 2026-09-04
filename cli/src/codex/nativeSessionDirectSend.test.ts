@@ -113,6 +113,142 @@ function writeTranscript(options: {
 }
 
 describe('NativeCodexSessionDirectSender', () => {
+    it('rejects fresh SSH-controlled send and archive requests before creating a receipt or app-server call', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-controlled-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789099'
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState: 'idle' as const
+        })
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const externalControlChecker = vi.fn(async () => true)
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1_000,
+            { getSummary: lookup },
+            null,
+            null,
+            null,
+            externalControlChecker
+        )
+        const archiveAttempt = vi.fn(async () => ({ success: true as const }))
+
+        try {
+            await expect(sender.sendWithExternalControlCheck(sessionId, 'Do not queue this')).resolves.toMatchObject({
+                success: false,
+                code: 'external_writer_active'
+            })
+            await expect(sender.archive(sessionId, archiveAttempt)).resolves.toMatchObject({
+                success: false,
+                code: 'external_writer_active'
+            })
+            expect(spawn).not.toHaveBeenCalled()
+            expect(archiveAttempt).not.toHaveBeenCalled()
+            expect(externalControlChecker).toHaveBeenCalledTimes(2)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('checks SSH ownership again before starting an already queued native receipt', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-queue-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789098'
+        let runState: 'idle' | 'processing' = 'processing'
+        const lookup = () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState
+        })
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const externalControlChecker = vi.fn(async () => true)
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1,
+            { getSummary: lookup },
+            null,
+            null,
+            null,
+            externalControlChecker
+        )
+
+        try {
+            expect(sender.send(sessionId, 'Keep this durable queue')).toMatchObject({ success: true, status: 'queued' })
+            runState = 'idle'
+            sender.notifyTranscriptChanged(sessionId)
+            await new Promise((resolve) => setTimeout(resolve, 20))
+
+            expect(externalControlChecker).toHaveBeenCalled()
+            expect(spawn).not.toHaveBeenCalled()
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                queuedMessages: [{ text: 'Keep this durable queue' }]
+            })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not start a queued bridge when shutdown wins an in-flight ownership check', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-dispose-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789097'
+        let runState: 'idle' | 'processing' = 'processing'
+        let resolveOwnership!: (held: boolean) => void
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const externalControlChecker = vi.fn(() => new Promise<boolean>((resolve) => {
+            resolveOwnership = resolve
+        }))
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState
+                })
+            },
+            null,
+            null,
+            null,
+            externalControlChecker
+        )
+
+        try {
+            expect(sender.send(sessionId, 'Keep this receipt while stopping')).toMatchObject({
+                success: true,
+                status: 'queued'
+            })
+            runState = 'idle'
+            ;(sender as unknown as { pumpQueue: (id: string) => void }).pumpQueue(sessionId)
+            await flushMicrotasks()
+            expect(externalControlChecker).toHaveBeenCalledTimes(1)
+
+            sender.dispose()
+            resolveOwnership(false)
+            await flushMicrotasks()
+
+            expect(spawn).not.toHaveBeenCalled()
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('reserves an idle native thread so a new send and queue pump cannot race archive', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-archive-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789013'

@@ -426,6 +426,102 @@ describe('RecentCodexSessions', () => {
         expect(nativeIcon?.querySelector('[data-session-running-indicator]')).toHaveClass('bg-[#34C759]', 'motion-safe:animate-pulse')
     })
 
+    it('colors SSH-controlled native agents yellow while keeping the processing signal', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({
+            success: true as const,
+            sessions: [
+                {
+                    id: 'ssh-idle-thread',
+                    title: 'SSH-held idle task',
+                    cwd: '/workspace/project',
+                    file: '/tmp/ssh-idle.jsonl',
+                    modifiedAt: Date.now(),
+                    runState: 'idle' as const,
+                    controlledByCodexSsh: true
+                },
+                {
+                    id: 'ssh-processing-thread',
+                    title: 'SSH-held processing task',
+                    cwd: '/workspace/project',
+                    file: '/tmp/ssh-processing.jsonl',
+                    modifiedAt: Date.now() - 1,
+                    runState: 'processing' as const,
+                    controlledByCodexSsh: true
+                }
+            ]
+        }))
+
+        render(
+            <I18nProvider>
+                <RecentCodexSessions api={api} machineId="machine-1" onOpen={vi.fn()} />
+            </I18nProvider>
+        )
+
+        const idleTitle = await screen.findByText('SSH-held idle task')
+        const idleRow = idleTitle.closest('button')
+        expect(idleRow?.querySelector('[data-session-ssh-controlled="true"] [title="Codex"]')).toHaveClass('text-[#F5A524]')
+        expect(idleRow?.querySelector('[data-session-ssh-lock]')).toBeNull()
+        expect(idleRow?.querySelector('[data-session-running-indicator]')).toBeNull()
+
+        const processingTitle = screen.getByText('SSH-held processing task')
+        const processingRow = processingTitle.closest('button')
+        expect(processingRow?.querySelector('[data-session-ssh-controlled="true"] [title="Codex"]')).toHaveClass('text-[#F5A524]')
+        expect(processingRow?.querySelector('[data-session-running-indicator]')).not.toBeNull()
+        expect(processingRow?.querySelector('[data-session-ssh-lock]')).toBeNull()
+    })
+
+    it('clears the SSH agent color when a realtime native summary explicitly reports false', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({
+            success: true as const,
+            sessions: [{
+                id: 'ssh-release-thread',
+                title: 'SSH release task',
+                cwd: '/workspace/project',
+                file: '/tmp/ssh-release.jsonl',
+                modifiedAt: Date.now(),
+                runState: 'idle' as const,
+                controlledByCodexSsh: true
+            }]
+        }))
+
+        render(
+            <NativeCodexRealtimeProvider value={{ connected: true }}>
+                <I18nProvider>
+                    <RecentCodexSessions
+                        api={api}
+                        machineId="machine-1"
+                        onOpen={vi.fn()}
+                        realtimeAvailable
+                    />
+                </I18nProvider>
+            </NativeCodexRealtimeProvider>
+        )
+
+        const title = await screen.findByText('SSH release task')
+        const row = title.closest('button')
+        expect(row?.querySelector('[title="Codex"]')).toHaveClass('text-[#F5A524]')
+
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'ssh-release-thread',
+            summary: {
+                id: 'ssh-release-thread',
+                title: 'SSH release task',
+                cwd: '/workspace/project',
+                modifiedAt: Date.now() + 1,
+                runState: 'idle',
+                controlledByCodexSsh: false
+            }
+        })
+
+        await waitFor(() => {
+            expect(screen.getByText('SSH release task').closest('button')?.querySelector('[title="Codex"]')).not.toHaveClass('text-[#F5A524]')
+        })
+    })
+
     it('renders priority-ordered Kanban groups, one completed count, and a quiet thinking animation', async () => {
         const api = createApi()
         api.getCodexSessions = vi.fn(async () => ({
@@ -708,7 +804,7 @@ describe('RecentCodexSessions', () => {
         expect(api.forkCodexSession).not.toHaveBeenCalled()
     })
 
-    it('keeps embedded directory cards at their intrinsic height instead of shrinking them to the viewport', async () => {
+    it('keeps embedded directory groups at their intrinsic height in the compact list', async () => {
         const api = createApi()
         api.getCodexSessions = vi.fn(async () => ({
             success: true as const,
@@ -745,8 +841,8 @@ describe('RecentCodexSessions', () => {
         )
 
         await screen.findByText('Project A task')
-        expect(screen.getByTestId('recent-codex-sessions')).toHaveAttribute('data-session-list-presentation', 'cupertino')
-        expect(screen.getByTestId('recent-codex-sessions')).toHaveAttribute('data-session-list-view', 'list')
+        expect(screen.getByTestId('recent-codex-sessions')).not.toHaveAttribute('data-session-list-presentation')
+        expect(screen.getByTestId('recent-codex-sessions')).not.toHaveAttribute('data-session-list-view')
         expect(screen.queryByRole('heading', { name: 'Directories' })).not.toBeInTheDocument()
         const groups = view.container.querySelector('.cupertino-session-groups')
         expect(groups).toHaveClass('shrink-0')

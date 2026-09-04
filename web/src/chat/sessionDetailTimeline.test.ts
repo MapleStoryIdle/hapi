@@ -110,6 +110,49 @@ describe('buildSessionDetailTimeline', () => {
         })
     })
 
+    it('aggregates an active native turn into one process row', () => {
+        const secondTool: ToolCallBlock = {
+            ...toolBlock(),
+            id: 'tool-2',
+            createdAt: 5,
+            tool: {
+                ...toolBlock().tool,
+                id: 'tool-2',
+                createdAt: 5,
+                startedAt: 5,
+                completedAt: 6
+            }
+        }
+        const timeline = buildSessionDetailTimeline([
+            userBlock(),
+            toolBlock(),
+            reasoningBlock('reasoning-1', 3, 'Inspecting'),
+            { ...agentBlock(), id: 'process-1', text: 'Checking the first result' },
+            secondTool,
+            reasoningBlock('reasoning-2', 7, 'Verifying')
+        ], {
+            hasMoreMessages: false,
+            runActive: true,
+            aggregateActiveProcess: true
+        })
+
+        expect(timeline.visible.map((block) => block.id)).toEqual([
+            'user-1',
+            'tool-group:active-process:tool-1'
+        ])
+        expect(timeline.visible[1]).toMatchObject({
+            kind: 'tool-group',
+            turnActive: true,
+            tools: [{ id: 'tool-1' }, { id: 'tool-2' }],
+            detailBlocks: [
+                { id: 'tool-1' },
+                { id: 'process-1' },
+                { id: 'tool-2' },
+                { id: 'reasoning-2' }
+            ]
+        })
+    })
+
     it('keeps a reasoning-only active turn visible', () => {
         const timeline = buildSessionDetailTimeline([
             userBlock(),

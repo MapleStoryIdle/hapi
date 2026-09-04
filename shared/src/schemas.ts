@@ -418,7 +418,8 @@ export const CodexLocalSessionListUpdateSchema = z.object({
     model: z.string().nullable().optional(),
     modelReasoningEffort: z.string().nullable().optional(),
     runState: z.enum(['idle', 'processing', 'unknown']).optional(),
-    waitingForUserInput: z.boolean().optional()
+    waitingForUserInput: z.boolean().optional(),
+    controlledByCodexSsh: z.boolean().optional()
 }).strict()
 
 export type CodexLocalSessionListUpdate = z.infer<typeof CodexLocalSessionListUpdateSchema>
@@ -469,6 +470,7 @@ export const CodexLocalSessionRealtimeStatusSchema = z.object({
     status: z.enum(['idle', 'processing', 'unknown']),
     activeTurnId: CodexLocalSessionActiveTurnIdSchema.optional(),
     waitingForUserInput: z.boolean().optional(),
+    controlledByCodexSsh: z.boolean().optional(),
     stalledSince: z.number().finite().optional(),
     startedAt: z.number().finite().optional(),
     progress: CodexLocalSessionDirectSendProgressSchema.optional(),

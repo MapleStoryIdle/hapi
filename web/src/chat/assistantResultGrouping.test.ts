@@ -92,6 +92,86 @@ describe('groupAssistantResultDetails', () => {
         expect(visible).toBe(blocks)
     })
 
+    it('keeps one stable live process group across native reasoning and tool snapshots', () => {
+        const firstTool = toolCall('tool-1', 'Read')
+        const secondTool = toolCall('tool-2', 'Bash')
+        const processText = agentText('text-1', 'Checking the result')
+        const blocks: VisibleChatBlock[] = [
+            userText('user-current'),
+            firstTool,
+            {
+                kind: 'agent-reasoning',
+                id: 'reasoning-1',
+                localId: null,
+                createdAt: 2,
+                text: '**Inspecting files**'
+            },
+            {
+                kind: 'agent-event',
+                id: 'compact-1',
+                createdAt: 3,
+                event: { type: 'compact', trigger: 'auto', preTokens: 0 }
+            },
+            secondTool,
+            processText
+        ]
+
+        const visible = groupAssistantResultDetails(blocks, {
+            runActive: true,
+            aggregateActiveProcess: true
+        })
+
+        expect(visible).toHaveLength(2)
+        expect(visible[0]).toBe(blocks[0])
+        expect(visible[1]).toMatchObject({
+            kind: 'tool-group',
+            id: 'tool-group:active-process:tool-1',
+            turnActive: true,
+            tools: [firstTool, secondTool],
+            detailBlocks: [firstTool, { id: 'reasoning-1' }, { id: 'compact-1' }, secondTool, processText]
+        })
+    })
+
+    it('does not hide an active permission request inside a process group', () => {
+        const permission = toolCall('permission-1')
+        permission.tool.permission = { id: 'permission-1', status: 'pending' }
+
+        const visible = groupAssistantResultDetails([permission], {
+            runActive: true,
+            aggregateActiveProcess: true
+        })
+
+        expect(visible).toEqual([permission])
+    })
+
+    it('keeps a completed native turn aggregated across context compaction', () => {
+        const tool = toolCall('tool-1')
+        const processText = agentText('process-1', 'Checking the result')
+        const finalText = agentText('final-1', 'Done')
+        const compactEvent: VisibleChatBlock = {
+            kind: 'agent-event',
+            id: 'compact-1',
+            createdAt: 2,
+            event: { type: 'compact', trigger: 'auto', preTokens: 0 }
+        }
+
+        const visible = groupAssistantResultDetails([
+            userText('user-current'),
+            tool,
+            compactEvent,
+            processText,
+            finalText
+        ], { aggregateActiveProcess: true })
+
+        expect(visible).toHaveLength(3)
+        expect(visible[1]).toMatchObject({
+            kind: 'tool-group',
+            tools: [tool],
+            detailBlocks: [tool, compactEvent, processText]
+        })
+        expect(visible[2]).toBe(finalText)
+    })
+
     it('still groups completed history while the latest turn is active', () => {
         const historicalTool = toolCall('tool-history')
         const historicalProcess = agentText('history-process', '历史过程')

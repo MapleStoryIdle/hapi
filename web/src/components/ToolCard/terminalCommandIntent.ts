@@ -15,6 +15,7 @@ export type TerminalCommandIntent =
     | { kind: 'request-url'; method: string | null; host: string | null; path: string | null }
     | {
         kind: 'remote-command'
+        executable: string
         host: string | null
         mode: 'connect' | 'execute' | 'transfer'
         action: TerminalCommandIntent | null
@@ -503,6 +504,7 @@ function getRemoteIntent(invocation: ShellInvocation): Extract<TerminalCommandIn
         const action = remoteCommand ? getTerminalCommandIntent({ command: remoteCommand }) : null
         return {
             kind: 'remote-command',
+            executable: invocation.normalizedExecutable,
             host: target.host,
             mode: remoteCommand ? 'execute' : 'connect',
             action: action?.kind === 'remote-command' ? null : action,
@@ -518,6 +520,7 @@ function getRemoteIntent(invocation: ShellInvocation): Extract<TerminalCommandIn
     }))
     return {
         kind: 'remote-command',
+        executable: invocation.normalizedExecutable,
         host: remote?.host ?? (invocation.normalizedExecutable === 'sftp' ? safeHost(operands[0] ?? '') : null),
         mode: 'transfer',
         action: null,
@@ -609,25 +612,11 @@ export function getTerminalCommandIntentTitle(intent: TerminalCommandIntent, t?:
     }
 
     if (intent.kind === 'request-url') {
-        const title = t ? t('tool.semanticTitle.request-url') : 'Request URL'
-        return intent.method ? `${title} · ${intent.method}` : title
+        return intent.method ?? (t ? t('tool.semanticTitle.request-url') : 'Request URL')
     }
 
     if (intent.kind === 'remote-command') {
-        if (intent.mode === 'transfer') {
-            const title = t ? t('tool.semanticTitle.transferFiles') : 'Transfer files'
-            const files = formatNames(intent.files)
-            return files ? `${title} · ${files}` : title
-        }
-        if (intent.action) {
-            const title = getTerminalCommandIntentTitle(intent.action, t)
-            const detail = getTerminalCommandIntentDetail(intent.action)
-            return detail ? `${title} · ${detail}` : title
-        }
-        if (intent.mode === 'execute') {
-            return t ? t('tool.semanticTitle.runShell') : 'Run shell'
-        }
-        return t ? t('tool.semanticTitle.remote-command') : 'Connect remotely'
+        return intent.executable
     }
 
     if (intent.kind === 'manage-service' && intent.operation) {
@@ -764,12 +753,82 @@ function summarizeTerminalSegment(segment: string): string | null {
     return null
 }
 
-function getTerminalCommandForSummary(input: unknown): string | null {
-    const parsed = getTerminalCommand(input)
-    if (parsed) return parsed
+function decodeJsStringLiteral(literal: string): string | null {
+    if (literal.startsWith('"')) {
+        try {
+            const parsed = JSON.parse(literal)
+            return typeof parsed === 'string' ? parsed : null
+        } catch {
+            return null
+        }
+    }
+    if (!literal.startsWith("'") || !literal.endsWith("'")) return null
 
-    const raw = getInputStringAny(input, ['command', 'cmd'])?.trim()
+    return literal
+        .slice(1, -1)
+        .replace(/\\(['\\])/g, '$1')
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t')
+}
+
+/**
+ * Codex Desktop records its orchestration wrapper as one `exec` tool call.
+ * Recover only literal nested terminal commands; never show the surrounding
+ * JavaScript or its arguments in the compact activity list.
+ */
+function getOrchestratedTerminalCommands(raw: string): string[] {
+    if (!/\btools\.exec_command\s*\(/.test(raw)) return []
+
+    const commands: string[] = []
+    const fieldPattern = /(?:\bcmd\b|["']cmd["'])\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g
+    for (const match of raw.matchAll(fieldPattern)) {
+        const command = decodeJsStringLiteral(match[1]!)?.trim()
+        if (!command || commands.includes(command)) continue
+        commands.push(command)
+    }
+    return commands
+}
+
+function getCodexOrchestrationTitle(input: unknown, t?: Translator): string | null {
+    const raw = getTerminalCommand(input) ?? getInputStringAny(input, ['command', 'cmd'])?.trim()
     if (!raw) return null
+
+    const commands = getOrchestratedTerminalCommands(raw)
+    if (commands.length === 1) {
+        return getTerminalCommandDisplayTitle({ command: commands[0] }, t)
+    }
+    if (commands.length > 1) {
+        return getTerminalCommandSummary({ command: commands.join('\n') })
+    }
+
+    const isExecCommand = /\btools\.exec_command\s*\(/.test(raw)
+    const isCodexOrchestration = /\btools\.[A-Za-z_$][\w$]*\s*\(/.test(raw)
+        || /\bALL_TOOLS\b/.test(raw)
+    if (!isCodexOrchestration) return null
+
+    const titleMatches = [...raw.matchAll(/\btitle\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g)]
+    const explicitTitle = decodeJsStringLiteral(titleMatches[titleMatches.length - 1]?.[1] ?? '')
+        ?.replace(/\s+/g, ' ')
+        .trim()
+    if (explicitTitle) {
+        return explicitTitle.length > 96 ? `${explicitTitle.slice(0, 95)}…` : explicitTitle
+    }
+
+    if (isExecCommand) {
+        return t ? t('terminal.execution.execCommandFallback') : 'Run tool command'
+    }
+    return t ? t('terminal.execution.toolAction') : 'Tool operation'
+}
+
+function getTerminalCommandForSummary(input: unknown): string | null {
+    const raw = getTerminalCommand(input) ?? getInputStringAny(input, ['command', 'cmd'])?.trim()
+    if (!raw) return null
+
+    const orchestratedCommands = getOrchestratedTerminalCommands(raw)
+    if (orchestratedCommands.length > 0) {
+        return orchestratedCommands.join('\n')
+    }
 
     // Historical Codex traces can carry malformed nested shell quotes. The
     // display summary may still safely inspect their command text.
@@ -810,6 +869,9 @@ export function getTerminalCommandIntentLabel(
 }
 
 export function getTerminalCommandDisplayTitle(input: unknown, t?: Translator): string | null {
+    const orchestrationTitle = getCodexOrchestrationTitle(input, t)
+    if (orchestrationTitle) return orchestrationTitle
+
     const intent = getTerminalCommandIntent(input)
     if (intent) {
         const title = getTerminalCommandIntentLabel(input, intent, t)

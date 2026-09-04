@@ -205,6 +205,8 @@ export type CodexLocalSessionSummary = {
     modelReasoningEffort?: string | null
     runState?: CodexLocalSessionRunState
     waitingForUserInput?: boolean
+    /** Explicit false from current runners clears a stale SSH ownership lock. */
+    controlledByCodexSsh?: boolean
 }
 
 export type CodexLocalSessionsResponse = {
@@ -226,7 +228,7 @@ export type CodexLocalSessionContextMessage = {
 
 export type CodexLocalSessionContextResponse = {
     success: true
-    session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort'>
+    session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort' | 'controlledByCodexSsh'>
     messages: CodexLocalSessionContextMessage[]
     page: {
         limit: number
@@ -278,6 +280,8 @@ export type CodexLocalSessionStatusResponse =
         status: CodexLocalSessionRunState
         activeTurnId?: string
         waitingForUserInput?: boolean
+        /** Current runners always include true or false. */
+        controlledByCodexSsh?: boolean
         stalledSince?: number
         startedAt?: number
         progress?: CodexLocalSessionDirectSendProgress

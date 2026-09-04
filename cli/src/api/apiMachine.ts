@@ -49,6 +49,7 @@ import { NativeCodexSessionListCache } from '@/codex/nativeSessionListCache'
 import { NativeCodexSessionTitleCache } from '@/codex/nativeSessionTitleCache'
 import { NativeCodexTranscriptCache, type NativeCodexTranscriptRead } from '@/codex/nativeTranscriptCache'
 import { NativeCodexSessionWatcher } from '@/codex/nativeSessionWatcher'
+import { CodexSshSessionOwnershipProbe } from '@/codex/codexSshOwnership'
 import {
     NativeCodexTurnLifecycleTracker,
     normalizeNativeCodexSessionForDisplay,
@@ -75,6 +76,8 @@ import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
 import { readGeneratedImageFileBytes, readSessionFileBytes } from '@/modules/common/handlers/files'
 import { readUploadFileBytes } from '@/modules/common/handlers/uploads'
+
+const CODEX_SSH_OWNERSHIP_MONITOR_INTERVAL_MS = 1_000
 
 type NativeCodexArchiveClient = Pick<CodexAppServerClient, 'connect' | 'initialize' | 'archiveThread' | 'disconnect'>
 
@@ -145,8 +148,9 @@ interface ArchiveCodexLocalSessionRequest {
 }
 
 function toNativeCodexSessionListUpdate(session: CodexLocalSessionSummary): CodexLocalSessionListUpdate {
-    const { file: _file, ...summary } = normalizeNativeCodexSessionForDisplay(session)
-    return summary
+    const normalized = normalizeNativeCodexSessionForDisplay(session)
+    const { file: _file, ...summary } = normalized
+    return { ...summary, controlledByCodexSsh: normalized.controlledByCodexSsh ?? false }
 }
 
 function toNativeCodexSessionDisplaySummary(session: CodexLocalSessionSummary): CodexLocalSessionDisplaySummary {
@@ -157,7 +161,8 @@ function toNativeCodexSessionDisplaySummary(session: CodexLocalSessionSummary): 
         cwd: normalized.cwd,
         modifiedAt: normalized.modifiedAt,
         model: normalized.model,
-        modelReasoningEffort: normalized.modelReasoningEffort
+        modelReasoningEffort: normalized.modelReasoningEffort,
+        controlledByCodexSsh: normalized.controlledByCodexSsh ?? false
     }
 }
 
@@ -267,6 +272,7 @@ export class ApiMachineClient {
     private socket!: Socket<ServerToClientEvents, ClientToServerEvents>
     private keepAliveInterval: NodeJS.Timeout | null = null
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
+    private codexSshOwnershipMonitor: ReturnType<typeof setInterval> | null = null
     private rpcHandlerManager: RpcHandlerManager
     private readonly nativeCodexSessionTitleCache = new NativeCodexSessionTitleCache()
     private readonly nativeCodexTurnLifecycle = new NativeCodexTurnLifecycleTracker({
@@ -285,6 +291,7 @@ export class ApiMachineClient {
             )
         )
     })
+    private readonly nativeCodexSshOwnership = new CodexSshSessionOwnershipProbe()
     private readonly nativeCodexSessionDirectSender: NativeCodexSessionDirectSender
     private readonly nativeKanbanFeedbackStore = new NativeKanbanFeedbackStore(
         join(configuration.happyHomeDir, 'native-kanban-feedback')
@@ -330,7 +337,8 @@ export class ApiMachineClient {
             // continue editing the transcript outside SHAPI.
             () => new CodexAppServerClient(),
             new FileNativeCodexSessionDirectSendStore(join(configuration.happyHomeDir, 'native-codex-direct-outbox.json')),
-            (sessionId, guard) => this.nativeKanbanFeedbackStore.verify(sessionId, guard)
+            (sessionId, guard) => this.nativeKanbanFeedbackStore.verify(sessionId, guard),
+            (sessionId) => this.isNativeCodexSessionControlledBySsh(sessionId, { forceRefresh: true })
         )
 
         this.rpcHandlerManager = new RpcHandlerManager({
@@ -378,13 +386,14 @@ export class ApiMachineClient {
                 if (forceRefresh !== undefined && typeof forceRefresh !== 'boolean') {
                     return { success: false, error: 'forceRefresh must be a boolean' }
                 }
+                const heldSessionIds = await this.refreshNativeCodexSshOwnership({ forceRefresh: forceRefresh === true })
                 return {
                     success: true,
                     sessions: this.nativeCodexSessionListCache.list(
                         limit ?? 500,
                         { excludeHapiInitiated },
                         { forceRefresh }
-                    )
+                    ).map((session) => this.withNativeCodexSshControl(session, heldSessionIds))
                 }
             }
         )
@@ -404,12 +413,14 @@ export class ApiMachineClient {
                 if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100)) {
                     return { success: false, error: 'limit must be an integer between 1 and 100' }
                 }
+                await this.refreshNativeCodexSshOwnership()
                 const read = this.readNativeCodexTranscript(sessionId, { before, limit })
                 if (read) {
                     this.observeNativeCodexSession(sessionId)
                 }
-                return read
-                    ? { success: true, data: read.data }
+                const controlledRead = read ? this.withNativeCodexSshControlForRead(read) : null
+                return controlledRead
+                    ? { success: true, data: controlledRead.data }
                     : { success: false, error: 'Codex session not found' }
             }
         )
@@ -436,40 +447,42 @@ export class ApiMachineClient {
                     return { success: false, error: 'knownVersion must contain runnerEpoch and a positive integer revision' }
                 }
 
+                await this.refreshNativeCodexSshOwnership()
                 const read = this.readNativeCodexTranscript(sessionId, { before, limit })
                 if (!read) {
                     return { success: false, error: 'Codex session not found' }
                 }
                 this.observeNativeCodexSession(sessionId)
-                const status = this.getNativeCodexSessionStatus(sessionId, read.data.session, read.plan)
+                const controlledRead = this.withNativeCodexSshControlForRead(read)
+                const status = this.getNativeCodexSessionStatus(sessionId, controlledRead.data.session, controlledRead.plan)
                 if (status.success !== true) {
                     return { success: false, error: status.error }
                 }
                 const canUseKnownVersion = before === undefined && (limit ?? 50) === 50
                 if (knownVersion
                     && canUseKnownVersion
-                    && knownVersion.runnerEpoch === read.version.runnerEpoch
-                    && knownVersion.revision === read.version.revision) {
+                    && knownVersion.runnerEpoch === controlledRead.version.runnerEpoch
+                    && knownVersion.revision === controlledRead.version.revision) {
                     return {
                         success: true,
                         unchanged: true,
-                        version: read.version,
-                        revision: read.revision,
-                        session: toNativeCodexSessionDisplaySummary(read.data.session),
+                        version: controlledRead.version,
+                        revision: controlledRead.revision,
+                        session: toNativeCodexSessionDisplaySummary(controlledRead.data.session),
                         status,
-                        timing: read.timing
+                        timing: controlledRead.timing
                     }
                 }
                 return {
                     success: true,
                     unchanged: false,
                     snapshot: {
-                        data: read.data,
+                        data: controlledRead.data,
                         status,
-                        plan: read.plan,
-                        version: read.version,
-                        revision: read.revision,
-                        timing: read.timing
+                        plan: controlledRead.plan,
+                        version: controlledRead.version,
+                        revision: controlledRead.revision,
+                        timing: controlledRead.timing
                     }
                 }
             }
@@ -486,6 +499,7 @@ export class ApiMachineClient {
                 if (summary) {
                     this.observeNativeCodexSession(sessionId)
                 }
+                await this.refreshNativeCodexSshOwnership()
                 return this.getNativeCodexSessionStatus(sessionId, summary ?? undefined)
             }
         )
@@ -542,7 +556,7 @@ export class ApiMachineClient {
                 if (summary) {
                     this.observeNativeCodexSession(sessionId)
                 }
-                return this.nativeCodexSessionDirectSender.send(
+                return await this.nativeCodexSessionDirectSender.sendWithExternalControlCheck(
                     sessionId,
                     params?.message,
                     params?.displayMessage,
@@ -1090,6 +1104,69 @@ export class ApiMachineClient {
         this.nativeCodexSessionWatcher.observeTranscript(session.file, session.id)
     }
 
+    /**
+     * Refreshes the optional Desktop SSH owner list. A change emits the same
+     * native-session invalidation used for transcript updates, including an
+     * explicit `controlledByCodexSsh: false` when SSH releases a thread.
+     */
+    private async refreshNativeCodexSshOwnership(
+        options: { forceRefresh?: boolean } = {}
+    ): Promise<ReadonlySet<string>> {
+        const previous = this.nativeCodexSshOwnership.getCachedHeldSessionIds()
+        const current = await this.nativeCodexSshOwnership.getHeldSessionIds(options)
+        const changedSessionIds = new Set<string>()
+        for (const sessionId of previous) {
+            if (!current.has(sessionId)) changedSessionIds.add(sessionId)
+        }
+        for (const sessionId of current) {
+            if (!previous.has(sessionId)) changedSessionIds.add(sessionId)
+        }
+
+        for (const sessionId of changedSessionIds) {
+            // Populate the small summary when it is still available. This is
+            // deliberately bounded to changed thread ids, not a global scan.
+            this.reportNativeCodexSessionUpdated(
+                sessionId,
+                Date.now(),
+                undefined,
+                this.getNativeCodexSessionSummary(sessionId)
+            )
+        }
+        return current
+    }
+
+    /** Fresh send/archive gate. HAPI-originated app-server threads are never claimed. */
+    private async isNativeCodexSessionControlledBySsh(
+        sessionId: string,
+        options: { forceRefresh?: boolean } = {}
+    ): Promise<boolean> {
+        const session = this.getNativeCodexSessionSummary(sessionId)
+        if (!session || isHapiInitiatedCodexSession(session)) return false
+        return (await this.refreshNativeCodexSshOwnership(options)).has(sessionId)
+    }
+
+    private withNativeCodexSshControl(
+        session: CodexLocalSessionSummary,
+        heldSessionIds = this.nativeCodexSshOwnership.getCachedHeldSessionIds()
+    ): CodexLocalSessionSummary {
+        const controlledByCodexSsh = !isHapiInitiatedCodexSession(session) && heldSessionIds.has(session.id)
+        return session.controlledByCodexSsh === controlledByCodexSsh
+            ? session
+            : { ...session, controlledByCodexSsh }
+    }
+
+    private withNativeCodexSshControlForRead(read: NativeCodexTranscriptRead): NativeCodexTranscriptRead {
+        const session = this.withNativeCodexSshControl(read.data.session)
+        if (session === read.data.session) return read
+        return {
+            ...read,
+            data: {
+                ...read.data,
+                session
+            }
+        }
+    }
+
     private reportNativeCodexSessionUpdated(
         codexSessionId: string,
         modifiedAt = Date.now(),
@@ -1103,7 +1180,9 @@ export class ApiMachineClient {
         const cachedRead = transcriptRead === undefined
             ? this.nativeCodexTranscriptCache.readCached(codexSessionId, { limit: 50 })
             : transcriptRead
-        const read = cachedRead ? this.withNativeCodexTitle(cachedRead) : null
+        const read = cachedRead
+            ? this.withNativeCodexSshControlForRead(this.withNativeCodexTitle(cachedRead))
+            : null
         // The watcher also monitors recently active local transcripts that no
         // browser has opened. Do not turn those lightweight invalidations
         // into a full cross-directory session lookup merely to construct a
@@ -1118,7 +1197,9 @@ export class ApiMachineClient {
             ? buildNativeCodexRealtimeSnapshot(read, status)
             : undefined
         const rawSummary = read?.data.session ?? listSession
-        const summary = rawSummary ? this.maskRunnerOwnedNativeUserInput(rawSummary) : null
+        const summary = rawSummary
+            ? this.withNativeCodexSshControl(this.maskRunnerOwnedNativeUserInput(rawSummary))
+            : null
         socket.emit('codex-session-updated', {
             machineId: this.machine.id,
             codexSessionId,
@@ -1139,13 +1220,22 @@ export class ApiMachineClient {
         summary?: CodexLocalSessionSummary | null,
         plan?: NativeCodexTranscriptRead['plan']
     ): CodexLocalSessionStatusRpcResponse {
-        const status = this.nativeCodexSessionDirectSender.getStatus(sessionId, summary)
-        if (status.success !== true || status.status !== 'processing') {
-            return status
+        const resolvedSummary = summary === undefined ? this.getNativeCodexSessionSummary(sessionId) : summary
+        const status = this.nativeCodexSessionDirectSender.getStatus(sessionId, resolvedSummary)
+        if (status.success !== true) return status
+        const controlledByCodexSsh = Boolean(
+            resolvedSummary
+            && !isHapiInitiatedCodexSession(resolvedSummary)
+            && this.nativeCodexSshOwnership.getCachedHeldSessionIds().has(sessionId)
+        )
+        if (status.status !== 'processing') {
+            return { ...status, controlledByCodexSsh }
         }
         const activeTurnId = this.nativeCodexTurnLifecycle.getActiveTurnId(sessionId)
             ?? plan?.turnId
-        return activeTurnId ? { ...status, activeTurnId } : status
+        return activeTurnId
+            ? { ...status, activeTurnId, controlledByCodexSsh }
+            : { ...status, controlledByCodexSsh }
     }
 
     private withNativeCodexTitle(read: NativeCodexTranscriptRead): NativeCodexTranscriptRead {
@@ -1215,12 +1305,14 @@ export class ApiMachineClient {
             }
 
             this.startKeepAlive()
+            this.startCodexSshOwnershipMonitor()
         })
 
         this.socket.on('disconnect', () => {
             logger.debug('[API MACHINE] Disconnected from bot')
             this.rpcHandlerManager.onSocketDisconnect()
             this.stopKeepAlive()
+            this.stopCodexSshOwnershipMonitor()
         })
 
         this.socket.on('rpc-request', async (data: { method: string; params: string }, callback: (response: string) => void) => {
@@ -1360,8 +1452,33 @@ export class ApiMachineClient {
         }
     }
 
+    /**
+     * The Desktop control endpoint never starts on our behalf: an absent
+     * socket is a cheap explicit release. Polling only while the runner is
+     * connected makes SSH acquire/release immediately invalidate list/detail
+     * views instead of waiting for a transcript write.
+     */
+    private startCodexSshOwnershipMonitor(): void {
+        if (this.codexSshOwnershipMonitor) return
+        const refresh = () => {
+            void this.refreshNativeCodexSshOwnership({ forceRefresh: true }).catch((error) => {
+                logger.debug('[API MACHINE] Failed to refresh Codex SSH ownership', error)
+            })
+        }
+        refresh()
+        this.codexSshOwnershipMonitor = setInterval(refresh, CODEX_SSH_OWNERSHIP_MONITOR_INTERVAL_MS)
+        this.codexSshOwnershipMonitor.unref?.()
+    }
+
+    private stopCodexSshOwnershipMonitor(): void {
+        if (!this.codexSshOwnershipMonitor) return
+        clearInterval(this.codexSshOwnershipMonitor)
+        this.codexSshOwnershipMonitor = null
+    }
+
     shutdown(): void {
         this.stopKeepAlive()
+        this.stopCodexSshOwnershipMonitor()
         this.nativeCodexSessionWatcher.stop()
         this.nativeCodexSessionDirectSender.dispose()
         this.nativeCodexTurnLifecycle.dispose()

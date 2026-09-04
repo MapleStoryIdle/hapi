@@ -40,6 +40,8 @@ export type ToolGroupBlock = {
     forceGenericCompactTitle?: boolean
     /** Render the tool activity as a collapsed, transparent activity row. */
     forceCompact?: boolean
+    /** The surrounding assistant turn is still running after its latest tool completed. */
+    turnActive?: boolean
 }
 
 export type VisibleChatBlock = ChatBlock | ToolGroupBlock | QuestionAnswerBlock

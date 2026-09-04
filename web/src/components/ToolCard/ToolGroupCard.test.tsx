@@ -677,6 +677,57 @@ describe('ToolGroupCard', () => {
         expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
     })
 
+    it('uses the newest reasoning action while the native turn remains active', () => {
+        const now = Date.now()
+        const tool = makeToolBlock('read-1', 'Read', { file_path: 'src/old.ts' }, {
+            createdAt: now - 8_000,
+            startedAt: now - 8_000,
+            completedAt: now - 7_000
+        })
+        const view = renderCard(makeGroup({
+            createdAt: now - 8_000,
+            invokedAt: now - 8_000,
+            tools: [tool],
+            detailBlocks: [tool, {
+                kind: 'agent-reasoning',
+                id: 'reasoning-1',
+                localId: null,
+                createdAt: now - 1_000,
+                text: '**Inspecting files**\n\n**Verifying the final result**'
+            }],
+            forceGenericCompactTitle: true,
+            forceCompact: true,
+            showAgentIcon: true,
+            turnActive: true,
+            summary: {
+                totalTools: 1,
+                countsByKind: {
+                    read: 1,
+                    search: 0,
+                    command: 0,
+                    mutation: 0,
+                    web: 0,
+                    other: 0
+                },
+                fileTargets: ['src/old.ts'],
+                commandTargets: [],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0
+            }
+        }), { terminalToolDisplayMode: 'compact' })
+
+        const toggle = within(view.container)
+            .getAllByRole('button', { name: /Verifying the final result \d+s/i })
+            .find((button) => button.hasAttribute('aria-expanded'))
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(toggle?.querySelector('.motion-safe\\:animate-pulse')).not.toBeNull()
+        expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
+    })
+
     it('treats running tools as active even when summary counts are stale', () => {
         const startedAt = Date.now() - 8_000
         const tools = [

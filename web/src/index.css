@@ -734,6 +734,10 @@ select {
     color: var(--cupertino-session-secondary-label);
 }
 
+.cupertino-session-index .cupertino-session-list[data-session-list-presentation="cupertino"] [data-session-ssh-controlled="true"] .cupertino-session-source-glyph {
+    color: #F5A524;
+}
+
 @keyframes cupertino-session-live-signal {
     0%, 100% {
         box-shadow: 0 0 0 2px color-mix(in srgb, var(--cupertino-session-active) 16%, transparent);

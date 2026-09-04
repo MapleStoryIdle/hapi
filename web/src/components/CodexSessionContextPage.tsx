@@ -216,7 +216,7 @@ function NativeContextTypingIndicator(props: { label: string }) {
 export function getNativeContextRefreshInterval(
     status: CodexLocalSessionStatusResponse | undefined
 ): number | false {
-    return status?.success === true && status.status === 'processing'
+    return status?.success === true && (status.status === 'processing' || status.controlledByCodexSsh === true)
         ? NATIVE_CONTEXT_ACTIVE_REFRESH_INTERVAL_MS
         : NATIVE_CONTEXT_REFRESH_INTERVAL_MS
 }
@@ -558,6 +558,7 @@ function NativeCodexThread(props: {
     plan?: CodexLocalSessionPlan | null
     queuedMessages: readonly CodexLocalSessionQueuedMessage[]
     composerDisabled: boolean
+    composerLocked: boolean
     composerNotice: string | null
     sendError: ComposerSendError | null
     autocompleteSuggestions: (query: string) => Promise<Suggestion[]>
@@ -598,7 +599,8 @@ function NativeCodexThread(props: {
         () => buildSessionDetailTimeline(ungroupedBlocks, {
             hasMoreMessages: props.hasMoreMessages,
             terminalToolDisplayMode,
-            runActive: props.isProcessing
+            runActive: props.isProcessing,
+            aggregateActiveProcess: true
         }),
         [props.hasMoreMessages, props.isProcessing, terminalToolDisplayMode, ungroupedBlocks]
     )
@@ -723,6 +725,7 @@ function NativeCodexThread(props: {
                                 sessionId={`codex-native-${props.sessionId}`}
                                 projectPath={props.projectPath}
                                 disabled={props.composerDisabled}
+                                locked={props.composerLocked}
                                 active
                                 agentFlavor={null}
                                 showStatusBar={false}
@@ -863,12 +866,13 @@ export function CodexSessionContextPage(props: {
         // would double every attempt, including permanent 4xx responses.
         retry: false,
         // A native realtime payload updates this cache directly. Poll only
-        // when an older runner cannot provide that stream.
-        refetchInterval: hasRealtimeUpdates
-            ? false
-            : (query) => getNativeContextRefreshInterval(
-                (query.state.data as CodexLocalSessionSnapshotResponse | undefined)?.status
-            ),
+        // when an older runner cannot provide that stream, except while SSH
+        // owns this thread: bounded polling recovers a missed release event.
+        refetchInterval: (query) => {
+            const status = (query.state.data as CodexLocalSessionSnapshotResponse | undefined)?.status
+            if (hasRealtimeUpdates && status?.controlledByCodexSsh !== true) return false
+            return getNativeContextRefreshInterval(status)
+        },
         refetchIntervalInBackground: false,
         refetchOnMount: 'always',
         // Foreground and reconnect recovery are coalesced below. Letting React
@@ -1138,12 +1142,23 @@ export function CodexSessionContextPage(props: {
         && statusQuery.data.waitingForUserInput === true
     const rawDirectStatusError = statusQuery.data?.success === true ? statusQuery.data.lastError ?? null : null
     const directStatusErrorCode = statusQuery.data?.success === true ? statusQuery.data.lastErrorCode ?? null : null
+    const controlledByCodexSsh = statusQuery.data?.success === true
+        ? statusQuery.data.controlledByCodexSsh
+        : undefined
+    // A current runner explicitly sends false on release. The old
+    // post-resume conflict remains a compatibility fallback only when this
+    // field is absent, so a stale `lastErrorCode` cannot keep a new UI locked.
+    const legacyExternalWriterActive = controlledByCodexSsh === undefined
+        && directStatusErrorCode === 'external_writer_active'
+    const sshControlled = controlledByCodexSsh === true || legacyExternalWriterActive
     const directStatusErrorClientMessageId = statusQuery.data?.success === true
         ? statusQuery.data.lastErrorClientMessageId ?? null
         : null
-    const directStatusError = rawDirectStatusError && directStatusErrorCode
-        ? getNativeRecoveryDetail(directStatusErrorCode, true, t)
-        : rawDirectStatusError
+    const directStatusError = controlledByCodexSsh === false && directStatusErrorCode === 'external_writer_active'
+        ? null
+        : rawDirectStatusError && directStatusErrorCode
+            ? getNativeRecoveryDetail(directStatusErrorCode, true, t)
+            : rawDirectStatusError
     const nativeStalledSince = statusQuery.data?.success === true ? statusQuery.data.stalledSince ?? null : null
     const runnerQueuedMessages = statusQuery.data?.success === true && Array.isArray(statusQuery.data.queuedMessages)
         ? statusQuery.data.queuedMessages
@@ -1466,6 +1481,7 @@ export function CodexSessionContextPage(props: {
     const nativeNeedsManualRecovery = nativeRecoveryCandidate.candidate !== null
         && (nativeStalledSince !== null || nativeRecoveryCandidate.uncertain)
     const canRecoverNativeDelivery = nativeRecoveryCandidate.candidate !== null
+        && !sshControlled
         && (directStatus === 'idle' || nativeStalledSince !== null)
     const directSendPhase = getNativeCodexDirectSendPhase({
         pendingDirectSendCount,
@@ -1492,12 +1508,15 @@ export function CodexSessionContextPage(props: {
     const isNativeQueueWaiting = hasNativeQueuedMessages && directStatus === 'idle'
     const isNativeIdle = !isSendingDirect && directStatus === 'idle' && !hasNativeQueuedMessages
     const canFork = Boolean(props.machineId) && !isForking && isNativeIdle
-    const composerDisabled = !props.machineId
+    const composerDisabled = sshControlled
+        || !props.machineId
         || statusQuery.isLoading
         || statusQuery.isError
         || directStatus === null
         || directStatus === 'unknown'
-    const composerNotice = nativeWaitingForUserInput
+    const composerNotice = sshControlled
+        ? t('recentCodex.sshControl.detail')
+        : nativeWaitingForUserInput
         ? t('recentCodex.status.waitingForLocalInput')
         : isNativeProcessing
         ? nativeNeedsManualRecovery
@@ -1518,7 +1537,7 @@ export function CodexSessionContextPage(props: {
                         : statusQuery.isError || directStatus === null
                             ? t('recentCodex.direct.statusFailed')
                             : null
-    const externalWriterActive = directStatusErrorCode === 'external_writer_active'
+    const externalWriterActive = sshControlled
     const visibleRunnerError = directStatusError === dismissedRunnerError ? null : directStatusError
     const composerSendError = directSendError ?? (!externalWriterActive && visibleRunnerError
         ? {
@@ -1573,7 +1592,7 @@ export function CodexSessionContextPage(props: {
 
     const recoverNativeDelivery = useCallback(async () => {
         const candidate = nativeRecoveryCandidate.candidate
-        if (!props.machineId || !candidate || !canRecoverNativeDelivery || isRecoveringNativeDelivery) {
+        if (!props.machineId || !candidate || !canRecoverNativeDelivery || isRecoveringNativeDelivery || sshControlled) {
             return
         }
 
@@ -1683,6 +1702,7 @@ export function CodexSessionContextPage(props: {
         props.machineId,
         props.sessionId,
         refetchNativeSnapshot,
+        sshControlled,
         t,
         updateNativeDirectMessageEchoes
     ])
@@ -1753,7 +1773,7 @@ export function CodexSessionContextPage(props: {
     ])
 
     const sendDirectMessage = useCallback((text: string) => {
-        if (!props.machineId || directStatus === null || directStatus === 'unknown') {
+        if (!props.machineId || sshControlled || directStatus === null || directStatus === 'unknown') {
             return
         }
         const deliveryText = expandCodexCustomPrompt(text, nativeComposerCapabilities.commands) ?? text
@@ -1833,32 +1853,40 @@ export function CodexSessionContextPage(props: {
                 void refetchNativeSnapshot()
             } catch (error) {
                 const needsVerification = shouldVerifyDirectSendReceipt(error)
+                const rejectedByExternalWriter = error instanceof ApiError
+                    && error.code === 'external_writer_active'
                 // A transport timeout is not proof that Codex rejected the
                 // prompt. Retain a pending receipt while the status stream
                 // checks it, then expose explicit recovery rather than
                 // creating a second prompt with a new client id.
-                updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
-                    message.id !== echoId
-                        ? message
-                        : needsVerification
-                            ? {
-                                ...message,
-                                status: 'sending' as const,
-                                deliveryPhase: 'matching' as const,
-                                phaseStartedAt: Date.now()
-                            }
-                            : { ...message, status: 'failed' as const }
-                )))
+                updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => (
+                    rejectedByExternalWriter
+                        ? current.filter((message) => message.id !== echoId)
+                        : current.map((message) => (
+                            message.id !== echoId
+                                ? message
+                                : needsVerification
+                                    ? {
+                                        ...message,
+                                        status: 'sending' as const,
+                                        deliveryPhase: 'matching' as const,
+                                        phaseStartedAt: Date.now()
+                                    }
+                                    : { ...message, status: 'failed' as const }
+                        ))
+                ))
                 if (pageScopeRef.current !== requestScope) {
                     return
                 }
-                setDirectSendError({
-                    id: Date.now(),
-                    text,
-                    message: formatDirectSendError(error, t),
-                    scheduledAt: null
-                })
-                if (needsVerification) {
+                if (!rejectedByExternalWriter) {
+                    setDirectSendError({
+                        id: Date.now(),
+                        text,
+                        message: formatDirectSendError(error, t),
+                        scheduledAt: null
+                    })
+                }
+                if (needsVerification || rejectedByExternalWriter) {
                     void refetchNativeSnapshot()
                 }
             } finally {
@@ -1877,6 +1905,7 @@ export function CodexSessionContextPage(props: {
         props.machineId,
         props.sessionId,
         refetchNativeSnapshot,
+        sshControlled,
         t,
         updateNativeDirectMessageEchoes
     ])
@@ -1886,7 +1915,7 @@ export function CodexSessionContextPage(props: {
     // receipts need an explicit recovery action: after a runner restart the
     // former in-memory dedupe is gone, so silent retry could duplicate work.
     useEffect(() => {
-        if (!props.machineId || directStatus === null || directStatus === 'unknown' || nativeStalledSince !== null) {
+        if (!props.machineId || sshControlled || directStatus === null || directStatus === 'unknown' || nativeStalledSince !== null) {
             return
         }
 
@@ -1963,6 +1992,7 @@ export function CodexSessionContextPage(props: {
         props.machineId,
         props.sessionId,
         refetchNativeSnapshot,
+        sshControlled,
         t,
         updateNativeDirectMessageEchoes
     ])
@@ -1998,7 +2028,7 @@ export function CodexSessionContextPage(props: {
                             >
                                 <AgentFlavorStatusIcon
                                     flavor="codex"
-                                    className="h-5 w-5"
+                                    className={`h-5 w-5 ${sshControlled ? 'text-[#F5A524]' : ''}`}
                                     showStatus
                                     statusClassName={nativeAgentStatusClass}
                                 />
@@ -2081,6 +2111,7 @@ export function CodexSessionContextPage(props: {
                             plan={context?.plan ?? null}
                             queuedMessages={nativeQueuedMessages}
                             composerDisabled={composerDisabled}
+                            composerLocked={sshControlled}
                             composerNotice={composerNotice}
                             sendError={composerSendError}
                             autocompleteSuggestions={nativeComposerCapabilities.getSuggestions}
@@ -2122,6 +2153,21 @@ export function CodexSessionContextPage(props: {
                             testId="codex-fork-error"
                         />
                     </div>
+                ) : sshControlled ? (
+                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
+                        <SessionDetailStatusNotice
+                            tone="warning"
+                            title={legacyExternalWriterActive
+                                ? t('recentCodex.direct.externalWriter.title')
+                                : t('recentCodex.sshControl.title')}
+                            detail={legacyExternalWriterActive
+                                ? t('recentCodex.direct.externalWriter.detail')
+                                : t('recentCodex.sshControl.detail')}
+                            testId={legacyExternalWriterActive
+                                ? 'codex-native-external-writer'
+                                : 'codex-native-ssh-controlled'}
+                        />
+                    </div>
                 ) : nativeWaitingForUserInput ? (
                     <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
                         <SessionDetailStatusNotice
@@ -2157,15 +2203,6 @@ export function CodexSessionContextPage(props: {
                                 busy: isDiscardingNativeRecovery
                             } : undefined}
                             testId="codex-native-recovery"
-                        />
-                    </div>
-                ) : externalWriterActive ? (
-                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                        <SessionDetailStatusNotice
-                            tone="warning"
-                            title={t('recentCodex.direct.externalWriter.title')}
-                            detail={t('recentCodex.direct.externalWriter.detail')}
-                            testId="codex-native-external-writer"
                         />
                     </div>
                 ) : directSendPhase ? (

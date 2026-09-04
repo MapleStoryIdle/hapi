@@ -5,7 +5,7 @@ import {
     Volume2 as Volume2IconNode,
     VolumeX as VolumeXIconNode,
 } from 'lucide'
-import { Filter, Puzzle, Search, Zap } from 'lucide-react'
+import { Filter, Lock as LockIcon, Puzzle, Search, Zap } from 'lucide-react'
 import type { PermissionMode, SkillSummary } from '@/types/api'
 import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
@@ -812,6 +812,8 @@ export function UnifiedButton(props: {
     voiceStatus: ConversationStatus
     voiceEnabled: boolean
     controlsDisabled: boolean
+    /** Locked send affordance; the draft stays in the composer. */
+    locked?: boolean
     onSend: () => void
     onVoiceToggle: () => void
     showAbortButton?: boolean
@@ -845,13 +847,17 @@ export function UnifiedButton(props: {
     // draft takes precedence over aborting the current response. An empty
     // composer still exposes the abort control as before.
     const showAbort = Boolean(
+        !props.locked
+        &&
         props.showAbortButton
         && !hasText
         && (!(props.abortDisabled ?? false) || props.isAborting)
     )
 
     const handleClick = () => {
-        if (showAbort) {
+        if (props.locked) {
+            return
+        } else if (showAbort) {
             props.onAbort?.()
         } else if (isVoiceActive) {
             props.onVoiceToggle() // Stop voice
@@ -864,7 +870,11 @@ export function UnifiedButton(props: {
     let className: string
     let ariaLabel: string
 
-    if (showAbort) {
+    if (props.locked) {
+        icon = <LockIcon data-testid="composer-send-lock" aria-hidden="true" />
+        className = 'bg-[var(--app-hint)] text-white'
+        ariaLabel = t('recentCodex.sshControl.sendLocked')
+    } else if (showAbort) {
         icon = <AbortIcon spinning={props.isAborting ?? false} />
         className = `bg-red-600 text-white shadow-[0_0_0_3px_rgba(239,68,68,0.12)] hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-400${props.isAborting ? '' : ' animate-stop-button-breathe'}`
         ariaLabel = t('composer.abort')
@@ -910,13 +920,13 @@ export function UnifiedButton(props: {
     // Voice launch is hidden from the composer for now. Empty input keeps
     // the regular disabled send affordance; connected voice sessions still
     // expose the stop state above so users can end an existing session.
-    const isDisabled = showAbort
+    const isDisabled = props.locked || (showAbort
         ? (props.abortDisabled ?? false)
         : props.controlsDisabled || (
             routesToScratchlist
                 ? !hasText
                 : !hasText && !isVoiceActive
-        )
+        ))
 
     return (
         <button
@@ -991,6 +1001,7 @@ export function getComposerOptionalControlsVisibility(
 export function ComposerButtons(props: {
     canSend: boolean
     controlsDisabled: boolean
+    locked?: boolean
     showSettingsButton: boolean
     onSettingsToggle: () => void
     settingsButtonRef?: RefObject<HTMLButtonElement | null>
@@ -1623,6 +1634,7 @@ export function ComposerButtons(props: {
                         voiceStatus={props.voiceStatus}
                         voiceEnabled={props.voiceEnabled}
                         controlsDisabled={props.controlsDisabled}
+                        locked={props.locked}
                         onSend={props.onSend}
                         onVoiceToggle={props.onVoiceToggle}
                         showAbortButton={showRunningStopButton}
@@ -1906,6 +1918,7 @@ export function ComposerButtons(props: {
                         voiceStatus={props.voiceStatus}
                         voiceEnabled={props.voiceEnabled}
                         controlsDisabled={props.controlsDisabled}
+                        locked={props.locked}
                         onSend={props.onSend}
                         onVoiceToggle={props.onVoiceToggle}
                         showAbortButton={showRunningStopButton}

@@ -42,6 +42,7 @@ describe('terminal command intent', () => {
         })
         expect(getTerminalCommandIntent({ command: 'ssh server-alias systemctl status app' })).toEqual({
             kind: 'remote-command',
+            executable: 'ssh',
             host: 'server-alias',
             mode: 'execute',
             action: { kind: 'manage-service', operation: 'inspect', service: 'app' },
@@ -99,17 +100,21 @@ describe('terminal command intent', () => {
         const remote = getTerminalCommandIntent({
             command: 'ssh deploy@192.0.2.18 systemctl restart hapi-hub.service'
         })
-        expect(remote && getTerminalCommandIntentTitle(remote)).toBe('Restart hapi-hub service')
+        expect(remote && getTerminalCommandIntentTitle(remote)).toBe('ssh')
         expect(remote && getTerminalCommandIntentDetail(remote)).toBe('192.0.2.18')
         expect(getTerminalCommandDisplayTitle({
             command: 'ssh deploy@192.0.2.18 systemctl restart hapi-hub.service'
-        })).toBe('Restart hapi-hub service · 192.0.2.18')
+        })).toBe('ssh · 192.0.2.18')
         expect(getTerminalCommandDisplayTitle({
             command: 'ssh 192.0.2.18 echo must-not-render'
-        })).toBe('Run shell · 192.0.2.18')
+        })).toBe('ssh · 192.0.2.18')
         expect(getTerminalCommandDisplayTitle({
             command: 'scp -i /credentials/private-key /build/hapi deploy@192.0.2.18:/tmp/hapi'
-        })).toBe('Transfer files · hapi · 192.0.2.18')
+        })).toBe('scp · 192.0.2.18')
+
+        expect(getTerminalCommandDisplayTitle({
+            command: 'curl https://example.com/api'
+        })).toBe('GET · example.com/api')
 
         const database = getTerminalCommandIntent({
             command: `mysql --database lingda_dev -e "SELECT password FROM sys_user WHERE token = 'must-not-render'"`
@@ -178,5 +183,36 @@ describe('terminal command intent', () => {
         expect(getTerminalCommandSummary({
             command: '/bin/zsh -lc "sed -n \'1,20p\' src/App.tsx; for f in src/a.ts; do echo $f; done\''
         })).toBe('sed -n')
+    })
+
+    it('extracts key commands from a Codex Desktop orchestration wrapper', () => {
+        const input = {
+            command: `const results = await Promise.all([
+                tools.exec_command({ cmd: "git status --short; git diff --stat", workdir: "/repo" }),
+                tools.exec_command({ cmd: "bun run test", workdir: "/repo" })
+            ]); text(results.length);`
+        }
+
+        expect(getTerminalCommandSummary(input)).toBe('git status · git diff · +1')
+        expect(getTerminalCommandDisplayTitle(input)).toBe('git status · git diff · +1')
+    })
+
+    it('does not expose Codex Desktop orchestration as Run const', () => {
+        expect(getTerminalCommandDisplayTitle({
+            command: 'const matches = ALL_TOOLS.filter((tool) => tool.name); text(matches);'
+        })).toBe('Tool operation')
+
+        expect(getTerminalCommandDisplayTitle({
+            command: 'const result = await tools.browser_check({ url: "http://localhost", title: "Check local preview" }); text(result);'
+        })).toBe('Check local preview')
+
+        const receivedKeys: string[] = []
+        expect(getTerminalCommandDisplayTitle({
+            command: 'const result = await tools.exec_command({ cmd: buildCommand() }); text(result);'
+        }, (key) => {
+            receivedKeys.push(key)
+            return '执行工具命令'
+        })).toBe('执行工具命令')
+        expect(receivedKeys).toEqual(['terminal.execution.execCommandFallback'])
     })
 })

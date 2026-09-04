@@ -13,6 +13,11 @@ function isAssistantVisibleBlock(block: VisibleChatBlock): boolean {
     return true
 }
 
+function isFoldableProcessEvent(block: VisibleChatBlock): boolean {
+    return block.kind === 'agent-event'
+        && (block.event.type === 'compact' || block.event.type === 'microcompact')
+}
+
 function firstInvokedAt(blocks: VisibleChatBlock[]): number | null {
     for (const block of blocks) {
         if ('invokedAt' in block && block.invokedAt != null) {
@@ -62,7 +67,11 @@ function collectExpansionStateKeys(blocks: readonly VisibleChatBlock[]): string[
 function createResultDetailsGroup(
     sourceBlocks: VisibleChatBlock[],
     tools: ToolCallBlock[],
-    detailBlocks: ChatBlock[]
+    detailBlocks: ChatBlock[],
+    options: {
+        id?: string
+        turnActive?: boolean
+    } = {}
 ): ToolGroupBlock {
     const firstBlock = sourceBlocks[0]
     const firstToolId = tools[0]?.id ?? firstBlock.id
@@ -70,7 +79,7 @@ function createResultDetailsGroup(
 
     return {
         kind: 'tool-group',
-        id: `tool-group:result-details:${firstBlock.id}`,
+        id: options.id ?? `tool-group:result-details:${firstBlock.id}`,
         createdAt: firstBlock.createdAt,
         invokedAt: firstInvokedAt(sourceBlocks),
         firstToolId,
@@ -84,8 +93,33 @@ function createResultDetailsGroup(
         detailBlocks,
         showAgentIcon: tools.length > 0,
         forceGenericCompactTitle: true,
-        forceCompact: true
+        forceCompact: true,
+        ...(options.turnActive ? { turnActive: true } : {})
     }
+}
+
+function transformActiveProcessGroup(group: VisibleChatBlock[]): VisibleChatBlock[] {
+    const tools: ToolCallBlock[] = []
+    const detailBlocks: ChatBlock[] = []
+
+    for (const block of group) {
+        flattenSourceBlock(block, tools, detailBlocks)
+    }
+
+    // A compact activity group needs at least one real tool artifact. Keep a
+    // reasoning-only turn in its native renderer, and never hide a permission
+    // request that still needs a tap from the user.
+    if (
+        tools.length === 0
+        || tools.some((tool) => tool.tool.permission?.status === 'pending')
+    ) {
+        return group
+    }
+
+    return [createResultDetailsGroup(group, tools, detailBlocks, {
+        id: `tool-group:active-process:${tools[0]!.id}`,
+        turnActive: true
+    })]
 }
 
 function transformAssistantGroup(group: VisibleChatBlock[]): VisibleChatBlock[] {
@@ -126,7 +160,10 @@ function transformAssistantGroup(group: VisibleChatBlock[]): VisibleChatBlock[] 
 
 export function groupAssistantResultDetails(
     blocks: VisibleChatBlock[],
-    options: { runActive?: boolean } = {}
+    options: {
+        runActive?: boolean
+        aggregateActiveProcess?: boolean
+    } = {}
 ): VisibleChatBlock[] {
     const transformed: VisibleChatBlock[] = []
     let group: VisibleChatBlock[] = []
@@ -143,7 +180,9 @@ export function groupAssistantResultDetails(
         const isCurrentTurnGroup = groupStartIndex > latestUserIndex
         transformed.push(...(
             options.runActive && isCurrentTurnGroup
-                ? group
+                ? options.aggregateActiveProcess
+                    ? transformActiveProcessGroup(group)
+                    : group
                 : transformAssistantGroup(group)
         ))
         group = []
@@ -152,7 +191,9 @@ export function groupAssistantResultDetails(
 
     for (let index = 0; index < blocks.length; index += 1) {
         const block = blocks[index]!
-        if (!isAssistantVisibleBlock(block)) {
+        const foldProcessEvent = options.aggregateActiveProcess === true
+            && isFoldableProcessEvent(block)
+        if (!isAssistantVisibleBlock(block) && !foldProcessEvent) {
             flushGroup()
             transformed.push(block)
             continue

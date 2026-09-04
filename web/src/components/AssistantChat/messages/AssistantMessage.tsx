@@ -78,7 +78,13 @@ function AssistantToolGroupMetaBar(props: {
             className="mb-0.5 flex min-h-9 w-full items-center gap-1.5 rounded-md px-0.5 py-1 text-left text-[13px] font-medium leading-5 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
         >
             {props.block.showAgentIcon ? (
-                <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]" />
+                <AgentFlavorIcon
+                    flavor={ctx.metadata?.flavor}
+                    className={cn(
+                        'h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]',
+                        active && 'motion-safe:animate-pulse'
+                    )}
+                />
             ) : null}
             <span className="min-w-0 flex-1 truncate">{label}</span>
             <span

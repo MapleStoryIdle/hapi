@@ -77,6 +77,7 @@ export function getNativeCodexRealtimeSnapshot(
         || status?.success !== true
         || !['idle', 'processing', 'unknown'].includes(status.status as string)
         || (status.waitingForUserInput !== undefined && typeof status.waitingForUserInput !== 'boolean')
+        || (status.controlledByCodexSsh !== undefined && typeof status.controlledByCodexSsh !== 'boolean')
         || 'queuedMessages' in (status ?? {})
         || !validQueuedMessageRefs
         || (timing?.cache !== 'hit' && timing?.cache !== 'miss')

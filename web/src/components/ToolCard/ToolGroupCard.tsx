@@ -72,7 +72,8 @@ function getToolEndMs(tool: ToolCallBlock, now: number): number {
 }
 
 export function isToolGroupActive(block: ToolGroupBlock): boolean {
-    return block.tools.some((tool) => tool.tool.state === 'running' || tool.tool.state === 'pending')
+    return block.turnActive === true
+        || block.tools.some((tool) => tool.tool.state === 'running' || tool.tool.state === 'pending')
 }
 
 export function getToolGroupDurationMs(block: ToolGroupBlock, now: number): number {
@@ -80,7 +81,12 @@ export function getToolGroupDurationMs(block: ToolGroupBlock, now: number): numb
         return 0
     }
 
-    const startedAt = Math.min(...block.tools.map(getToolStartMs))
+    const toolStartedAt = Math.min(...block.tools.map(getToolStartMs))
+    if (block.turnActive) {
+        const startedAt = Math.min(block.invokedAt ?? block.createdAt, toolStartedAt)
+        return Math.max(0, now - startedAt)
+    }
+    const startedAt = toolStartedAt
     const endedAt = Math.max(...block.tools.map((tool) => getToolEndMs(tool, now)))
     return Math.max(0, endedAt - startedAt)
 }
@@ -168,6 +174,38 @@ function formatCompactRawText(value: string): string {
     return normalized.length > 96 ? `${normalized.slice(0, 95)}…` : normalized
 }
 
+/** Turn a Codex reasoning/commentary snapshot into one calm activity label. */
+export function formatLiveProcessText(value: string): string | null {
+    const sections = value
+        .split(/\n\s*\n/)
+        .map((section) => section.trim())
+        .filter(Boolean)
+    const section = sections[sections.length - 1]
+    if (!section) return null
+
+    const emphasized = [...section.matchAll(/\*\*([^*]+)\*\*/g)]
+    const source = emphasized[emphasized.length - 1]?.[1] ?? section.split(/\r?\n/).find(Boolean) ?? section
+    const normalized = source
+        .replace(/^\s*(?:#{1,6}|[-*+>])\s*/, '')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/\*\*|__|`/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+
+    if (!normalized) return null
+    return formatCompactRawText(normalized)
+}
+
+function getLatestLiveProcessBlock(block: ToolGroupBlock): ToolCallBlock | Exclude<NonNullable<ToolGroupBlock['detailBlocks']>[number], ToolCallBlock> | null {
+    if (!block.turnActive) return null
+    const details = block.detailBlocks ?? block.tools
+    return details.findLast((detail) => (
+        detail.kind === 'tool-call'
+        || detail.kind === 'agent-text'
+        || detail.kind === 'agent-reasoning'
+    )) ?? null
+}
+
 export function formatToolGroupCompactTitle(
     block: ToolGroupBlock,
     now: number,
@@ -176,7 +214,18 @@ export function formatToolGroupCompactTitle(
     const active = isToolGroupActive(block)
     const durationMs = getToolGroupDurationMs(block, now)
     const renderedDuration = formatCompactDuration(durationMs)
-    const skillName = getToolGroupSkillName(block)
+    const latestLiveBlock = getLatestLiveProcessBlock(block)
+    if (latestLiveBlock?.kind === 'agent-text' || latestLiveBlock?.kind === 'agent-reasoning') {
+        const activity = formatLiveProcessText(latestLiveBlock.text)
+        if (activity) return `${activity} ${renderedDuration}`.trim()
+    }
+
+    const liveTool = latestLiveBlock?.kind === 'tool-call' ? latestLiveBlock : null
+    const skillName = block.turnActive
+        ? liveTool?.tool.name === 'Skill'
+            ? getInputStringAny(liveTool.tool.input, ['skill', 'name'])?.trim() ?? null
+            : null
+        : getToolGroupSkillName(block)
     if (skillName) {
         return active
             ? t('toolGroup.compact.skill.processing', { skill: skillName, duration: renderedDuration }).trim()
@@ -186,9 +235,9 @@ export function formatToolGroupCompactTitle(
     const latestActiveTool = active
         ? block.tools.findLast((tool) => tool.tool.state === 'running' || tool.tool.state === 'pending') ?? null
         : null
-    const displayTool = !block.forceGenericCompactTitle && block.tools.length === 1
+    const displayTool = liveTool ?? (!block.forceGenericCompactTitle && block.tools.length === 1
         ? block.tools[0]
-        : latestActiveTool
+        : latestActiveTool)
     if (displayTool) {
         const invocationTitle = getInputStringAny(displayTool.tool.input, ['title'])?.trim()
         if (invocationTitle) {
@@ -259,9 +308,14 @@ function CompactDetailBlock(props: { block: Exclude<NonNullable<ToolGroupBlock['
     }
 
     if (block.kind === 'agent-reasoning') {
+        const lines = block.text
+            .split(/\n\s*\n/)
+            .map(formatLiveProcessText)
+            .filter((line): line is string => line !== null)
+            .filter((line, index, source) => source.indexOf(line) === index)
         return (
-            <div className="min-w-0 pl-[15px] whitespace-pre-wrap text-[13px] leading-5 text-[var(--app-hint)]">
-                {block.text}
+            <div className="min-w-0 space-y-0.5 pl-[15px] text-[13px] leading-5 text-[var(--app-hint)]">
+                {lines.map((line) => <div key={line}>{line}</div>)}
             </div>
         )
     }
@@ -712,7 +766,13 @@ export function ToolGroupCard(props: {
                         aria-expanded={displayedOpen}
                     >
                         {props.block.showAgentIcon ? (
-                            <AgentFlavorIcon flavor={ctx.metadata?.flavor} className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]" />
+                            <AgentFlavorIcon
+                                flavor={ctx.metadata?.flavor}
+                                className={cn(
+                                    'h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]',
+                                    hasActiveTools && 'motion-safe:animate-pulse'
+                                )}
+                            />
                         ) : null}
                         <span className="min-w-0 flex-1 truncate">{compactTitle}</span>
                         <span className="shrink-0 text-[var(--app-hint)]">
