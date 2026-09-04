@@ -1,5 +1,5 @@
 import { CircleAlert } from 'lucide-react'
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import {
     SessionDetailStatusNotice,
     type SessionDetailStatusAction
@@ -31,7 +31,6 @@ export function NativeCodexFloatingStatusNotice(props: {
     const toggleRef = useRef<HTMLButtonElement | null>(null)
     const autoCollapseTimerRef = useRef<number | null>(null)
     const focusToggleOnCollapseRef = useRef(false)
-    const contentId = useId()
 
     useLayoutEffect(() => {
         setCollapsed(false)
@@ -71,15 +70,14 @@ export function NativeCodexFloatingStatusNotice(props: {
             type="button"
             onClick={toggle}
             aria-expanded={!collapsed}
-            aria-controls={contentId}
             aria-label={props.statusLabel}
             title={props.statusLabel}
             data-testid={props.testId ? `${props.testId}-toggle` : undefined}
             className={cn(
-                'pointer-events-auto touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2',
+                'pointer-events-auto touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2',
                 collapsed
-                    ? 'border border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] hover:bg-[var(--app-secondary-bg)] focus-visible:ring-[var(--app-link)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]'
-                    : 'hover:bg-[var(--app-muted)] focus-visible:ring-[var(--app-link)]'
+                    ? 'rounded-r-full rounded-l-none border border-l-0 border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] hover:bg-[var(--app-secondary-bg)] focus-visible:ring-[var(--app-link)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]'
+                    : 'rounded-full hover:bg-[var(--app-muted)] focus-visible:ring-[var(--app-link)]'
             )}
         >
             <CircleAlert className={cn('h-5 w-5', iconClass)} aria-hidden="true" />
@@ -92,25 +90,28 @@ export function NativeCodexFloatingStatusNotice(props: {
             data-testid={props.testId}
             data-status-tone={props.tone}
             data-status-collapsed={collapsed ? 'true' : 'false'}
-            className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30"
+            className={cn(
+                'pointer-events-none absolute top-[calc(var(--app-safe-area-top)+4.5rem)] z-30',
+                collapsed ? 'left-0' : 'inset-x-0'
+            )}
         >
-            <div className="mx-auto w-full max-w-content px-3">
+            {collapsed ? (
                 <div className="relative">
-                    <div id={contentId} hidden={collapsed}>
+                    {toggleButton}
+                </div>
+            ) : (
+                <div className="mx-auto w-full max-w-content px-3">
+                    <div className="relative">
                         <SessionDetailStatusNotice
                             tone={props.tone}
                             title={props.title}
                             detail={props.detail}
                             action={props.action}
                             secondaryAction={props.secondaryAction}
-                            className="pr-12"
                         />
                     </div>
-                    <div className={collapsed ? 'ml-12' : 'absolute right-1 top-1'}>
-                        {toggleButton}
-                    </div>
                 </div>
-            </div>
+            )}
         </div>
     )
 }

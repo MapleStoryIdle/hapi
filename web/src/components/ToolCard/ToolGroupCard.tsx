@@ -10,7 +10,7 @@ import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
 import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutationDetail'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
-import { getCodexAgentActivity, getCodexAgentReasoningEffort, getCodexAgentSummary } from '@/components/ToolCard/codexAgents'
+import { getCodexAgentReasoningEffort, getCodexAgentSummary, parseCodexSpawnAgentResult } from '@/components/ToolCard/codexAgents'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
@@ -377,16 +377,163 @@ function CompactDetailItem(props: {
     return <CompactDetailBlock block={block} />
 }
 
-function getCodexSubagentName(tool: ToolCallBlock, t: (key: string, params?: Record<string, string | number>) => string): string {
-    return getCodexAgentSummary(tool.tool.input)
-        ?? getInputStringAny(tool.tool.input, ['name', 'nickname', 'agentName', 'agent_name', 'agentId', 'agent_id'])
-        ?? t('toolGroup.codexSubagent.unknown')
+const CODEX_SUBAGENT_FRIENDLY_NAMES = [
+    'Atlas',
+    'Nova',
+    'Orbit',
+    'Sage',
+    'Scout',
+    'Beacon',
+    'Harbor',
+    'Piper'
+] as const
+
+export const CODEX_SUBAGENT_CARD_COLORS = [
+    '#4E7CF5',
+    '#7367E8',
+    '#9862C7',
+    '#C35E92',
+    '#337FA8',
+    '#258C91',
+    '#647AA3',
+    '#8A6F9E'
+] as const
+
+function getStablePaletteIndex(value: string, paletteLength: number): number {
+    let hash = 2_166_136_261
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index)
+        hash = Math.imul(hash, 16_777_619)
+    }
+    return (hash >>> 0) % paletteLength
 }
 
-function getCodexSubagentStatus(tool: ToolCallBlock): string {
-    return getCodexAgentActivity(tool.tool.input)
-        ?? getInputStringAny(tool.tool.input, ['agentStatus', 'status', 'state'])
-        ?? tool.tool.state
+function getTrimmedInputString(input: unknown, keys: string[]): string | null {
+    return getInputStringAny(input, keys)?.trim() || null
+}
+
+function getCodexSubagentInternalIds(tool: ToolCallBlock): ReadonlySet<string> {
+    const ids = new Set<string>()
+    const inputId = getTrimmedInputString(tool.tool.input, ['agentId', 'agent_id'])
+    if (inputId) ids.add(inputId.toLowerCase())
+
+    const spawnResult = parseCodexSpawnAgentResult(tool.tool.result)
+    if (spawnResult?.agentId) ids.add(spawnResult.agentId.trim().toLowerCase())
+    return ids
+}
+
+function getSafeCodexSubagentIdentityCandidate(value: string | null, internalIds: ReadonlySet<string>): string | null {
+    const candidate = value?.trim() || null
+    if (!candidate || internalIds.has(candidate.toLowerCase())) return null
+    return candidate
+}
+
+export function getCodexSubagentCardIdentity(tool: ToolCallBlock): string {
+    const input = tool.tool.input
+    const internalIds = getCodexSubagentInternalIds(tool)
+    const displayName = getSafeCodexSubagentIdentityCandidate(getTrimmedInputString(input, [
+        'displayName',
+        'display_name',
+        'name',
+        'nickname',
+        'agentName',
+        'agent_name'
+    ]), internalIds)
+    if (displayName) return displayName
+
+    const spawnNickname = getSafeCodexSubagentIdentityCandidate(
+        parseCodexSpawnAgentResult(tool.tool.result)?.nickname ?? null,
+        internalIds
+    )
+    if (spawnNickname) return spawnNickname
+
+    const role = getSafeCodexSubagentIdentityCandidate(getTrimmedInputString(input, [
+        'agent_type',
+        'subagent_type',
+        'specialization',
+        'specialty',
+        'role',
+        'type'
+    ]), internalIds)
+    if (role) return role
+
+    const summary = getSafeCodexSubagentIdentityCandidate(getCodexAgentSummary(input), internalIds)
+    if (summary) return summary
+
+    return CODEX_SUBAGENT_FRIENDLY_NAMES[
+        getStablePaletteIndex(tool.id || 'codex-agent', CODEX_SUBAGENT_FRIENDLY_NAMES.length)
+    ]
+}
+
+export function getCodexSubagentCardColor(toolId: string): string {
+    return CODEX_SUBAGENT_CARD_COLORS[
+        getStablePaletteIndex(toolId || 'codex-agent', CODEX_SUBAGENT_CARD_COLORS.length)
+    ]
+}
+
+/**
+ * Keep cards distinct when their stable palette hashes collide. Sorting ids
+ * makes the collision resolution independent of the source array order.
+ */
+export function assignCodexSubagentCardColors(toolIds: readonly string[]): ReadonlyMap<string, string> {
+    const uniqueToolIds = [...new Set(toolIds)].sort()
+    const assignments = new Map<string, string>()
+    const usedColors = new Set<string>()
+
+    for (const toolId of uniqueToolIds) {
+        const preferredIndex = getStablePaletteIndex(toolId || 'codex-agent', CODEX_SUBAGENT_CARD_COLORS.length)
+        let color = CODEX_SUBAGENT_CARD_COLORS[preferredIndex]
+        if (usedColors.size < CODEX_SUBAGENT_CARD_COLORS.length) {
+            for (let offset = 0; offset < CODEX_SUBAGENT_CARD_COLORS.length; offset += 1) {
+                const candidate = CODEX_SUBAGENT_CARD_COLORS[
+                    (preferredIndex + offset) % CODEX_SUBAGENT_CARD_COLORS.length
+                ]
+                if (!usedColors.has(candidate)) {
+                    color = candidate
+                    break
+                }
+            }
+        }
+        assignments.set(toolId, color)
+        usedColors.add(color)
+    }
+
+    return assignments
+}
+
+export function getCodexSubagentCardState(state: unknown): ToolCallBlock['tool']['state'] {
+    const normalized = typeof state === 'string' ? state.trim().toLowerCase() : ''
+    if (normalized === 'completed') return 'completed'
+    if (
+        normalized === 'error'
+        || normalized === 'failed'
+        || normalized === 'cancelled'
+        || normalized === 'canceled'
+        || normalized === 'not-found'
+        || normalized === 'not_found'
+        || normalized === 'not found'
+    ) {
+        return 'error'
+    }
+    if (normalized === 'pending') return 'pending'
+    return 'running'
+}
+
+function getCodexSubagentCardStatusLabel(
+    state: ToolCallBlock['tool']['state'],
+    t: (key: string, params?: Record<string, string | number>) => string
+): string {
+    if (state === 'pending') return t('terminal.execution.pending')
+    if (state === 'running') return t('terminal.execution.running')
+    if (state === 'error') return t('terminal.execution.failed')
+    return t('terminal.execution.completed')
+}
+
+function getCodexSubagentCardMetadata(tool: ToolCallBlock, unavailable: string): string {
+    const model = getTrimmedInputString(tool.tool.input, ['model']) ?? (tool.model?.trim() || null)
+    const reasoning = getCodexAgentReasoningEffort(tool.tool.input)?.trim() || null
+    const values = [model, reasoning].filter((value): value is string => value !== null)
+    return values.length > 0 ? values.join(' · ') : unavailable
 }
 
 function CodexSubagentCards(props: {
@@ -396,38 +543,53 @@ function CodexSubagentCards(props: {
 }) {
     if (props.tools.length === 0) return null
 
+    const colors = assignCodexSubagentCardColors(props.tools.map((tool) => tool.id))
+
     return (
         <div className="mt-2 flex flex-wrap gap-2" data-codex-subagent-cards>
             {props.tools.map((tool) => {
-                const name = getCodexSubagentName(tool, props.t)
-                const model = getInputStringAny(tool.tool.input, ['model']) ?? tool.model ?? props.t('toolGroup.codexSubagent.unavailable')
-                const reasoning = getCodexAgentReasoningEffort(tool.tool.input) ?? props.t('toolGroup.codexSubagent.unavailable')
-                const status = getCodexSubagentStatus(tool)
+                const identity = getCodexSubagentCardIdentity(tool)
+                const metadata = getCodexSubagentCardMetadata(
+                    tool,
+                    props.t('toolGroup.codexSubagent.unavailable')
+                )
+                const state = getCodexSubagentCardState(tool.tool.state)
+                const statusLabel = getCodexSubagentCardStatusLabel(state, props.t)
+                const color = colors.get(tool.id) ?? getCodexSubagentCardColor(tool.id)
 
                 return (
                     <button
                         key={tool.id}
                         type="button"
-                        className="flex min-h-11 min-w-[min(100%,15rem)] flex-1 basis-[15rem] cursor-pointer flex-col items-start gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        className="flex min-h-11 min-w-[min(100%,15rem)] flex-1 basis-[15rem] cursor-pointer flex-col items-start gap-1 rounded-xl border border-l-[3px] border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        style={{ borderLeftColor: color }}
                         onClick={() => props.onSelectTool(tool.id)}
                         aria-haspopup="dialog"
                         data-codex-subagent-card
+                        data-codex-subagent-color={color}
+                        data-codex-subagent-status={state}
                         data-tool-id={tool.id}
                     >
                         <span className="flex w-full min-w-0 items-center gap-2">
-                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--app-fg)]" title={name}>
-                                {props.t('toolGroup.codexSubagent.agent', { name })}
+                            <span
+                                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--app-secondary-bg)]"
+                                style={{ color }}
+                                data-codex-subagent-icon
+                            >
+                                <AgentFlavorIcon flavor="codex" className="h-4 w-4" />
                             </span>
-                            <span className={cn('shrink-0', toolStatusColorClass(tool.tool.state))} aria-hidden="true">
-                                <ToolStatusIcon state={tool.tool.state} />
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--app-fg)]" title={identity}>
+                                {identity}
+                            </span>
+                            <span className={cn('shrink-0', toolStatusColorClass(state))} aria-hidden="true">
+                                <ToolStatusIcon state={state} />
+                            </span>
+                            <span className="sr-only" role="status" aria-label={statusLabel} aria-live="polite" aria-atomic="true">
+                                {statusLabel}
                             </span>
                         </span>
-                        <span className="flex w-full flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-[var(--app-hint)]">
-                            <span className="truncate" title={model}>{props.t('toolGroup.codexSubagent.model', { model })}</span>
-                            <span className="truncate" title={reasoning}>{props.t('toolGroup.codexSubagent.reasoning', { effort: reasoning })}</span>
-                            <span className="truncate" title={status} aria-live="polite" aria-atomic="true">
-                                {props.t('toolGroup.codexSubagent.status', { status })}
-                            </span>
+                        <span className="block w-full truncate text-[11px] text-[var(--app-hint)]" title={metadata}>
+                            {metadata}
                         </span>
                     </button>
                 )

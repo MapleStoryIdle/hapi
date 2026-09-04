@@ -62,6 +62,7 @@ export default {
   'sessions.kanban.pinned': '置顶',
   'sessions.kanban.pending': '待确认',
   'sessions.kanban.processing': 'thinking',
+  'sessions.kanban.unviewed': '未查看',
   'sessions.kanban.completed': '已完成',
   'sessions.kanban.pin': '置顶会话',
   'sessions.kanban.unpin': '取消置顶会话',

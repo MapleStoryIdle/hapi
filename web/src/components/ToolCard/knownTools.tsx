@@ -159,10 +159,7 @@ export const knownTools: Record<string, {
     },
     Grep: {
         icon: () => <EyeIcon className={DEFAULT_ICON_CLASS} />,
-        title: (opts) => {
-            const pattern = getInputStringAny(opts.input, ['pattern'])
-            return pattern ? `grep(pattern: ${pattern})` : 'Search content'
-        },
+        title: () => 'grep',
         minimal: true
     },
     LS: {

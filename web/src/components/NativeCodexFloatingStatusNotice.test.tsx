@@ -28,22 +28,23 @@ describe('NativeCodexFloatingStatusNotice', () => {
         renderNotice()
 
         const notice = screen.getByTestId('native-status')
-        const toggle = screen.getByTestId('native-status-toggle')
         expect(notice).toHaveAttribute('data-status-collapsed', 'false')
         expect(notice).toHaveTextContent('Return to the local Codex session')
-        expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(document.getElementById(toggle.getAttribute('aria-controls') ?? '')).toBeInTheDocument()
+        expect(screen.queryByTestId('native-status-toggle')).not.toBeInTheDocument()
 
         act(() => vi.advanceTimersByTime(5_000))
 
         expect(notice).toHaveAttribute('data-status-collapsed', 'true')
-        expect(screen.getByText('Return to the local Codex session')).not.toBeVisible()
+        expect(screen.queryByText('Return to the local Codex session')).not.toBeInTheDocument()
         const compactToggle = screen.getByTestId('native-status-toggle')
         expect(compactToggle).toHaveAttribute('aria-expanded', 'false')
         expect(compactToggle).toHaveAccessibleName('Waiting for local input')
         expect(compactToggle).toHaveAttribute('title', 'Waiting for local input')
         expect(compactToggle).toHaveClass('h-11', 'w-11')
-        expect(compactToggle.parentElement).toHaveClass('ml-12')
+        expect(notice).toHaveClass('left-0')
+        expect(compactToggle.parentElement).toHaveClass('relative')
+        expect(compactToggle.parentElement).not.toHaveClass('ml-12')
+        expect(compactToggle).toHaveClass('rounded-l-none')
         expect(compactToggle.querySelector('.lucide-circle-alert')).toHaveClass('text-amber-500')
     })
 
@@ -62,30 +63,24 @@ describe('NativeCodexFloatingStatusNotice', () => {
         expect(compactToggle.querySelector('.lucide-circle-alert')).toHaveClass('text-red-500')
     })
 
-    it('toggles between the compact control and the expanded notice', () => {
+    it('expands the compact control without showing a second prompt icon', () => {
         vi.useFakeTimers()
         renderNotice()
         act(() => vi.advanceTimersByTime(5_000))
 
         fireEvent.click(screen.getByTestId('native-status-toggle'))
         expect(screen.getByTestId('native-status')).toHaveAttribute('data-status-collapsed', 'false')
-        expect(screen.getByTestId('native-status-toggle')).toHaveAttribute('aria-expanded', 'true')
         expect(screen.getByText('Return to the local Codex session')).toBeInTheDocument()
-
-        fireEvent.click(screen.getByTestId('native-status-toggle'))
-        expect(screen.getByTestId('native-status')).toHaveAttribute('data-status-collapsed', 'true')
-        expect(screen.getByTestId('native-status-toggle')).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByTestId('native-status-toggle')).not.toBeInTheDocument()
     })
 
     it('lets a manual expansion stay open instead of applying an older auto-collapse timer', () => {
         vi.useFakeTimers()
         renderNotice()
 
-        act(() => vi.advanceTimersByTime(1_000))
-        fireEvent.click(screen.getByTestId('native-status-toggle'))
+        act(() => vi.advanceTimersByTime(5_000))
         expect(screen.getByTestId('native-status')).toHaveAttribute('data-status-collapsed', 'true')
 
-        act(() => vi.advanceTimersByTime(1_000))
         fireEvent.click(screen.getByTestId('native-status-toggle'))
         expect(screen.getByTestId('native-status')).toHaveAttribute('data-status-collapsed', 'false')
 
@@ -93,16 +88,14 @@ describe('NativeCodexFloatingStatusNotice', () => {
         expect(screen.getByTestId('native-status')).toHaveAttribute('data-status-collapsed', 'false')
     })
 
-    it('keeps keyboard focus on the toggle while it is manually expanded or collapsed', () => {
+    it('keeps the compact toggle keyboard-focusable after auto-collapse', () => {
         vi.useFakeTimers()
         renderNotice()
 
+        act(() => vi.advanceTimersByTime(5_000))
         const toggle = screen.getByTestId('native-status-toggle')
         toggle.focus()
-        fireEvent.click(toggle)
-        expect(screen.getByTestId('native-status-toggle')).toHaveFocus()
-        fireEvent.click(screen.getByTestId('native-status-toggle'))
-        expect(screen.getByTestId('native-status-toggle')).toHaveFocus()
+        expect(toggle).toHaveFocus()
     })
 
     it('moves action focus back to the compact toggle on auto-collapse', () => {

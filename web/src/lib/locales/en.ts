@@ -62,6 +62,7 @@ export default {
   'sessions.kanban.pinned': 'Pinned',
   'sessions.kanban.pending': 'Needs confirmation',
   'sessions.kanban.processing': 'thinking',
+  'sessions.kanban.unviewed': 'Unviewed',
   'sessions.kanban.completed': 'Completed',
   'sessions.kanban.pin': 'Pin session',
   'sessions.kanban.unpin': 'Unpin session',

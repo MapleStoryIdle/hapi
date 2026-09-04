@@ -27,7 +27,7 @@ afterEach(() => {
     cleanup()
     resetInteractionPriorityForTests()
     vi.useRealTimers()
-    localStorage.removeItem('hapi-lang')
+    localStorage.clear()
 })
 
 function render(ui: ReactElement) {
@@ -80,6 +80,34 @@ function createApi() {
         archiveSession: vi.fn(async () => {}),
         archiveCodexSession: vi.fn(async () => ({ success: true as const }))
     } as unknown as ApiClient
+}
+
+function createManagedCodexSession(
+    id: string,
+    updatedAt: number,
+    options: { title?: string; thinking?: boolean; pendingRequestsCount?: number } = {}
+): SessionSummary {
+    return {
+        id,
+        active: true,
+        thinking: options.thinking ?? false,
+        activeAt: updatedAt,
+        updatedAt,
+        metadata: {
+            path: '/workspace/project',
+            flavor: 'codex',
+            name: options.title ?? id
+        },
+        todoProgress: null,
+        pendingRequestsCount: options.pendingRequestsCount ?? 0,
+        pendingRequestKinds: [],
+        pendingRequests: [],
+        backgroundTaskCount: 0,
+        futureScheduledMessageCount: 0,
+        nextScheduledAt: null,
+        model: null,
+        effort: null
+    } as SessionSummary
 }
 
 describe('RecentCodexSessions', () => {
@@ -245,7 +273,52 @@ describe('RecentCodexSessions', () => {
             ['pending', ['hapi-pending']],
             ['processing', ['hapi-processing']],
             ['pinned', ['native-completed']],
+            ['unviewed', []],
             ['completed', ['native-newer-completed']]
+        ])
+    })
+
+    it('puts only unviewed completed SHAPI rows above completed and ahead of pins', () => {
+        const now = 1_800_000_000_000
+        const rows = mergeRecentCodexSessions(
+            [
+                createManagedCodexSession('hapi-unviewed-newer', now - 10, { title: 'Newer unviewed' }),
+                createManagedCodexSession('hapi-unviewed-older', now - 20, { title: 'Older unviewed' }),
+                createManagedCodexSession('hapi-seen-pinned', now - 30, { title: 'Seen pinned' })
+            ],
+            [
+                {
+                    id: 'native-pinned',
+                    title: 'Native pinned',
+                    cwd: '/workspace/project',
+                    file: '/tmp/native-pinned.jsonl',
+                    modifiedAt: now - 40,
+                    runState: 'idle'
+                },
+                {
+                    id: 'native-completed',
+                    title: 'Native completed',
+                    cwd: '/workspace/project',
+                    file: '/tmp/native-completed.jsonl',
+                    modifiedAt: now - 50,
+                    runState: 'idle'
+                }
+            ],
+            { now }
+        )
+
+        const groups = groupMergedCodexSessionsForKanban(
+            rows,
+            new Set(['hapi:hapi-unviewed-newer', 'hapi:hapi-seen-pinned', 'native:native-pinned']),
+            { 'hapi-seen-pinned': now - 30 }
+        )
+
+        expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
+            ['pending', []],
+            ['processing', []],
+            ['pinned', ['hapi-seen-pinned', 'native-pinned']],
+            ['unviewed', ['hapi-unviewed-newer', 'hapi-unviewed-older']],
+            ['completed', ['native-completed']]
         ])
     })
 
@@ -522,6 +595,195 @@ describe('RecentCodexSessions', () => {
         })
     })
 
+    it('baselines completed SHAPI rows, then moves new and rerun rows through Unviewed live', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({ success: true as const, sessions: [] }))
+        const now = Date.now()
+        const historical = createManagedCodexSession('hapi-historical', now - 100, { title: 'Historical completion' })
+        const fresh = createManagedCodexSession('hapi-fresh', now, { title: 'Fresh completion' })
+        const onOpenHapi = vi.fn()
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const renderBoard = (hapiSessions: SessionSummary[]) => (
+            <QueryClientProvider client={queryClient}>
+                <I18nProvider>
+                    <RecentCodexSessions
+                        api={api}
+                        machineId="machine-1"
+                        hapiSessions={hapiSessions}
+                        hapiIsLoading={false}
+                        onOpen={vi.fn()}
+                        onOpenHapi={onOpenHapi}
+                        embedded
+                        hideHeader
+                        recentOnly
+                        viewMode="kanban"
+                        pinnedSessionKeys={new Set(['hapi:hapi-fresh'])}
+                    />
+                </I18nProvider>
+            </QueryClientProvider>
+        )
+
+        const view = renderUi(renderBoard([historical]))
+        await screen.findByText('Historical completion')
+        const board = screen.getByTestId('session-kanban-board')
+        await waitFor(() => {
+            expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
+            expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Historical completion')
+        })
+
+        view.rerender(renderBoard([historical, fresh]))
+        await waitFor(() => {
+            const unviewed = board.querySelector('[data-kanban-group="unviewed"]')
+            expect(unviewed).toHaveTextContent('Fresh completion')
+            expect(board.querySelector('[data-kanban-group="pinned"]')).toBeNull()
+        })
+
+        fireEvent.click(screen.getByRole('button', { name: 'Open Fresh completion' }))
+        expect(onOpenHapi).toHaveBeenCalledWith(fresh)
+        await waitFor(() => {
+            expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
+            expect(board.querySelector('[data-kanban-group="pinned"]')).toHaveTextContent('Fresh completion')
+        })
+
+        const rerun = { ...fresh, updatedAt: fresh.updatedAt + 100, activeAt: fresh.activeAt + 100 }
+        view.rerender(renderBoard([historical, rerun]))
+        await waitFor(() => {
+            const unviewed = board.querySelector('[data-kanban-group="unviewed"]')
+            expect(unviewed).toHaveTextContent('Fresh completion')
+            expect(board.querySelector('[data-kanban-group="pinned"]')).toBeNull()
+        })
+    })
+
+    it('baselines the historical completed rows for each selected runner independently', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({ success: true as const, sessions: [] }))
+        const now = Date.now()
+        const runnerA = createManagedCodexSession('hapi-runner-a', now - 200, { title: 'Runner A history' })
+        const runnerB = createManagedCodexSession('hapi-runner-b', now - 100, { title: 'Runner B history' })
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false },
+                mutations: { retry: false }
+            }
+        })
+        const renderBoard = (machineId: string, hapiSessions: SessionSummary[]) => (
+            <QueryClientProvider client={queryClient}>
+                <I18nProvider>
+                    <RecentCodexSessions
+                        api={api}
+                        machineId={machineId}
+                        hapiSessions={hapiSessions}
+                        hapiIsLoading={false}
+                        onOpen={vi.fn()}
+                        onOpenHapi={vi.fn()}
+                        embedded
+                        hideHeader
+                        recentOnly
+                        viewMode="kanban"
+                    />
+                </I18nProvider>
+            </QueryClientProvider>
+        )
+
+        const view = renderUi(renderBoard('machine-a', [runnerA]))
+        const board = await screen.findByTestId('session-kanban-board')
+        await waitFor(() => {
+            expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
+            expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Runner A history')
+        })
+
+        view.rerender(renderBoard('machine-b', [runnerB]))
+        await waitFor(() => {
+            expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
+            expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Runner B history')
+        })
+    })
+
+    it('re-baselines a mounted runner when another tab replaces the shared seen state', async () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({ success: true as const, sessions: [] }))
+        const runnerB = createManagedCodexSession('hapi-runner-b', Date.now(), { title: 'Runner B history' })
+
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-b"
+                    hapiSessions={[runnerB]}
+                    hapiIsLoading={false}
+                    onOpen={vi.fn()}
+                    onOpenHapi={vi.fn()}
+                    embedded
+                    hideHeader
+                    recentOnly
+                    viewMode="kanban"
+                />
+            </I18nProvider>
+        )
+
+        const board = await screen.findByTestId('session-kanban-board')
+        await waitFor(() => {
+            expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
+            expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Runner B history')
+        })
+
+        act(() => {
+            localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({
+                lastSeenAtBySession: { 'hapi-runner-a': Date.now() },
+                codexKanbanInitializedScopes: { 'machine-a': true }
+            }))
+            window.dispatchEvent(new StorageEvent('storage', { key: 'hapi.sessionLastSeen.v1' }))
+        })
+
+        await waitFor(() => {
+            expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
+            expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Runner B history')
+        })
+    })
+
+    it('keeps Unviewed disabled when the initial seen baseline cannot be stored', async () => {
+        const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+            throw new Error('quota exceeded')
+        })
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({ success: true as const, sessions: [] }))
+        const historical = createManagedCodexSession('hapi-storage-failure', Date.now(), {
+            title: 'Historical storage failure'
+        })
+
+        try {
+            render(
+                <I18nProvider>
+                    <RecentCodexSessions
+                        api={api}
+                        machineId="machine-1"
+                        hapiSessions={[historical]}
+                        hapiIsLoading={false}
+                        onOpen={vi.fn()}
+                        onOpenHapi={vi.fn()}
+                        embedded
+                        hideHeader
+                        recentOnly
+                        viewMode="kanban"
+                    />
+                </I18nProvider>
+            )
+
+            const board = await screen.findByTestId('session-kanban-board')
+            await waitFor(() => {
+                expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
+                expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Historical storage failure')
+            })
+        } finally {
+            setItem.mockRestore()
+        }
+    })
+
     it('renders priority-ordered Kanban groups, one completed count, and a quiet thinking animation', async () => {
         const api = createApi()
         api.getCodexSessions = vi.fn(async () => ({
@@ -655,10 +917,13 @@ describe('RecentCodexSessions', () => {
         expect(completedCard).toHaveStyle({ borderLeftColor: projectColor })
         expect(board.querySelector('[data-git-kind="worktree"]')).toHaveAttribute('title', 'worktree · feature/kanban')
         expect(board.querySelector('[data-git-kind="worktree"] [data-motion-icon="worktree"]')).not.toBeNull()
-        expect(board.querySelector('[data-git-kind="worktree"] [data-git-dirty]')).toHaveAttribute(
-            'aria-label',
-            'Uncommitted changes'
-        )
+        expect(board.querySelector('[data-git-kind="worktree"] [data-git-label]')).toHaveTextContent('feature/kanban*')
+        const gitDirty = board.querySelector('[data-git-kind="worktree"] [data-git-dirty]')
+        expect(gitDirty).toHaveAttribute('aria-label', 'Uncommitted changes')
+        expect(gitDirty).toHaveAttribute('title', 'Uncommitted changes')
+        expect(gitDirty).toHaveTextContent('*')
+        expect(gitDirty).toHaveClass('font-bold')
+        expect(gitDirty).not.toHaveClass('bg-[#F5A524]')
 
         const unpinButton = screen.getByRole('button', { name: 'Unpin session' })
         expect(unpinButton).toHaveClass('text-[var(--app-link)]')
@@ -898,6 +1163,7 @@ describe('RecentCodexSessions', () => {
             'worktree · feature/session-list'
         )
         expect(screen.getByTestId('recent-codex-directory-branch').querySelector('[data-motion-icon="worktree"]')).not.toBeNull()
+        expect(screen.getByTestId('recent-codex-directory-branch').querySelector('[data-git-label]')).toHaveTextContent('feature/session-list*')
         expect(screen.getByTestId('recent-codex-directory-branch').querySelector('[data-git-dirty]')).toHaveAttribute(
             'aria-label',
             'Uncommitted changes'

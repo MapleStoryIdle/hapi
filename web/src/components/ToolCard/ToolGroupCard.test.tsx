@@ -4,7 +4,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock } from '@/chat/toolGroups'
 import { HappyChatProvider } from '@/components/AssistantChat/context'
-import { ToolGroupCard } from '@/components/ToolCard/ToolGroupCard'
+import {
+    ToolGroupCard,
+    assignCodexSubagentCardColors,
+    getCodexSubagentCardColor,
+    getCodexSubagentCardIdentity,
+    getCodexSubagentCardState
+} from '@/components/ToolCard/ToolGroupCard'
 import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { I18nProvider } from '@/lib/i18n-context'
 
@@ -205,19 +211,110 @@ describe('ToolGroupCard', () => {
         expect(view.container.querySelector('[data-codex-subagent-cards]')).toHaveClass('flex', 'flex-wrap')
         expect(cards[0]).toHaveClass('min-h-11')
         expect(cards[0]).toHaveAttribute('aria-haspopup', 'dialog')
-        expect(cards[0]).toHaveAccessibleName(/Agent: Explore the codebase/)
-        expect(cards[0]).toHaveAccessibleName(/Model: gpt-5\.3-codex/)
-        expect(cards[0]).toHaveAccessibleName(/Reasoning: high/)
-        expect(cards[0]).toHaveAccessibleName(/Status: Completed exploration/)
+        expect(cards[0]).toHaveAccessibleName(/Explore the codebase/)
+        expect(cards[0]).toHaveAccessibleName(/gpt-5\.3-codex · high/)
+        expect(cards[0]).toHaveAccessibleName(/Completed/)
+        expect(cards[0]).not.toHaveAccessibleName(/Agent:|Model:|Reasoning:|Status:/)
 
-        expect(within(cards[0]).getByText('Agent: Explore the codebase')).toBeInTheDocument()
-        expect(within(cards[0]).getByText('Model: gpt-5.3-codex')).toBeInTheDocument()
-        expect(within(cards[0]).getByText('Reasoning: high')).toBeInTheDocument()
-        expect(within(cards[0]).getByText('Status: Completed exploration')).toBeInTheDocument()
-        expect(within(cards[1]).getByText('Model: gpt-5.4')).toBeInTheDocument()
-        expect(within(cards[2]).getByText('Model: unavailable')).toBeInTheDocument()
-        expect(within(cards[2]).getByText('Reasoning: unavailable')).toBeInTheDocument()
-        expect(within(cards[2]).getByText('Status: completed')).toBeInTheDocument()
+        expect(within(cards[0]).getByText('Explore the codebase')).toBeInTheDocument()
+        expect(within(cards[0]).getByText('gpt-5.3-codex · high')).toBeInTheDocument()
+        expect(within(cards[0]).getByRole('status', { name: 'Completed' })).toHaveClass('sr-only')
+        expect(within(cards[0]).queryByText('Completed exploration')).toBeNull()
+        expect(within(cards[1]).getByText('gpt-5.4 · medium')).toBeInTheDocument()
+        expect(within(cards[2]).getByText('unavailable')).toBeInTheDocument()
+    })
+
+    it('uses friendly card identities, deterministic colors, and icon-only tool states', () => {
+        const named = makeToolBlock('agent-alpha', 'CodexAgent', {
+            displayName: 'Ada',
+            agentId: 'agent-id-must-not-leak',
+            model: 'gpt-5.4',
+            reasoning_effort: 'high'
+        })
+        const role = makeToolBlock('agent-beta', 'CodexAgent', {
+            agent_type: 'reviewer',
+            agentId: 'another-agent-id'
+        }, { state: 'pending' })
+        const summary = makeToolBlock('agent-gamma', 'CodexAgent', {
+            summary: 'Check the test failures'
+        }, { state: 'error' })
+        const fallback = makeToolBlock('agent-delta', 'CodexAgent', {
+            agentId: 'only-an-agent-id'
+        })
+        const spawnNickname = makeToolBlock('agent-epsilon', 'CodexAgent', {
+            message: 'Implement the parser',
+            agentId: 'result-agent-id'
+        }, {
+            result: JSON.stringify({ agent_id: 'result-agent-id', nickname: 'Raman' })
+        })
+        const disguisedId = makeToolBlock('agent-zeta', 'CodexAgent', {
+            agentId: 'unsafe-agent-id',
+            name: 'unsafe-agent-id'
+        })
+        const view = renderCard(makeGroup({
+            tools: [named, role, summary, fallback, spawnNickname, disguisedId],
+            forceCompact: true,
+            forceGenericCompactTitle: true,
+        }))
+        const cards = Array.from(view.container.querySelectorAll<HTMLButtonElement>('[data-codex-subagent-card]'))
+
+        expect(getCodexSubagentCardIdentity(named)).toBe('Ada')
+        expect(getCodexSubagentCardIdentity(role)).toBe('reviewer')
+        expect(getCodexSubagentCardIdentity(summary)).toBe('Check the test failures')
+        expect(getCodexSubagentCardIdentity(fallback)).toMatch(/^(Atlas|Nova|Orbit|Sage|Scout|Beacon|Harbor|Piper)$/)
+        expect(getCodexSubagentCardIdentity(spawnNickname)).toBe('Raman')
+        expect(getCodexSubagentCardIdentity(disguisedId)).toMatch(/^(Atlas|Nova|Orbit|Sage|Scout|Beacon|Harbor|Piper)$/)
+        expect(cards.map((card) => card.textContent)).toEqual(expect.arrayContaining([
+            expect.stringContaining('Ada'),
+            expect.stringContaining('reviewer'),
+            expect.stringContaining('Check the test failures'),
+            expect.stringContaining(getCodexSubagentCardIdentity(fallback)),
+            expect.stringContaining('Raman'),
+            expect.stringContaining(getCodexSubagentCardIdentity(disguisedId))
+        ]))
+        expect(view.container).not.toHaveTextContent('agent-id-must-not-leak')
+        expect(view.container).not.toHaveTextContent('another-agent-id')
+        expect(view.container).not.toHaveTextContent('only-an-agent-id')
+        expect(view.container).not.toHaveTextContent('result-agent-id')
+        expect(view.container).not.toHaveTextContent('unsafe-agent-id')
+
+        expect(getCodexSubagentCardColor('agent-alpha')).toBe(getCodexSubagentCardColor('agent-alpha'))
+        expect(getCodexSubagentCardColor('agent-alpha')).not.toBe(getCodexSubagentCardColor('agent-beta'))
+        const collisionColors = assignCodexSubagentCardColors(['summary-card', 'fallback-card'])
+        const reversedCollisionColors = assignCodexSubagentCardColors(['fallback-card', 'summary-card'])
+        expect(collisionColors.get('summary-card')).not.toBe(collisionColors.get('fallback-card'))
+        expect(collisionColors.get('summary-card')).toBe(reversedCollisionColors.get('summary-card'))
+        expect(collisionColors.get('fallback-card')).toBe(reversedCollisionColors.get('fallback-card'))
+        expect(cards[0]).toHaveAttribute('data-codex-subagent-color', getCodexSubagentCardColor('agent-alpha'))
+        expect(cards[1]).toHaveAttribute('data-codex-subagent-color', getCodexSubagentCardColor('agent-beta'))
+        expect(cards[0].querySelector('[data-codex-subagent-icon] [title="Codex"]')).not.toBeNull()
+
+        expect(cards[0]).toHaveTextContent('gpt-5.4 · high')
+        expect(cards[0]).not.toHaveTextContent('Model:')
+        expect(cards[0]).not.toHaveTextContent('Reasoning:')
+        expect(cards[1]).toHaveAttribute('data-codex-subagent-status', 'pending')
+        expect(cards[2]).toHaveAttribute('data-codex-subagent-status', 'error')
+        expect(within(cards[1]).getByRole('status', { name: 'Waiting to run' })).toHaveClass('sr-only')
+        expect(within(cards[2]).getByRole('status', { name: 'Failed' })).toHaveClass('sr-only')
+        expect(getCodexSubagentCardState('failed')).toBe('error')
+        expect(getCodexSubagentCardState('cancelled')).toBe('error')
+        expect(getCodexSubagentCardState('not-found')).toBe('error')
+    })
+
+    it('resolves colliding palette slots across rendered Codex agent cards', () => {
+        const first = makeToolBlock('summary-card', 'CodexAgent', { summary: 'First agent' })
+        const second = makeToolBlock('fallback-card', 'CodexAgent', { summary: 'Second agent' })
+        const view = renderCard(makeGroup({
+            tools: [first, second],
+            forceCompact: true,
+            forceGenericCompactTitle: true,
+        }))
+        const cards = Array.from(view.container.querySelectorAll<HTMLButtonElement>('[data-codex-subagent-card]'))
+
+        expect(getCodexSubagentCardColor(first.id)).toBe(getCodexSubagentCardColor(second.id))
+        expect(cards[0]).toHaveAttribute('data-codex-subagent-color')
+        expect(cards[1]).toHaveAttribute('data-codex-subagent-color')
+        expect(cards[0].dataset.codexSubagentColor).not.toBe(cards[1].dataset.codexSubagentColor)
     })
 
     it('opens Codex subagent cards in the existing dialog and omits their expanded detail row', async () => {
@@ -225,7 +322,8 @@ describe('ToolGroupCard', () => {
             summary: 'Inspect the implementation',
             model: 'gpt-5.3-codex',
             reasoning_effort: 'high',
-            agentStatus: 'completed'
+            agentStatus: 'completed',
+            agentId: 'dialog-agent-id'
         }, {
             createdAt: 10,
             startedAt: 10,
@@ -240,12 +338,15 @@ describe('ToolGroupCard', () => {
             forceGenericCompactTitle: true,
         }))
 
-        const card = within(view.container).getByRole('button', { name: /Agent: Inspect the implementation/i })
+        const card = within(view.container).getByRole('button', { name: /Inspect the implementation/i })
         const processed = within(view.container).getByRole('button', { name: 'Processed' })
+        expect(card).not.toHaveTextContent('dialog-agent-id')
+        expect(card).not.toHaveAccessibleName(/dialog-agent-id/)
+        expect(card.innerHTML).not.toContain('dialog-agent-id')
 
         fireEvent.click(processed)
 
-        expect(screen.getAllByText('Agent: Inspect the implementation')).toHaveLength(1)
+        expect(screen.getAllByText('Inspect the implementation')).toHaveLength(1)
         expect(screen.getByText('a.ts')).toBeInTheDocument()
 
         fireEvent.click(card)
@@ -254,6 +355,7 @@ describe('ToolGroupCard', () => {
             expect(screen.getByRole('dialog')).toBeInTheDocument()
         })
         expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Agent: Inspect the implementation' })).toBeInTheDocument()
+        expect(within(screen.getByRole('dialog')).getAllByText('dialog-agent-id')).toHaveLength(2)
     })
 
     it('keeps the source launch order when Codex agents share a timestamp', () => {

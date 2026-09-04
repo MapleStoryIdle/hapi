@@ -36,6 +36,19 @@ describe('getToolPresentation — MCP invocation titles', () => {
 })
 
 describe('getToolPresentation — file access semantics', () => {
+    it('labels native Grep operations as grep', () => {
+        const presentation = getToolPresentation({
+            toolName: 'Grep',
+            input: { pattern: 'TODO', path: 'web/src' },
+            result: null,
+            childrenCount: 0,
+            description: null,
+            metadata: null,
+        })
+
+        expect(presentation).toMatchObject({ title: 'grep', subtitle: null, minimal: true })
+    })
+
     it('shows native Read path and actual line range directly', () => {
         const presentation = getToolPresentation({
             toolName: 'Read',

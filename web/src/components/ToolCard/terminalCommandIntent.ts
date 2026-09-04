@@ -664,6 +664,7 @@ export function getTerminalCommandIntentTitle(intent: TerminalCommandIntent, t?:
 
 export function usesTerminalCommandAsLabel(intent: TerminalCommandIntent): boolean {
     return intent.kind === 'inspect-git'
+        || intent.kind === 'search-files'
         || intent.kind === 'run-tests'
         || intent.kind === 'run-checks'
         || intent.kind === 'typecheck'

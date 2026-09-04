@@ -132,9 +132,17 @@ describe('terminal command intent', () => {
 
         const moved = getTerminalCommandIntent({ command: 'mv web/src/old.ts web/src/new.ts' })
         expect(moved && getTerminalCommandIntentDetail(moved)).toBe('old.ts → new.ts')
-        const searched = getTerminalCommandIntent({ command: 'rg -n ToolCard web/src/components/ToolCard/knownTools.tsx' })
+        const searchedInput = { command: 'rg -n ToolCard web/src/components/ToolCard/knownTools.tsx' }
+        const searched = getTerminalCommandIntent(searchedInput)
         expect(searched && getTerminalCommandIntentTitle(searched)).toBe('Search files')
         expect(searched && getTerminalCommandIntentDetail(searched)).toBe('knownTools.tsx')
+        expect(searched && getTerminalCommandIntentLabel(searchedInput, searched)).toBe('rg')
+        expect(getTerminalCommandDisplayTitle(searchedInput)).toBe('rg · knownTools.tsx')
+
+        const grepInput = { command: 'grep -n ToolCard web/src/components/ToolCard/knownTools.tsx' }
+        const grep = getTerminalCommandIntent(grepInput)
+        expect(grep && getTerminalCommandIntentLabel(grepInput, grep)).toBe('grep')
+        expect(getTerminalCommandDisplayTitle(grepInput)).toBe('grep · knownTools.tsx')
 
         const rendered = [
             request && getTerminalCommandDisplayTitle({ command: `curl -X POST 'https://user:password@192.0.2.18:8080/api/order/status?token=secret'` }),
