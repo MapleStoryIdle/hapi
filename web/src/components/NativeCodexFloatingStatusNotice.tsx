@@ -1,5 +1,5 @@
 import { CircleAlert } from 'lucide-react'
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import {
     SessionDetailStatusNotice,
     type SessionDetailStatusAction
@@ -32,21 +32,31 @@ export function NativeCodexFloatingStatusNotice(props: {
     const autoCollapseTimerRef = useRef<number | null>(null)
     const focusToggleOnCollapseRef = useRef(false)
 
-    useLayoutEffect(() => {
-        setCollapsed(false)
+    const clearAutoCollapseTimer = useCallback(() => {
+        if (autoCollapseTimerRef.current === null) return
+        window.clearTimeout(autoCollapseTimerRef.current)
+        autoCollapseTimerRef.current = null
+    }, [])
+
+    const startAutoCollapseTimer = useCallback(() => {
+        clearAutoCollapseTimer()
         const timer = window.setTimeout(() => {
             focusToggleOnCollapseRef.current = rootRef.current?.contains(document.activeElement) ?? false
             setCollapsed(true)
-            autoCollapseTimerRef.current = null
-        }, AUTO_COLLAPSE_MS)
-        autoCollapseTimerRef.current = timer
-        return () => {
-            window.clearTimeout(timer)
             if (autoCollapseTimerRef.current === timer) {
                 autoCollapseTimerRef.current = null
             }
+        }, AUTO_COLLAPSE_MS)
+        autoCollapseTimerRef.current = timer
+    }, [clearAutoCollapseTimer])
+
+    useLayoutEffect(() => {
+        setCollapsed(false)
+        startAutoCollapseTimer()
+        return () => {
+            clearAutoCollapseTimer()
         }
-    }, [props.noticeKey])
+    }, [clearAutoCollapseTimer, props.noticeKey, startAutoCollapseTimer])
 
     useLayoutEffect(() => {
         if (!collapsed || !focusToggleOnCollapseRef.current) {
@@ -57,30 +67,27 @@ export function NativeCodexFloatingStatusNotice(props: {
     }, [collapsed])
 
     const iconClass = props.tone === 'error' ? 'text-red-500' : 'text-amber-500'
-    const toggle = () => {
-        if (autoCollapseTimerRef.current !== null) {
-            window.clearTimeout(autoCollapseTimerRef.current)
-            autoCollapseTimerRef.current = null
-        }
-        setCollapsed((current) => !current)
+    const expand = () => {
+        setCollapsed(false)
+        startAutoCollapseTimer()
     }
     const toggleButton = (
         <button
             ref={toggleRef}
             type="button"
-            onClick={toggle}
+            onClick={expand}
             aria-expanded={!collapsed}
             aria-label={props.statusLabel}
             title={props.statusLabel}
             data-testid={props.testId ? `${props.testId}-toggle` : undefined}
-            className={cn(
-                'pointer-events-auto touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2',
-                collapsed
-                    ? 'rounded-r-full rounded-l-none border border-l-0 border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] hover:bg-[var(--app-secondary-bg)] focus-visible:ring-[var(--app-link)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]'
-                    : 'rounded-full hover:bg-[var(--app-muted)] focus-visible:ring-[var(--app-link)]'
-            )}
+            className="pointer-events-auto touch-manipulation flex h-11 w-11 shrink-0 items-center justify-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
         >
-            <CircleAlert className={cn('h-5 w-5', iconClass)} aria-hidden="true" />
+            <span
+                className="flex h-[31px] w-[31px] items-center justify-center rounded-r-full rounded-l-none border border-l-0 border-[var(--app-border)] bg-[var(--app-bg)] shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors hover:bg-[var(--app-secondary-bg)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
+                data-testid={props.testId ? `${props.testId}-toggle-visual` : undefined}
+            >
+                <CircleAlert className={cn('h-3.5 w-3.5', iconClass)} aria-hidden="true" />
+            </span>
         </button>
     )
 

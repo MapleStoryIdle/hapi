@@ -27,7 +27,7 @@ export type AgentEvent =
         type: 'task-status'
         status: 'retrying' | 'compacting' | 'compacted' | 'failed'
         source: 'codex'
-        code: 'system_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown'
+        code: 'system_error' | 'network_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown'
         message: string
         retryAttempt?: number
         maxRetries?: number

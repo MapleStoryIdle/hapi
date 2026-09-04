@@ -1,6 +1,6 @@
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
-import { Activity, AlertTriangle, Archive, Clock, ExternalLink, Layers2, RefreshCw, type LucideIcon } from 'lucide-react'
-import { getEventPresentation, isUsageLimitEvent } from '@/chat/presentation'
+import { Activity, AlertTriangle, Archive, Clock, ExternalLink, Layers2, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react'
+import { getEventPresentation, isNetworkTaskStatus, isUsageLimitEvent } from '@/chat/presentation'
 import type { AgentEvent } from '@/chat/types'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { useTranslation } from '@/lib/use-translation'
@@ -88,6 +88,16 @@ function taskStatusVisual(event: TaskStatusEvent): {
             Icon: AlertTriangle,
             titleKey: 'taskStatus.modelCapacity.title',
             bodyKey: 'taskStatus.modelCapacity.body',
+            toneClassName: 'border-[color-mix(in_srgb,#F59E0B_42%,var(--app-border))] [background:color-mix(in_srgb,var(--app-bg)_90%,#F59E0B)]',
+            iconClassName: 'text-amber-600',
+        }
+    }
+
+    if (isNetworkTaskStatus(event)) {
+        return {
+            Icon: WifiOff,
+            titleKey: 'taskStatus.network.title',
+            bodyKey: 'taskStatus.network.body',
             toneClassName: 'border-[color-mix(in_srgb,#F59E0B_42%,var(--app-border))] [background:color-mix(in_srgb,var(--app-bg)_90%,#F59E0B)]',
             iconClassName: 'text-amber-600',
         }

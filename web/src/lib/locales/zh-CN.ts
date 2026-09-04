@@ -1013,6 +1013,8 @@ export default {
   'taskStatus.usage.action': '查看额度设置',
   'taskStatus.modelCapacity.title': '模型暂时满载',
   'taskStatus.modelCapacity.body': 'Codex 返回模型容量不足，稍后重试通常可以恢复。',
+  'taskStatus.network.title': '网络连接异常',
+  'taskStatus.network.body': 'Codex 暂时无法连接服务，请检查网络后重试。',
   'taskStatus.contextWindow.title': '上下文过长，任务失败',
   'taskStatus.contextWindow.body': '当前会话上下文已超过 Codex 可处理范围，需要压缩或开启新会话。',
   'taskStatus.failed.title': 'Codex 任务失败',

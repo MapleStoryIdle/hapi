@@ -44,8 +44,9 @@ describe('NativeCodexFloatingStatusNotice', () => {
         expect(notice).toHaveClass('left-0')
         expect(compactToggle.parentElement).toHaveClass('relative')
         expect(compactToggle.parentElement).not.toHaveClass('ml-12')
-        expect(compactToggle).toHaveClass('rounded-l-none')
-        expect(compactToggle.querySelector('.lucide-circle-alert')).toHaveClass('text-amber-500')
+        const compactVisual = screen.getByTestId('native-status-toggle-visual')
+        expect(compactVisual).toHaveClass('h-[31px]', 'w-[31px]', 'rounded-l-none')
+        expect(compactToggle.querySelector('.lucide-circle-alert')).toHaveClass('h-3.5', 'w-3.5', 'text-amber-500')
     })
 
     it('uses a red icon for an error', () => {
@@ -74,7 +75,7 @@ describe('NativeCodexFloatingStatusNotice', () => {
         expect(screen.queryByTestId('native-status-toggle')).not.toBeInTheDocument()
     })
 
-    it('lets a manual expansion stay open instead of applying an older auto-collapse timer', () => {
+    it('auto-collapses again five seconds after a compact notice is expanded', () => {
         vi.useFakeTimers()
         renderNotice()
 
@@ -84,8 +85,10 @@ describe('NativeCodexFloatingStatusNotice', () => {
         fireEvent.click(screen.getByTestId('native-status-toggle'))
         expect(screen.getByTestId('native-status')).toHaveAttribute('data-status-collapsed', 'false')
 
-        act(() => vi.advanceTimersByTime(5_000))
+        act(() => vi.advanceTimersByTime(4_999))
         expect(screen.getByTestId('native-status')).toHaveAttribute('data-status-collapsed', 'false')
+        act(() => vi.advanceTimersByTime(1))
+        expect(screen.getByTestId('native-status')).toHaveAttribute('data-status-collapsed', 'true')
     })
 
     it('keeps the compact toggle keyboard-focusable after auto-collapse', () => {

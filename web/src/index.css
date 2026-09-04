@@ -37,8 +37,8 @@
     --app-link: var(--tg-theme-link-color, #111827);
     /* Content links stay recognizably blue even when Telegram supplies a
      * neutral --app-link color for buttons and controls. */
-    --app-markdown-link: #2563eb;
-    --app-markdown-link-hover: #1d4ed8;
+    --app-markdown-link: #60a5fa;
+    --app-markdown-link-hover: #93c5fd;
     --app-markdown-link-muted: color-mix(in srgb, var(--app-markdown-link) 48%, transparent);
     --app-button: var(--tg-theme-button-color, #111827);
     --app-button-text: var(--tg-theme-button-text-color, #ffffff);
@@ -841,7 +841,7 @@ select {
 .cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-card-time {
     color: var(--cupertino-session-secondary-label);
     font-size: 0.6875rem;
-    font-weight: 500;
+    font-weight: 400;
     line-height: 1rem;
 }
 

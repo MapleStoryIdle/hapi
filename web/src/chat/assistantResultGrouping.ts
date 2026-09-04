@@ -13,11 +13,6 @@ function isAssistantVisibleBlock(block: VisibleChatBlock): boolean {
     return true
 }
 
-function isFoldableProcessEvent(block: VisibleChatBlock): boolean {
-    return block.kind === 'agent-event'
-        && (block.event.type === 'compact' || block.event.type === 'microcompact')
-}
-
 function firstInvokedAt(blocks: VisibleChatBlock[]): number | null {
     for (const block of blocks) {
         if ('invokedAt' in block && block.invokedAt != null) {
@@ -191,9 +186,7 @@ export function groupAssistantResultDetails(
 
     for (let index = 0; index < blocks.length; index += 1) {
         const block = blocks[index]!
-        const foldProcessEvent = options.aggregateActiveProcess === true
-            && isFoldableProcessEvent(block)
-        if (!isAssistantVisibleBlock(block) && !foldProcessEvent) {
+        if (!isAssistantVisibleBlock(block)) {
             flushGroup()
             transformed.push(block)
             continue

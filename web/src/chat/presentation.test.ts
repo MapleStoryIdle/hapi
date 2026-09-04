@@ -45,6 +45,27 @@ describe('getEventPresentation — task-status', () => {
         expect(result.icon).toBe('⚠️')
         expect(result.text).toBe('Codex usage limit reached · try again at 9:43 AM')
     })
+
+    it('formats classified and older unclassified network failures without the generic task-failed label', () => {
+        const result = getEventPresentation({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'network_error',
+            message: 'Network error: request timed out',
+            recoverable: false
+        })
+
+        expect(result).toEqual({ icon: '⚠️', text: 'Network connection issue' })
+        expect(getEventPresentation({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'unknown',
+            message: 'stream disconnected before completion: error sending request',
+            recoverable: false
+        })).toEqual({ icon: '⚠️', text: 'Network connection issue' })
+    })
 })
 
 describe('getEventPresentation — limit-warning', () => {

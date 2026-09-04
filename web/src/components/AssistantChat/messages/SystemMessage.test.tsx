@@ -93,4 +93,18 @@ describe('HappySystemMessage — quota events', () => {
         expect(screen.queryByTestId('usage-limit-event')).not.toBeInTheDocument()
         expect(screen.getByText('taskStatus.modelCapacity.title')).toBeInTheDocument()
     })
+
+    it('shows a network-specific task failure card', () => {
+        renderEvent({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'unknown',
+            message: 'Network error: request timed out',
+            recoverable: false
+        })
+
+        expect(screen.getByText('taskStatus.network.title')).toBeInTheDocument()
+        expect(screen.getByText('taskStatus.network.body')).toBeInTheDocument()
+    })
 })

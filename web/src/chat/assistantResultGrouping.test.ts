@@ -92,10 +92,42 @@ describe('groupAssistantResultDetails', () => {
         expect(visible).toBe(blocks)
     })
 
-    it('keeps one stable live process group across native reasoning and tool snapshots', () => {
+    it('keeps context compaction events outside active process groups', () => {
         const firstTool = toolCall('tool-1', 'Read')
         const secondTool = toolCall('tool-2', 'Bash')
         const processText = agentText('text-1', 'Checking the result')
+        const compactingEvent: VisibleChatBlock = {
+            kind: 'agent-event',
+            id: 'compacting-1',
+            createdAt: 3,
+            event: {
+                type: 'task-status',
+                status: 'compacting',
+                source: 'codex',
+                code: 'context_window',
+                message: 'Context is too large',
+                recoverable: true
+            }
+        }
+        const compactEvent: VisibleChatBlock = {
+            kind: 'agent-event',
+            id: 'compact-1',
+            createdAt: 4,
+            event: { type: 'compact', trigger: 'auto', preTokens: 0 }
+        }
+        const compactedEvent: VisibleChatBlock = {
+            kind: 'agent-event',
+            id: 'compacted-1',
+            createdAt: 5,
+            event: {
+                type: 'task-status',
+                status: 'compacted',
+                source: 'codex',
+                code: 'context_window',
+                message: 'Context compacted; retrying',
+                recoverable: true
+            }
+        }
         const blocks: VisibleChatBlock[] = [
             userText('user-current'),
             firstTool,
@@ -106,12 +138,9 @@ describe('groupAssistantResultDetails', () => {
                 createdAt: 2,
                 text: '**Inspecting files**'
             },
-            {
-                kind: 'agent-event',
-                id: 'compact-1',
-                createdAt: 3,
-                event: { type: 'compact', trigger: 'auto', preTokens: 0 }
-            },
+            compactingEvent,
+            compactEvent,
+            compactedEvent,
             secondTool,
             processText
         ]
@@ -121,14 +150,24 @@ describe('groupAssistantResultDetails', () => {
             aggregateActiveProcess: true
         })
 
-        expect(visible).toHaveLength(2)
+        expect(visible).toHaveLength(6)
         expect(visible[0]).toBe(blocks[0])
         expect(visible[1]).toMatchObject({
             kind: 'tool-group',
             id: 'tool-group:active-process:tool-1',
             turnActive: true,
-            tools: [firstTool, secondTool],
-            detailBlocks: [firstTool, { id: 'reasoning-1' }, { id: 'compact-1' }, secondTool, processText]
+            tools: [firstTool],
+            detailBlocks: [firstTool, { id: 'reasoning-1' }]
+        })
+        expect(visible[2]).toBe(compactingEvent)
+        expect(visible[3]).toBe(compactEvent)
+        expect(visible[4]).toBe(compactedEvent)
+        expect(visible[5]).toMatchObject({
+            kind: 'tool-group',
+            id: 'tool-group:active-process:tool-2',
+            turnActive: true,
+            tools: [secondTool],
+            detailBlocks: [secondTool, processText]
         })
     })
 
@@ -144,7 +183,7 @@ describe('groupAssistantResultDetails', () => {
         expect(visible).toEqual([permission])
     })
 
-    it('keeps a completed native turn aggregated across context compaction', () => {
+    it('keeps context compaction outside completed processed details', () => {
         const tool = toolCall('tool-1')
         const processText = agentText('process-1', 'Checking the result')
         const finalText = agentText('final-1', 'Done')
@@ -158,18 +197,16 @@ describe('groupAssistantResultDetails', () => {
         const visible = groupAssistantResultDetails([
             userText('user-current'),
             tool,
-            compactEvent,
             processText,
-            finalText
+            compactEvent,
+            toolCall('tool-2'),
+            finalText,
         ], { aggregateActiveProcess: true })
 
-        expect(visible).toHaveLength(3)
-        expect(visible[1]).toMatchObject({
-            kind: 'tool-group',
-            tools: [tool],
-            detailBlocks: [tool, compactEvent, processText]
-        })
-        expect(visible[2]).toBe(finalText)
+        expect(visible).toContain(compactEvent)
+        expect(visible.some((block) => (
+            isToolGroupBlock(block) && block.detailBlocks?.some((detail) => detail.id === compactEvent.id)
+        ))).toBe(false)
     })
 
     it('still groups completed history while the latest turn is active', () => {

@@ -1716,6 +1716,24 @@ describe('codexRemoteLauncher', () => {
         expect(session.thinking).toBe(false);
     });
 
+    it('classifies Codex network failures for structured UI display', async () => {
+        harness.nextTurnFailureMessage = 'stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)';
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(sessionEvents).toContainEqual({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'network_error',
+            message: 'stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)',
+            recoverable: false
+        });
+        expect(session.thinking).toBe(false);
+    });
+
     it('does not start a fresh thread for the next queued message after thread-level systemError', async () => {
         harness.remainingThreadSystemErrors = 1;
         const { session } = createSessionStub(['first message', 'second message']);

@@ -1009,6 +1009,8 @@ export default {
   'taskStatus.usage.action': 'View usage settings',
   'taskStatus.modelCapacity.title': 'Model is at capacity',
   'taskStatus.modelCapacity.body': 'Codex reported that the selected model is currently at capacity. Retrying later usually recovers.',
+  'taskStatus.network.title': 'Network connection issue',
+  'taskStatus.network.body': 'Codex could not reach its service. Check your connection, then try again.',
   'taskStatus.contextWindow.title': 'Context too large; task failed',
   'taskStatus.contextWindow.body': 'This conversation is beyond the context Codex can process. Compact it or start a new conversation.',
   'taskStatus.failed.title': 'Codex task failed',

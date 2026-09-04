@@ -70,7 +70,7 @@ type PendingSideSessionFork = {
     }) => void;
     reject: (error: Error) => void;
 };
-type CodexTaskStatusCode = 'system_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown';
+type CodexTaskStatusCode = 'system_error' | 'network_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown';
 type CodexTaskStatusEvent = {
     type: 'task-status';
     status: 'retrying' | 'compacting' | 'compacted' | 'failed';
@@ -134,6 +134,28 @@ const CONTEXT_COMPACT_RETRYABLE_ERROR_PATTERNS = [
     'ran out of room in the model',
     'context window',
     'clear earlier history'
+];
+const NETWORK_ERROR_PATTERNS = [
+    'network error',
+    'network request failed',
+    'failed to fetch',
+    'fetch failed',
+    'error sending request',
+    'stream disconnected before completion',
+    'connection reset',
+    'connection refused',
+    'connection timed out',
+    'connection timeout',
+    'network is unreachable',
+    'network unreachable',
+    'socket hang up',
+    'could not resolve host',
+    'dns error',
+    'econnreset',
+    'econnrefused',
+    'etimedout',
+    'enotfound',
+    'eai_again'
 ];
 const SAME_THREAD_MAX_RETRIES = 3;
 const SAME_THREAD_MAX_COMPACT_RETRIES = 1;
@@ -219,6 +241,14 @@ function isContextCompactRetryableCodexError(error: string | null): boolean {
     return CONTEXT_COMPACT_RETRYABLE_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
 }
 
+function isNetworkCodexError(error: string | null): boolean {
+    if (!error) {
+        return false;
+    }
+    const normalized = error.toLowerCase();
+    return NETWORK_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
+
 function extractCodexUsageActionUrl(error: string): string | null {
     const match = error.match(/https:\/\/chatgpt\.com\/codex\/settings\/usage[^\s)]*/i);
     return match?.[0] ?? null;
@@ -258,6 +288,9 @@ function classifyCodexTaskFailure(error: string | null): {
     }
     if (isContextCompactRetryableCodexError(error) || normalized.includes('same-conversation compact')) {
         return { code: 'context_window' };
+    }
+    if (isNetworkCodexError(error)) {
+        return { code: 'network_error' };
     }
     return { code: 'unknown' };
 }
