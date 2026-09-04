@@ -69,6 +69,7 @@ import { useNativeCodexSessionComposerCapabilities } from '@/hooks/queries/useNa
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { SessionDetailContent, SessionDetailSurface } from '@/components/SessionDetailSurface'
 import { SessionDetailStatusNotice } from '@/components/SessionDetailStatusNotice'
+import { NativeCodexFloatingStatusNotice } from '@/components/NativeCodexFloatingStatusNotice'
 import { SessionConversationLoading } from '@/components/SessionEntryLoading'
 import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import {
@@ -2062,6 +2063,120 @@ export function CodexSessionContextPage(props: {
                     }}
                 />
 
+                {isForking ? (
+                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
+                        <SessionDetailStatusNotice
+                            tone="loading"
+                            title={t('recentCodex.fork.progress.title')}
+                            detail={t('recentCodex.fork.progress.body')}
+                            testId="codex-fork-progress"
+                        />
+                    </div>
+                ) : forkError ? (
+                    <NativeCodexFloatingStatusNotice
+                        tone="error"
+                        title={t('recentCodex.fork.failed.title')}
+                        detail={forkError}
+                        action={{
+                            label: t('recentCodex.retry'),
+                            onClick: () => void fork(),
+                            disabled: !canFork
+                        }}
+                        noticeKey={`fork-error:${forkError}`}
+                        statusLabel={t('recentCodex.fork.failed.title')}
+                        testId="codex-fork-error"
+                    />
+                ) : sshControlled ? (
+                    <NativeCodexFloatingStatusNotice
+                        tone="warning"
+                        title={legacyExternalWriterActive
+                            ? t('recentCodex.direct.externalWriter.title')
+                            : t('recentCodex.sshControl.title')}
+                        detail={legacyExternalWriterActive
+                            ? t('recentCodex.direct.externalWriter.detail')
+                            : t('recentCodex.sshControl.detail')}
+                        noticeKey={legacyExternalWriterActive ? 'external-writer-active' : 'ssh-controlled'}
+                        statusLabel={legacyExternalWriterActive
+                            ? t('recentCodex.direct.externalWriter.title')
+                            : t('recentCodex.sshControl.title')}
+                        testId={legacyExternalWriterActive
+                            ? 'codex-native-external-writer'
+                            : 'codex-native-ssh-controlled'}
+                    />
+                ) : nativeWaitingForUserInput ? (
+                    <NativeCodexFloatingStatusNotice
+                        tone="warning"
+                        title={t('recentCodex.status.waitingForLocalInput')}
+                        detail={t('recentCodex.status.waitingForLocalInput.detail')}
+                        noticeKey="waiting-for-local-input"
+                        statusLabel={t('recentCodex.status.waitingForLocalInput')}
+                        testId="codex-native-waiting-for-local-input"
+                    />
+                ) : nativeNeedsManualRecovery ? (
+                    <NativeCodexFloatingStatusNotice
+                        tone="warning"
+                        title={t('recentCodex.direct.recovery.title')}
+                        detail={getNativeRecoveryDetail(
+                            nativeRecoveryCandidate.reason,
+                            nativeRecoveryCandidate.uncertain,
+                            t
+                        )}
+                        action={canRecoverNativeDelivery ? {
+                            label: isRecoveringNativeDelivery
+                                ? t('recentCodex.direct.recovery.pending')
+                                : getNativeRecoveryActionLabel(nativeRecoveryCandidate.reason, t),
+                            onClick: () => void recoverNativeDelivery(),
+                            busy: isRecoveringNativeDelivery,
+                            disabled: isDiscardingNativeRecovery
+                        } : undefined}
+                        secondaryAction={nativeRecoveryCandidate.candidate ? {
+                            label: isDiscardingNativeRecovery
+                                ? t('recentCodex.direct.recovery.discarding')
+                                : t('recentCodex.direct.recovery.discard'),
+                            onClick: () => void discardNativeRecovery(),
+                            busy: isDiscardingNativeRecovery
+                        } : undefined}
+                        noticeKey={[
+                            'native-recovery',
+                            nativeRecoveryCandidate.reason,
+                            nativeRecoveryCandidate.uncertain,
+                            isRecoveringNativeDelivery,
+                            isDiscardingNativeRecovery
+                        ].join(':')}
+                        statusLabel={t('recentCodex.direct.recovery.title')}
+                        testId="codex-native-recovery"
+                    />
+                ) : directSendPhase ? (
+                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
+                        <SessionDetailStatusNotice
+                            tone="processing"
+                            title={t(`recentCodex.direct.phase.${directSendPhase}.title`)}
+                            detail={[
+                                t(`recentCodex.direct.phase.${directSendPhase}.detail`),
+                                directSendPhaseElapsedSeconds === null
+                                    ? null
+                                    : t('recentCodex.direct.phase.elapsed', { seconds: directSendPhaseElapsedSeconds })
+                            ].filter(Boolean).join(' · ')}
+                            testId={`codex-direct-send-phase-${directSendPhase}`}
+                            leadingVisual={<NativeCodexDirectSendPhaseIcon phase={directSendPhase} />}
+                        />
+                    </div>
+                ) : directStatus === 'unknown' || statusQuery.isError ? (
+                    <NativeCodexFloatingStatusNotice
+                        tone="warning"
+                        title={directStatus === 'unknown' ? t('recentCodex.status.unknown') : t('recentCodex.status.failed')}
+                        detail={t('recentCodex.status.locked')}
+                        action={{
+                            label: t('recentCodex.retry'),
+                            onClick: () => void refetchNativeSnapshot(),
+                            busy: statusQuery.isFetching
+                        }}
+                        noticeKey={directStatus === 'unknown' ? 'status-unknown' : 'status-failed'}
+                        statusLabel={directStatus === 'unknown' ? t('recentCodex.status.unknown') : t('recentCodex.status.failed')}
+                        testId="codex-status-error"
+                    />
+                ) : null}
+
                 <SessionDetailContent ariaLabel={t('recentCodex.context.title')}>
                     {!props.machineId ? (
                         <div className="px-3 py-3">
@@ -2130,111 +2245,6 @@ export function CodexSessionContextPage(props: {
                         />
                     ) : null}
                 </SessionDetailContent>
-                {isForking ? (
-                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                        <SessionDetailStatusNotice
-                            tone="loading"
-                            title={t('recentCodex.fork.progress.title')}
-                            detail={t('recentCodex.fork.progress.body')}
-                            testId="codex-fork-progress"
-                        />
-                    </div>
-                ) : forkError ? (
-                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                        <SessionDetailStatusNotice
-                            tone="error"
-                            title={t('recentCodex.fork.failed.title')}
-                            detail={forkError}
-                            action={{
-                                label: t('recentCodex.retry'),
-                                onClick: () => void fork(),
-                                disabled: !canFork
-                            }}
-                            testId="codex-fork-error"
-                        />
-                    </div>
-                ) : sshControlled ? (
-                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                        <SessionDetailStatusNotice
-                            tone="warning"
-                            title={legacyExternalWriterActive
-                                ? t('recentCodex.direct.externalWriter.title')
-                                : t('recentCodex.sshControl.title')}
-                            detail={legacyExternalWriterActive
-                                ? t('recentCodex.direct.externalWriter.detail')
-                                : t('recentCodex.sshControl.detail')}
-                            testId={legacyExternalWriterActive
-                                ? 'codex-native-external-writer'
-                                : 'codex-native-ssh-controlled'}
-                        />
-                    </div>
-                ) : nativeWaitingForUserInput ? (
-                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                        <SessionDetailStatusNotice
-                            tone="warning"
-                            title={t('recentCodex.status.waitingForLocalInput')}
-                            detail={t('recentCodex.status.waitingForLocalInput.detail')}
-                            testId="codex-native-waiting-for-local-input"
-                        />
-                    </div>
-                ) : nativeNeedsManualRecovery ? (
-                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                        <SessionDetailStatusNotice
-                            tone="warning"
-                            title={t('recentCodex.direct.recovery.title')}
-                            detail={getNativeRecoveryDetail(
-                                nativeRecoveryCandidate.reason,
-                                nativeRecoveryCandidate.uncertain,
-                                t
-                            )}
-                            action={canRecoverNativeDelivery ? {
-                                label: isRecoveringNativeDelivery
-                                    ? t('recentCodex.direct.recovery.pending')
-                                    : getNativeRecoveryActionLabel(nativeRecoveryCandidate.reason, t),
-                                onClick: () => void recoverNativeDelivery(),
-                                busy: isRecoveringNativeDelivery,
-                                disabled: isDiscardingNativeRecovery
-                            } : undefined}
-                            secondaryAction={nativeRecoveryCandidate.candidate ? {
-                                label: isDiscardingNativeRecovery
-                                    ? t('recentCodex.direct.recovery.discarding')
-                                    : t('recentCodex.direct.recovery.discard'),
-                                onClick: () => void discardNativeRecovery(),
-                                busy: isDiscardingNativeRecovery
-                            } : undefined}
-                            testId="codex-native-recovery"
-                        />
-                    </div>
-                ) : directSendPhase ? (
-                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                        <SessionDetailStatusNotice
-                            tone="processing"
-                            title={t(`recentCodex.direct.phase.${directSendPhase}.title`)}
-                            detail={[
-                                t(`recentCodex.direct.phase.${directSendPhase}.detail`),
-                                directSendPhaseElapsedSeconds === null
-                                    ? null
-                                    : t('recentCodex.direct.phase.elapsed', { seconds: directSendPhaseElapsedSeconds })
-                            ].filter(Boolean).join(' · ')}
-                            testId={`codex-direct-send-phase-${directSendPhase}`}
-                            leadingVisual={<NativeCodexDirectSendPhaseIcon phase={directSendPhase} />}
-                        />
-                    </div>
-                ) : directStatus === 'unknown' || statusQuery.isError ? (
-                    <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--app-safe-area-top)+4.5rem)] z-30 px-3">
-                        <SessionDetailStatusNotice
-                            tone="warning"
-                            title={directStatus === 'unknown' ? t('recentCodex.status.unknown') : t('recentCodex.status.failed')}
-                            detail={t('recentCodex.status.locked')}
-                            action={{
-                                label: t('recentCodex.retry'),
-                                onClick: () => void refetchNativeSnapshot(),
-                                busy: statusQuery.isFetching
-                            }}
-                            testId="codex-status-error"
-                        />
-                    </div>
-                ) : null}
             </SessionDetailSurface>
         </SessionConnectionProvider>
     )

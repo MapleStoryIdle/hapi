@@ -247,7 +247,7 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
             <button
                 type="button"
                 onClick={toggleDetails}
-                className="pointer-events-auto touch-manipulation flex h-11 max-w-full items-center truncate rounded-full pl-1 pr-2 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                className="pointer-events-auto touch-manipulation flex h-11 max-w-full items-center truncate rounded-full px-1 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                 aria-haspopup="dialog"
                 aria-expanded={detailsOpen}
                 aria-controls={detailsOpen ? detailsId : undefined}

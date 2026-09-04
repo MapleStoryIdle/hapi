@@ -152,6 +152,131 @@ describe('ToolGroupCard', () => {
         expect(within(view.container).getAllByText('查看本地会话')).toHaveLength(2)
     })
 
+    it('keeps native Codex subagent cards visible below a closed processed group', () => {
+        const firstAgent = makeToolBlock('codex-agent-first', 'CodexAgent', {
+            summary: 'Explore the codebase',
+            model: 'gpt-5.3-codex',
+            reasoning_effort: 'high',
+            activity: 'Completed exploration'
+        }, {
+            createdAt: 10,
+            startedAt: 10,
+            completedAt: 11,
+        })
+        const modelFromBlockAgent: ToolCallBlock = {
+            ...makeToolBlock('codex-agent-second', 'CodexAgent', {
+                summary: 'Verify the changes',
+                reasoning_effort: 'medium',
+                agentStatus: 'completed'
+            }, {
+                createdAt: 20,
+                startedAt: 20,
+                completedAt: 21,
+            }),
+            createdAt: 20,
+            model: 'gpt-5.4'
+        }
+        const fallbackAgent = makeToolBlock('codex-agent-third', 'CodexAgent', {
+            summary: 'Report the result'
+        }, {
+            createdAt: 30,
+            startedAt: 30,
+            completedAt: 31,
+        })
+        const claudeTask = makeToolBlock('claude-task', 'Task', { description: 'Do not render as a Codex card' })
+        const claudeAgent = makeToolBlock('claude-agent', 'Agent', { description: 'Do not render as a Codex card' })
+        const view = renderCard(makeGroup({
+            tools: [fallbackAgent, claudeTask, modelFromBlockAgent, claudeAgent, firstAgent],
+            forceCompact: true,
+            forceGenericCompactTitle: true,
+        }))
+
+        const processed = within(view.container).getByRole('button', { name: 'Processed' })
+        expect(processed).toHaveAttribute('aria-expanded', 'false')
+
+        const cards = Array.from(view.container.querySelectorAll<HTMLButtonElement>('[data-codex-subagent-card]'))
+        expect(cards.map((card) => card.dataset.toolId)).toEqual([
+            'codex-agent-first',
+            'codex-agent-second',
+            'codex-agent-third'
+        ])
+        expect(view.container.querySelector('[data-tool-id="claude-task"]')).toBeNull()
+        expect(view.container.querySelector('[data-tool-id="claude-agent"]')).toBeNull()
+        expect(view.container.querySelector('[data-codex-subagent-cards]')).toHaveClass('flex', 'flex-wrap')
+        expect(cards[0]).toHaveClass('min-h-11')
+        expect(cards[0]).toHaveAttribute('aria-haspopup', 'dialog')
+        expect(cards[0]).toHaveAccessibleName(/Agent: Explore the codebase/)
+        expect(cards[0]).toHaveAccessibleName(/Model: gpt-5\.3-codex/)
+        expect(cards[0]).toHaveAccessibleName(/Reasoning: high/)
+        expect(cards[0]).toHaveAccessibleName(/Status: Completed exploration/)
+
+        expect(within(cards[0]).getByText('Agent: Explore the codebase')).toBeInTheDocument()
+        expect(within(cards[0]).getByText('Model: gpt-5.3-codex')).toBeInTheDocument()
+        expect(within(cards[0]).getByText('Reasoning: high')).toBeInTheDocument()
+        expect(within(cards[0]).getByText('Status: Completed exploration')).toBeInTheDocument()
+        expect(within(cards[1]).getByText('Model: gpt-5.4')).toBeInTheDocument()
+        expect(within(cards[2]).getByText('Model: unavailable')).toBeInTheDocument()
+        expect(within(cards[2]).getByText('Reasoning: unavailable')).toBeInTheDocument()
+        expect(within(cards[2]).getByText('Status: completed')).toBeInTheDocument()
+    })
+
+    it('opens Codex subagent cards in the existing dialog and omits their expanded detail row', async () => {
+        const agent = makeToolBlock('codex-agent-detail', 'CodexAgent', {
+            summary: 'Inspect the implementation',
+            model: 'gpt-5.3-codex',
+            reasoning_effort: 'high',
+            agentStatus: 'completed'
+        }, {
+            createdAt: 10,
+            startedAt: 10,
+            completedAt: 11,
+            result: undefined,
+        })
+        const read = makeToolBlock('read-1', 'Read', { file_path: 'repo/src/a.ts' })
+        const view = renderCard(makeGroup({
+            tools: [agent, read],
+            detailBlocks: [agent, read],
+            forceCompact: true,
+            forceGenericCompactTitle: true,
+        }))
+
+        const card = within(view.container).getByRole('button', { name: /Agent: Inspect the implementation/i })
+        const processed = within(view.container).getByRole('button', { name: 'Processed' })
+
+        fireEvent.click(processed)
+
+        expect(screen.getAllByText('Agent: Inspect the implementation')).toHaveLength(1)
+        expect(screen.getByText('a.ts')).toBeInTheDocument()
+
+        fireEvent.click(card)
+
+        await waitFor(() => {
+            expect(screen.getByRole('dialog')).toBeInTheDocument()
+        })
+        expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Agent: Inspect the implementation' })).toBeInTheDocument()
+    })
+
+    it('keeps the source launch order when Codex agents share a timestamp', () => {
+        const firstAgent = makeToolBlock('z-agent', 'CodexAgent', { summary: 'First launch' }, {
+            createdAt: 10,
+            startedAt: 10,
+            completedAt: 11,
+        })
+        const secondAgent = makeToolBlock('a-agent', 'CodexAgent', { summary: 'Second launch' }, {
+            createdAt: 10,
+            startedAt: 10,
+            completedAt: 11,
+        })
+        const view = renderCard(makeGroup({
+            tools: [firstAgent, secondAgent],
+            forceCompact: true,
+            forceGenericCompactTitle: true,
+        }))
+
+        expect(Array.from(view.container.querySelectorAll<HTMLButtonElement>('[data-codex-subagent-card]'))
+            .map((card) => card.dataset.toolId)).toEqual(['z-agent', 'a-agent'])
+    })
+
     it('keeps forced compact activity collapsed while a tool is running', () => {
         const startedAt = Date.now() - 3_000
         const running = makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {

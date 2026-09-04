@@ -10,6 +10,7 @@ import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
 import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutationDetail'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
+import { getCodexAgentActivity, getCodexAgentReasoningEffort, getCodexAgentSummary } from '@/components/ToolCard/codexAgents'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
@@ -376,6 +377,65 @@ function CompactDetailItem(props: {
     return <CompactDetailBlock block={block} />
 }
 
+function getCodexSubagentName(tool: ToolCallBlock, t: (key: string, params?: Record<string, string | number>) => string): string {
+    return getCodexAgentSummary(tool.tool.input)
+        ?? getInputStringAny(tool.tool.input, ['name', 'nickname', 'agentName', 'agent_name', 'agentId', 'agent_id'])
+        ?? t('toolGroup.codexSubagent.unknown')
+}
+
+function getCodexSubagentStatus(tool: ToolCallBlock): string {
+    return getCodexAgentActivity(tool.tool.input)
+        ?? getInputStringAny(tool.tool.input, ['agentStatus', 'status', 'state'])
+        ?? tool.tool.state
+}
+
+function CodexSubagentCards(props: {
+    tools: ToolCallBlock[]
+    onSelectTool: (toolId: string) => void
+    t: (key: string, params?: Record<string, string | number>) => string
+}) {
+    if (props.tools.length === 0) return null
+
+    return (
+        <div className="mt-2 flex flex-wrap gap-2" data-codex-subagent-cards>
+            {props.tools.map((tool) => {
+                const name = getCodexSubagentName(tool, props.t)
+                const model = getInputStringAny(tool.tool.input, ['model']) ?? tool.model ?? props.t('toolGroup.codexSubagent.unavailable')
+                const reasoning = getCodexAgentReasoningEffort(tool.tool.input) ?? props.t('toolGroup.codexSubagent.unavailable')
+                const status = getCodexSubagentStatus(tool)
+
+                return (
+                    <button
+                        key={tool.id}
+                        type="button"
+                        className="flex min-h-11 min-w-[min(100%,15rem)] flex-1 basis-[15rem] cursor-pointer flex-col items-start gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        onClick={() => props.onSelectTool(tool.id)}
+                        aria-haspopup="dialog"
+                        data-codex-subagent-card
+                        data-tool-id={tool.id}
+                    >
+                        <span className="flex w-full min-w-0 items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--app-fg)]" title={name}>
+                                {props.t('toolGroup.codexSubagent.agent', { name })}
+                            </span>
+                            <span className={cn('shrink-0', toolStatusColorClass(tool.tool.state))} aria-hidden="true">
+                                <ToolStatusIcon state={tool.tool.state} />
+                            </span>
+                        </span>
+                        <span className="flex w-full flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-[var(--app-hint)]">
+                            <span className="truncate" title={model}>{props.t('toolGroup.codexSubagent.model', { model })}</span>
+                            <span className="truncate" title={reasoning}>{props.t('toolGroup.codexSubagent.reasoning', { effort: reasoning })}</span>
+                            <span className="truncate" title={status} aria-live="polite" aria-atomic="true">
+                                {props.t('toolGroup.codexSubagent.status', { status })}
+                            </span>
+                        </span>
+                    </button>
+                )
+            })}
+        </div>
+    )
+}
+
 function SummaryBadge(props: { className: string; text: string }) {
     return (
         <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium', props.className)}>
@@ -740,6 +800,29 @@ export function ToolGroupCard(props: {
             metadata: props.metadata
         }, t)
     }, [selectedTool, props.metadata, t])
+    const codexSubagentTools = useMemo(() => props.block.tools
+        .map((tool, index) => ({ tool, index }))
+        .filter(({ tool }) => tool.tool.name === 'CodexAgent')
+        .sort((left, right) => (
+            (left.tool.tool.startedAt ?? left.tool.tool.createdAt) - (right.tool.tool.startedAt ?? right.tool.tool.createdAt)
+            || left.tool.createdAt - right.tool.createdAt
+            || left.index - right.index
+        ))
+        .map(({ tool }) => tool), [props.block.tools])
+    const codexSubagentToolIds = useMemo(
+        () => new Set(codexSubagentTools.map((tool) => tool.id)),
+        [codexSubagentTools]
+    )
+    const compactDetailBlocks = useMemo(() => {
+        const blocks = props.block.detailBlocks && props.block.detailBlocks.length > 0
+            ? props.block.detailBlocks
+            : props.block.tools
+        return blocks.filter((block) => (
+            block.kind !== 'tool-call'
+            || block.tool.name !== 'CodexAgent'
+            || !codexSubagentToolIds.has(block.id)
+        ))
+    }, [codexSubagentToolIds, props.block.detailBlocks, props.block.tools])
 
     const primaryTitle = formatGroupedHeaderTitle(props.block, t)
     const subtitle = formatGroupedHeaderSubtitle(props.block, t) ?? formatActionSummary(props.block, t)
@@ -781,28 +864,23 @@ export function ToolGroupCard(props: {
                     </button>
                 ) : null}
 
+                <CodexSubagentCards
+                    tools={codexSubagentTools}
+                    onSelectTool={setSelectedToolId}
+                    t={t}
+                />
+
                 {displayedOpen ? (
                     <div className={cn('relative ml-[7px] flex flex-col gap-0.5', useExternalCompactHeader ? 'mt-0.5' : 'mt-1')}>
                         <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-px bg-[var(--app-divider)]" data-tool-group-timeline />
-                        {props.block.detailBlocks && props.block.detailBlocks.length > 0 ? (
-                            props.block.detailBlocks.map((block, index) => (
-                                <CompactDetailItem
-                                    key={`detail:${block.kind}:${block.id}:${index}`}
-                                    block={block}
-                                    metadata={props.metadata}
-                                    onSelectTool={setSelectedToolId}
-                                />
-                            ))
-                        ) : (
-                            props.block.tools.map((tool) => (
-                                <CompactDetailItem
-                                    key={tool.id}
-                                    block={tool}
-                                    metadata={props.metadata}
-                                    onSelectTool={setSelectedToolId}
-                                />
-                            ))
-                        )}
+                        {compactDetailBlocks.map((block, index) => (
+                            <CompactDetailItem
+                                key={`detail:${block.kind}:${block.id}:${index}`}
+                                block={block}
+                                metadata={props.metadata}
+                                onSelectTool={setSelectedToolId}
+                            />
+                        ))}
 
                         {isHydratingHistory ? (
                             <div className="pl-[15px] text-xs text-[var(--app-hint)]">

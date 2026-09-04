@@ -278,6 +278,13 @@ describe('CodexSessionContextPage', () => {
 
         expect(await screen.findByTestId('codex-native-waiting-for-local-input')).toHaveTextContent('Waiting for local input')
         expect(screen.getByTestId('codex-native-waiting-for-local-input')).toHaveTextContent('Return to the local Codex session')
+        const headerControls = screen.getByTestId('session-header-controls')
+        const noticeToggle = screen.getByTestId('codex-native-waiting-for-local-input-toggle')
+        const composer = screen.getByRole('textbox')
+        expect(headerControls.compareDocumentPosition(noticeToggle) & Node.DOCUMENT_POSITION_FOLLOWING)
+            .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+        expect(noticeToggle.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING)
+            .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
         openNativeSessionMenu()
         expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeDisabled()
     })

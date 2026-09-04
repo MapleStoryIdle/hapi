@@ -74,7 +74,7 @@ describe('mobile layout contract', () => {
 
         const controls = screen.getByTestId('session-header-controls')
         expect(controls).toHaveClass('pointer-events-auto', 'h-11', 'gap-0', 'bg-[var(--app-bg)]')
-        expect(screen.getByRole('button', { name: 'hapi' })).toHaveClass('pl-1', 'pr-2')
+        expect(screen.getByRole('button', { name: 'hapi' })).toHaveClass('px-1')
         expect(screen.getByTestId('session-header-row')).toHaveClass('h-14')
     })
 })
