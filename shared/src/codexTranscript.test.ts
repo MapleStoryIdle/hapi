@@ -54,6 +54,7 @@ describe('getLocalCodexSessionData', () => {
             { type: 'turn_context', payload: { model: 'gpt-5.6-terra', effort: 'high' } },
             { type: 'event_msg', payload: { type: 'task_started', turn_id: 'old-turn' } },
             { type: 'event_msg', payload: { type: 'agent_message', message: 'Old output ' + 'x'.repeat(2 * 1024 * 1024) } },
+            { type: 'event_msg', payload: { type: 'agent_message', message: 'Large tool output ' + 'x'.repeat(80 * 1024) } },
             { type: 'event_msg', payload: { type: 'agent_message', message: 'Latest answer' } },
             { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'new-turn' } }
         ].map((record) => JSON.stringify(record)).join('\n') + '\n')

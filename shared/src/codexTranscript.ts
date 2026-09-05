@@ -465,6 +465,8 @@ const MAX_CODEX_PLAN_STEP_CHARS = 600
 const MAX_CODEX_PLAN_ID_LENGTH = 512
 const MAX_CODEX_SUBAGENT_TRACE_MESSAGES = 160
 const MAX_CODEX_SUBAGENT_TRACE_BYTES = 1024 * 1024
+const MAX_CODEX_SUBAGENT_TRACE_PAYLOAD_BYTES = 64 * 1024
+const MAX_CODEX_SUBAGENTS_TRACE_PAYLOAD_BYTES = 1024 * 1024
 // Session lists only need metadata from the transcript header and latest
 // records. Large historical transcripts must not be fully loaded just to
 // render a row in the native-session list.
@@ -2079,6 +2081,21 @@ function normalizeNativeSubagentField(value: string | null): string | null {
     return normalized ? normalized : null
 }
 
+function boundCodexSubagentTrace(messages: readonly CodexImportedMessageContent[], budget: number): CodexImportedMessageContent[] {
+    const recent: CodexImportedMessageContent[] = []
+    let bytes = 0
+    for (let index = messages.length - 1; index >= 0 && recent.length < MAX_CODEX_SUBAGENT_TRACE_MESSAGES; index--) {
+        const message = messages[index]
+        const size = Buffer.byteLength(JSON.stringify(message), 'utf8')
+        // A giant tool result must not crowd out the following answer or
+        // delay the entire parent conversation. Raw transcripts stay intact.
+        if (bytes + size > budget) continue
+        bytes += size
+        recent.push(message)
+    }
+    return recent.reverse()
+}
+
 function buildCodexLocalSessionSubagent(
     parentSessionId: string,
     group: CodexSubagentTranscriptGroup
@@ -2156,9 +2173,7 @@ function buildCodexLocalSessionSubagent(
     }
 
     const traceMessages = accumulator.messages.filter((message) => message.role === 'agent')
-    const boundedTraceMessages = traceMessages.length > MAX_CODEX_SUBAGENT_TRACE_MESSAGES
-        ? traceMessages.slice(-MAX_CODEX_SUBAGENT_TRACE_MESSAGES)
-        : traceMessages
+    const boundedTraceMessages = boundCodexSubagentTrace(traceMessages, MAX_CODEX_SUBAGENT_TRACE_PAYLOAD_BYTES)
     const fallbackStartedAt = files[0]?.modifiedAt ?? updatedAt ?? Date.now()
     const name = normalizeNativeSubagentField(group.header.name)
     const role = normalizeNativeSubagentField(group.header.role)
@@ -2225,13 +2240,20 @@ export function listLocalCodexSessionSubagents(parentSessionId: string): CodexLo
         if (group) addCodexSubagentTranscriptFile(group, candidate)
     }
 
-    return Array.from(groups.values())
+    const subagents = Array.from(groups.values())
         .map((group) => buildCodexLocalSessionSubagent(parentId, group))
         .sort((left, right) => (
             left.startedAt - right.startedAt
             || left.updatedAt - right.updatedAt
             || left.id.localeCompare(right.id)
         ))
+    let remaining = MAX_CODEX_SUBAGENTS_TRACE_PAYLOAD_BYTES
+    for (let index = subagents.length - 1; index >= 0; index--) {
+        const subagent = subagents[index]
+        subagent.traceMessages = boundCodexSubagentTrace(subagent.traceMessages, remaining)
+        remaining = Math.max(0, remaining - Buffer.byteLength(JSON.stringify(subagent.traceMessages), 'utf8'))
+    }
+    return subagents
 }
 
 export function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): CodexTranscriptImportData | null {
