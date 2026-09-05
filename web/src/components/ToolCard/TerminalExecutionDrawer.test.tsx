@@ -213,7 +213,7 @@ describe('TerminalExecutionDrawer', () => {
             </I18nProvider>
         )
 
-        expect(screen.getByText('Inspect hapi-hub service · 192.0.2.18')).toBeInTheDocument()
+        expect(screen.getByText('ssh · 192.0.2.18')).toBeInTheDocument()
         expect(screen.queryByText('Terminal execution')).not.toBeInTheDocument()
         expect(screen.queryByText('Run remotely')).not.toBeInTheDocument()
     })

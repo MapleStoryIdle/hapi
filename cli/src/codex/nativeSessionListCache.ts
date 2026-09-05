@@ -119,6 +119,16 @@ export class NativeCodexSessionListCache {
     }
 
     private getOrReadSummary(candidate: CodexTranscriptFileCandidate): CodexLocalSessionSummary | null {
+        // A watcher can miss a final write or temporarily stop watching a cold
+        // thread. Never let its discovery snapshot freeze the list run state.
+        try {
+            const stats = statSync(candidate.file)
+            candidate.modifiedAt = stats.mtimeMs
+            candidate.size = stats.size
+        } catch {
+            this.summaries.delete(candidate.file)
+            return null
+        }
         const cached = this.summaries.get(candidate.file)
         if (cached && cached.modifiedAt === candidate.modifiedAt && cached.size === candidate.size) {
             return cached.session

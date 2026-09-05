@@ -464,6 +464,7 @@ const MAX_CODEX_PLAN_STEPS = 32
 const MAX_CODEX_PLAN_STEP_CHARS = 600
 const MAX_CODEX_PLAN_ID_LENGTH = 512
 const MAX_CODEX_SUBAGENT_TRACE_MESSAGES = 160
+const MAX_CODEX_SUBAGENT_TRACE_BYTES = 1024 * 1024
 // Session lists only need metadata from the transcript header and latest
 // records. Large historical transcripts must not be fully loaded just to
 // render a row in the native-session list.
@@ -1096,8 +1097,8 @@ function getCodexSummaryHeadLines(
     return bytes === null ? null : bytes.toString('utf8').split(/\r?\n/).filter(Boolean)
 }
 
-function getCodexSummaryTailLines(filePath: string, size: number): string[] | null {
-    const offset = Math.max(0, size - CODEX_SESSION_SUMMARY_WINDOW_BYTES)
+function getCodexSummaryTailLines(filePath: string, size: number, maxBytes = CODEX_SESSION_SUMMARY_WINDOW_BYTES): string[] | null {
+    const offset = Math.max(0, size - maxBytes)
     const bytes = readCodexTranscriptRange(filePath, offset, size - offset)
     if (bytes === null) return null
 
@@ -2095,15 +2096,23 @@ function buildCodexLocalSessionSubagent(
     let updatedAt = files.reduce((latest, file) => Math.max(latest, file.modifiedAt), 0)
 
     for (const file of files) {
-        let content: string
-        try {
-            content = readFileSync(file.file, 'utf-8')
-        } catch {
-            // Native archive can remove a rotated old segment while the
-            // newest child segment remains readable.
-            continue
+        // Child cards expose a bounded recent trace. Reading every historical
+        // body here can block the parent snapshot for tens of seconds and
+        // allocate gigabytes even when its own message page is only 50 rows.
+        const lines = getCodexSummaryTailLines(file.file, file.size, MAX_CODEX_SUBAGENT_TRACE_BYTES)
+        if (lines === null) continue
+        if (file.size > MAX_CODEX_SUBAGENT_TRACE_BYTES) {
+            const head = getCodexSummaryHeadLines(file.file, file.size) ?? []
+            const initialConfig = getLatestCodexSessionConfig(head)
+            if (initialConfig.model) model = initialConfig.model
+            if (initialConfig.modelReasoningEffort) modelReasoningEffort = initialConfig.modelReasoningEffort
+            // A skipped middle can contain another turn. Do not use an old
+            // segment's turn id to reject the latest terminal or claim busy.
+            currentTurnId = null
+            status = 'unknown'
+            startedAt = null
+            completedAt = undefined
         }
-        const lines = content.split(/\r?\n/).filter(Boolean)
         const config = getLatestCodexSessionConfig(lines)
         if (config.model) model = config.model
         if (config.modelReasoningEffort) modelReasoningEffort = config.modelReasoningEffort

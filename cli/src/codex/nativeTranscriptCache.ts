@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
+import { closeSync, openSync, readSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import {
     appendCodexTranscriptImportLines,
@@ -102,6 +102,7 @@ const MAX_LIFECYCLE_EVENTS_PER_TRANSCRIPT = 128
 // A cold session only needs the latest turn terminal/start records. Full
 // message history is loaded later, when the user actually opens the detail.
 const LIFECYCLE_TAIL_READ_BYTES = 16 * 1024
+const TRANSCRIPT_READ_CHUNK_BYTES = 256 * 1024
 // Child transcript changes do not always append to the parent file. Keep the
 // recursive CODEX_HOME discovery bounded; the browser can poll cheaply while
 // an active card exists, but should not make every one-second read scan every
@@ -557,20 +558,45 @@ export class NativeCodexTranscriptCache {
     private loadImportedMessages(sessionId: string, entry: CacheEntry): CacheEntry {
         const accumulator = createCodexTranscriptImportAccumulator()
         let latestParsed: CompleteLines | null = null
+        let latestFingerprint: FileFingerprint | null = null
+        let lifecycleEvents: CodexTranscriptLifecycleEvent[] = []
+        let runState = entry.session.runState
         for (const filePath of entry.transcriptFiles) {
-            let contents: Buffer
-            try {
-                contents = readFileSync(filePath)
-            } catch {
-                // A rotated historical segment can disappear after native
-                // archive/cleanup. Keep the current segment readable rather
-                // than dropping the whole thread view.
-                continue
+            const fingerprint = getFileFingerprint(filePath)
+            if (!fingerprint) continue
+            let offset = 0
+            let pendingChunks: Buffer[] = []
+            while (offset < fingerprint.size) {
+                const bytes = readFileRange(filePath, offset, Math.min(TRANSCRIPT_READ_CHUNK_BYTES, fingerprint.size - offset))
+                if (!bytes?.length) break
+                offset += bytes.length
+                // Only accept a non-newline-terminated record at the actual
+                // EOF; a chunk boundary is not a transcript record boundary.
+                const boundary = offset === fingerprint.size ? bytes.length : bytes.lastIndexOf(0x0a) + 1
+                if (boundary === 0) {
+                    pendingChunks.push(bytes)
+                    continue
+                }
+                const parsed = splitCompleteJsonlLines(Buffer.concat([...pendingChunks, bytes.subarray(0, boundary)]))
+                pendingChunks = [parsed.trailingBytes, bytes.subarray(boundary)].filter((chunk) => chunk.length > 0)
+                appendCodexTranscriptImportLines(accumulator, parsed.lines)
+                if (filePath === entry.session.file) {
+                    // Keep lifecycle authority across a long turn whose start
+                    // lies outside the tiny summary tail, without parsing
+                    // large tool/image payloads several additional times.
+                    const lifecycleLines = parsed.lines.filter((line) => (
+                        line.includes('task_started') || line.includes('task_complete')
+                        || line.includes('task_failed') || line.includes('turn_aborted')
+                    ))
+                    lifecycleEvents = appendLifecycleEvents(lifecycleEvents, lifecycleLines)
+                    runState = getCodexTranscriptTailSummary(lifecycleLines).runState ?? runState
+                }
             }
-            const parsed = splitCompleteJsonlLines(contents)
-            appendCodexTranscriptImportLines(accumulator, parsed.lines)
             if (filePath === entry.session.file) {
-                latestParsed = parsed
+                latestParsed = { lines: [], trailingBytes: Buffer.concat(pendingChunks) }
+                // Retain the exact read boundary so writes arriving during a
+                // cold load are consumed by the next incremental refresh.
+                latestFingerprint = { ...fingerprint, size: offset }
             }
         }
 
@@ -587,17 +613,21 @@ export class NativeCodexTranscriptCache {
             return empty
         }
 
-        const fingerprint = getFileFingerprint(entry.session.file)
+        const fingerprint = latestFingerprint
+        const lifecycleTail = readRecentLifecycleTail(entry.session.file, fingerprint?.size ?? entry.fileSize)
         const next: CacheEntry = {
             ...entry,
-            session: fingerprint ? applyTailSummary(entry.session, latestParsed.lines, fingerprint) : entry.session,
+            session: {
+                ...(readLocalCodexSessionSummary(entry.session.file, fingerprint?.modifiedAt, fingerprint?.size) ?? entry.session),
+                ...(runState === undefined ? {} : { runState })
+            },
             importedMessages: accumulator.messages,
             accumulator,
             trailingBytes: latestParsed.trailingBytes,
             fileSize: fingerprint?.size ?? entry.fileSize,
             fingerprint,
-            lifecycleEvents: takeRecentLifecycleEvents(latestParsed.lines),
-            userInputEvents: takeRecentUserInputEvents(latestParsed.lines)
+            lifecycleEvents,
+            userInputEvents: lifecycleTail.userInputEvents
         }
         this.setEntry(sessionId, next)
         return next
@@ -695,7 +725,7 @@ function getIncrementalUserInputWaitingState(
     return active !== null
 }
 
-function readRecentLifecycleTail(file: string, fileSize: number): RecentLifecycleTail {
+export function readRecentLifecycleTail(file: string, fileSize: number): RecentLifecycleTail {
     const empty: RecentLifecycleTail = {
         lifecycleEvents: [],
         userInputEvents: [],

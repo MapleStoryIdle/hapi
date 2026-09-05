@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NativeCodexSessionListCache } from './nativeSessionListCache'
@@ -18,6 +18,22 @@ function candidate(file: string) {
 }
 
 describe('NativeCodexSessionListCache', () => {
+    it('observes a completed turn even when its watcher callback was missed', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-list-missed-completion-'))
+        cleanupPaths.push(root)
+        const id = '11111111-1111-4111-8111-111111111111'
+        const file = join(root, `rollout-${id}.jsonl`)
+        writeFileSync(file, [
+            JSON.stringify({ type: 'session_meta', payload: { id, cwd: '/work' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } }), ''
+        ].join('\n'))
+        const listFiles = vi.fn(() => [candidate(file)])
+        const cache = new NativeCodexSessionListCache({ listFiles })
+        expect(cache.list(1)[0]?.runState).toBe('processing')
+        appendFileSync(file, JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-1' } }) + '\n')
+        expect(cache.list(1)[0]?.runState).toBe('idle')
+        expect(listFiles).toHaveBeenCalledTimes(1)
+    })
     it('reuses unchanged rows and applies a new watcher row without rescanning', () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-native-codex-list-cache-'))
         cleanupPaths.push(root)

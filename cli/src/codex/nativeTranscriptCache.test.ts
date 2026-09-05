@@ -19,6 +19,36 @@ function transcriptRecord(value: unknown): string {
 }
 
 describe('NativeCodexTranscriptCache', () => {
+    it('reads across large UTF-8 records and retains the exact trailing append boundary', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-chunked-transcript-'))
+        const id = 'a1234567-1234-4234-8234-123456789012'
+        const dir = join(root, 'sessions')
+        mkdirSync(dir)
+        const file = join(dir, `rollout-${id}.jsonl`)
+        const text = '检查中文边界'.repeat(50_000)
+        writeFileSync(file, [
+            transcriptRecord({ type: 'session_meta', payload: { id, cwd: '/work' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'user_message', message: text } }),
+            '{"type":"event_msg","payload":'
+        ].join(''))
+        process.env.CODEX_HOME = root
+        try {
+            const cache = new NativeCodexTranscriptCache()
+            const first = cache.read(id, { limit: 50 })
+            expect(first?.data.session.runState).toBe('processing')
+            expect(first?.data.importedMessages.find((message) => message.role === 'user')?.content).toMatchObject({ text })
+            appendFileSync(file, '{"type":"agent_message","message":"Finished"}}\n' + transcriptRecord({
+                type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-1' }
+            }))
+            const next = cache.read(id, { limit: 50 })
+            expect(next?.data.importedMessages.filter((message) => message.role === 'user')).toHaveLength(1)
+            expect(next?.data.session.runState).toBe('idle')
+            expect(next?.data.importedMessages.at(-1)?.content).toMatchObject({ data: { type: 'message', message: 'Finished' } })
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
     it('refreshes native child cards when only a direct subagent transcript changes', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-transcript-subagent-'))
         const parentId = 'a1234567-1234-4234-8234-123456789012'

@@ -43,6 +43,30 @@ describe('getCodexSessionDisplayTitle', () => {
 })
 
 describe('getLocalCodexSessionData', () => {
+    it('bounds large child traces while retaining its model and latest terminal', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-bounded-child-'))
+        const parentId = '10101010-1010-4010-8010-101010101010'
+        const childId = '20202020-2020-4020-8020-202020202020'
+        const dir = join(root, 'sessions')
+        mkdirSync(dir)
+        writeFileSync(join(dir, `rollout-${childId}.jsonl`), [
+            { type: 'session_meta', payload: { id: childId, source: { subagent: { thread_spawn: { parent_thread_id: parentId } } } } },
+            { type: 'turn_context', payload: { model: 'gpt-5.6-terra', effort: 'high' } },
+            { type: 'event_msg', payload: { type: 'task_started', turn_id: 'old-turn' } },
+            { type: 'event_msg', payload: { type: 'agent_message', message: 'Old output ' + 'x'.repeat(2 * 1024 * 1024) } },
+            { type: 'event_msg', payload: { type: 'agent_message', message: 'Latest answer' } },
+            { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'new-turn' } }
+        ].map((record) => JSON.stringify(record)).join('\n') + '\n')
+        process.env.CODEX_HOME = root
+        try {
+            const [child] = listLocalCodexSessionSubagents(parentId)
+            expect(child).toMatchObject({ model: 'gpt-5.6-terra', modelReasoningEffort: 'high', status: 'completed' })
+            expect(child.traceMessages).toHaveLength(1)
+            expect(child.traceMessages[0].content).toMatchObject({ data: { message: 'Latest answer' } })
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
     it('associates native child rollouts with their direct parent only', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-native-subagent-test-'))
         const parentId = '10101010-1010-4010-8010-101010101010'

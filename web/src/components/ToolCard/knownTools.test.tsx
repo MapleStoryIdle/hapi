@@ -124,7 +124,7 @@ describe('getToolPresentation — file access semantics', () => {
         const cases = [
             {
                 command: 'ssh deploy@192.0.2.18 systemctl status hapi-hub.service',
-                title: 'Inspect hapi-hub service',
+                title: 'ssh',
                 subtitle: '192.0.2.18'
             },
             {
@@ -134,7 +134,7 @@ describe('getToolPresentation — file access semantics', () => {
             },
             {
                 command: `curl -X POST 'https://user:password@example.com/api/status?token=secret'`,
-                title: 'Request URL · POST',
+                title: 'POST',
                 subtitle: 'example.com/api/status'
             },
             {

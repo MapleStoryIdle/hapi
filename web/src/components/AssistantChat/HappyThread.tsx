@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ThreadPrimitive } from '@assistant-ui/react'
 import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
@@ -639,6 +639,7 @@ export function HappyThread(props: {
     scrollButtonPositionReady?: boolean
     onOutlineOpenChange: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
+    trailingMessage?: ReactNode
 }) {
     const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
@@ -1496,6 +1497,7 @@ export function HappyThread(props: {
                             )}
                             <div className="happy-thread-messages flex flex-col gap-5 sm:gap-6">
                                 <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
+                                {props.trailingMessage}
                             </div>
                         </div>
                     </div>

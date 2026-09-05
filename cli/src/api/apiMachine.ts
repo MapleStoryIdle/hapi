@@ -40,7 +40,8 @@ import {
     type NativeCodexDeliveryPolicy,
     type NativeKanbanFeedbackReviewGuard,
     type SendCodexLocalSessionMessageRpcResponse,
-    isHapiInitiatedCodexSession
+    isHapiInitiatedCodexSession,
+    readLocalCodexSessionSummary
 } from '@hapi/protocol/codexTranscript'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import {
@@ -53,7 +54,7 @@ import { CodexAppServerClient } from '@/codex/codexAppServerClient'
 import { CodexSshAppServerClient } from '@/codex/codexSshAppServerClient'
 import { NativeCodexSessionListCache } from '@/codex/nativeSessionListCache'
 import { NativeCodexSessionTitleCache } from '@/codex/nativeSessionTitleCache'
-import { NativeCodexTranscriptCache, type NativeCodexTranscriptRead } from '@/codex/nativeTranscriptCache'
+import { NativeCodexTranscriptCache, readRecentLifecycleTail, type NativeCodexTranscriptRead } from '@/codex/nativeTranscriptCache'
 import { NativeCodexSessionWatcher } from '@/codex/nativeSessionWatcher'
 import { CodexSshSessionOwnershipProbe, getCodexSshControlSocketPath } from '@/codex/codexSshOwnership'
 import {
@@ -304,6 +305,21 @@ export class ApiMachineClient {
         applyLifecycle: (session) => this.nativeCodexTurnLifecycle.applyToSummary(session)
     })
     private readonly nativeCodexSessionListCache = new NativeCodexSessionListCache({
+        readSummary: (filePath, modifiedAt, size) => {
+            const session = readLocalCodexSessionSummary(filePath, modifiedAt, size)
+            if (session && size !== undefined) {
+                // A missed watcher callback must not leave the old hook lease
+                // overriding a completed transcript on the list page.
+                const tail = readRecentLifecycleTail(filePath, size)
+                this.nativeCodexTurnLifecycle.observeTranscriptEvents(session.id, tail.lifecycleEvents)
+                if (this.nativeCodexSessionDirectSender.ownsActiveDelivery(session.id)) {
+                    this.nativeCodexTurnLifecycle.suppressUserInputWait(session.id)
+                } else {
+                    this.nativeCodexTurnLifecycle.observeTranscriptUserInputEvents(session.id, tail.userInputEvents)
+                }
+            }
+            return session
+        },
         resolveTitles: (sessionIds, options) => this.nativeCodexSessionTitleCache.resolve(sessionIds, options),
         applyLifecycle: (session) => normalizeNativeCodexSessionForDisplay(
             this.maskRunnerOwnedNativeUserInput(

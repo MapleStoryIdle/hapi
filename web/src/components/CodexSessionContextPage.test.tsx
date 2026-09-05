@@ -17,6 +17,7 @@ import {
     CodexSessionContextPage,
     deriveNativeSessionConnectionHealth,
     hasNativeCodexAgentReply,
+    hasNativeCodexOutputSince,
     getNativeCodexDirectSendPhase,
     getNativeCodexPlanStatus,
     getNativeContextRefreshInterval,
@@ -156,6 +157,17 @@ function openNativeSessionMenu() {
 }
 
 describe('CodexSessionContextPage', () => {
+    it('treats new reasoning and tools as real output but ignores older responses', () => {
+        const record = (type: string, createdAt: number): CodexLocalSessionContextMessage => ({
+            id: `${type}-${createdAt}`,
+            createdAt,
+            content: { role: 'agent', content: { type: 'codex', data: { type, message: 'Output', callId: 'call-1' } } }
+        })
+        expect(hasNativeCodexOutputSince([record('message', 10)], 20)).toBe(false)
+        expect(hasNativeCodexOutputSince([record('reasoning', 21)], 20)).toBe(true)
+        expect(hasNativeCodexOutputSince([record('tool-call', 22)], 20)).toBe(true)
+        expect(hasNativeCodexOutputSince([record('task_started', 22)], 20)).toBe(false)
+    })
     it('shows a native plan only for its active processing turn', () => {
         const plan: CodexLocalSessionPlan = {
             turnId: 'turn-plan',
@@ -804,8 +816,8 @@ describe('CodexSessionContextPage', () => {
                     status: 'processing',
                     progress: {
                         phase: 'launching',
-                        startedAt: 1,
-                        phaseStartedAt: 1,
+                        startedAt: Date.now(),
+                        phaseStartedAt: Date.now(),
                         transport: 'app-server'
                     }
                 },
@@ -1139,12 +1151,12 @@ describe('CodexSessionContextPage', () => {
         })
         expect(await screen.findByText('Show this right away')).toBeInTheDocument()
         expect(screen.getByRole('status', { name: 'Sending' })).toBeInTheDocument()
-        expect(screen.getByTestId('codex-direct-send-phase-launching').querySelector('[data-motion-icon="native-direct-launching"]')).not.toBeNull()
+        expect(screen.getByTestId('codex-direct-send-phase-launching').closest('.happy-thread-messages')).not.toBeNull()
 
         await act(async () => {
             resolveSend({ success: true, status: 'processing', startedAt: Date.now() })
         })
-        expect((await screen.findByTestId('codex-direct-send-phase-matching')).querySelector('[data-motion-icon="native-direct-matching"]')).not.toBeNull()
+        expect(await screen.findByTestId('codex-direct-send-phase-matching', {}, { timeout: 2_000 })).toBeInTheDocument()
     })
 
     it('shows fallback delivery retry progress from the runner', async () => {
@@ -1154,8 +1166,8 @@ describe('CodexSessionContextPage', () => {
             status: 'processing',
             progress: {
                 phase: 'retrying',
-                startedAt: 1,
-                phaseStartedAt: 2,
+                startedAt: Date.now(),
+                phaseStartedAt: Date.now(),
                 transport: 'exec-resume',
                 attempt: 2
             }
@@ -1163,9 +1175,10 @@ describe('CodexSessionContextPage', () => {
         renderPage({ api })
 
         const notice = await screen.findByTestId('codex-direct-send-phase-retrying')
-        expect(notice).toHaveTextContent('Retrying delivery')
-        expect(notice).toHaveTextContent('switching to the fallback')
-        expect(notice.querySelector('[data-motion-icon="native-direct-retrying"]')).not.toBeNull()
+        await waitFor(() => expect(notice).toHaveTextContent('Retrying send'))
+        expect(notice).not.toHaveTextContent('switching to the fallback')
+        expect(notice.querySelector('svg')).toBeNull()
+        expect(notice.closest('.happy-thread-messages')).not.toBeNull()
     })
 
     it('keeps a transport-timed-out prompt pending while it verifies delivery', async () => {
@@ -1294,9 +1307,7 @@ describe('CodexSessionContextPage', () => {
             })
         })
         expect(await screen.findByRole('button', { name: 'Open 1 queued messages' })).toBeInTheDocument()
-        const queuedNotice = screen.getByTestId('codex-direct-send-phase-queued')
-        expect(queuedNotice).toHaveTextContent('Native Codex is still working')
-        expect(queuedNotice).toHaveTextContent('This message is queued')
+        expect(screen.queryByTestId('codex-direct-send-phase-queued')).toBeNull()
         expect(screen.queryByTestId('codex-native-recovery')).not.toBeInTheDocument()
     })
 
@@ -1325,6 +1336,80 @@ describe('CodexSessionContextPage', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
         expect(await screen.findByRole('button', { name: 'Open 1 queued messages' })).toBeInTheDocument()
+    })
+
+    it('clears a local queued receipt when the native transcript confirms delivery', async () => {
+        const api = createApi()
+        let transcriptHasPrompt = false
+        ;(api.getCodexSessionContext as ReturnType<typeof vi.fn>).mockImplementation(async () => ({
+            success: true as const,
+            session: {
+                id: 'codex-thread-1',
+                title: 'Recent Codex task',
+                cwd: '/workspace/project',
+                modifiedAt: Date.now(),
+                model: 'gpt-5.6-terra',
+                modelReasoningEffort: 'high'
+            },
+            page: { limit: 50, nextBefore: null, hasMore: false },
+            messages: [
+                {
+                    id: 'codex-local:codex-thread-1:0',
+                    createdAt: 0,
+                    content: { role: 'user' as const, content: { type: 'text', text: 'Original prompt' } }
+                },
+                {
+                    id: 'codex-local:codex-thread-1:1',
+                    createdAt: 1,
+                    content: {
+                        role: 'agent' as const,
+                        content: { type: 'codex', data: { type: 'message', message: 'Original response' } }
+                    }
+                },
+                ...(transcriptHasPrompt ? [{
+                    id: 'codex-local:codex-thread-1:2',
+                    createdAt: 2,
+                    content: { role: 'user' as const, content: { type: 'text', text: 'Delivered prompt' } }
+                }] : [])
+            ]
+        }))
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            stalledSince: Date.now() - 10_000,
+            queuedMessages: []
+        })
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementation(async (
+            _sessionId: string,
+            payload: { clientMessageId: string }
+        ) => {
+            transcriptHasPrompt = true
+            return {
+                success: true as const,
+                status: 'queued' as const,
+                queueId: payload.clientMessageId,
+                queuedAt: Date.now(),
+                queuedMessages: [{
+                    id: payload.clientMessageId,
+                    text: 'Delivered prompt',
+                    queuedAt: Date.now()
+                }]
+            }
+        })
+        renderPage({ api })
+
+        await screen.findByText('Original response')
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Delivered prompt' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1)
+        })
+        await waitFor(() => {
+            expect(screen.getAllByText('Delivered prompt')).toHaveLength(1)
+            expect(screen.queryByRole('button', { name: 'Open 1 queued messages' })).not.toBeInTheDocument()
+            expect(screen.queryByTestId('codex-native-recovery')).not.toBeInTheDocument()
+        })
     })
 
     it('shows native queued messages in a compact accessory and drawer', async () => {
