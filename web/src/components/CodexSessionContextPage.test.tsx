@@ -9,8 +9,10 @@ import type {
     CodexLocalSessionContextMessage,
     CodexLocalSessionContextResponse,
     CodexLocalSessionPlan,
+    CodexLocalSessionSubagent,
     CodexLocalSessionSnapshotResponse
 } from '@/types/api'
+import { buildSessionDetailTimeline } from '@/chat/sessionDetailTimeline'
 import {
     buildNativeCodexBlocks,
     buildReadOnlyCodexBlocks,
@@ -843,7 +845,7 @@ describe('CodexSessionContextPage', () => {
 
         await waitFor(() => {
             expect(screen.queryByTestId('codex-direct-send-phase-launching')).toBeNull()
-        })
+        }, { timeout: 4_000 }) // Type + a full second hold + erase, even after status clears.
     })
 
     it('reconciles full queued messages when compact realtime queue refs change', async () => {
@@ -1156,7 +1158,7 @@ describe('CodexSessionContextPage', () => {
         await act(async () => {
             resolveSend({ success: true, status: 'processing', startedAt: Date.now() })
         })
-        expect(await screen.findByTestId('codex-direct-send-phase-matching', {}, { timeout: 2_000 })).toBeInTheDocument()
+        expect(await screen.findByTestId('codex-direct-send-phase-matching', {}, { timeout: 4_000 })).toBeInTheDocument()
     })
 
     it('shows fallback delivery retry progress from the runner', async () => {
@@ -2088,6 +2090,65 @@ describe('CodexSessionContextPage', () => {
         expect(childCardIndex).toBeLessThan(laterParentMessageIndex)
     })
 
+    it.each([false, true])('keeps native subagents with their loaded conversation round (running=%s)', (runActive) => {
+        const messages: CodexLocalSessionContextMessage[] = [
+            { id: 'round-1', createdAt: 1, content: { role: 'user', content: { type: 'text', text: 'First task' } } },
+            { id: 'reply-1', createdAt: 40, content: { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'First result' } } } },
+            { id: 'round-2', createdAt: 50, content: { role: 'user', content: { type: 'text', text: 'Second task' } } },
+            { id: 'reply-2', createdAt: 90, content: { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'Second result' } } } },
+            { id: 'round-3', createdAt: 100, content: { role: 'user', content: { type: 'text', text: 'Third task' } } },
+            { id: 'reply-3', createdAt: 140, content: { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'Third result' } } } }
+        ]
+        const subagents: CodexLocalSessionSubagent[] = [10, 20, 60, 110].map((startedAt, index) => ({
+            id: `child-${index}`,
+            parentSessionId: 'parent-thread',
+            model: null,
+            modelReasoningEffort: null,
+            status: 'completed',
+            startedAt,
+            // Late updates/trace must not move an old child into the latest round.
+            updatedAt: 150,
+            completedAt: 150,
+            traceMessages: [{
+                createdAt: 145,
+                role: 'agent',
+                content: { type: 'codex', data: { type: 'message', message: `Child ${index} result` } }
+            }]
+        }))
+        const groupsForPage = (page: CodexLocalSessionContextMessage[], hasMoreMessages: boolean) => {
+            const blocks = buildNativeCodexBlocks(page, [], subagents, { hasMoreMessages })
+            const { visible } = buildSessionDetailTimeline(blocks, { hasMoreMessages, runActive, aggregateActiveProcess: true })
+            let round: string | null = null
+            return visible.flatMap((block) => {
+                if (block.kind === 'user-text') round = block.id
+                if (block.kind !== 'tool-group') return []
+                const children = block.tools.filter((tool) => tool.tool.name === 'CodexAgent')
+                return children.length ? [{ round, ids: children.map((tool) => tool.tool.id) }] : []
+            })
+        }
+
+        expect(groupsForPage(messages.slice(4), true)).toEqual([
+            { round: 'round-3', ids: ['native-codex-agent:child-3'] }
+        ])
+        expect(groupsForPage(messages.slice(2), true)).toEqual([
+            { round: 'round-2', ids: ['native-codex-agent:child-2'] },
+            { round: 'round-3', ids: ['native-codex-agent:child-3'] }
+        ])
+        expect(groupsForPage(messages, false)).toEqual([
+            { round: 'round-1', ids: ['native-codex-agent:child-0', 'native-codex-agent:child-1'] },
+            { round: 'round-2', ids: ['native-codex-agent:child-2'] },
+            { round: 'round-3', ids: ['native-codex-agent:child-3'] }
+        ])
+    })
+
+    it('does not expose historical subagents before any paginated parent messages arrive', () => {
+        const blocks = buildNativeCodexBlocks([], [], [{
+            id: 'historical-child', parentSessionId: 'parent', model: null, modelReasoningEffort: null,
+            status: 'completed', startedAt: 10, updatedAt: 20, traceMessages: []
+        }], { hasMoreMessages: true })
+        expect(blocks).toEqual([])
+    })
+
     it('renders a native child as the existing CodexAgent card', async () => {
         const api = createApi()
         ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockImplementation(async (sessionId, machineId, options) => ({
@@ -2121,6 +2182,51 @@ describe('CodexSessionContextPage', () => {
         expect(card).toHaveTextContent('Ada')
         expect(card).toHaveTextContent('gpt-5.6-terra · high')
         expect(card).toHaveAttribute('data-codex-subagent-status', 'completed')
+    })
+
+    it('reveals older subagent cards only when their parent conversation is loaded', async () => {
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(0)
+        const api = createApi()
+        const currentPage = await api.getCodexSessionContext('codex-thread-1', 'machine-1')
+        const subagents: CodexLocalSessionSubagent[] = [-10, 10].map((startedAt, index) => ({
+            id: `page-child-${index}`, parentSessionId: 'codex-thread-1', name: index ? 'Current helper' : 'Earlier helper',
+            status: 'completed', startedAt, updatedAt: 20, completedAt: 20, traceMessages: []
+        }))
+        vi.mocked(api.getCodexSessionSnapshot).mockResolvedValue({
+            ...currentPage,
+            page: { limit: 50, nextBefore: 2, hasMore: true },
+            subagents,
+            status: { success: true, status: 'idle' },
+            version: { runnerEpoch: 'runner-a', revision: 1 }, revision: 1,
+            timing: { cache: 'hit', durationMs: 1 }
+        })
+        vi.mocked(api.getCodexSessionContext).mockImplementation(async (_sessionId, _machineId, options) => {
+            expect(options?.before).toBe(2)
+            return {
+                ...currentPage,
+                messages: [
+                    { id: 'earlier-user', createdAt: -20, content: { role: 'user', content: { type: 'text', text: 'Earlier task' } } },
+                    { id: 'earlier-answer', createdAt: -5, content: { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'Earlier result' } } } }
+                ]
+            }
+        })
+        renderPage({ api })
+
+        await screen.findByText('Current helper')
+        expect(screen.queryByText('Earlier helper')).not.toBeInTheDocument()
+        expect(document.querySelectorAll('[data-codex-subagent-cards]')).toHaveLength(1)
+
+        clock.mockReturnValue(500)
+        const viewport = document.querySelector<HTMLElement>('.app-scroll-y')!
+        Object.defineProperty(viewport, 'scrollTop', { configurable: true, value: 0, writable: true })
+        fireEvent.wheel(viewport, { deltaY: -20 })
+
+        await screen.findByText('Earlier helper')
+        const groups = document.querySelectorAll('[data-codex-subagent-cards]')
+        expect(groups).toHaveLength(2)
+        expect(groups[0]).toHaveTextContent('Earlier helper')
+        expect(groups[0]).not.toHaveTextContent('Current helper')
+        expect(groups[1]).toHaveTextContent('Current helper')
     })
 
     it('keeps native context compaction as an independent event block', () => {

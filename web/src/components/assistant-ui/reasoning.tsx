@@ -1,5 +1,5 @@
-import { useState, type FC, type PropsWithChildren } from 'react'
-import { useMessage } from '@assistant-ui/react'
+import { useState, type FC } from 'react'
+import { useMessage, type ReasoningGroupProps } from '@assistant-ui/react'
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
@@ -69,14 +69,15 @@ export const Reasoning: FC = () => {
     )
 }
 
-export const ReasoningGroup: FC<PropsWithChildren> = ({ children }) => {
+export const ReasoningGroup: FC<ReasoningGroupProps> = ({ children, startIndex, endIndex }) => {
     const [isOpen, setIsOpen] = useState(false)
     const { t } = useTranslation()
     const message = useMessage()
     const isStreaming = message.status?.type === 'running'
+        && endIndex === message.content.length - 1
         && message.content.length > 0
         && message.content[message.content.length - 1]?.type === 'reasoning'
-    const preview = getReasoningPreview(message.content)
+    const preview = getReasoningPreview(message.content.slice(startIndex, endIndex + 1))
     const label = isStreaming ? t('session.item.thinking') : t('misc.reasoning')
 
     return (

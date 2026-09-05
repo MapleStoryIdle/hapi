@@ -6,6 +6,7 @@ import {
     type VisibleChatBlock
 } from '@/chat/toolGroups'
 import { groupAssistantResultDetails } from '@/chat/assistantResultGrouping'
+import { toQuestionAnswerBlock } from '@/chat/questionAnswers'
 import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 
 /**
@@ -124,14 +125,15 @@ function canReuseTimelinePrefix(
  * They describe the same moving thought, so keep only the newest snapshot in
  * the active turn. Completed turns retain their history inside result details.
  */
-function compactActiveTurnReasoning(
-    blocks: VisibleChatBlock[],
+function compactActiveTurnReasoning<T extends VisibleChatBlock>(
+    blocks: T[],
     runActive: boolean | undefined
-): VisibleChatBlock[] {
+): T[] {
     if (!runActive) return blocks
 
     const latestBoundaryIndex = blocks.findLastIndex((block) => (
         block.kind === 'user-text' || block.kind === 'question-answer'
+        || (block.kind === 'tool-call' && toQuestionAnswerBlock(block) !== null)
     ))
     let latestReasoningIndex = -1
     let reasoningCount = 0
@@ -196,11 +198,11 @@ export function buildSessionDetailTimeline(
     options: SessionDetailTimelineOptions
 ): SessionDetailTimeline {
     const grouped = foldActiveTurnReasoningIntoNearestToolGroup(
-        compactActiveTurnReasoning(buildVisibleChatBlocks([...blocks], {
+        buildVisibleChatBlocks(compactActiveTurnReasoning([...blocks], options.runActive), {
             hasMoreMessages: options.hasMoreMessages,
             previousGroups: options.previousGroups ? [...options.previousGroups] : undefined,
             terminalToolDisplayMode: options.terminalToolDisplayMode
-        }), options.runActive),
+        }),
         options.runActive
     )
 

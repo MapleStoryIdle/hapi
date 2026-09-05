@@ -304,20 +304,35 @@ export function buildVisibleChatBlocks(
                 continue
             }
         }
-        if (block.kind !== 'tool-call' || !isEligibleForToolGrouping(block)) {
+        if (block.kind !== 'agent-reasoning' && (block.kind !== 'tool-call' || !isEligibleForToolGrouping(block))) {
             visibleBlocks.push(block)
             continue
         }
 
-        const tools: ToolCallBlock[] = [block]
+        // Reasoning is passive process detail even in completed history or a
+        // partial page without a final answer. Keep it in the adjacent tool
+        // run, without crossing commentary, user choices or pending controls.
+        const detailBlocks: ChatBlock[] = [block]
+        const tools: ToolCallBlock[] = block.kind === 'tool-call' ? [block] : []
         let cursor = index + 1
         while (cursor < displayBlocks.length) {
             const candidate = displayBlocks[cursor]
-            if (candidate.kind !== 'tool-call' || !isEligibleForToolGrouping(candidate)) {
+            if (candidate.kind !== 'agent-reasoning' && (
+                candidate.kind !== 'tool-call'
+                || !isEligibleForToolGrouping(candidate)
+                || toQuestionAnswerBlock(candidate)
+            )) {
                 break
             }
-            tools.push(candidate)
+            detailBlocks.push(candidate)
+            if (candidate.kind === 'tool-call') tools.push(candidate)
             cursor += 1
+        }
+
+        if (tools.length === 0) {
+            visibleBlocks.push(...detailBlocks)
+            index = cursor - 1
+            continue
         }
 
         const startsAtOldestVisibleBoundary = visibleBlocks.length === 0
@@ -335,6 +350,7 @@ export function buildVisibleChatBlocks(
             historyState: needsOlderHistory ? 'needs-older-history' : 'complete',
             needsOlderHistory,
             summary: summarizeToolGroup(tools),
+            ...(detailBlocks.length > tools.length ? { detailBlocks } : {}),
             expansionStateKeys: [id],
             showAgentIcon: true,
             forceCompact: true

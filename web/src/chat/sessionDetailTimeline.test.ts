@@ -58,6 +58,46 @@ function reasoningBlock(id: string, createdAt: number, text: string): AgentReaso
 }
 
 describe('buildSessionDetailTimeline', () => {
+    it('preserves earlier reasoning across an answered-question boundary while the next step runs', () => {
+        const question = toolBlock()
+        question.id = 'question'
+        question.tool = {
+            ...question.tool,
+            id: 'question',
+            name: 'request_user_input',
+            input: { questions: [{ id: 'direction', question: 'Continue?', options: [{ label: 'Yes' }] }] },
+            permission: { id: 'question', status: 'approved', answers: { direction: { answers: ['Yes'] } } }
+        }
+        const { visible } = buildSessionDetailTimeline([
+            userBlock(), reasoningBlock('earlier-reasoning', 2, 'Inspecting'), toolBlock(), question,
+            reasoningBlock('current-reasoning', 4, 'Verifying'), { ...toolBlock(), id: 'tool-2' }
+        ], { hasMoreMessages: false, runActive: true, aggregateActiveProcess: true })
+
+        expect(visible.map((block) => block.kind)).toEqual(['user-text', 'tool-group', 'question-answer', 'tool-group'])
+        expect(visible.flatMap((block) => block.kind === 'tool-group' ? block.detailBlocks ?? [] : [])
+            .filter((block) => block.kind === 'agent-reasoning').map((block) => block.id))
+            .toEqual(['earlier-reasoning', 'current-reasoning'])
+    })
+
+    it.each([false, true])('folds historical reasoning when active=%s and the page ends in a tool', (runActive) => {
+        const blocks = [
+            userBlock(), toolBlock(), reasoningBlock('reasoning-history', 3, 'Checking'),
+            agentBlock(), { ...toolBlock(), id: 'tool-history-end' },
+            { ...userBlock(), id: 'next-user', createdAt: 5 },
+            { ...toolBlock(), id: 'tool-current', createdAt: 6 },
+            reasoningBlock('reasoning-current', 7, 'Verifying')
+        ]
+        const { visible } = buildSessionDetailTimeline(blocks, {
+            hasMoreMessages: true, runActive, aggregateActiveProcess: true
+        })
+        expect(visible.some((block) => block.kind === 'agent-reasoning')).toBe(false)
+        expect(visible.some((block) => block.id === 'agent-1')).toBe(true)
+        const details = visible.flatMap((block) => block.kind === 'tool-group' ? block.detailBlocks ?? [] : [])
+        expect(details.filter((block) => block.kind === 'agent-reasoning').map((block) => block.id)).toEqual([
+            'reasoning-history', 'reasoning-current'
+        ])
+    })
+
     it('uses the same compact result grouping policy for either detail source', () => {
         const blocks = [userBlock(), toolBlock(), agentBlock()]
         const hapi = buildSessionDetailTimeline(blocks, { hasMoreMessages: false })

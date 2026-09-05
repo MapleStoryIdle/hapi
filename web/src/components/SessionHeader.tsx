@@ -247,13 +247,13 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
             <button
                 type="button"
                 onClick={toggleDetails}
-                className="pointer-events-auto touch-manipulation flex h-11 max-w-full items-center truncate rounded-full px-1 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                className="pointer-events-auto touch-manipulation flex h-11 w-full min-w-0 items-center rounded-full px-1 text-left text-[15px] font-medium leading-5 tracking-[-0.01em] text-[var(--app-fg)] transition-colors hover:text-[var(--app-link)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                 aria-haspopup="dialog"
                 aria-expanded={detailsOpen}
                 aria-controls={detailsOpen ? detailsId : undefined}
                 title={props.title}
             >
-                {props.title}
+                <span className="min-w-0 flex-1 truncate">{props.title}</span>
             </button>
 
             {detailsOpen ? (
@@ -498,7 +498,7 @@ export function FloatingSessionHeader(props: {
             <div className={SESSION_DETAIL_HEADER_ROW_CLASS} data-testid="session-header-row">
                 <div
                     data-testid="session-header-controls"
-                    className={`pointer-events-auto flex h-11 min-w-0 items-center gap-0 rounded-full border px-1 ${headerSurfaceClass} ${headerElevationClass}`}
+                    className={`pointer-events-auto flex h-11 min-w-0 items-center gap-0 rounded-full border pl-1 pr-5 ${headerSurfaceClass} ${headerElevationClass}`}
                 >
                     <SessionHeaderBackButton onBack={props.onBack} label={props.backLabel} />
                     <SessionTitleDetails

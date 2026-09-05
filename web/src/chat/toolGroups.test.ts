@@ -47,6 +47,59 @@ function makeTextBlock(id: string, text = 'note'): ChatBlock {
     }
 }
 
+function makeReasoningBlock(id: string): ChatBlock {
+    return { kind: 'agent-reasoning', id, localId: null, createdAt: 1, text: id }
+}
+
+describe('reasoning activity grouping', () => {
+    it('folds leading, interleaved and trailing reasoning without requiring a final answer', () => {
+        const blocks = [
+            makeReasoningBlock('reasoning-1'),
+            makeToolBlock('tool-1', 'Read'),
+            makeReasoningBlock('reasoning-2'),
+            makeToolBlock('tool-2', 'Bash'),
+            makeReasoningBlock('reasoning-3')
+        ]
+        const visible = buildVisibleChatBlocks(blocks, { hasMoreMessages: true })
+        expect(visible).toHaveLength(1)
+        expect(visible[0]).toMatchObject({
+            kind: 'tool-group',
+            tools: [{ id: 'tool-1' }, { id: 'tool-2' }],
+            detailBlocks: blocks,
+            needsOlderHistory: true
+        })
+    })
+
+    it('does not merge activity across commentary or a pending permission', () => {
+        const permission = makeToolBlock('permission', 'Bash')
+        permission.tool.permission = { id: 'permission', status: 'pending' }
+        const commentary = makeTextBlock('commentary')
+        const visible = buildVisibleChatBlocks([
+            makeToolBlock('tool-1', 'Read'), makeReasoningBlock('reasoning-1'),
+            commentary,
+            makeReasoningBlock('reasoning-2'), makeToolBlock('tool-2', 'Bash'),
+            permission,
+            makeReasoningBlock('reasoning-3')
+        ], { hasMoreMessages: false })
+        expect(visible.map((block) => block.kind)).toEqual([
+            'tool-group', 'agent-text', 'tool-group', 'tool-call', 'agent-reasoning'
+        ])
+        expect(visible[1]).toBe(commentary)
+        expect(visible[3]).toBe(permission)
+    })
+
+    it('retains group identity when earlier reasoning is loaded', () => {
+        const tool = makeToolBlock('tool-1', 'Read')
+        const previous = buildVisibleChatBlocks([tool], { hasMoreMessages: true })
+        const visible = buildVisibleChatBlocks([makeReasoningBlock('reasoning-1'), tool], {
+            hasMoreMessages: true,
+            previousGroups: previous.filter(isToolGroupBlock)
+        })
+        expect(visible).toHaveLength(1)
+        expect(visible[0]?.id).toBe(previous[0]?.id)
+    })
+})
+
 describe('getToolGroupActionKind', () => {
     it('classifies common execution tools', () => {
         expect(getToolGroupActionKind(makeToolBlock('read-1', 'Read'))).toBe('read')

@@ -73,13 +73,27 @@ describe('mobile layout contract', () => {
         expect(shell).toHaveClass('pointer-events-none', 'z-40', 'isolate')
 
         const controls = screen.getByTestId('session-header-controls')
-        expect(controls).toHaveClass('pointer-events-auto', 'h-11', 'gap-0', 'bg-[var(--app-bg)]')
+        expect(controls).toHaveClass('pointer-events-auto', 'h-11', 'gap-0', 'pl-1', 'pr-5', 'bg-[var(--app-bg)]')
         expect(screen.getByRole('button', { name: 'hapi' })).toHaveClass('px-1')
         expect(screen.getByTestId('session-header-row')).toHaveClass('h-14')
     })
 })
 
 describe('SessionHeader back action', () => {
+    it('truncates the title inside a shrinkable text element while keeping the full accessible name', () => {
+        const title = '这里有什么新功能是我之前 fork 出来就脱离主版本的，需要继续确认完整标题'
+        render(
+            <I18nProvider>
+                <SessionTitleDetails title={title} />
+            </I18nProvider>
+        )
+
+        const button = screen.getByRole('button', { name: title })
+        expect(button).toHaveClass('w-full', 'min-w-0')
+        expect(button).toHaveAttribute('title', title)
+        expect(button.querySelector('span')).toHaveClass('min-w-0', 'flex-1', 'truncate')
+    })
+
     it('uses the explicit back callback from the floating header control', () => {
         const queryClient = new QueryClient({
             defaultOptions: {

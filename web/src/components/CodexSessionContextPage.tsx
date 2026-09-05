@@ -506,9 +506,9 @@ function buildNativeCodexSubagentInput(subagent: CodexLocalSessionSubagent): Rec
 
 /**
  * Translate native child transcript snapshots to the exact `agent-run-*`
- * events consumed by the existing SHAPI CodexAgent reducer. Their original
- * timestamps keep cards as standalone entries in the parent timeline instead
- * of folding them into the parent tool group.
+ * events consumed by the existing SHAPI CodexAgent reducer. Start timestamps
+ * anchor each card to its parent conversation round; later trace/status events
+ * update that card without moving it across a user-message boundary.
  */
 function buildNativeCodexSubagentMessages(
     subagents: readonly CodexLocalSessionSubagent[]
@@ -601,16 +601,25 @@ function buildCodexBlocksFromDecryptedMessages(messages: readonly DecryptedMessa
     return reduceChatBlocks(normalizedMessages, null).blocks
 }
 
-/** Build a native transcript plus any unconfirmed direct-send bubbles. */
+/** Build the loaded native transcript window plus unconfirmed direct-send bubbles. */
 export function buildNativeCodexBlocks(
     messages: readonly CodexLocalSessionContextMessage[],
     echoes: readonly NativeDirectMessageEcho[] = [],
-    subagents: readonly CodexLocalSessionSubagent[] = []
+    subagents: readonly CodexLocalSessionSubagent[] = [],
+    options: { hasMoreMessages?: boolean } = {}
 ): ChatBlock[] {
+    // Snapshots include ALL children, but parent messages are paginated. Without
+    // their user-message boundaries, historical cards collapse into one giant
+    // orphan group above the loaded conversation. Reveal them with their parent
+    // history, using start time (never a late result/update or a local echo).
+    const firstLoadedAt = messages.reduce((earliest, message) => Math.min(earliest, message.createdAt), Infinity)
+    const visibleSubagents = options.hasMoreMessages
+        ? subagents.filter((subagent) => subagent.startedAt >= firstLoadedAt)
+        : subagents
     const orderedMessages = [
         ...buildReadOnlyCodexMessages(messages).map((message, index) => ({ message, source: 0, index })),
         ...buildNativeDirectEchoMessages(echoes).map((message, index) => ({ message, source: 1, index })),
-        ...buildNativeCodexSubagentMessages(subagents).map((message, index) => ({ message, source: 2, index }))
+        ...buildNativeCodexSubagentMessages(visibleSubagents).map((message, index) => ({ message, source: 2, index }))
     ].sort((left, right) => (
         left.message.createdAt - right.message.createdAt
         || left.source - right.source
@@ -704,8 +713,10 @@ function NativeCodexThread(props: {
         [props.messages]
     )
     const ungroupedBlocks = useMemo(
-        () => buildNativeCodexBlocks(props.messages, props.directMessageEchoes, props.subagents),
-        [props.directMessageEchoes, props.messages, props.subagents]
+        () => buildNativeCodexBlocks(props.messages, props.directMessageEchoes, props.subagents, {
+            hasMoreMessages: props.hasMoreMessages
+        }),
+        [props.directMessageEchoes, props.hasMoreMessages, props.messages, props.subagents]
     )
     const nativePlan = useMemo(
         () => getNativeCodexPlanStatus(props.plan, props.runState, props.activeTurnId),

@@ -16,7 +16,7 @@ const session: Session = {
     active: true,
     activeAt: 0,
     metadata: {
-        name: 'Header test',
+        name: new URLSearchParams(window.location.search).get('title') || 'Header test',
         path: '/workspace/hapi',
         host: 'localhost',
         flavor: 'claude'
