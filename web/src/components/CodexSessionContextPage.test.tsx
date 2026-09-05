@@ -1183,6 +1183,81 @@ describe('CodexSessionContextPage', () => {
         expect(notice.closest('.happy-thread-messages')).not.toBeNull()
     })
 
+    it('replays coalesced runner stages then waits for new output rather than an earlier turn reply', async () => {
+        const api = createApi()
+        const startedAt = Date.now()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            progress: {
+                phase: 'reasoning', startedAt, phaseStartedAt: startedAt, transport: 'app-server',
+                history: [
+                    { phase: 'launching', startedAt },
+                    { phase: 'matching', startedAt },
+                    { phase: 'connected', startedAt },
+                    { phase: 'reasoning', startedAt }
+                ]
+            }
+        })
+        renderPage({ api, realtimeAvailable: true, realtimeConnected: true })
+
+        await screen.findByText('Original response') // Earlier turns must not stop this send's status.
+        for (const phase of ['launching', 'matching', 'connected', 'reasoning']) {
+            expect(await screen.findByTestId(`codex-direct-send-phase-${phase}`, {}, { timeout: 4_000 })).toBeInTheDocument()
+        }
+        const waiting = screen.getByRole('status', { name: 'Reasoning' })
+        expect(waiting).toHaveTextContent(/Reasoning\.{1,3}\d+s/)
+
+        // A genuine new assistant message may arrive together with the latest progress.
+        const original = await api.getCodexSessionSnapshot('codex-thread-1', 'machine-1', {})
+        if (!original.success || !('messages' in original)) throw new Error('Expected a full snapshot')
+        ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+            ...original,
+            version: { runnerEpoch: 'runner-a', revision: 2 }, revision: 2,
+            messages: [...original.messages, {
+                id: 'codex-local:codex-thread-1:2', createdAt: startedAt + 1,
+                content: { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'The new reply' } } }
+            }]
+        })
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated', machineId: 'machine-1', codexSessionId: 'codex-thread-1',
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 2 }, revision: 2,
+                status: original.status,
+                timing: { cache: 'hit', durationMs: 0 }
+            }
+        })
+        await screen.findByText('The new reply')
+        await waitFor(() => expect(screen.queryByTestId('codex-direct-send-phase-reasoning')).toBeNull())
+    }, 15_000)
+
+    it('retains intermediate phases carried only by the send receipt', async () => {
+        const api = createApi()
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+            const startedAt = Date.now()
+            return {
+                success: true, status: 'processing', startedAt,
+                progress: {
+                    phase: 'reasoning', startedAt, phaseStartedAt: startedAt, transport: 'app-server',
+                    history: [
+                        { phase: 'launching', startedAt },
+                        { phase: 'matching', startedAt },
+                        { phase: 'connected', startedAt },
+                        { phase: 'reasoning', startedAt }
+                    ]
+                }
+            }
+        })
+        renderPage({ api }) // Follow-up snapshots intentionally omit progress.
+        await screen.findByText('Original response')
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep the received stages' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+        for (const phase of ['launching', 'matching', 'connected']) {
+            expect(await screen.findByTestId(`codex-direct-send-phase-${phase}`, {}, { timeout: 4_000 })).toBeInTheDocument()
+        }
+        expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1)
+    }, 12_000)
+
     it('keeps a transport-timed-out prompt pending while it verifies delivery', async () => {
         const api = createApi()
         ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockRejectedValue(

@@ -242,6 +242,8 @@ export type CodexLocalSessionDirectSendProgress = {
     startedAt: number
     /** Lets clients show the duration of the currently visible stage. */
     phaseStartedAt: number
+    /** Ordered, bounded stages for this hand-off; survives coalesced status updates. */
+    history?: Array<{ phase: CodexLocalSessionDirectSendPhase; startedAt: number }>
     transport: 'app-server' | 'exec-resume'
     /** Present after SHAPI switches from the primary bridge to its safe fallback. */
     attempt?: number

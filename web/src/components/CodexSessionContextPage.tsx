@@ -71,7 +71,7 @@ import { SessionDetailContent, SessionDetailSurface } from '@/components/Session
 import { SessionDetailStatusNotice } from '@/components/SessionDetailStatusNotice'
 import { NativeCodexFloatingStatusNotice } from '@/components/NativeCodexFloatingStatusNotice'
 import { SessionConversationLoading } from '@/components/SessionEntryLoading'
-import { NativeSendStatusMessage, type NativeSendConnectionPhase } from '@/components/NativeSendStatusMessage'
+import { NativeSendStatusMessage, type NativeSendConnectionPhase, type NativeSendStatusEntry } from '@/components/NativeSendStatusMessage'
 import {
     SessionDetailBottomDock,
     SessionDetailBottomDockAccessory,
@@ -698,6 +698,8 @@ function NativeCodexThread(props: {
     forceScrollToken: number
     connectionPhase: NativeSendConnectionPhase | null
     connectionPhaseStartedAt: number | null
+    connectionHistory: readonly NativeSendStatusEntry[]
+    connectionStartedAt?: number
 }) {
     const { t } = useTranslation()
     const composerOverlayRef = useRef<HTMLDivElement | null>(null)
@@ -850,6 +852,10 @@ function NativeCodexThread(props: {
                             phase={props.connectionPhase}
                             label={props.connectionPhase ? t(`recentCodex.direct.phase.${props.connectionPhase}.title`) : ''}
                             startedAt={props.connectionPhaseStartedAt}
+                            history={props.connectionHistory}
+                            historyStartedAt={props.connectionStartedAt}
+                            waitingForOutput={props.connectionPhase === 'connected'}
+                            waitingStartedAt={props.connectionPhaseStartedAt ?? props.connectionStartedAt}
                         />
                     }
                 />
@@ -1064,6 +1070,10 @@ export function CodexSessionContextPage(props: {
             : []
     ))
     const [nativeForceScrollToken, setNativeForceScrollToken] = useState(0)
+    const [recordedConnectionProgress, setRecordedConnectionProgress] = useState<{
+        scopeKey: string
+        progress: CodexLocalSessionDirectSendProgress
+    } | null>(null)
     const [directSendError, setDirectSendError] = useState<ComposerSendError | null>(null)
     const [dismissedRunnerError, setDismissedRunnerError] = useState<string | null>(null)
     const [connectionNow, setConnectionNow] = useState(() => Date.now())
@@ -1098,7 +1108,8 @@ export function CodexSessionContextPage(props: {
 
     const updateNativeDirectMessageEchoes = useCallback((
         scope: NativeCodexDirectMessageScope,
-        updater: (messages: NativeDirectMessageEcho[]) => readonly NativeDirectMessageEcho[]
+        updater: (messages: NativeDirectMessageEcho[]) => readonly NativeDirectMessageEcho[],
+        progress?: CodexLocalSessionDirectSendProgress
     ): NativeDirectMessageEcho[] => {
         if (!scope.machineId) return []
         const next = updateNativeCodexDirectMessageEchoes(scope, updater)
@@ -1109,6 +1120,18 @@ export function CodexSessionContextPage(props: {
         ) {
             setNativeDirectMessageEchoScopeKey(scopeKey)
             setNativeDirectMessageEchoes(next)
+            // Keep playback evidence from both POST receipts and status pushes,
+            // separate from durable message receipts and the live run state.
+            if (progress?.history?.length) {
+                setRecordedConnectionProgress((previous) => {
+                    if (previous?.scopeKey === scopeKey && (
+                        previous.progress.startedAt > progress.startedAt
+                        || (previous.progress.startedAt === progress.startedAt
+                            && (previous.progress.history?.length ?? 0) >= (progress.history?.length ?? 0))
+                    )) return previous
+                    return { scopeKey, progress }
+                })
+            }
         }
         return next
     }, [])
@@ -1233,7 +1256,7 @@ export function CodexSessionContextPage(props: {
                     return echo
                 })
                 return changed ? next : current
-            })
+            }, response.progress)
         }
     }, [nativeDirectMessageScope, statusQuery.data, updateNativeDirectMessageEchoes])
 
@@ -1680,22 +1703,41 @@ export function CodexSessionContextPage(props: {
         && (nativeStalledSince !== null || nativeRecoveryCandidate.uncertain)
     const canRecoverNativeDelivery = nativeRecoveryCandidate.candidate !== null
         && (directStatus === 'idle' || nativeStalledSince !== null)
+    const deliveryProgress = statusQuery.data?.success === true ? statusQuery.data.progress : null
     const directSendPhase = getNativeCodexDirectSendPhase({
         pendingDirectSendCount,
         queuedMessages: reconciledNativeQueuedMessages,
         directMessageEchoes: visibleNativeDirectMessageEchoes,
         runState: directStatus,
         progress: statusQuery.data?.success === true ? statusQuery.data.progress ?? null : null,
-        hasAgentReply: hasNativeCodexAgentReply(messages)
+        hasAgentReply: deliveryProgress
+            ? hasNativeCodexOutputSince(messages, deliveryProgress.startedAt)
+            : hasNativeCodexAgentReply(messages)
     })
     const directSendPhaseStartedAt = getNativeCodexDirectSendPhaseStartedAt({
         phase: directSendPhase,
         progress: statusQuery.data?.success === true ? statusQuery.data.progress ?? null : null,
         directMessageEchoes: visibleNativeDirectMessageEchoes
     })
-    const deliveryProgress = statusQuery.data?.success === true ? statusQuery.data.progress : null
-    const connectionStartedAt = deliveryProgress?.startedAt
+    const connectionStartedAt = (directSendPhase === 'launching' ? directSendPhaseStartedAt ?? undefined : undefined)
+        ?? deliveryProgress?.startedAt
         ?? visibleNativeDirectMessageEchoes.find((echo) => echo.status !== 'failed' && echo.deliveryPhase !== 'queued')?.createdAt
+    const recordedProgress = recordedConnectionProgress?.scopeKey === nativeDirectMessageScopeKey
+        ? recordedConnectionProgress.progress : null
+    const latestRecordedProgress = deliveryProgress?.history?.length && (!recordedProgress
+        || deliveryProgress.startedAt > recordedProgress.startedAt
+        || (deliveryProgress.startedAt === recordedProgress.startedAt
+            && deliveryProgress.history.length >= (recordedProgress.history?.length ?? 0)))
+        ? deliveryProgress : recordedProgress
+    // A new local send must not replay or be hidden by the previous send's history.
+    const playbackProgress = directSendPhase === 'launching' && directSendPhaseStartedAt !== null
+        && latestRecordedProgress && directSendPhaseStartedAt > latestRecordedProgress.startedAt
+        ? null : latestRecordedProgress
+    // Do not derive playback solely from the latest UI phase: a snapshot can
+    // contain all connection transitions and the first real output together.
+    const connectionHistory = useMemo(() => (playbackProgress?.history ?? [])
+        .filter((entry): entry is { phase: NativeSendConnectionPhase; startedAt: number } => entry.phase !== 'reasoning')
+        .map((entry) => ({ ...entry, label: t(`recentCodex.direct.phase.${entry.phase}.title`) })), [playbackProgress?.history, t])
     const hasCurrentOutput = connectionStartedAt !== undefined && hasNativeCodexOutputSince(messages, connectionStartedAt)
     const connectionPhase: NativeSendConnectionPhase | null = isForking || nativeNeedsManualRecovery || nativeWaitingForUserInput
         || directSendPhase === 'queued' || hasCurrentOutput
@@ -1854,7 +1896,7 @@ export function CodexSessionContextPage(props: {
                             : response.progress?.phaseStartedAt ?? Date.now(),
                         queueId: response.queueId ?? null
                     }
-            )))
+            )), response.progress)
             if (pageScopeRef.current !== requestScope) {
                 return
             }
@@ -2067,7 +2109,7 @@ export function CodexSessionContextPage(props: {
                                 : response.progress?.phaseStartedAt ?? Date.now(),
                             queueId: response.queueId ?? null
                         }
-                )))
+                )), response.progress)
                 if (pageScopeRef.current !== requestScope) {
                     return
                 }
@@ -2199,7 +2241,7 @@ export function CodexSessionContextPage(props: {
                                     : response.progress?.phaseStartedAt ?? Date.now(),
                                 queueId: response.queueId ?? null
                             }
-                    )))
+                    )), response.progress)
                     if (pageScopeRef.current !== requestScope || !nativeDirectMessagePageMountedRef.current) {
                         return
                     }
@@ -2439,6 +2481,8 @@ export function CodexSessionContextPage(props: {
                             queuedMessages={reconciledNativeQueuedMessages}
                             connectionPhase={connectionPhase}
                             connectionPhaseStartedAt={directSendPhaseStartedAt}
+                            connectionHistory={connectionHistory}
+                            connectionStartedAt={playbackProgress?.startedAt ?? connectionStartedAt}
                             composerDisabled={composerDisabled}
                             composerNotice={composerNotice}
                             sendError={composerSendError}

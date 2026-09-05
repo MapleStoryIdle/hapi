@@ -2169,6 +2169,10 @@ describe('NativeCodexSessionDirectSender', () => {
                     phase: 'matching',
                     startedAt: 123,
                     phaseStartedAt: 123,
+                    history: [
+                        { phase: 'launching', startedAt: 123 },
+                        { phase: 'matching', startedAt: 123 }
+                    ],
                     transport: 'app-server'
                 }
             })
@@ -2193,7 +2197,14 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
                 status: 'processing',
-                progress: { phase: 'connected', transport: 'app-server' }
+                progress: {
+                    phase: 'connected', transport: 'app-server',
+                    history: [
+                        { phase: 'launching', startedAt: 123 },
+                        { phase: 'matching', startedAt: 123 },
+                        { phase: 'connected', startedAt: 123 }
+                    ]
+                }
             })
 
             // The app-server can announce the turn a few milliseconds before
@@ -2273,7 +2284,12 @@ describe('NativeCodexSessionDirectSender', () => {
                 progress: {
                     phase: 'retrying',
                     transport: 'exec-resume',
-                    attempt: 2
+                    attempt: 2,
+                    history: [
+                        { phase: 'launching', startedAt: 123 },
+                        { phase: 'matching', startedAt: 123 },
+                        { phase: 'retrying', startedAt: 123 }
+                    ]
                 }
             })
             expect(client.disconnectCalls).toBe(1)
@@ -2508,6 +2524,7 @@ describe('NativeCodexSessionDirectSender', () => {
                     phase: 'launching',
                     startedAt: 123,
                     phaseStartedAt: 123,
+                    history: [{ phase: 'launching', startedAt: 123 }],
                     transport: 'exec-resume'
                 }
             })
@@ -2523,6 +2540,7 @@ describe('NativeCodexSessionDirectSender', () => {
                     phase: 'launching',
                     startedAt: 123,
                     phaseStartedAt: 123,
+                    history: [{ phase: 'launching', startedAt: 123 }],
                     transport: 'exec-resume'
                 },
                 queuedMessages: []
@@ -2561,6 +2579,7 @@ describe('NativeCodexSessionDirectSender', () => {
                     phase: 'launching',
                     startedAt: 789,
                     phaseStartedAt: 789,
+                    history: [{ phase: 'launching', startedAt: 789 }],
                     transport: 'exec-resume'
                 }
             })
@@ -2572,6 +2591,7 @@ describe('NativeCodexSessionDirectSender', () => {
                     phase: 'launching',
                     startedAt: 789,
                     phaseStartedAt: 789,
+                    history: [{ phase: 'launching', startedAt: 789 }],
                     transport: 'exec-resume'
                 },
                 queuedMessages: []

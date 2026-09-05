@@ -360,6 +360,8 @@ describe('markdown <A> component — file path links', () => {
         const link = screen.getByRole('link')
         expect(link).toHaveClass('aui-md-file-link')
         expect(link).toHaveClass('text-[var(--app-markdown-link)]')
+        expect(link).toHaveClass('bg-transparent', '[&_code]:bg-transparent')
+        expect(link).not.toHaveClass('bg-[var(--app-inline-code-bg)]', 'hover:bg-[var(--app-code-copy-hover-bg)]')
         expect(link).toHaveAttribute('title', 'docs/guide.md:42')
         expect(link.querySelector('[data-markdown-link-icon="file"]')).not.toBeNull()
 
@@ -380,7 +382,7 @@ describe('markdown <A> component — file path links', () => {
 
         renderAInChat({ href, children: 'web/src/router.tsx:42:7' })
 
-        // File path links should look like inline code chips, not generic web links.
+        // File paths retain compact monospace styling without a filled background.
         const link = screen.getByRole('link')
         expect(link).toHaveClass('aui-md-file-link', 'truncate', 'font-mono', 'no-underline')
         expect(link).toHaveAttribute('title', 'web/src/router.tsx:42:7')
@@ -691,6 +693,8 @@ describe('markdown <A> component — file path links', () => {
         const link = screen.getByRole('link')
         const target = new URL(link.getAttribute('href')!, 'http://127.0.0.1')
         expect(target.pathname).toBe('/sessions/codex/codex-thread-1/file')
+        expect(link).toHaveClass('bg-transparent', '[&_code]:bg-transparent')
+        expect(link).not.toHaveClass('bg-[var(--app-inline-code-bg)]', 'hover:bg-[var(--app-code-copy-hover-bg)]')
         expect(target.searchParams.get('machineId')).toBe('machine-1')
         expect(target.searchParams.get('path')).toBe(encodeBase64('web/src/router.tsx'))
         expect(target.searchParams.get('line')).toBe('42')

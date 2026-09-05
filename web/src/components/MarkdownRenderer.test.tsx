@@ -125,6 +125,22 @@ describe('MarkdownRenderer', () => {
         expect(link.querySelector('[data-markdown-link-icon="external"]')).not.toBeNull()
     })
 
+    it('keeps clickable file links transparent without changing ordinary code', () => {
+        const view = renderInChat('[`Local file`](docs/README.md) and [`External file`](https://example.com/README.md) alongside `plain code`')
+
+        for (const name of ['Local file', 'External file']) {
+            const link = screen.getByRole('link', { name })
+            expect(link).toHaveClass('bg-transparent', '[&_code]:bg-transparent')
+            expect(link).not.toHaveClass('bg-[var(--app-inline-code-bg)]', 'hover:bg-[var(--app-code-copy-hover-bg)]')
+            expect(link.querySelector('code')).not.toBeNull()
+        }
+
+        const code = screen.getByText('plain code')
+        expect(code).toHaveClass('bg-[var(--app-inline-code-bg)]')
+        expect(code.closest('a')).toBeNull()
+        view.unmount()
+    })
+
     it('keeps remark plugins stable when the chat provider value is recreated', () => {
         const onPlugins = vi.fn()
         const view = render(chatProviderProbe(onPlugins))

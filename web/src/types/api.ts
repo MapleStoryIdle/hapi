@@ -289,6 +289,7 @@ export type CodexLocalSessionDirectSendProgress = {
     phase: CodexLocalSessionDirectSendPhase
     startedAt: number
     phaseStartedAt: number
+    history?: Array<{ phase: CodexLocalSessionDirectSendPhase; startedAt: number }>
     transport: 'app-server' | 'exec-resume'
     attempt?: number
 }

@@ -433,6 +433,10 @@ export const CodexLocalSessionDirectSendProgressSchema = z.object({
     phase: z.enum(['launching', 'matching', 'connected', 'retrying', 'reasoning']),
     startedAt: z.number().finite(),
     phaseStartedAt: z.number().finite(),
+    history: z.array(z.object({
+        phase: z.enum(['launching', 'matching', 'connected', 'retrying', 'reasoning']),
+        startedAt: z.number().finite()
+    }).strict()).max(32).optional(),
     transport: z.enum(['app-server', 'exec-resume']),
     attempt: z.number().int().positive().optional()
 }).strict()

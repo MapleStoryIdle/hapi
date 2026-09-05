@@ -1877,6 +1877,7 @@ export class NativeCodexSessionDirectSender {
                 phase: 'launching',
                 startedAt,
                 phaseStartedAt: startedAt,
+                history: [{ phase: 'launching', startedAt }],
                 transport: 'app-server'
             },
             initialModifiedAt,
@@ -1904,7 +1905,7 @@ export class NativeCodexSessionDirectSender {
             this.activeSends.delete(sessionId)
             this.disposeBridge(active)
             this.persistOutbox()
-            return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, startedAt, 2, deliveryPolicy, reviewGuard)
+            return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, startedAt, 2, deliveryPolicy, reviewGuard, active.progress.history)
         }
         this.scheduleBridgeLifecycleCheck(sessionId, active)
         this.notifyStateChange(sessionId)
@@ -1921,7 +1922,8 @@ export class NativeCodexSessionDirectSender {
         startedAt = this.now(),
         attempt = 1,
         deliveryPolicy: NativeCodexDeliveryPolicy = 'default',
-        reviewGuard?: NativeKanbanFeedbackReviewGuard
+        reviewGuard?: NativeKanbanFeedbackReviewGuard,
+        previousHistory: CodexLocalSessionDirectSendProgress['history'] = []
     ): SendCodexLocalSessionMessageRpcResponse {
         const guardError = this.verifyReviewGuard(sessionId, deliveryPolicy, reviewGuard)
         if (guardError) {
@@ -1980,6 +1982,8 @@ export class NativeCodexSessionDirectSender {
             return { success: false, code: 'launch_failed', error: failure }
         }
 
+        const phase: CodexLocalSessionDirectSendProgress['phase'] = attempt > 1 ? 'retrying' : 'launching'
+        const phaseStartedAt = this.now()
         const active: ActiveExecSend = {
             kind: 'exec-resume',
             startedAt,
@@ -1990,9 +1994,10 @@ export class NativeCodexSessionDirectSender {
             deliveryPolicy,
             ...(reviewGuard ? { reviewGuard } : {}),
             progress: {
-                phase: attempt > 1 ? 'retrying' : 'launching',
+                phase,
                 startedAt,
-                phaseStartedAt: startedAt,
+                phaseStartedAt,
+                history: [...previousHistory, { phase, startedAt: phaseStartedAt }].slice(-32),
                 transport: 'exec-resume',
                 ...(attempt > 1 ? { attempt } : {})
             },
@@ -2189,7 +2194,8 @@ export class NativeCodexSessionDirectSender {
                 active.startedAt,
                 2,
                 active.deliveryPolicy,
-                active.reviewGuard
+                active.reviewGuard,
+                active.progress.history
             )
             if (result.success) return
             this.recordBridgeFallbackFailure(sessionId, active, result)
@@ -2232,7 +2238,8 @@ export class NativeCodexSessionDirectSender {
                 active.startedAt,
                 2,
                 active.deliveryPolicy,
-                active.reviewGuard
+                active.reviewGuard,
+                active.progress.history
             )
             if (!result.success) {
                 this.recordBridgeFallbackFailure(sessionId, active, result)
@@ -2436,10 +2443,12 @@ export class NativeCodexSessionDirectSender {
         phase: CodexLocalSessionDirectSendProgress['phase']
     ): void {
         if (!this.isCurrentActive(sessionId, active) || active.progress.phase === phase) return
+        const phaseStartedAt = this.now()
         active.progress = {
             ...active.progress,
             phase,
-            phaseStartedAt: this.now()
+            phaseStartedAt,
+            history: [...(active.progress.history ?? []), { phase, startedAt: phaseStartedAt }].slice(-32)
         }
         this.notifyStateChange(sessionId)
     }
@@ -2450,10 +2459,12 @@ export class NativeCodexSessionDirectSender {
         phase: CodexLocalSessionDirectSendProgress['phase']
     ): void {
         if (!this.isCurrentActive(sessionId, active) || active.progress.phase === phase) return
+        const phaseStartedAt = this.now()
         active.progress = {
             ...active.progress,
             phase,
-            phaseStartedAt: this.now()
+            phaseStartedAt,
+            history: [...(active.progress.history ?? []), { phase, startedAt: phaseStartedAt }].slice(-32)
         }
         this.notifyStateChange(sessionId)
     }
