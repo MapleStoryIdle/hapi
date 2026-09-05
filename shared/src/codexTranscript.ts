@@ -11,6 +11,7 @@ import type { CodexLocalSessionSnapshotVersion } from './codexSnapshot'
 export type { CodexLocalSessionSnapshotVersion } from './codexSnapshot'
 import { parseAutomationHeartbeatMessageContent } from './messages'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
+import { isHttpForbiddenError } from './utils'
 import type { SlashCommand } from './apiTypes'
 
 export type CodexLocalSessionSummary = {
@@ -1564,6 +1565,20 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
         }
         if (eventType === 'context_compacted') {
             return buildImportedAgentMessage({ type: 'context_compacted', id: randomUUID() }, createdAt)
+        }
+        // Native Codex can end a failed turn with task_complete + error.
+        if (eventType === 'task_complete' || eventType === 'task_failed') {
+            const error = asString(payload.error) ?? asString(asRecord(payload.error)?.message)
+            if (isHttpForbiddenError(error)) {
+                return buildImportedAgentMessage({
+                    type: 'task-status',
+                    status: 'failed',
+                    source: 'codex',
+                    code: 'http_forbidden',
+                    message: 'HTTP 403 Forbidden',
+                    recoverable: false
+                }, createdAt)
+            }
         }
         return null
     }

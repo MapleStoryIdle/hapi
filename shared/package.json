@@ -15,6 +15,7 @@
         "./codexTranscript": "./src/codexTranscript.ts",
         "./modes": "./src/modes.ts",
         "./rpcMethods": "./src/rpcMethods.ts",
+        "./localServices": "./src/localServices.ts",
         "./schemas": "./src/schemas.ts",
         "./sessionExport": "./src/sessionExport.ts",
         "./sessionCitation": "./src/sessionCitation.ts",

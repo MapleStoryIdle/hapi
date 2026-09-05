@@ -21,7 +21,8 @@
 //
 // Trailing punctuation (.,!?;:) and closing brackets/parens are stripped
 // by a post-match trim step so "See obsidian://x." doesn't include the ".".
-const NON_HTTPS_URI_RE = /\b(?!https?:\/\/)([a-zA-Z][a-zA-Z0-9+\-.]*):\/\/[^\s]*/g
+// GFM leaves bracketed IPv6 literals as plain text; include only local ::1 here.
+const NON_HTTPS_URI_RE = /\b(?:https?:\/\/\[::1\](?=[:/?#\s]|$)[^\s]*|(?!https?:\/\/)([a-zA-Z][a-zA-Z0-9+\-.]*):\/\/[^\s]*)/gi
 
 // Characters that may be stripped from the end of a matched URI.
 // `)` and `]` are only stripped when the URL body has no unmatched opening

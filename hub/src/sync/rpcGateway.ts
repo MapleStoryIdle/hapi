@@ -2,6 +2,7 @@ import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/
 import { randomUUID } from 'node:crypto'
 import { MAX_UPLOAD_CHUNK_BYTES } from '@hapi/protocol'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+import { LOCAL_SERVICE_RPC, type LocalServiceTunnelRequest, type LocalServiceTunnelResponse } from '@hapi/protocol/localServices'
 import type {
     CodexLocalSessionComposerCapabilitiesRpcResponse,
     ArchiveCodexLocalSessionRpcResponse,
@@ -680,6 +681,10 @@ export class RpcGateway {
 
     async checkLocalPreview(machineId: string, request: LocalPreviewProbeRequest): Promise<RpcLocalPreviewProbeResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.LocalPreviewCheck, request) as RpcLocalPreviewProbeResponse
+    }
+
+    async openLocalServiceTunnel(machineId: string, request: LocalServiceTunnelRequest): Promise<LocalServiceTunnelResponse> {
+        return await this.machineRpc(machineId, LOCAL_SERVICE_RPC, request) as LocalServiceTunnelResponse
     }
 
     async proxyLocalPreviewRequest(machineId: string, request: LocalPreviewHttpRequest): Promise<RpcLocalPreviewHttpResponse> {

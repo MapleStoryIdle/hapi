@@ -545,7 +545,8 @@ export function normalizeAgentRecord(
         if (!data || typeof data.type !== 'string') return null
 
         if (
-            data.type === 'agent-run-start'
+            data.type === 'task-status'
+            || data.type === 'agent-run-start'
             || data.type === 'agent-run-update'
             || data.type === 'agent-run-trace'
         ) {

@@ -10,7 +10,7 @@ import type { ChatBlock, CliOutputBlock, CodexReview, UsageData } from '@/chat/t
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
 import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
-import { formatQuestionAnswerText, type QuestionAnswerPresentation } from '@/chat/questionAnswers'
+import { formatQuestionAnswerText, parseUserMessageQuestionReply, type QuestionAnswerPresentation } from '@/chat/questionAnswers'
 
 /**
  * Aggregated metadata for a multi-turn response group, surfaced on the
@@ -329,19 +329,21 @@ export function assignThreadMessageIds(
 
 export function toThreadMessageLike(block: VisibleChatBlock, threadMessageId: string): ThreadMessageLike {
     if (block.kind === 'user-text') {
+        const questionAnswer = parseUserMessageQuestionReply(block.text)
         return {
             role: 'user',
             id: threadMessageId,
             createdAt: new Date(block.createdAt),
-            content: [{ type: 'text', text: block.text }],
+            content: [{ type: 'text', text: questionAnswer ? formatQuestionAnswerText(questionAnswer) : block.text }],
             metadata: {
                 custom: {
                     kind: 'user',
                     status: block.status,
                     localId: block.localId,
-                    originalText: block.originalText,
+                    originalText: block.originalText ?? (questionAnswer ? block.text : undefined),
                     attachments: block.attachments,
-                    invokedAt: block.invokedAt
+                    invokedAt: block.invokedAt,
+                    questionAnswer: questionAnswer ?? undefined
                 } satisfies HappyChatMessageMetadata
             }
         }

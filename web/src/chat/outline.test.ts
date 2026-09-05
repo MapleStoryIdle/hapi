@@ -28,6 +28,19 @@ function eventBlock(id: string, event: AgentEvent, createdAt: number): ChatBlock
 }
 
 describe('conversation outline', () => {
+    it('uses readable questions and answers while keeping the native message anchor', () => {
+        const text = `<send_user_message_question_reply>${JSON.stringify([{
+            questionItemId: 'question-1', question: '选择哪种方案？', answer: '轻量方案'
+        }])}</send_user_message_question_reply>`
+        expect(buildConversationOutline([userBlock('reply', text, 1_000)])).toEqual([{
+            id: 'outline:user-text:reply',
+            targetMessageId: 'user-text:reply',
+            kind: 'user',
+            label: '选择哪种方案？ • 轻量方案',
+            createdAt: 1_000
+        }])
+    })
+
     it('creates outline items from user messages', () => {
         expect(buildConversationOutline([
             userBlock('m1', 'Implement the outline panel', 1000),

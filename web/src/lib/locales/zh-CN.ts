@@ -1,4 +1,13 @@
 export default {
+  'localService.title': '本地服务',
+  'localService.opening': '正在连接你的电脑…',
+  'localService.notConfigured': '此 Hub 尚未配置本地服务访问。需要管理员先配置预览域名和隧道。',
+  'localService.offline': '会话所在电脑不在线，请启动对应 Runner 后重试。',
+  'localService.invalid': '这不是支持的本地 HTTP 或 HTTPS 链接。',
+  'localService.busy': '同时打开的本地服务较多，请稍后重试。',
+  'localService.failed': '暂时无法打开服务。请确认 Runner 和本地服务正在运行，然后重试。',
+  'localService.retry': '重新连接',
+  'localService.back': '返回会话列表',
   // Loading states
   'loading': '加载中…',
   'authorizing': '认证中…',
@@ -1027,6 +1036,8 @@ export default {
   'taskStatus.contextWindow.title': '上下文过长，任务失败',
   'taskStatus.contextWindow.body': '当前会话上下文已超过 Codex 可处理范围，需要压缩或开启新会话。',
   'taskStatus.failed.title': 'Codex 任务失败',
+  'taskStatus.forbidden.title': '请求被拒绝（HTTP 403）',
+  'taskStatus.forbidden.body': '模型服务拒绝了本次请求，任务已停止。请检查登录状态或网络后重试。',
   'taskStatus.failed.body': '任务已停止，请查看最近的错误原因后重试。',
 
   // Install prompt

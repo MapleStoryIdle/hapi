@@ -30,6 +30,7 @@ import { useOptionalHappyChatContext, type HappyChatFileLinkTarget } from '@/com
 import { decodeFilePathLinkHref, isProjectFilePathTarget, isWindowsDriveRootPath, parseAbsoluteFilePathHref, parseProjectFilePathHref, remarkFilePathLinks, type FilePathLinkTarget } from '@/lib/remark-file-path-links'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
 import { useTranslation } from '@/lib/use-translation'
+import { useLocalServiceLink } from '@/lib/local-service-links'
 
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
 
@@ -637,6 +638,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
  */
 function A(props: ComponentPropsWithoutRef<'a'>) {
     const chat = useOptionalHappyChatContext()
+    const localServiceLink = useLocalServiceLink(props.href)
     // useContext must be called unconditionally before any early return so that
     // the Rules of Hooks are satisfied regardless of whether `filePath` is set.
     // isAllowed comes exclusively from the shared context. Every call site
@@ -721,6 +723,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
 
         if (classification === 'iana') {
             onClick?.(e)
+            localServiceLink?.onClick(e)
             return
         }
 
@@ -737,10 +740,12 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     return (
         <a
             {...rest}
-            href={domHref}
-            rel={rel}
+            href={localServiceLink?.href ?? domHref}
+            target={localServiceLink ? '_blank' : props.target}
+            rel={localServiceLink ? 'noopener noreferrer' : rel}
             onClick={handleClick}
             data-hapi-external-link={isExternalLink ? 'true' : undefined}
+            data-local-service-link={localServiceLink ? 'true' : undefined}
             aria-disabled={classification === 'deny' || !href ? true : undefined}
             className={cn(MESSAGE_LINK_CLASS, props.className)}
         >

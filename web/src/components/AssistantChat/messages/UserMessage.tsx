@@ -98,6 +98,12 @@ export function HappyUserMessage() {
                 onClick={toggleDetailsVisible}
             >
                 <QuestionAnswerBubble answer={questionAnswer} />
+                {attachments?.length ? <MessageAttachments attachments={attachments} /> : null}
+                {showStatus ? (
+                    <div className="mt-1 flex justify-end">
+                        <MessageStatusIndicator status={status} onRetry={onRetry} />
+                    </div>
+                ) : null}
                 <MessageDetailsFooter
                     visible={detailsVisible}
                     align="right"

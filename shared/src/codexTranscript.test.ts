@@ -43,6 +43,36 @@ describe('getCodexSessionDisplayTitle', () => {
 })
 
 describe('getLocalCodexSessionData', () => {
+    it.each(['task_complete', 'task_failed'])('imports a %s HTTP 403 without its HTML response', (type) => {
+        const accumulator = createCodexTranscriptImportAccumulator()
+        appendCodexTranscriptImportLines(accumulator, [JSON.stringify({
+            type: 'event_msg',
+            timestamp: '2026-09-05T09:52:05.089Z',
+            payload: { type, error: { message: 'unexpected status 403 Forbidden: <html>private server response</html>' } }
+        })])
+        expect(accumulator.messages).toHaveLength(1)
+        expect(accumulator.messages[0]).toMatchObject({
+            createdAt: Date.parse('2026-09-05T09:52:05.089Z'),
+            content: { data: {
+                type: 'task-status', status: 'failed', code: 'http_forbidden',
+                source: 'codex', message: 'HTTP 403 Forbidden', recoverable: false
+            } }
+        })
+        expect(JSON.stringify(accumulator.messages)).not.toContain('private server response')
+    })
+
+    it('imports string 403 errors but not successful or interrupted turns', () => {
+        const accumulator = createCodexTranscriptImportAccumulator()
+        appendCodexTranscriptImportLines(accumulator, [
+            { type: 'task_complete' },
+            { type: 'task_complete', error: null },
+            { type: 'turn_aborted', reason: 'interrupted' },
+            { type: 'task_failed', error: 'HTTP 403 Forbidden' }
+        ].map((payload) => JSON.stringify({ type: 'event_msg', payload })))
+        expect(accumulator.messages).toHaveLength(1)
+        expect(accumulator.messages[0].content).toMatchObject({ data: { code: 'http_forbidden' } })
+    })
+
     it('bounds large child traces while retaining its model and latest terminal', () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-bounded-child-'))
         const parentId = '10101010-1010-4010-8010-101010101010'

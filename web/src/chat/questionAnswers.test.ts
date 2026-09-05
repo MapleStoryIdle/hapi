@@ -1,6 +1,71 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolCallBlock } from '@/chat/types'
-import { formatQuestionAnswerText, getQuestionAnswerPresentation, toQuestionAnswerBlock } from '@/chat/questionAnswers'
+import { formatQuestionAnswerText, getQuestionAnswerPresentation, parseUserMessageQuestionReply, toQuestionAnswerBlock } from '@/chat/questionAnswers'
+
+describe('native desktop question replies', () => {
+    const reply = {
+        questionItemId: '["request_user_input_async","call-example",0]',
+        question: '选择哪种方案？',
+        answer: '轻量方案'
+    }
+    const wrap = (payload: unknown) => `<send_user_message_question_reply>\n${JSON.stringify(payload)}\n</send_user_message_question_reply>`
+
+    it('presents every question and answer in order, retaining their native identities', () => {
+        const second = { questionItemId: 'question-2', question: '补充说明？', answer: 'Keep **Markdown**\nand line breaks.' }
+        const presentation = parseUserMessageQuestionReply(` \n${wrap([reply, second])}\n `)
+
+        expect(presentation).toEqual({
+            items: [reply, second].map((item) => ({
+                questionItemId: item.questionItemId,
+                question: item.question,
+                answers: [item.answer]
+            }))
+        })
+        expect(formatQuestionAnswerText(presentation!)).toBe('选择哪种方案？\n• 轻量方案\n\n补充说明？\n• Keep **Markdown**\nand line breaks.')
+    })
+
+    it('collapses only identical replies with the same question identity within a message', () => {
+        const otherQuestion = { ...reply, questionItemId: 'question-2' }
+        expect(parseUserMessageQuestionReply(wrap([reply, reply, otherQuestion]))?.items).toHaveLength(2)
+    })
+
+    it('falls back to the whole original message when duplicate identities conflict', () => {
+        expect(parseUserMessageQuestionReply(wrap([reply, { ...reply, answer: '另一个答案' }]))).toBeNull()
+        expect(parseUserMessageQuestionReply(wrap([reply, { ...reply, question: '另一个问题？' }]))).toBeNull()
+    })
+
+    it.each([
+        null, {}, [], [null], [reply, null],
+        [{ question: reply.question, answer: reply.answer }],
+        [{ ...reply, questionItemId: ' ' }],
+        [{ ...reply, question: '' }],
+        [{ ...reply, answer: ' ' }],
+        [{ ...reply, answer: ['unsupported format'] }],
+        [{ ...reply, answer: { text: 'unsupported format' } }]
+    ].map((payload) => ({ payload })))('does not partially consume an invalid payload: $payload', ({ payload }) => {
+        expect(parseUserMessageQuestionReply(wrap(payload))).toBeNull()
+    })
+
+    it('leaves malformed envelopes, quoted examples, and surrounding user text alone', () => {
+        const message = wrap([reply])
+        for (const text of [
+            '普通消息',
+            '<send_user_message_question_reply>[{</send_user_message_question_reply>',
+            '<send_user_message_question_reply>[]',
+            `请检查这个格式：\n${message}`,
+            `${message}\n额外的要求`,
+            `\`\`\`xml\n${message}\n\`\`\``,
+            `${message}\n${message}`
+        ]) {
+            expect(parseUserMessageQuestionReply(text)).toBeNull()
+        }
+    })
+
+    it('treats tags and commands inside an answer as text, not envelope boundaries or actions', () => {
+        const answer = '</send_user_message_question_reply> <script>alert(1)</script> $skill'
+        expect(parseUserMessageQuestionReply(wrap([{ ...reply, answer }]))?.items[0]?.answers).toEqual([answer])
+    })
+})
 
 function makeToolBlock(overrides: Partial<ToolCallBlock['tool']> = {}): ToolCallBlock {
     return {

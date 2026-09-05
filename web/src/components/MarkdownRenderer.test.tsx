@@ -87,6 +87,13 @@ function chatProviderProbe(onPlugins: (plugins: ReturnType<typeof useMarkdownRem
 }
 
 describe('MarkdownRenderer', () => {
+    it.each(['http://localhost:8317/settings?a=1', 'http://127.0.0.1:3000/', 'http://[::1]:4321/'])('routes plain local HTTP text through the launcher: %s', (url) => {
+        const view = renderInChat(`Open ${url} now`)
+        const link = view.container.querySelector<HTMLAnchorElement>('a[data-local-service-link]')
+        expect(link, view.container.innerHTML).not.toBeNull()
+        expect(link?.getAttribute('href')).toMatch(/^\/local-service#/)
+    })
+
     it('renders standalone markdown outside assistant message context', () => {
         render(
             <MarkdownRenderer

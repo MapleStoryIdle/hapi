@@ -1,4 +1,5 @@
 import React from 'react';
+import { isHttpForbiddenError } from '@hapi/protocol';
 import { randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 
@@ -70,7 +71,7 @@ type PendingSideSessionFork = {
     }) => void;
     reject: (error: Error) => void;
 };
-type CodexTaskStatusCode = 'system_error' | 'network_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown';
+type CodexTaskStatusCode = 'system_error' | 'http_forbidden' | 'network_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown';
 type CodexTaskStatusEvent = {
     type: 'task-status';
     status: 'retrying' | 'compacting' | 'compacted' | 'failed';
@@ -271,6 +272,9 @@ function classifyCodexTaskFailure(error: string | null): {
 } {
     if (!error) {
         return { code: 'unknown' };
+    }
+    if (isHttpForbiddenError(error)) {
+        return { code: 'http_forbidden' };
     }
 
     const normalized = error.toLowerCase();

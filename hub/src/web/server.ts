@@ -19,7 +19,8 @@ import { createMessagesRoutes } from './routes/messages'
 import { createPermissionsRoutes } from './routes/permissions'
 import { createMachinesRoutes } from './routes/machines'
 import { createGitRoutes } from './routes/git'
-import { createLocalPreviewRoutes } from './routes/localPreview'
+import { createLocalServiceRoutes } from './routes/localServices'
+import type { LocalServiceManager } from '../localServices/manager'
 import { createOpenVikingRoutes } from './routes/openViking'
 import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
@@ -253,6 +254,7 @@ export function createWebApp(options: {
     webappDistDir?: string
     relayMode?: boolean
     officialWebUrl?: string
+    getLocalServices?: () => LocalServiceManager | null
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -290,7 +292,7 @@ export function createWebApp(options: {
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine))
     app.route('/api', createGitRoutes(options.getSyncEngine))
-    app.route('/api', createLocalPreviewRoutes(options.getSyncEngine))
+    app.route('/api', createLocalServiceRoutes(options.getSyncEngine, options.getLocalServices ?? (() => null)))
     app.route('/api', createOpenVikingRoutes(options.getSyncEngine))
     app.route('/api', createShareManagementRoutes(options.store, undefined, options.getSyncEngine))
     // 中文注释：这里提供两类 Codex 辅助能力：扫描本地 transcript 以导入到 SHAPI，以及按需重启 Codex Desktop 客户端。
@@ -431,6 +433,7 @@ export async function startWebServer(options: {
     corsOrigins?: string[]
     relayMode?: boolean
     officialWebUrl?: string
+    getLocalServices?: () => LocalServiceManager | null
 }): Promise<BunServer<WebSocketData>> {
     const isCompiled = isBunCompiled()
     const embeddedAssetMap = isCompiled ? await loadEmbeddedAssetMap() : null
@@ -445,7 +448,8 @@ export async function startWebServer(options: {
         corsOrigins: options.corsOrigins,
         embeddedAssetMap,
         relayMode: options.relayMode,
-        officialWebUrl: options.officialWebUrl
+        officialWebUrl: options.officialWebUrl,
+        getLocalServices: options.getLocalServices
     })
 
     const configuration = getConfiguration()

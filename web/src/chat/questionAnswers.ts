@@ -5,6 +5,8 @@ import { isCursorAskQuestionToolName, parseCursorAskQuestionInput } from '@/comp
 import { isRequestUserInputToolName, parseRequestUserInputInput, type RequestUserInputOption, type RequestUserInputQuestion } from '@/components/ToolCard/requestUserInput'
 
 export type QuestionAnswerItem = {
+    /** Native desktop question identity; never treated as a pending tool call. */
+    questionItemId?: string
     question: string | null
     answers: string[]
     /**
@@ -40,6 +42,44 @@ type ParsedQuestion = {
 }
 
 type AnswerMap = Record<string, string[]>
+
+const QUESTION_REPLY_OPEN = '<send_user_message_question_reply>'
+const QUESTION_REPLY_CLOSE = '</send_user_message_question_reply>'
+
+/** Display-only adaptation. Keep malformed, mixed, or conflicting messages intact. */
+export function parseUserMessageQuestionReply(text: string): QuestionAnswerPresentation | null {
+    const trimmed = text.trim()
+    if (!trimmed.startsWith(QUESTION_REPLY_OPEN) || !trimmed.endsWith(QUESTION_REPLY_CLOSE)) return null
+
+    let payload: unknown
+    try {
+        payload = JSON.parse(trimmed.slice(QUESTION_REPLY_OPEN.length, -QUESTION_REPLY_CLOSE.length))
+    } catch {
+        return null
+    }
+    if (!Array.isArray(payload) || payload.length === 0) return null
+
+    const items = new Map<string, QuestionAnswerItem>()
+    for (const entry of payload) {
+        if (!isObject(entry)
+            || typeof entry.questionItemId !== 'string' || !entry.questionItemId.trim()
+            || typeof entry.question !== 'string' || !entry.question.trim()
+            || typeof entry.answer !== 'string' || !entry.answer.trim()) return null
+
+        const previous = items.get(entry.questionItemId)
+        if (previous) {
+            // Only identical copies of the same question are safe to collapse.
+            if (previous.question !== entry.question || previous.answers[0] !== entry.answer) return null
+            continue
+        }
+        items.set(entry.questionItemId, {
+            questionItemId: entry.questionItemId,
+            question: entry.question,
+            answers: [entry.answer]
+        })
+    }
+    return { items: [...items.values()] }
+}
 
 function parseResultAnswers(value: unknown): unknown {
     if (typeof value !== 'string') return value

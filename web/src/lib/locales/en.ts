@@ -1,4 +1,13 @@
 export default {
+  'localService.title': 'Local service',
+  'localService.opening': 'Connecting to your computer…',
+  'localService.notConfigured': 'Local service access is not configured on this Hub yet. The administrator needs to set up its preview domain and tunnel.',
+  'localService.offline': 'This session’s computer is offline. Start its Runner and try again.',
+  'localService.invalid': 'This is not a supported local HTTP or HTTPS link.',
+  'localService.busy': 'Too many local services are open. Wait a little and try again.',
+  'localService.failed': 'Could not open the service. Check that its Runner and local service are running, then try again.',
+  'localService.retry': 'Try again',
+  'localService.back': 'Back to sessions',
   // Loading states
   'loading': 'Loading…',
   'authorizing': 'Authorizing…',
@@ -1023,6 +1032,8 @@ export default {
   'taskStatus.contextWindow.title': 'Context too large; task failed',
   'taskStatus.contextWindow.body': 'This conversation is beyond the context Codex can process. Compact it or start a new conversation.',
   'taskStatus.failed.title': 'Codex task failed',
+  'taskStatus.forbidden.title': 'Request denied (HTTP 403)',
+  'taskStatus.forbidden.body': 'The model service denied this request and the task has stopped. Check your sign-in status or network, then try again.',
   'taskStatus.failed.body': 'The task has stopped. Check the recent error and retry when ready.',
 
   // Install prompt

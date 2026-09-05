@@ -9,6 +9,7 @@
 
 import { AGENT_MESSAGE_PAYLOAD_TYPE, isKnownFlavor, MAX_UPLOAD_BYTES, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+import type { LocalServiceTunnelRequest, LocalServiceTunnelResponse } from '@hapi/protocol/localServices'
 import type {
     CreateSideSessionResponse,
     CursorMigrateOutcome,
@@ -2096,6 +2097,10 @@ export class SyncEngine {
 
     async checkLocalPreview(machineId: string, request: LocalPreviewProbeRequest): Promise<LocalPreviewProbeResponse> {
         return await this.rpcGateway.checkLocalPreview(machineId, request)
+    }
+
+    async openLocalServiceTunnel(machineId: string, request: LocalServiceTunnelRequest): Promise<LocalServiceTunnelResponse> {
+        return await this.rpcGateway.openLocalServiceTunnel(machineId, request)
     }
 
     async proxyLocalPreviewRequest(machineId: string, request: LocalPreviewHttpRequest): Promise<LocalPreviewHttpResponse> {

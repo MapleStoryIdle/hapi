@@ -146,6 +146,61 @@ describe('assignThreadMessageIds', () => {
 })
 
 describe('answered question messages', () => {
+    const nativeReply = `<send_user_message_question_reply>${JSON.stringify([{
+        questionItemId: '["request_user_input_async","call-example",0]',
+        question: '选择哪种方案？',
+        answer: '轻量方案'
+    }])}</send_user_message_question_reply>`
+
+    it('adapts stored native replies without changing message identity, delivery metadata, or raw history', () => {
+        const block = userText('native-answer', {
+            text: nativeReply,
+            createdAt: 1_600,
+            invokedAt: 1_700,
+            localId: 'local-answer',
+            status: 'sent',
+            attachments: [{ id: 'file-1', filename: 'notes.md', mimeType: 'text/markdown', size: 10, path: '/tmp/notes.md' }]
+        })
+        const message = toThreadMessageLike(block, 'user-text:native-answer')
+
+        expect(message).toMatchObject({
+            role: 'user',
+            id: 'user-text:native-answer',
+            createdAt: new Date(1_600),
+            content: [{ type: 'text', text: '选择哪种方案？\n• 轻量方案' }],
+            metadata: { custom: {
+                kind: 'user',
+                localId: 'local-answer',
+                status: 'sent',
+                invokedAt: 1_700,
+                originalText: nativeReply,
+                attachments: block.attachments,
+                questionAnswer: { items: [{
+                    questionItemId: '["request_user_input_async","call-example",0]',
+                    question: '选择哪种方案？',
+                    answers: ['轻量方案']
+                }] }
+            } }
+        })
+        expect(block.text).toBe(nativeReply)
+        expect(toThreadMessageLike(block, 'user-text:native-answer')).toEqual(message)
+    })
+
+    it('keeps invalid replies as the exact original text', () => {
+        const text = '<send_user_message_question_reply>[invalid</send_user_message_question_reply>'
+        const message = toThreadMessageLike(userText('invalid', { text }), 'user-text:invalid')
+
+        expect(message.content).toEqual([{ type: 'text', text }])
+        expect(message.metadata?.custom?.questionAnswer).toBeUndefined()
+    })
+
+    it('does not reinterpret an assistant message as a user answer', () => {
+        const message = toThreadMessageLike(agentText('example', { text: nativeReply }), 'agent-text:example')
+        expect(message.role).toBe('assistant')
+        expect(message.content).toEqual([{ type: 'text', text: nativeReply }])
+        expect(message.metadata?.custom?.questionAnswer).toBeUndefined()
+    })
+
     it('maps selected answers to a user-role message', () => {
         const answer = questionAnswer('qa-1', { createdAt: 1_600 })
         const message = toThreadMessageLike(answer, 'question-answer:qa-1')

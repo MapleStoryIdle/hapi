@@ -167,7 +167,7 @@ export function QuestionAnswerBubble(props: { answer: QuestionAnswerPresentation
                         <span className="min-w-0 flex-1">
                             <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--app-hint)]">{title}</span>
                             {props.answer.items.map((item, index) => (
-                                <span key={index} className="mt-2 block first:mt-0" data-question-answer-summary-item>
+                                <span key={item.questionItemId ?? index} className="mt-2 block first:mt-0" data-question-answer-summary-item>
                                     {item.question ? <span className="block whitespace-pre-wrap break-words text-xs leading-5 text-[var(--app-hint)]">{item.question}</span> : null}
                                     <span className="mt-0.5 block whitespace-pre-wrap break-words text-sm font-semibold leading-6 text-[var(--app-fg)]">{item.answers.join(' · ')}</span>
                                 </span>
@@ -178,7 +178,7 @@ export function QuestionAnswerBubble(props: { answer: QuestionAnswerPresentation
                 )}
             >
                 {props.answer.items.map((item, index) => (
-                    <QuestionAnswerDetailItem key={`${item.question ?? 'selection'}:${index}`} item={item} index={index} />
+                    <QuestionAnswerDetailItem key={item.questionItemId ?? `${item.question ?? 'selection'}:${index}`} item={item} index={index} />
                 ))}
             </BottomDrawer>
         </div>

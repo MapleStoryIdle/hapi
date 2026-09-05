@@ -217,6 +217,9 @@ async function buildTarget(projectRoot: string, target: string, outdir: string, 
         'build',
         '--compile',
         '--no-compile-autoload-dotenv',
+        // ssh2's optional native CPU probe is not portable across release targets.
+        // Its guarded require falls back to the pure-JS crypto path.
+        '--external=cpu-features',
         `--feature=${featureFlag}`,
         `--target=${target}`,
         `--outfile=${outfile}`,

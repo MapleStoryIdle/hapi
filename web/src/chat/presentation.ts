@@ -1,4 +1,5 @@
 import type { AgentEvent } from '@/chat/types'
+import { isHttpForbiddenError } from '@hapi/protocol'
 
 function normalizeTimestamp(value: number): Date {
     const ms = value < 1_000_000_000_000 ? value * 1000 : value
@@ -115,6 +116,12 @@ const NETWORK_TASK_FAILURE_PATTERNS = [
     'eai_again'
 ]
 
+/** Recognize HTTP 403 even when an older runner classified it as unknown. */
+export function isForbiddenTaskStatus(event: AgentEvent): boolean {
+    return event.type === 'task-status'
+        && (event.code === 'http_forbidden' || isHttpForbiddenError(event.message))
+}
+
 /** Keeps older runners' unclassified network errors understandable in the UI. */
 export function isNetworkTaskStatus(event: AgentEvent): boolean {
     if (event.type !== 'task-status') return false
@@ -141,6 +148,9 @@ function formatTaskStatusEvent(event: AgentEvent): EventPresentation {
     }
     if (status === 'compacted') {
         return { icon: '↻', text: 'Context compacted; retrying' }
+    }
+    if (isForbiddenTaskStatus(event)) {
+        return { icon: '⚠️', text: 'Request denied (HTTP 403)' }
     }
     if (code === 'usage_limit') {
         const resetAtText = typeof record.resetAtText === 'string' ? record.resetAtText : ''

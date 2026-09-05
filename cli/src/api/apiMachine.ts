@@ -69,6 +69,8 @@ import { backoff } from '@/utils/time'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
+import { LocalServiceTunnels } from '../runner/localServiceTunnels'
+import { LOCAL_SERVICE_RPC, type LocalServiceTunnelRequest, type LocalServiceTunnelResponse } from '@hapi/protocol/localServices'
 import { listSlashCommands } from '../modules/common/slashCommands'
 import { listSkills } from '../modules/common/skills'
 import { getGitBranchStatusForCwd } from '../modules/common/handlers/git'
@@ -290,6 +292,16 @@ function mergeAdvertisedRunnerMetadata(
 }
 
 export class ApiMachineClient {
+    private readonly localServiceTunnels = new LocalServiceTunnels(() => {
+        const ports = [this.machine.runnerState?.httpPort].filter((port): port is number => typeof port === 'number')
+        try {
+            const hub = new URL(configuration.apiUrl)
+            if (['localhost', '127.0.0.1', '[::1]'].includes(hub.hostname)) {
+                ports.push(Number(hub.port || (hub.protocol === 'https:' ? 443 : 80)))
+            }
+        } catch { /* Existing connection validation reports invalid Hub URLs. */ }
+        return ports
+    })
     private socket!: Socket<ServerToClientEvents, ClientToServerEvents>
     private keepAliveInterval: NodeJS.Timeout | null = null
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
@@ -397,6 +409,10 @@ export class ApiMachineClient {
         })
 
         registerCommonHandlers(this.rpcHandlerManager, getInvokedCwd())
+        this.rpcHandlerManager.registerHandler<LocalServiceTunnelRequest, LocalServiceTunnelResponse>(
+            LOCAL_SERVICE_RPC,
+            (request) => this.localServiceTunnels.open(request)
+        )
 
         this.rpcHandlerManager.registerHandler<ReadMachineFileRequest, FileReadResponse>(
             RPC_METHODS.ReadMachineFile,
@@ -1357,6 +1373,7 @@ export class ApiMachineClient {
         })
 
         this.socket.on('disconnect', () => {
+            this.localServiceTunnels.dispose()
             logger.debug('[API MACHINE] Disconnected from bot')
             this.rpcHandlerManager.onSocketDisconnect()
             this.stopKeepAlive()
@@ -1525,6 +1542,7 @@ export class ApiMachineClient {
     }
 
     shutdown(): void {
+        this.localServiceTunnels.dispose()
         this.stopKeepAlive()
         this.stopCodexSshOwnershipMonitor()
         this.nativeCodexSessionWatcher.stop()

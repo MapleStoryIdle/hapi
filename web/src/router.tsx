@@ -64,6 +64,7 @@ const SettingsPage = lazy(() => import('@/routes/settings'))
 const SharePage = lazy(() => import('@/routes/share'))
 const SharesPage = lazy(() => import('@/routes/shares'))
 const KanbanTaskPage = lazy(() => import('@/routes/kanban-task'))
+const LocalServicePage = lazy(() => import('@/routes/local-service'))
 
 type ComposerSendError = {
     id: number
@@ -1844,6 +1845,12 @@ const settingsRoute = createRoute({
     component: SettingsPage,
 })
 
+const localServiceRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/local-service',
+    component: LocalServicePage,
+})
+
 const sharesRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/shares',
@@ -1902,6 +1909,7 @@ export const routeTree = rootRoute.addChildren([
     ]),
     settingsRoute,
     shareRoute,
+    localServiceRoute,
 ])
 
 type RouterHistory = Parameters<typeof createRouter>[0]['history']

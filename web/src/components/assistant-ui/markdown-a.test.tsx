@@ -9,13 +9,15 @@
  *   - <A> component click behaviour: deny, IANA, custom (dialog opened via context)
  *   - intra-tab cross-provider sync via module-level schemeListeners emitter
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react'
 import React from 'react'
 import { defaultComponents, classifyScheme, denyOnlyTransform, UriConfirmProvider } from '@/components/assistant-ui/markdown-text'
 import { I18nProvider } from '@/lib/i18n-context'
 import { HappyChatProvider, type HappyChatFileLinkTarget } from '@/components/AssistantChat/context'
 import { encodeBase64 } from '@/lib/utils'
+import { parseLocalServiceLaunchHash } from '@/lib/local-service-links'
+import * as localServiceNavigation from '@/lib/open-local-service'
 
 const routerMocks = vi.hoisted(() => ({
     navigate: vi.fn(),
@@ -72,12 +74,50 @@ function renderAInChat(
 
 const STORAGE_KEY = 'hapi-allowed-schemes'
 
+describe('automatic local service links', () => {
+    it('hands a normal tap to the authenticated chat without opening the login route', () => {
+        const open = vi.spyOn(localServiceNavigation, 'openLocalServiceInTab').mockReturnValue(true)
+        renderAInChat({ href: 'http://localhost:8317/settings', children: 'Open service' })
+        expect(open).not.toHaveBeenCalled()
+        const dispatched = fireEvent.click(screen.getByRole('link', { name: 'Open service' }))
+        expect(dispatched).toBe(false)
+        expect(open).toHaveBeenCalledWith(expect.anything(), {
+            source: { type: 'session', sessionId: 'session-1' }, url: 'http://localhost:8317/settings'
+        }, expect.objectContaining({ opening: expect.any(String) }))
+    })
+
+    it('does not override an explicitly cancelled click', () => {
+        const open = vi.spyOn(localServiceNavigation, 'openLocalServiceInTab').mockReturnValue(true)
+        renderAInChat({ href: 'http://localhost:8317/', children: 'Open service', onClick: (event) => event.preventDefault() })
+        fireEvent.click(screen.getByRole('link', { name: 'Open service' }))
+        expect(open).not.toHaveBeenCalled()
+    })
+
+    it.each(['http://localhost:8317/settings?a=1#tab', 'http://127.0.0.1:3000', 'https://[::1]:4443/'])('opens %s through its managed session without calling an API while rendering', (href) => {
+        renderAInChat({ href, children: 'Open service' })
+        const link = screen.getByRole('link', { name: 'Open service' }) as HTMLAnchorElement
+        expect(link).toHaveAttribute('target', '_blank')
+        expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+        expect(parseLocalServiceLaunchHash(new URL(link.href).hash)).toEqual({ source: { type: 'session', sessionId: 'session-1' }, url: href })
+        expect(screen.queryByRole('dialog')).toBeNull()
+        expect(routerMocks.navigate).not.toHaveBeenCalled()
+    })
+
+    it('uses the native source machine rather than the viewing phone', () => {
+        const source = { type: 'native-codex' as const, sessionId: 'native-2', machineId: 'machine-2' }
+        renderAInChat({ href: 'http://localhost:9000/', children: 'Native service' }, { fileLinkTarget: source })
+        const link = screen.getByRole('link', { name: 'Native service' }) as HTMLAnchorElement
+        expect(parseLocalServiceLaunchHash(new URL(link.href).hash)?.source).toEqual(source)
+    })
+})
+
 beforeEach(() => {
     localStorage.clear()
     cleanup()
     routerMocks.navigate.mockClear()
     vi.clearAllMocks()
 })
+afterEach(() => vi.restoreAllMocks())
 
 // ── classifyScheme ────────────────────────────────────────────────────────────
 

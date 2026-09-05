@@ -49,6 +49,14 @@ not a SHAPI-owned domain. Self-hosters should set `HAPI_RELAY_API` and
 
 ## Running
 
+### Optional local service access
+
+To open Runner-local HTTP(S) links from session messages, configure the dedicated
+SSH endpoint and isolated preview origin. See [Local services](../docs/guide/local-services.md)
+for environment variables, Nginx setup, security boundaries, and limits.
+This is disabled unless `HAPI_LOCAL_SERVICE_ORIGIN` is set; normal Hub startup
+does not open extra ports.
+
 Binary (single executable):
 
 ```bash

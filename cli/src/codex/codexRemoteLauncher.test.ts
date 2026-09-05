@@ -1748,6 +1748,18 @@ describe('codexRemoteLauncher', () => {
         expect(session.thinking).toBe(false);
     });
 
+    it('classifies HTTP 403 failures instead of falling back to unknown', async () => {
+        harness.nextTurnFailureMessage = 'unexpected status 403 Forbidden: <html>server response</html>';
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        await codexRemoteLauncher(session as never);
+
+        expect(sessionEvents).toContainEqual(expect.objectContaining({
+            type: 'task-status', status: 'failed', code: 'http_forbidden', recoverable: false
+        }));
+        expect(session.thinking).toBe(false);
+    });
+
     it('does not start a fresh thread for the next queued message after thread-level systemError', async () => {
         harness.remainingThreadSystemErrors = 1;
         const { session } = createSessionStub(['first message', 'second message']);

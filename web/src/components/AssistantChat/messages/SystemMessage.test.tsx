@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent } from '@/chat/types'
+import zhCN from '@/lib/locales/zh-CN'
 
 const state = vi.hoisted(() => ({
     event: null as unknown
@@ -26,7 +27,7 @@ vi.mock('@assistant-ui/react', async () => {
 })
 
 vi.mock('@/lib/use-translation', () => ({
-    useTranslation: () => ({ t: (key: string) => key })
+    useTranslation: () => ({ t: (key: string) => key.startsWith('taskStatus.forbidden.') ? zhCN[key as keyof typeof zhCN] : key })
 }))
 
 import { HappySystemMessage } from './SystemMessage'
@@ -39,6 +40,19 @@ function renderEvent(event: AgentEvent) {
 afterEach(() => cleanup())
 
 describe('HappySystemMessage — quota events', () => {
+    it.each(['http_forbidden', 'unknown', 'network_error'] as const)('shows the approved HTTP 403 copy for %s', (code) => {
+        const { container } = renderEvent({
+            type: 'task-status', status: 'failed', source: 'codex', code,
+            message: 'unexpected status 403 Forbidden: <html><script>secret</script></html>',
+            recoverable: false
+        })
+        expect(screen.getByText('请求被拒绝（HTTP 403）')).toBeInTheDocument()
+        expect(screen.getByText('模型服务拒绝了本次请求，任务已停止。请检查登录状态或网络后重试。')).toBeInTheDocument()
+        expect(screen.queryByText('taskStatus.failed.title')).not.toBeInTheDocument()
+        expect(container).not.toHaveTextContent('secret')
+        expect(container.querySelector('script')).toBeNull()
+    })
+
     it('shows the quota reason and its settings action', () => {
         renderEvent({
             type: 'task-status',

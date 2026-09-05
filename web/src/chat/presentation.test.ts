@@ -14,6 +14,14 @@ describe('getEventPresentation — agent errors', () => {
 })
 
 describe('getEventPresentation — task-status', () => {
+    it.each(['http_forbidden', 'unknown', 'network_error'] as const)('recognizes HTTP 403 with code %s', (code) => {
+        expect(getEventPresentation({
+            type: 'task-status', status: 'failed', source: 'codex', code,
+            message: 'stream disconnected before completion: unexpected status 403 Forbidden: <html>private response</html>',
+            recoverable: false
+        })).toEqual({ icon: '⚠️', text: 'Request denied (HTTP 403)' })
+    })
+
     it('formats retrying task status with attempt counts', () => {
         const result = getEventPresentation({
             type: 'task-status',

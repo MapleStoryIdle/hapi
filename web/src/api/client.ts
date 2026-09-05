@@ -1,3 +1,4 @@
+import type { OpenLocalServiceRequest, OpenLocalServiceResponse } from '@hapi/protocol/localServices'
 import type {
     AttachmentMetadata,
     AuthResponse,
@@ -113,6 +114,11 @@ export class ApiError extends Error {
 }
 
 export class ApiClient {
+    async openLocalService(request: OpenLocalServiceRequest): Promise<OpenLocalServiceResponse> {
+        return await this.request('/api/local-services/open', {
+            method: 'POST', body: JSON.stringify(request)
+        }, 0, undefined, 60_000)
+    }
     private token: string
     private readonly baseUrl: string | null
     private readonly getToken: (() => string | null) | null

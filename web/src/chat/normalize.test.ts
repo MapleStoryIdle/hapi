@@ -13,6 +13,15 @@ function makeMessage(content: unknown): DecryptedMessage {
 }
 
 describe('normalizeDecryptedMessage', () => {
+    it('normalizes native HTTP 403 status records as timeline events', () => {
+        const event = {
+            type: 'task-status', status: 'failed', source: 'codex',
+            code: 'http_forbidden', message: 'HTTP 403 Forbidden', recoverable: false
+        }
+        expect(normalizeDecryptedMessage(makeMessage({
+            role: 'agent', content: { type: 'codex', data: event }
+        }))).toMatchObject({ role: 'event', content: event })
+    })
     it('normalizes automation heartbeats into formatted status events', () => {
         const message = makeMessage({
             role: 'agent',

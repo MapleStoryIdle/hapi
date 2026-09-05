@@ -1,4 +1,5 @@
 import type { ChatBlock, UserTextBlock } from '@/chat/types'
+import { formatQuestionAnswerText, parseUserMessageQuestionReply } from '@/chat/questionAnswers'
 
 export type ConversationOutlineItem = {
     id: string
@@ -23,7 +24,8 @@ export function truncateOutlineLabel(value: string, maxLength = MAX_OUTLINE_LABE
 }
 
 function userBlockToOutlineItem(block: UserTextBlock): ConversationOutlineItem {
-    const label = truncateOutlineLabel(block.text) || 'Empty message'
+    const questionAnswer = parseUserMessageQuestionReply(block.text)
+    const label = truncateOutlineLabel(questionAnswer ? formatQuestionAnswerText(questionAnswer) : block.text) || 'Empty message'
     return {
         id: `outline:user-text:${block.id}`,
         targetMessageId: `user-text:${block.id}`,

@@ -22,6 +22,7 @@ import type { WebSocketData } from '@socket.io/bun-engine'
 import { join } from 'node:path'
 import { GeneratedImageStore } from './generatedImages/store'
 import { ArtifactService } from './artifacts/service'
+import { startLocalServices } from './localServices/start'
 
 /** Format config source for logging */
 function formatSource(source: ConfigSource | 'generated'): string {
@@ -125,6 +126,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let visibilityTracker: VisibilityTracker | null = null
     let notificationHub: NotificationHub | null = null
     let tunnelManager: TunnelManager | null = null
+    let localServices: Awaited<ReturnType<typeof startLocalServices>> = null
 
     // Load configuration (async - loads from env/file with persistence)
     const relayApiDomain = process.env.HAPI_RELAY_API || 'relay.hapi.run'
@@ -257,6 +259,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     notificationHub = new NotificationHub(syncEngine, notificationChannels)
 
     // Start HTTP service first (before tunnel, so tunnel has something to forward to)
+    localServices = await startLocalServices(() => syncEngine, config.publicUrl)
     webServer = await startWebServer({
         getSyncEngine: () => syncEngine,
         getSseManager: () => sseManager,
@@ -268,7 +271,8 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         socketEngine: socketServer.engine,
         corsOrigins,
         relayMode: relayFlag.enabled,
-        officialWebUrl
+        officialWebUrl,
+        getLocalServices: () => localServices?.manager ?? null
     })
 
     // Start the bot if configured
@@ -345,6 +349,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
     return {
         stop: async () => {
+            await localServices?.stop()
             await tunnelManager?.stop()
             await happyBot?.stop()
             notificationHub?.stop()

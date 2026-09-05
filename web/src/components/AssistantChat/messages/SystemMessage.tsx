@@ -1,7 +1,8 @@
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
 import { Activity, AlertTriangle, Archive, Clock, Layers2, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react'
 import { MESSAGE_LINK_CLASS, MessageLinkIcon } from '@/components/MessageLink'
-import { getEventPresentation, isNetworkTaskStatus, isUsageLimitEvent } from '@/chat/presentation'
+import { useLocalServiceLink } from '@/lib/local-service-links'
+import { getEventPresentation, isForbiddenTaskStatus, isNetworkTaskStatus, isUsageLimitEvent } from '@/chat/presentation'
 import type { AgentEvent } from '@/chat/types'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { useTranslation } from '@/lib/use-translation'
@@ -69,6 +70,16 @@ function taskStatusVisual(event: TaskStatusEvent): {
             bodyKey: 'taskStatus.compacted.body',
             toneClassName: 'border-[color-mix(in_srgb,#22C55E_36%,var(--app-border))] [background:color-mix(in_srgb,var(--app-bg)_91%,#22C55E)]',
             iconClassName: 'text-green-600',
+        }
+    }
+
+    if (isForbiddenTaskStatus(event)) {
+        return {
+            Icon: AlertTriangle,
+            titleKey: 'taskStatus.forbidden.title',
+            bodyKey: 'taskStatus.forbidden.body',
+            toneClassName: 'border-[color-mix(in_srgb,#EF4444_42%,var(--app-border))] [background:color-mix(in_srgb,var(--app-bg)_91%,#EF4444)]',
+            iconClassName: 'text-red-600',
         }
     }
 
@@ -162,6 +173,7 @@ function AutomationHeartbeatCard(props: { event: AutomationHeartbeatEvent; messa
 
 function TaskStatusCard(props: { event: TaskStatusEvent; messageId: string }) {
     const { t } = useTranslation()
+    const localServiceLink = useLocalServiceLink(props.event.actionUrl)
     const visual = taskStatusVisual(props.event)
     const Icon = visual.Icon
 
@@ -185,9 +197,10 @@ function TaskStatusCard(props: { event: TaskStatusEvent; messageId: string }) {
                             </p>
                             {visual.actionKey && props.event.actionUrl ? (
                                 <a
-                                    href={props.event.actionUrl}
+                                    href={localServiceLink?.href ?? props.event.actionUrl}
+                                    onClick={localServiceLink?.onClick}
                                     target="_blank"
-                                    rel="noreferrer"
+                                    rel="noopener noreferrer"
                                     className={`${MESSAGE_LINK_CLASS} mt-2 inline-block`}
                                 >
                                     <MessageLinkIcon href={props.event.actionUrl} external />
