@@ -19,6 +19,7 @@ import {
     ChevronRight,
     CircleAlert as CircleAlertIcon,
     CircleCheck as CircleCheckIcon,
+    Clock3,
     Eye as EyeIcon,
     History,
     LoaderCircle as LoaderCircleIcon,
@@ -52,6 +53,7 @@ import {
 
 /** The sessions index intentionally stays focused on the last three days. */
 export const RECENT_CODEX_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
+export const RECENT_COMPLETED_WINDOW_MS = 30 * 60 * 1000
 const NATIVE_CODEX_LIST_FALLBACK_REFRESH_INTERVAL_MS = 5_000
 const NATIVE_CODEX_LIST_UPDATE_BATCH_MS = 100
 const HAPI_CODEX_ORIGINATOR = 'hapi-codex-client'
@@ -145,7 +147,7 @@ export type MergedCodexDirectoryGroup = {
 
 export type MergedCodexKanbanStatus = 'pending' | 'processing' | 'completed'
 
-export type MergedCodexKanbanGroupId = 'pinned' | 'unviewed' | MergedCodexKanbanStatus
+export type MergedCodexKanbanGroupId = 'pinned' | 'unviewed' | 'recent' | MergedCodexKanbanStatus
 
 export type MergedCodexKanbanGroup = {
     id: MergedCodexKanbanGroupId
@@ -153,6 +155,15 @@ export type MergedCodexKanbanGroup = {
 }
 
 const EMPTY_PINNED_SESSION_KEYS: ReadonlySet<string> = new Set()
+const KANBAN_HEADING_CLASS_NAME = 'text-xs font-semibold tracking-[0.04em] text-[var(--app-hint)]'
+const KANBAN_DATE_EMOJIS = ['🌿', '🌤️', '🌻', '🍀', '🌙', '🌊', '🍁', '✨', '🌸', '🪴', '🪁', '🍊'] as const
+
+/** Varied by calendar date, stable across refreshes and locale changes. */
+export function getKanbanDateEmoji(dateKey: string): string {
+    let hash = 0
+    for (const char of dateKey) hash = Math.imul(hash, 31) + char.charCodeAt(0)
+    return KANBAN_DATE_EMOJIS[(hash >>> 0) % KANBAN_DATE_EMOJIS.length]
+}
 
 /**
  * Completed cards use directory color as a quiet project identity. Keep these
@@ -261,6 +272,12 @@ const KANBAN_GROUP_PRESENTATION: Record<MergedCodexKanbanGroupId, {
         iconClassName: 'text-[#4E7CF5]',
         borderClassName: 'border-l-[#4E7CF5]'
     },
+    recent: {
+        labelKey: 'sessions.kanban.recent',
+        Icon: Clock3,
+        iconClassName: 'text-[var(--app-hint)]',
+        borderClassName: 'border-l-[var(--app-divider)]'
+    },
     completed: {
         labelKey: 'sessions.kanban.completed',
         Icon: CircleCheckIcon,
@@ -350,19 +367,23 @@ export function isMergedCodexSessionUnviewed(
 export function groupMergedCodexSessionsForKanban(
     sessions: MergedCodexSession[],
     pinnedSessionKeys: ReadonlySet<string> = EMPTY_PINNED_SESSION_KEYS,
-    lastSeenAtBySession: Readonly<Record<string, number>> | null = null
+    lastSeenAtBySession: Readonly<Record<string, number>> | null = null,
+    now = Date.now()
 ): MergedCodexKanbanGroup[] {
     const groups: MergedCodexKanbanGroup[] = [
         { id: 'pending', sessions: [] },
         { id: 'processing', sessions: [] },
         { id: 'unviewed', sessions: [] },
         { id: 'pinned', sessions: [] },
+        { id: 'recent', sessions: [] },
         { id: 'completed', sessions: [] }
     ]
     const groupsById = new Map(groups.map((group) => [group.id, group]))
 
     for (const session of sessions) {
         const status = getMergedCodexKanbanStatus(session)
+        // List summaries expose activity time, not a separate completion time.
+        const age = now - toEpochMilliseconds(session.modifiedAt)
         // User action and active thinking take precedence over a local pin.
         // An unviewed completed managed session takes precedence over a pin.
         const groupId = status === 'completed' && lastSeenAtBySession !== null
@@ -370,7 +391,9 @@ export function groupMergedCodexSessionsForKanban(
             ? 'unviewed'
             : status === 'completed' && pinnedSessionKeys.has(session.key)
                 ? 'pinned'
-                : status
+                : status === 'completed' && age >= 0 && age < RECENT_COMPLETED_WINDOW_MS
+                    ? 'recent'
+                    : status
         groupsById.get(groupId)!.sessions.push(session)
     }
 
@@ -1155,9 +1178,10 @@ export function RecentCodexSessions(props: {
             props.pinnedSessionKeys,
             isCodexKanbanLastSeenInitialized
                 ? sessionLastSeenState.lastSeenAtBySession
-                : null
+                : null,
+            Date.now()
         ),
-        [isCodexKanbanLastSeenInitialized, mergedSessions, props.pinnedSessionKeys, sessionLastSeenState.lastSeenAtBySession]
+        [isCodexKanbanLastSeenInitialized, mergedSessions, props.pinnedSessionKeys, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession]
     )
     const completedTimelineGroups = useMemo(() => {
         const completed = kanbanGroups.find((group) => group.id === 'completed')?.sessions ?? []
@@ -1548,7 +1572,7 @@ export function RecentCodexSessions(props: {
                                             data-kanban-group-icon={group.id}
                                         />
                                     )}
-                                    <h2 className="text-xs font-semibold tracking-[0.04em] text-[var(--app-hint)]">
+                                    <h2 className={KANBAN_HEADING_CLASS_NAME}>
                                         {group.id === 'processing' ? (
                                             <ThinkingKanbanLabel label={t(presentation.labelKey)} />
                                         ) : t(presentation.labelKey)}
@@ -1602,8 +1626,9 @@ export function RecentCodexSessions(props: {
                                 <div className="space-y-5">
                                     {completedTimelineGroups.map((group) => (
                                         <section key={group.key} data-kanban-date-group={group.key}>
-                                            <h3 className="cupertino-kanban-date-heading px-1 text-xs font-semibold text-[var(--app-hint)]">
-                                                {group.label}
+                                            <h3 className={`cupertino-kanban-date-heading flex min-h-6 items-center gap-2 px-1 ${KANBAN_HEADING_CLASS_NAME}`}>
+                                                <span aria-hidden="true" className="shrink-0 font-normal" data-kanban-date-emoji>{getKanbanDateEmoji(group.key)}</span>
+                                                <span>{group.label}</span>
                                             </h3>
                                             <ul className="cupertino-kanban-card-column mt-2 flex flex-col gap-2.5">
                                                 {group.shares.map((session) => (

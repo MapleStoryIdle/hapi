@@ -382,9 +382,11 @@ describe('markdown <A> component — file path links', () => {
 
         renderAInChat({ href, children: 'web/src/router.tsx:42:7' })
 
-        // File paths retain compact monospace styling without a filled background.
+        // File paths use the same inline text treatment as all message links.
         const link = screen.getByRole('link')
-        expect(link).toHaveClass('aui-md-file-link', 'truncate', 'font-mono', 'no-underline')
+        expect(link).toHaveClass('aui-md-file-link', 'message-content-link', 'no-underline')
+        expect(link).not.toHaveClass('truncate', 'font-mono', 'border')
+        expect(link.querySelector('[data-file-type="tsx"]')).not.toBeNull()
         expect(link).toHaveAttribute('title', 'web/src/router.tsx:42:7')
 
         const target = new URL(link.getAttribute('href')!, 'http://127.0.0.1')
@@ -533,6 +535,8 @@ describe('markdown <A> component — file path links', () => {
             let link = screen.getByRole('link')
             expect(link).toHaveClass('aui-md-file-link')
             expect(link).toHaveAttribute('aria-disabled', 'true')
+            expect(link).toHaveClass('message-content-link', 'bg-transparent', 'no-underline')
+            expect(link.querySelector('[data-markdown-link-icon="disabled"]')).not.toBeNull()
             expect(link).not.toHaveAttribute('href')
             expect(link).not.toHaveAttribute('data-hapi-file-link')
 

@@ -13,7 +13,7 @@ import remarkBreaks from 'remark-breaks'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { Check as CheckIconNode, Copy as CopyIconNode } from 'lucide'
-import { FileText, Link2 } from 'lucide-react'
+import { MESSAGE_LINK_CLASS, MessageLinkIcon } from '@/components/MessageLink'
 import remarkDisableIndentedCode from '@/lib/remark-disable-indented-code'
 import remarkRepairTables from '@/lib/remark-repair-tables'
 import { useNavigate } from '@tanstack/react-router'
@@ -472,7 +472,7 @@ function formatFileTargetTitle(fileTarget: FilePathLinkTarget): string {
     return `${fileTarget.path}:${fileTarget.line}${fileTarget.column !== undefined ? `:${fileTarget.column}` : ''}`
 }
 
-const FILE_PATH_CHIP_CLASS = 'aui-md-a aui-md-file-link min-w-0 max-w-full truncate rounded-md border border-[var(--app-inline-code-border)] bg-[var(--app-inline-code-bg)] px-[0.42em] py-[0.13em] font-mono text-[0.86em] font-medium leading-[1.35] text-[var(--app-inline-code-fg)] no-underline decoration-transparent'
+const FILE_PATH_LINK_CLASS = `${MESSAGE_LINK_CLASS} aui-md-file-link`
 
 function FilePathCopyButton(props: { path: string }) {
     const { copied, copy } = useCopyToClipboard()
@@ -504,12 +504,13 @@ function FilePathCopyButton(props: { path: string }) {
 function UnavailableFilePathChip(props: ComponentPropsWithoutRef<'a'> & {
     fileTarget: FilePathLinkTarget
 }) {
+    const { t } = useTranslation()
     const { children, className, fileTarget, title } = props
     const linkTitle = title ?? formatFileTargetTitle(fileTarget)
-    const unavailableLabel = `${linkTitle} — unavailable in this session`
+    const unavailableLabel = `${linkTitle} — ${t('file.link.unavailable')}`
 
     return (
-        <span className="aui-md-file-link-group inline-flex max-w-full items-center align-bottom">
+        <span className="aui-md-file-link-group">
             <span
                 role="link"
                 aria-disabled="true"
@@ -517,11 +518,11 @@ function UnavailableFilePathChip(props: ComponentPropsWithoutRef<'a'> & {
                 tabIndex={-1}
                 title={unavailableLabel}
                 className={cn(
-                    FILE_PATH_CHIP_CLASS,
-                    'cursor-not-allowed opacity-60',
+                    FILE_PATH_LINK_CLASS,
                     className
                 )}
             >
+                <MessageLinkIcon filePath={fileTarget.path} disabled />
                 {children}
             </span>
             <FilePathCopyButton path={fileTarget.path} />
@@ -595,7 +596,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
     }
 
     return (
-        <span className="aui-md-file-link-group inline-flex max-w-full items-center align-bottom">
+        <span className="aui-md-file-link-group">
             <a
                 {...anchorProps}
                 href={href}
@@ -605,17 +606,12 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
                 onClick={handleClick}
                 data-hapi-file-link="true"
                 className={cn(
-                    FILE_PATH_CHIP_CLASS,
-                    'inline-flex items-center gap-1 bg-transparent text-[var(--app-markdown-link)] transition-colors hover:border-[var(--app-markdown-link-muted)] hover:text-[var(--app-markdown-link-hover)] [&_code]:bg-transparent',
+                    FILE_PATH_LINK_CLASS,
                     className
                 )}
             >
-                <FileText
-                    className="h-[0.95em] w-[0.95em] shrink-0"
-                    data-markdown-link-icon="file"
-                    aria-hidden="true"
-                />
-                <span className="min-w-0 truncate">{children}</span>
+                <MessageLinkIcon filePath={fileTarget.path} />
+                {children}
             </a>
         </span>
     )
@@ -745,15 +741,10 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
             rel={rel}
             onClick={handleClick}
             data-hapi-external-link={isExternalLink ? 'true' : undefined}
-            className={cn('aui-md-a bg-transparent font-medium text-[var(--app-markdown-link)] underline decoration-[color:var(--app-markdown-link-muted)] underline-offset-3 transition-colors hover:text-[var(--app-markdown-link-hover)] hover:decoration-[color:var(--app-markdown-link-hover)] [&_code]:bg-transparent', props.className)}
+            aria-disabled={classification === 'deny' || !href ? true : undefined}
+            className={cn(MESSAGE_LINK_CLASS, props.className)}
         >
-            {isExternalLink ? (
-                <Link2
-                    className="mr-[0.3em] inline h-[0.9em] w-[0.9em] align-[-0.08em]"
-                    data-markdown-link-icon="external"
-                    aria-hidden="true"
-                />
-            ) : null}
+            <MessageLinkIcon href={href} external={isExternalLink} disabled={classification === 'deny' || !href} />
             {children}
         </a>
     )

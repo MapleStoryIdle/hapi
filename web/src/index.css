@@ -37,8 +37,8 @@
     --app-link: var(--tg-theme-link-color, #111827);
     /* Content links stay recognizably blue even when Telegram supplies a
      * neutral --app-link color for buttons and controls. */
-    --app-markdown-link: #60a5fa;
-    --app-markdown-link-hover: #93c5fd;
+    --app-markdown-link: #0b5fcc;
+    --app-markdown-link-hover: #084ca3;
     --app-markdown-link-muted: color-mix(in srgb, var(--app-markdown-link) 48%, transparent);
     --app-button: var(--tg-theme-button-color, #111827);
     --app-button-text: var(--tg-theme-button-text-color, #ffffff);
@@ -778,7 +778,8 @@ select {
     color: var(--cupertino-session-secondary-label);
 }
 
-.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-heading h2 {
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-heading h2,
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-date-heading {
     color: var(--cupertino-session-label);
     font-size: 0.9375rem;
     font-weight: 600;
@@ -853,11 +854,6 @@ select {
 .cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-completed-divider h2 {
     color: var(--cupertino-session-secondary-label);
     font-size: 0.75rem;
-}
-
-.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-date-heading {
-    color: var(--cupertino-session-secondary-label);
-    letter-spacing: -0.01em;
 }
 
 .cupertino-session-index .cupertino-session-list[data-session-list-view="list"] .cupertino-session-row .cupertino-session-source {
@@ -1195,31 +1191,67 @@ html[data-theme="oled"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-typ
     color: inherit;
 }
 
-.happy-user-bubble .aui-md-a {
-    color: var(--app-chat-user-fg);
-    text-decoration-color: color-mix(in srgb, var(--app-chat-user-fg) 70%, transparent);
+/* One inline-link treatment across assistant/user text and message actions.
+ * No chip surface; linked code inherits the same font and color as its label.
+ * Inline links can wrap naturally on narrow screens, without an oversized
+ * touch box that would disturb paragraph spacing. */
+.message-content-link {
+    border: 0;
+    border-radius: 2px;
+    padding: 0;
+    background: transparent;
+    color: var(--app-markdown-link);
+    font: inherit;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: color 150ms ease;
 }
 
-.happy-user-bubble .aui-md-a:hover {
-    text-decoration-color: var(--app-chat-user-fg);
-}
-
-.happy-user-bubble .aui-md-file-link,
-.happy-user-bubble .aui-md-file-link:hover {
-    color: var(--app-inline-code-fg);
+.message-content-link:hover,
+.message-content-link:active {
+    color: var(--app-markdown-link-hover);
     text-decoration: none;
 }
 
-.happy-user-bubble .aui-md-a[data-hapi-external-link="true"],
-.happy-user-bubble .aui-md-file-link[data-hapi-file-link="true"] {
-    color: var(--app-markdown-link);
-    text-decoration-color: var(--app-markdown-link-muted);
+.message-content-link:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 3px;
 }
 
-.happy-user-bubble .aui-md-a[data-hapi-external-link="true"]:hover,
-.happy-user-bubble .aui-md-file-link[data-hapi-file-link="true"]:hover {
-    color: var(--app-markdown-link-hover);
-    text-decoration-color: var(--app-markdown-link-hover);
+.message-content-link[aria-disabled="true"] {
+    color: var(--app-hint);
+    cursor: not-allowed;
+}
+
+.message-content-link code {
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-decoration: none;
+}
+
+.message-content-link strong,
+.message-content-link em {
+    color: inherit;
+}
+
+.message-content-link-icon {
+    display: inline-block;
+    width: 0.85em;
+    height: 0.85em;
+    margin-right: 0.32em;
+    vertical-align: -0.08em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .message-content-link {
+        transition: none;
+    }
 }
 
 .aui-md-codeblock pre.shiki {
@@ -1298,7 +1330,39 @@ html[data-theme="oled"] .shiki span {
 }
 
 .animate-slide-up {
-  animation: slide-up 0.3s ease-out;
+    animation: slide-up 0.3s ease-out;
+}
+
+/* Question sheets: drag only the handle/header, leaving the body free to scroll. */
+.question-drawer {
+    bottom: var(--drawer-bottom, 0px);
+    max-height: min(80dvh, 46rem, calc(var(--drawer-viewport-height, 100dvh) - var(--app-safe-area-top, 0px) - 12px));
+    padding-bottom: max(var(--app-safe-area-bottom), 12px);
+    padding-left: var(--app-safe-area-left);
+    padding-right: var(--app-safe-area-right);
+    transform: translateY(var(--drawer-drag, 0px));
+    transition: transform 360ms cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+.question-drawer[data-state='open']:not([data-entered='true']) { animation: question-drawer-in 320ms cubic-bezier(0.22, 1, 0.36, 1); }
+.question-drawer[data-state='closed'] { animation: question-drawer-out 220ms ease-in; }
+.question-drawer[data-dragging='true'] { animation: none; transition: none; }
+.question-drawer-overlay[data-state='open'] { animation: question-overlay-in 220ms ease-out; }
+.question-drawer-overlay[data-state='closed'] { animation: question-overlay-out 220ms ease-in; }
+@keyframes question-drawer-in {
+    from { transform: translateY(calc(100% + var(--drawer-bottom, 0px))); }
+    to { transform: translateY(0); }
+}
+@keyframes question-drawer-out {
+    from { transform: translateY(var(--drawer-drag, 0px)); }
+    to { transform: translateY(calc(100% + var(--drawer-bottom, 0px))); }
+}
+@keyframes question-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes question-overlay-out { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+    .question-drawer, .question-drawer[data-state='open']:not([data-entered='true']), .question-drawer[data-state='closed'], .question-drawer-overlay[data-state] {
+        animation: none;
+        transition: none;
+    }
 }
 
 @keyframes menu-pop {

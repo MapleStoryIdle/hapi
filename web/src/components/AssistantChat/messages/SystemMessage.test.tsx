@@ -57,6 +57,7 @@ describe('HappySystemMessage — quota events', () => {
             'href',
             'https://chatgpt.com/codex/settings/usage'
         )
+        expect(screen.getByRole('link', { name: 'taskStatus.usage.action' })).toHaveClass('message-content-link', 'no-underline')
     })
 
     it('uses the compact context-divider treatment for Codex usage updates', () => {

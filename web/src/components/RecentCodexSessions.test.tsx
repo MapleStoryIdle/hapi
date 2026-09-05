@@ -11,10 +11,12 @@ import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import {
     COMPLETED_SESSION_DIRECTORY_COLORS,
     RECENT_CODEX_WINDOW_MS,
+    RECENT_COMPLETED_WINDOW_MS,
     RecentCodexSessions,
     assignCompletedSessionDirectoryColors,
     formatKanbanSessionTime,
     getCompletedSessionDirectoryColor,
+    getKanbanDateEmoji,
     getMergedCodexKanbanStatus,
     groupMergedCodexCompletedTimeline,
     groupMergedCodexSessionsForKanban,
@@ -111,6 +113,72 @@ function createManagedCodexSession(
 }
 
 describe('RecentCodexSessions', () => {
+    it('splits recent completions at 30 minutes, including across midnight and seconds timestamps', () => {
+        const now = new Date(2026, 8, 5, 0, 10).getTime()
+        const native = (id: string, modifiedAt: number): CodexLocalSessionSummary => ({
+            id, title: id, file: '', modifiedAt, runState: 'idle'
+        })
+        const rows = mergeRecentCodexSessions(
+            [createManagedCodexSession('managed', now - 1000)],
+            [
+                native('just-now', now),
+                native('before-midnight', (now - 20 * 60_000) / 1000),
+                native('edge-recent', now - RECENT_COMPLETED_WINDOW_MS + 1),
+                native('edge-completed', now - RECENT_COMPLETED_WINDOW_MS),
+                native('old', now - RECENT_COMPLETED_WINDOW_MS - 1),
+                native('future', now + 60_000)
+            ], { now }
+        )
+        const groups = groupMergedCodexSessionsForKanban(rows, new Set(), null, now)
+        expect(groups.find((group) => group.id === 'recent')?.sessions.map((s) => s.id)).toEqual([
+            'just-now', 'managed', 'before-midnight', 'edge-recent'
+        ])
+        expect(groups.find((group) => group.id === 'completed')?.sessions.map((s) => s.id)).toEqual([
+            'future', 'edge-completed', 'old'
+        ])
+        const ids = groups.flatMap((group) => group.sessions.map((s) => s.key))
+        expect(new Set(ids).size).toBe(rows.length)
+        expect(ids).toHaveLength(rows.length)
+    })
+
+    it('assigns varied decorative emojis that remain stable for the same calendar date', () => {
+        const days = ['2026-09-05', '2026-09-04', '2026-09-03']
+        const emojis = days.map(getKanbanDateEmoji)
+        expect(emojis.every(Boolean)).toBe(true)
+        expect(new Set(emojis).size).toBe(days.length)
+        expect(days.map(getKanbanDateEmoji)).toEqual(emojis)
+    })
+
+    it('ages Recent into dated Completed using the existing clock, without another API request', async () => {
+        vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+        vi.setSystemTime(new Date(2026, 8, 5, 12))
+        localStorage.setItem('hapi-lang', 'zh-CN')
+        const api = createApi()
+        api.getCodexSessions = vi.fn(async () => ({ success: true as const, sessions: [] }))
+        const nearBoundary = createManagedCodexSession('near-boundary', Date.now() - RECENT_COMPLETED_WINDOW_MS + 15_000)
+        const old = createManagedCodexSession('old', Date.now() - RECENT_COMPLETED_WINDOW_MS - 60_000)
+        await act(async () => {
+            render(<NativeCodexRealtimeProvider value={{ connected: true }}><I18nProvider><RecentCodexSessions api={api} machineId="machine-1" realtimeAvailable hapiSessions={[nearBoundary, old]} embedded hideHeader viewMode="kanban" onOpen={() => {}} /></I18nProvider></NativeCodexRealtimeProvider>)
+        })
+        const board = screen.getByTestId('session-kanban-board')
+        const recent = board.querySelector('[data-kanban-group="recent"]')
+        expect(recent).toHaveTextContent('最近')
+        expect(recent).toHaveTextContent('near-boundary')
+        expect(recent?.querySelector('[data-kanban-group-icon="recent"]')).toHaveAttribute('aria-hidden', 'true')
+        expect([...board.querySelectorAll('[data-kanban-group]')].map((g) => g.getAttribute('data-kanban-group'))).toEqual(['recent', 'completed'])
+        const heading = board.querySelector('[data-kanban-date-group] h3')
+        expect(heading).toHaveTextContent('今天')
+        expect(heading).toHaveClass('text-xs', 'font-semibold', 'tracking-[0.04em]')
+        expect(heading?.querySelector('[data-kanban-date-emoji]')).toHaveAttribute('aria-hidden', 'true')
+        const emoji = heading?.querySelector('[data-kanban-date-emoji]')?.textContent
+        await act(async () => { vi.advanceTimersByTime(30_000) })
+        expect(board.querySelector('[data-kanban-group="recent"]')).toBeNull()
+        expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('near-boundary')
+        expect(board.querySelector('[data-kanban-date-emoji]')?.textContent).toBe(emoji)
+        expect(screen.getAllByRole('button', { name: '打开 near-boundary' })).toHaveLength(1)
+        expect(api.getCodexSessions).toHaveBeenCalledTimes(1)
+    })
+
     it('assigns completed cards a stable color from their directory', () => {
         const projectColor = getCompletedSessionDirectoryColor('/workspace/project/')
         expect(projectColor).toBe(getCompletedSessionDirectoryColor('/workspace/project'))
@@ -267,14 +335,15 @@ describe('RecentCodexSessions', () => {
             'hapi:hapi-pending',
             'hapi:hapi-processing',
             'native:native-completed'
-        ]))
+        ]), null, now)
 
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
             ['pending', ['hapi-pending']],
             ['processing', ['hapi-processing']],
             ['unviewed', []],
             ['pinned', ['native-completed']],
-            ['completed', ['native-newer-completed']]
+            ['recent', ['native-newer-completed']],
+            ['completed', []]
         ])
     })
 
@@ -310,7 +379,8 @@ describe('RecentCodexSessions', () => {
         const groups = groupMergedCodexSessionsForKanban(
             rows,
             new Set(['hapi:hapi-unviewed-newer', 'hapi:hapi-seen-pinned', 'native:native-pinned']),
-            { 'hapi-seen-pinned': now - 30 }
+            { 'hapi-seen-pinned': now - 30 },
+            now
         )
 
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
@@ -318,7 +388,8 @@ describe('RecentCodexSessions', () => {
             ['processing', []],
             ['unviewed', ['hapi-unviewed-newer', 'hapi-unviewed-older']],
             ['pinned', ['hapi-seen-pinned', 'native-pinned']],
-            ['completed', ['native-completed']]
+            ['recent', ['native-completed']],
+            ['completed', []]
         ])
     })
 
@@ -482,7 +553,7 @@ describe('RecentCodexSessions', () => {
         )
 
         expect(await screen.findByText('Managed task')).toBeInTheDocument()
-        expect(screen.getByText('Native task')).toBeInTheDocument()
+        expect(await screen.findByText('Native task')).toBeInTheDocument()
         const sessionList = screen.getByTestId('recent-codex-sessions')
         expect(sessionList).toHaveClass('px-4', 'sm:px-6')
         expect(sessionList.querySelector('[data-session-source="native"][data-session-active="true"]')).not.toBeNull()
@@ -633,7 +704,7 @@ describe('RecentCodexSessions', () => {
         const board = screen.getByTestId('session-kanban-board')
         await waitFor(() => {
             expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
-            expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Historical completion')
+            expect(board.querySelector('[data-kanban-group="recent"]')).toHaveTextContent('Historical completion')
         })
 
         view.rerender(renderBoard([historical, fresh]))
@@ -697,13 +768,13 @@ describe('RecentCodexSessions', () => {
         const board = await screen.findByTestId('session-kanban-board')
         await waitFor(() => {
             expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
-            expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Runner A history')
+            expect(board.querySelector('[data-kanban-group="recent"]')).toHaveTextContent('Runner A history')
         })
 
         view.rerender(renderBoard('machine-b', [runnerB]))
         await waitFor(() => {
             expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
-            expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Runner B history')
+            expect(board.querySelector('[data-kanban-group="recent"]')).toHaveTextContent('Runner B history')
         })
     })
 
@@ -732,7 +803,7 @@ describe('RecentCodexSessions', () => {
         const board = await screen.findByTestId('session-kanban-board')
         await waitFor(() => {
             expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
-            expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Runner B history')
+            expect(board.querySelector('[data-kanban-group="recent"]')).toHaveTextContent('Runner B history')
         })
 
         act(() => {
@@ -745,7 +816,7 @@ describe('RecentCodexSessions', () => {
 
         await waitFor(() => {
             expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
-            expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Runner B history')
+            expect(board.querySelector('[data-kanban-group="recent"]')).toHaveTextContent('Runner B history')
         })
     })
 
@@ -780,7 +851,7 @@ describe('RecentCodexSessions', () => {
             const board = await screen.findByTestId('session-kanban-board')
             await waitFor(() => {
                 expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
-                expect(board.querySelector('[data-kanban-group="completed"]')).toHaveTextContent('Historical storage failure')
+                expect(board.querySelector('[data-kanban-group="recent"]')).toHaveTextContent('Historical storage failure')
             })
         } finally {
             setItem.mockRestore()
@@ -805,7 +876,7 @@ describe('RecentCodexSessions', () => {
                     title: 'Completed Codex task',
                     cwd: '/workspace/other',
                     file: '/tmp/completed-rollout.jsonl',
-                    modifiedAt: Date.now() - 1,
+                    modifiedAt: Date.now() - RECENT_COMPLETED_WINDOW_MS - 1,
                     runState: 'idle' as const
                 }
             ]
@@ -1038,12 +1109,12 @@ describe('RecentCodexSessions', () => {
 
         await screen.findByText('SHAPI idle task')
         const board = screen.getByTestId('session-kanban-board')
-        expect(board.querySelector('[data-kanban-date-group]')).not.toBeNull()
+        expect(board.querySelector('[data-kanban-group="recent"]')).not.toBeNull()
         expect(board.querySelector('.cupertino-kanban-timeline-rail')).toBeNull()
         expect(board.querySelector('.cupertino-kanban-timeline-node')).toBeNull()
         expect(board.querySelector('.cupertino-kanban-time-line')).toBeNull()
         expect(board.querySelector('.cupertino-kanban-card-time')).not.toBeNull()
-        expect(screen.getByText('Today')).toBeInTheDocument()
+        expect(screen.getByText('Recent')).toBeInTheDocument()
         const card = screen.getByText('SHAPI idle task').closest('li')!
         fireEvent.click(card.querySelector('[data-kanban-archive]')!)
         const archiveButtons = screen.getAllByRole('button', { name: 'Archive' })

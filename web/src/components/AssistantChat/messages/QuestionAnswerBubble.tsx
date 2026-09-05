@@ -1,6 +1,7 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import { useState } from 'react'
 import type { QuestionAnswerItem, QuestionAnswerPresentation } from '@/chat/questionAnswers'
-import { CheckIcon, CloseIcon } from '@/components/icons'
+import { CheckIcon } from '@/components/icons'
+import { BottomDrawer } from '@/components/ui/BottomDrawer'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
@@ -60,11 +61,11 @@ function DetailOption(props: {
             <SelectedMark selected={props.selected} />
             <div className="min-w-0 flex-1">
                 <div className="break-words text-sm font-medium leading-6 text-[var(--app-fg)] [&_.aui-md]:text-inherit [&_.aui-md-p]:my-0 [&_.aui-md-p]:leading-6">
-                    <MarkdownRenderer content={props.label} />
+                    <MarkdownRenderer standalone content={props.label} />
                 </div>
                 {props.description ? (
                     <div className="mt-1 break-words text-xs leading-5 text-[var(--app-hint)] [&_.aui-md]:text-inherit [&_.aui-md-p]:my-0 [&_.aui-md-p]:leading-5">
-                        <MarkdownRenderer content={props.description} />
+                        <MarkdownRenderer standalone content={props.description} />
                     </div>
                 ) : null}
             </div>
@@ -101,7 +102,7 @@ function QuestionAnswerDetailItem(props: { item: QuestionAnswerItem; index: numb
                 </span>
                 <div className="min-w-0 break-words text-sm font-semibold leading-6 text-[var(--app-fg)] [&_.aui-md]:text-inherit [&_.aui-md-p]:my-0 [&_.aui-md-p]:leading-6">
                     {props.item.question ? (
-                        <MarkdownRenderer content={props.item.question} />
+                        <MarkdownRenderer standalone content={props.item.question} />
                     ) : (
                         t('questionAnswer.selectionNumber', { number: props.index + 1 })
                     )}
@@ -127,7 +128,7 @@ function QuestionAnswerDetailItem(props: { item: QuestionAnswerItem; index: numb
                     <div className="flex flex-col gap-1.5">
                         {customAnswers.map((answer) => (
                             <div key={answer} className="break-words text-sm leading-6 text-[var(--app-fg)] [&_.aui-md]:text-inherit [&_.aui-md-p]:my-0 [&_.aui-md-p]:leading-6">
-                                <MarkdownRenderer content={answer} />
+                                <MarkdownRenderer standalone content={answer} />
                             </div>
                         ))}
                     </div>
@@ -137,91 +138,49 @@ function QuestionAnswerDetailItem(props: { item: QuestionAnswerItem; index: numb
     )
 }
 
-/**
- * A completed question is a historical record, not an editable form. Keep the
- * chat line compact, then reveal the original option set in a portal drawer
- * when the user needs the full context for a past choice.
- */
+/** A historical answer stays read-only; show the question and choice together. */
 export function QuestionAnswerBubble(props: { answer: QuestionAnswerPresentation }) {
     const { t } = useTranslation()
+    const [open, setOpen] = useState(false)
     const summary = getSelectedAnswerSummary(props.answer)
     const title = t('questionAnswer.title')
-    const summaryText = summary.hiddenCount > 0
-        ? `${summary.text} +${summary.hiddenCount}`
-        : summary.text
+    const summaryText = summary.hiddenCount > 0 ? `${summary.text} +${summary.hiddenCount}` : summary.text
 
     return (
-        <Dialog.Root>
-            <div className="w-full min-w-0 max-w-full" data-question-answer-bubble>
-                <Dialog.Trigger asChild>
+        <div className="w-full min-w-0 max-w-full" data-question-answer-bubble>
+            <BottomDrawer
+                open={open}
+                onOpenChange={setOpen}
+                title={title}
+                subtitle={t('questionAnswer.completeOptions')}
+                testId="question-answer-details-drawer"
+                trigger={(
                     <button
                         type="button"
                         data-testid="question-answer-toggle"
                         aria-label={`${t('questionAnswer.viewOptions')}: ${summaryText}`}
-                        className="group flex w-full min-w-0 items-center gap-3 rounded-[20px] border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] px-3.5 py-3 text-left shadow-none transition-colors hover:bg-[var(--app-tool-card-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        className="group flex w-full min-w-0 items-start gap-3 rounded-[20px] border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] px-3.5 py-3 text-left shadow-none transition-colors hover:bg-[var(--app-tool-card-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                     >
-                        <span
-                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--app-subtle-bg)] text-emerald-600 dark:text-emerald-400"
-                            data-question-answer-summary-mark
-                            aria-hidden="true"
-                        >
+                        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--app-subtle-bg)] text-emerald-600 dark:text-emerald-400" data-question-answer-summary-mark aria-hidden="true">
                             <CheckIcon className="h-3.5 w-3.5" />
                         </span>
                         <span className="min-w-0 flex-1">
-                            <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--app-hint)]">
-                                {title}
-                            </span>
-                            <span className="mt-0.5 block truncate text-sm font-semibold leading-5 text-[var(--app-fg)]">
-                                {summaryText}
-                            </span>
+                            <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--app-hint)]">{title}</span>
+                            {props.answer.items.map((item, index) => (
+                                <span key={index} className="mt-2 block first:mt-0" data-question-answer-summary-item>
+                                    {item.question ? <span className="block whitespace-pre-wrap break-words text-xs leading-5 text-[var(--app-hint)]">{item.question}</span> : null}
+                                    <span className="mt-0.5 block whitespace-pre-wrap break-words text-sm font-semibold leading-6 text-[var(--app-fg)]">{item.answers.join(' · ')}</span>
+                                </span>
+                            ))}
                         </span>
-                        <span className="flex shrink-0 items-center gap-1 text-[var(--app-hint)]">
-                            <span className="hidden text-[10px] font-medium sm:inline">
-                                {t('questionAnswer.selectedCount', { count: summary.total })}
-                            </span>
-                            <DetailsIcon />
-                        </span>
+                        <span className="mt-1 shrink-0 text-[var(--app-hint)]"><DetailsIcon /></span>
                     </button>
-                </Dialog.Trigger>
-            </div>
-
-            <Dialog.Portal>
-                <Dialog.Overlay className="fixed inset-0 z-[60] bg-slate-950/35" />
-                <Dialog.Content
-                    aria-describedby={undefined}
-                    data-testid="question-answer-details-drawer"
-                    className="fixed inset-x-0 bottom-0 z-[61] flex max-h-[min(80dvh,46rem)] flex-col overflow-hidden rounded-t-[28px] border-x border-t border-[var(--app-border)] bg-[var(--app-dialog-bg)] pb-[max(var(--app-safe-area-bottom),0.75rem)] shadow-[0_-18px_48px_rgba(15,23,42,0.22)] animate-slide-up outline-none motion-reduce:animate-none sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-[min(34rem,48vw)] sm:rounded-none sm:border-y-0 sm:border-r-0 sm:border-l sm:pb-0 sm:shadow-[-18px_0_48px_rgba(15,23,42,0.18)]"
-                >
-                    <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-[var(--app-border)] sm:hidden" aria-hidden="true" />
-
-                    <header className="flex shrink-0 items-start gap-3 border-b border-[var(--app-border)] px-5 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-[max(var(--app-safe-area-top),1.25rem)]">
-                        <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--app-subtle-bg)] text-[var(--app-fg)]" aria-hidden="true">
-                            <CheckIcon className="h-5 w-5" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                            <Dialog.Title className="text-base font-bold text-[var(--app-fg)]">
-                                {title}
-                            </Dialog.Title>
-                            <p className="mt-0.5 text-xs leading-5 text-[var(--app-hint)]">
-                                {t('questionAnswer.completeOptions')}
-                            </p>
-                        </div>
-                        <Dialog.Close
-                            type="button"
-                            aria-label={t('button.close')}
-                            className="touch-manipulation -mr-2 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                        >
-                            <CloseIcon className="h-4 w-4" />
-                        </Dialog.Close>
-                    </header>
-
-                    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[max(var(--app-safe-area-bottom),1.25rem)] pt-4 sm:px-6 sm:pb-6">
-                        {props.answer.items.map((item, index) => (
-                            <QuestionAnswerDetailItem key={`${item.question ?? 'selection'}:${index}`} item={item} index={index} />
-                        ))}
-                    </div>
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+                )}
+            >
+                {props.answer.items.map((item, index) => (
+                    <QuestionAnswerDetailItem key={`${item.question ?? 'selection'}:${index}`} item={item} index={index} />
+                ))}
+            </BottomDrawer>
+        </div>
     )
 }

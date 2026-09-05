@@ -10,7 +10,7 @@ vi.mock('@/components/MarkdownRenderer', () => ({
 afterEach(() => cleanup())
 
 describe('QuestionAnswerBubble', () => {
-    it('keeps the chat summary compact and reveals the complete original options on tap', () => {
+    it('shows question and selected answer in the bubble, with other options in the drawer', () => {
         const view = render(
             <I18nProvider>
                 <QuestionAnswerBubble answer={{
@@ -28,7 +28,7 @@ describe('QuestionAnswerBubble', () => {
 
         expect(screen.getByText('Your selection')).toBeInTheDocument()
         expect(screen.getByText('Keep it compact')).toBeInTheDocument()
-        expect(screen.queryByText('Which direction?')).not.toBeInTheDocument()
+        expect(screen.getByText('Which direction?')).toBeInTheDocument()
         expect(screen.queryByText('Show all details')).not.toBeInTheDocument()
         expect(view.container.querySelector('[data-question-answer-bubble]')).toHaveClass('w-full')
         expect(screen.getByTestId('question-answer-toggle')).toHaveClass(
@@ -42,7 +42,7 @@ describe('QuestionAnswerBubble', () => {
 
         const drawer = screen.getByTestId('question-answer-details-drawer')
         expect(drawer).toBeInTheDocument()
-        expect(screen.getByText('Which direction?')).toBeInTheDocument()
+        expect(within(drawer).getByText('Which direction?')).toBeInTheDocument()
         expect(screen.getByText('Show all details')).toBeInTheDocument()
         expect(screen.getByText('Everything visible')).toBeInTheDocument()
         expect(drawer.querySelectorAll('[data-question-answer-option]')).toHaveLength(2)

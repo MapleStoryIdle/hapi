@@ -1,5 +1,6 @@
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
-import { Activity, AlertTriangle, Archive, Clock, ExternalLink, Layers2, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react'
+import { Activity, AlertTriangle, Archive, Clock, Layers2, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react'
+import { MESSAGE_LINK_CLASS, MessageLinkIcon } from '@/components/MessageLink'
 import { getEventPresentation, isNetworkTaskStatus, isUsageLimitEvent } from '@/chat/presentation'
 import type { AgentEvent } from '@/chat/types'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
@@ -187,10 +188,10 @@ function TaskStatusCard(props: { event: TaskStatusEvent; messageId: string }) {
                                     href={props.event.actionUrl}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[var(--app-link)] hover:underline"
+                                    className={`${MESSAGE_LINK_CLASS} mt-2 inline-block`}
                                 >
+                                    <MessageLinkIcon href={props.event.actionUrl} external />
                                     {t(visual.actionKey)}
-                                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
                                 </a>
                             ) : null}
                         </div>

@@ -54,7 +54,10 @@ describe('UserBubbleContent', () => {
         expect(screen.getByTestId('lazy-rainbow-text')).toHaveAttribute('data-inline', 'true')
         const skill = container.querySelector('[data-user-directive-kind="skill"]')
         expect(skill).toHaveClass('text-[var(--app-markdown-link)]')
+        expect(skill).toHaveClass('bg-transparent', 'border-0', 'p-0')
+        expect(skill).not.toHaveClass('bg-[var(--app-chat-user-chip-bg)]', 'border', 'rounded-full')
         expect(skill?.querySelector('svg')).toBeInTheDocument()
+        expect(skill?.tagName).toBe('SPAN')
     })
 
     it('keeps slash commands visually separate from skills', () => {
@@ -62,7 +65,20 @@ describe('UserBubbleContent', () => {
 
         const command = container.querySelector('[data-user-directive-kind="command"]')
         expect(command).toHaveClass('text-[var(--app-chat-user-chip-fg)]')
+        expect(command).toHaveClass('bg-[var(--app-chat-user-chip-bg)]', 'rounded-full', 'border')
         expect(command).not.toHaveClass('text-[var(--app-markdown-link)]')
+    })
+
+    it('keeps multiple skills transparent alongside an unchanged slash command', () => {
+        const { container } = render(<UserBubbleContent text={'$review $hapi-upgrade /model\nContinue\nNext step'} />)
+
+        const skills = container.querySelectorAll('[data-user-directive-kind="skill"]')
+        expect(skills).toHaveLength(2)
+        for (const skill of skills) {
+            expect(skill).toHaveClass('bg-transparent', 'border-0', 'text-[var(--app-markdown-link)]')
+        }
+        expect(container.querySelector('[data-user-directive-kind="command"]')).toHaveClass('bg-[var(--app-chat-user-chip-bg)]')
+        expect(container.querySelector('[data-testid="lazy-rainbow-text"]')).toHaveAttribute('data-preserve-single-line-breaks', 'true')
     })
 
     it('asks LazyRainbowText to preserve single newlines in sent prompt bodies', () => {

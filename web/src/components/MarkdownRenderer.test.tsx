@@ -141,6 +141,19 @@ describe('MarkdownRenderer', () => {
         view.unmount()
     })
 
+    it('shares unadorned inline-link styling across user-facing destinations', () => {
+        renderInChat('[识别规则 (line 306)](src/rules.ts:306) · [网页](https://example.com) · [下载文档](https://example.com/review.md) · [站内](/settings) · [应用](vscode://file/rules.ts)')
+
+        for (const link of screen.getAllByRole('link')) {
+            expect(link).toHaveClass('message-content-link', 'bg-transparent', 'no-underline')
+            expect(link).not.toHaveClass('underline', 'font-mono', 'truncate', 'border')
+            expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+        }
+        expect(screen.getByRole('link', { name: '识别规则 (line 306)' }).querySelector('[data-file-type="ts"]')).not.toBeNull()
+        expect(screen.getByRole('link', { name: '下载文档' })).toHaveAttribute('href', 'https://example.com/review.md')
+        expect(screen.getByRole('link', { name: '应用' })).toHaveAttribute('href', '#')
+    })
+
     it('keeps remark plugins stable when the chat provider value is recreated', () => {
         const onPlugins = vi.fn()
         const view = render(chatProviderProbe(onPlugins))
