@@ -64,6 +64,7 @@ import {
     type NativeSnapshotVersion
 } from '@/lib/native-snapshot-refresh-coordinator'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
+import { NATIVE_FEEDBACK_SILENCE_MS, useNativeFeedbackSilence } from '@/hooks/useNativeFeedbackSilence'
 import { useCodexSubscriptionLimits } from '@/hooks/queries/useCodexSubscriptionLimits'
 import { useNativeCodexSessionComposerCapabilities } from '@/hooks/queries/useNativeCodexSessionComposerCapabilities'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
@@ -86,7 +87,7 @@ const NATIVE_CONTEXT_REFRESH_INTERVAL_MS = 5_000
 const NATIVE_CONTEXT_ACTIVE_REFRESH_INTERVAL_MS = 1_000
 const NATIVE_CONTEXT_STALE_AFTER_MS = 12_000
 const NATIVE_STATUS_STALE_AFTER_MS = 6_000
-const NATIVE_ORPHANED_RECEIPT_GRACE_MS = 3_000
+const NATIVE_ORPHANED_RECEIPT_GRACE_MS = NATIVE_FEEDBACK_SILENCE_MS
 const NATIVE_UNCONFIRMED_RECEIPT_GRACE_MS = 15_000
 
 function areNativeQueueRefsCurrent(
@@ -1704,6 +1705,36 @@ export function CodexSessionContextPage(props: {
     const canRecoverNativeDelivery = nativeRecoveryCandidate.candidate !== null
         && (directStatus === 'idle' || nativeStalledSince !== null)
     const deliveryProgress = statusQuery.data?.success === true ? statusQuery.data.progress : null
+    // Repeated polls/heartbeats are not new feedback. Track transcript and
+    // delivery changes instead, scoped to this page and the latest prompt.
+    const latestEcho = currentNativeDirectMessageEchoes.at(-1)
+    const feedbackIsQuiet = useNativeFeedbackSilence(JSON.stringify([
+        nativeDirectMessageScopeKey,
+        contextQuery.data?.version,
+        contextQuery.data?.revision,
+        contextQuery.data?.messages.at(-1)?.id,
+        directStatus,
+        nativeWaitingForUserInput,
+        statusQuery.isError,
+        deliveryProgress?.startedAt,
+        deliveryProgress?.phase,
+        deliveryProgress?.phaseStartedAt,
+        latestEcho?.id,
+        latestEcho?.deliveryPhase,
+        latestEcho?.phaseStartedAt,
+        pendingDirectSendCount,
+        reconciledNativeQueuedMessages.map((message) => message.id)
+    ]), connectionNow)
+    const confirmedLaunchFailure = nativeRecoveryCandidate.reason === 'launch_failed'
+    // Presentation only: uncertain receipts still require explicit recovery;
+    // hiding a warning must never authorize an implicit resend.
+    const showNativeRecoveryNotice = nativeNeedsManualRecovery && (
+        isRecoveringNativeDelivery || isDiscardingNativeRecovery
+        || confirmedLaunchFailure || (feedbackIsQuiet && !nativeWaitingForUserInput)
+    )
+    const recoveryTitle = t(confirmedLaunchFailure
+        ? 'recentCodex.direct.recovery.launchFailedTitle'
+        : 'recentCodex.direct.recovery.title')
     const directSendPhase = getNativeCodexDirectSendPhase({
         pendingDirectSendCount,
         queuedMessages: reconciledNativeQueuedMessages,
@@ -1758,7 +1789,7 @@ export function CodexSessionContextPage(props: {
         || statusQuery.isError
         || directStatus === null
         || directStatus === 'unknown'
-    const composerNotice = nativeNeedsManualRecovery
+    const composerNotice = showNativeRecoveryNotice
         ? getNativeRecoveryDetail(
             nativeRecoveryCandidate.reason,
             nativeRecoveryCandidate.uncertain,
@@ -1775,13 +1806,16 @@ export function CodexSessionContextPage(props: {
             : directStatus === 'idle'
                 ? null
                 : directStatus === 'unknown'
-                    ? t('recentCodex.direct.unknown')
+                    ? feedbackIsQuiet ? t('recentCodex.direct.unknown') : null
                     : statusQuery.isLoading
                         ? t('recentCodex.direct.checking')
                         : statusQuery.isError || directStatus === null
-                            ? t('recentCodex.direct.statusFailed')
+                            ? feedbackIsQuiet ? t('recentCodex.direct.statusFailed') : null
                             : null
-    const visibleRunnerError = directStatusError === dismissedRunnerError ? null : directStatusError
+    const showRunnerError = directStatusErrorCode === 'launch_failed'
+        || directStatusErrorCode === 'external_writer_active'
+        || (feedbackIsQuiet && !nativeWaitingForUserInput)
+    const visibleRunnerError = !showRunnerError || directStatusError === dismissedRunnerError ? null : directStatusError
     const composerSendError = directSendError ?? (visibleRunnerError
         ? {
             id: statusQuery.dataUpdatedAt,
@@ -2371,10 +2405,10 @@ export function CodexSessionContextPage(props: {
                         statusLabel={t('recentCodex.fork.failed.title')}
                         testId="codex-fork-error"
                     />
-                ) : nativeNeedsManualRecovery ? (
+                ) : showNativeRecoveryNotice ? (
                     <NativeCodexFloatingStatusNotice
                         tone="warning"
-                        title={t('recentCodex.direct.recovery.title')}
+                        title={recoveryTitle}
                         detail={getNativeRecoveryDetail(
                             nativeRecoveryCandidate.reason,
                             nativeRecoveryCandidate.uncertain,
@@ -2402,7 +2436,7 @@ export function CodexSessionContextPage(props: {
                             isRecoveringNativeDelivery,
                             isDiscardingNativeRecovery
                         ].join(':')}
-                        statusLabel={t('recentCodex.direct.recovery.title')}
+                        statusLabel={recoveryTitle}
                         testId="codex-native-recovery"
                     />
                 ) : nativeWaitingForUserInput ? (
@@ -2414,7 +2448,7 @@ export function CodexSessionContextPage(props: {
                         statusLabel={t('recentCodex.status.waitingForLocalInput')}
                         testId="codex-native-waiting-for-local-input"
                     />
-                ) : directStatus === 'unknown' || statusQuery.isError ? (
+                ) : feedbackIsQuiet && (directStatus === 'unknown' || statusQuery.isError) ? (
                     <NativeCodexFloatingStatusNotice
                         tone="warning"
                         title={directStatus === 'unknown' ? t('recentCodex.status.unknown') : t('recentCodex.status.failed')}
