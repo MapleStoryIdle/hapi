@@ -70,8 +70,8 @@ async function fixture(options: { onUploadChunk?: () => void } = {}) {
     const gateway = createLocalServiceGateway(manager)
     cleanup.push(() => { gateway.stop(true) })
     const port = gateway.port!
-    const openUrl = (url: string) => manager.open({ namespace: 'owner', userId: 1 }, 'machine-1', { type: 'session', sessionId: 'session-1' }, url)
-    const open = (path = '/') => openUrl(`http://localhost:${localPort}${path}`)
+    const openUrl = (url: string, presentation: 'tab' | 'embed' = 'tab') => manager.open({ namespace: 'owner', userId: 1 }, 'machine-1', { type: 'session', sessionId: 'session-1' }, url, presentation)
+    const open = (path = '/', presentation: 'tab' | 'embed' = 'tab') => openUrl(`http://localhost:${localPort}${path}`, presentation)
     const enter = async (url: string) => {
         const link = new URL(url)
         const auth = await request(port, link.host, '/__shapi_local/auth', {
@@ -303,4 +303,28 @@ describe('preview origin isolation', () => {
             location: 'https://abc.preview.example.com/path?a=1#x', 'set-cookie': ['app=ok']
         })
     })
+})
+
+it('domain-mode embeds use isolated URL grants rather than third-party cookies', async () => {
+    const f = await fixture()
+    const tab = new URL((await f.open('/page')).url)
+    const tabGrant = await f.enter(tab.href)
+    const opened = new URL((await f.open('/page?q=1#part', 'embed')).url)
+    expect(opened.origin).not.toBe(tab.origin)
+    expect((await request(f.port, opened.host, '/page', { headers: { cookie: tabGrant.cookie } })).status).toBe(401)
+    const result = await request(f.port, opened.host, opened.pathname + opened.search, {
+        headers: { origin: 'null', cookie: 'shapi_local_dev=wrong; app=secret', authorization: 'Bearer secret' }
+    })
+    expect(result.status).toBe(200)
+    expect(result.headers['content-security-policy']).toContain('frame-ancestors http://localhost:5173')
+    expect(result.headers['content-security-policy']).toContain('sandbox allow-scripts allow-forms;')
+    expect(result.headers['set-cookie']).toBeUndefined()
+    const data = JSON.parse(result.text)
+    expect(data.path).toBe('/page?q=1')
+    expect(data.headers.cookie).toBeUndefined()
+    expect(data.headers.authorization).toBeUndefined()
+    const capability = opened.pathname.split('/')[3]
+    expect((await request(f.port, opened.host, '/page', { headers: { cookie: 'shapi_local_dev=' + capability } })).status).toBe(401)
+    f.offline()
+    expect((await request(f.port, opened.host, opened.pathname)).status).toBe(410)
 })

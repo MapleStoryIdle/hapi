@@ -47,3 +47,51 @@ describe('BottomDrawer', () => {
         expect(dialog.style.getPropertyValue('--drawer-bottom')).toBe('390px')
     })
 })
+
+it('blocks outside, Escape and close while an answer is being sent', () => {
+    const change = vi.fn()
+    render(<I18nProvider><BottomDrawer open onOpenChange={change} busy title="Sending" overlayTestId="outside"><p>Wait</p></BottomDrawer></I18nProvider>)
+    fireEvent.click(screen.getByTestId('outside'))
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled()
+    expect(change).not.toHaveBeenCalled()
+})
+
+it('restores focus without a Radix trigger and removes background motion on close', async () => {
+    function Preview() {
+        const [open, setOpen] = useState(false)
+        return <I18nProvider><div data-chat-drawer-background><button onClick={() => setOpen(true)}>Preview</button></div>
+            <BottomDrawer open={open} onOpenChange={setOpen} title="Preview" overlayTestId="outside"><p>Content</p></BottomDrawer>
+        </I18nProvider>
+    }
+    render(<Preview />)
+    const button = screen.getByRole('button', { name: 'Preview' })
+    button.focus()
+    fireEvent.click(button)
+    const background = document.querySelector<HTMLElement>('[data-chat-drawer-background]')!
+    expect(background.style.getPropertyValue('--drawer-background-progress')).toBe('1')
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    const outside = screen.getByTestId('outside')
+    fireEvent.pointerDown(outside)
+    fireEvent.click(outside)
+    await waitFor(() => expect(button).toHaveFocus())
+    expect(background.style.getPropertyValue('--drawer-background-progress')).toBe('0')
+})
+
+it('associates its subtitle with the dialog description', () => {
+    render(<I18nProvider><BottomDrawer open onOpenChange={() => {}} title="Details" subtitle="More context">Body</BottomDrawer></I18nProvider>)
+    expect(screen.getByRole('dialog')).toHaveAccessibleDescription('More context')
+})
+
+it('dismisses only once for a complete outside pointer click', async () => {
+    const change = vi.fn()
+    render(<I18nProvider><BottomDrawer open onOpenChange={change} title="Details" overlayTestId="outside">Body</BottomDrawer></I18nProvider>)
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    const outside = screen.getByTestId('outside')
+    fireEvent.pointerDown(outside, { button: 0, pointerType: 'mouse' })
+    fireEvent.mouseDown(outside)
+    fireEvent.pointerUp(outside, { button: 0, pointerType: 'mouse' })
+    fireEvent.mouseUp(outside)
+    fireEvent.click(outside)
+    expect(change).toHaveBeenCalledExactlyOnceWith(false)
+})

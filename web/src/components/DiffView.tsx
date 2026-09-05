@@ -1,7 +1,7 @@
 import { diffLines } from 'diff'
 import type { CSSProperties } from 'react'
 import { useMemo } from 'react'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { ChatDetailDialog } from '@/components/ui/ChatDetailDialog'
 import { usePointerFocusRing } from '@/hooks/usePointerFocusRing'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
@@ -87,8 +87,7 @@ export function DiffView(props: {
     }
 
     return (
-        <Dialog>
-            <DialogTrigger asChild>
+        <ChatDetailDialog title={title} subtitle={subtitle} desktopClassName="max-w-5xl" trigger={
                 <button
                     type="button"
                     aria-label={props.filePath ? `Open diff for ${props.filePath}` : 'Open diff preview'}
@@ -128,19 +127,11 @@ export function DiffView(props: {
                         </div>
                     </div>
                 </button>
-            </DialogTrigger>
-            <DialogContent className="max-w-5xl">
-                <DialogHeader>
-                    <DialogTitle className="break-all">{title}</DialogTitle>
-                    <DialogDescription className="break-all font-mono">
-                        {subtitle}
-                    </DialogDescription>
-                </DialogHeader>
-                <div className="mt-3 max-h-[75vh] overflow-auto">
+            }>
+                <div className="mt-3 overflow-x-auto">
                     {diffInline}
                 </div>
-            </DialogContent>
-        </Dialog>
+        </ChatDetailDialog>
     )
 }
 

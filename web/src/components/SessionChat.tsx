@@ -1,3 +1,4 @@
+import { ChatPreviewProvider, useChatPreview } from '@/components/ChatPreviewContext'
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
@@ -51,6 +52,7 @@ import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { consumeSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer, getShareTransfer } from '@/lib/shareTransfer'
 import { getDraft } from '@/lib/composer-drafts'
+import { enqueueQueuedMessageEdit } from '@/lib/queued-message-edits'
 import { useTranslation } from '@/lib/use-translation'
 import {
     SessionConnectionRecoveryControl,
@@ -809,7 +811,7 @@ function useDeferredThreadSnapshot(
  * SessionChatInner.
  */
 export function SessionChat(props: SessionChatProps) {
-    return <SessionChatInner key={props.session.id} {...props} />
+    return <ChatPreviewProvider key={props.session.id}><SessionChatInner key={props.session.id} {...props} /></ChatPreviewProvider>
 }
 
 function SessionChatInner(props: SessionChatProps) {
@@ -1695,8 +1697,10 @@ function SessionChatInner(props: SessionChatProps) {
         })
     }, [navigate, props.session.id])
 
-    const handleViewFileDiff = useCallback((file: { path: string; staged: boolean; unstaged: boolean }) => {
+    const openPreview = useChatPreview()
+    const handleViewFileDiff = useCallback((file: { path: string; staged: boolean; unstaged: boolean; status?: string }) => {
         setOutlineOpen(false)
+        if (openPreview?.({ type: 'file', api: props.api, source: { type: 'session', sessionId: props.session.id }, path: file.path, staged: file.staged && !file.unstaged, diff: file.status !== 'untracked' })) return
         navigate({
             to: '/sessions/$sessionId/file',
             params: { sessionId: props.session.id },
@@ -1706,7 +1710,7 @@ function SessionChatInner(props: SessionChatProps) {
                 from: 'session'
             }
         })
-    }, [navigate, props.session.id])
+    }, [navigate, props.session.id, props.api, openPreview])
 
     const handleToggleOutline = useCallback(() => {
         setOutlineOpen((open) => !open)
@@ -2252,10 +2256,7 @@ function SessionChatInner(props: SessionChatProps) {
                                             api={props.api}
                                             queuedMessages={queuedMessages}
                                             onExpandedChange={handleQueueAccessoryExpandedChange}
-                                            onEdit={({ pendingSchedule: restored }) => {
-                                                // Restore the schedule so the clock button re-activates.
-                                                setPendingSchedule(restored)
-                                            }}
+                                            onEdit={(edit) => enqueueQueuedMessageEdit(props.session.id, edit)}
                                         />
                                     ) : null}
                                 </div>

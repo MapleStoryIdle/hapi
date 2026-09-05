@@ -11,26 +11,8 @@ import type { ConversationStatus } from '@/realtime/types'
 import type { ThreadGoal } from '@/types/api'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
 import { isFastServiceTier } from './codexFastMode'
+import { SessionThinkingIndicator } from '@/components/SessionThinkingIndicator'
 import { useTranslation } from '@/lib/use-translation'
-
-// Vibing messages for thinking state
-const VIBING_MESSAGES = [
-    "Accomplishing", "Actioning", "Actualizing", "Baking", "Booping", "Brewing",
-    "Calculating", "Cerebrating", "Channelling", "Churning", "Clauding", "Coalescing",
-    "Cogitating", "Computing", "Combobulating", "Concocting", "Conjuring", "Considering",
-    "Contemplating", "Cooking", "Crafting", "Creating", "Crunching", "Deciphering",
-    "Deliberating", "Determining", "Discombobulating", "Divining", "Doing", "Effecting",
-    "Elucidating", "Enchanting", "Envisioning", "Finagling", "Flibbertigibbeting",
-    "Forging", "Forming", "Frolicking", "Generating", "Germinating", "Hatching",
-    "Herding", "Honking", "Ideating", "Imagining", "Incubating", "Inferring",
-    "Manifesting", "Marinating", "Meandering", "Moseying", "Mulling", "Mustering",
-    "Musing", "Noodling", "Percolating", "Perusing", "Philosophising", "Pontificating",
-    "Pondering", "Processing", "Puttering", "Puzzling", "Reticulating", "Ruminating",
-    "Scheming", "Schlepping", "Shimmying", "Simmering", "Smooshing", "Spelunking",
-    "Spinning", "Stewing", "Sussing", "Synthesizing", "Thinking", "Tinkering",
-    "Transmuting", "Unfurling", "Unravelling", "Vibing", "Wandering", "Whirring",
-    "Wibbling", "Wizarding", "Working", "Wrangling"
-]
 
 const PERMISSION_TONE_CLASSES: Record<PermissionModeTone, string> = {
     neutral: 'text-[var(--app-hint)]',
@@ -39,6 +21,15 @@ const PERMISSION_TONE_CLASSES: Record<PermissionModeTone, string> = {
     danger: 'text-red-500'
 }
 
+type StandardConnectionStatus = {
+    text: string
+    color: string
+    dotColor: string
+    isPulsing: boolean
+}
+
+type ConnectionStatus = StandardConnectionStatus | { isThinking: true }
+
 function getConnectionStatus(
     active: boolean,
     thinking: boolean,
@@ -46,7 +37,7 @@ function getConnectionStatus(
     voiceStatus: ConversationStatus | undefined,
     backgroundTaskCount: number,
     t: (key: string) => string
-): { text: string; color: string; dotColor: string; isPulsing: boolean } {
+): ConnectionStatus {
     const hasPermissions = agentState?.requests && Object.keys(agentState.requests).length > 0
 
     // Voice connecting takes priority
@@ -78,13 +69,7 @@ function getConnectionStatus(
     }
 
     if (thinking) {
-        const vibingMessage = VIBING_MESSAGES[Math.floor(Math.random() * VIBING_MESSAGES.length)].toLowerCase() + '…'
-        return {
-            text: vibingMessage,
-            color: 'text-[#007AFF]',
-            dotColor: 'bg-[#007AFF]',
-            isPulsing: true
-        }
+        return { isThinking: true }
     }
 
     if (backgroundTaskCount > 0) {
@@ -278,14 +263,18 @@ export function StatusBar(props: StatusBarProps) {
     return (
         <div className="flex min-w-0 items-center justify-between gap-2 px-2 pb-1">
             <div className="flex min-w-0 items-baseline gap-2 sm:gap-3">
-                <div className="flex shrink-0 items-center gap-1.5">
-                    <span
-                        className={`h-2 w-2 rounded-full ${connectionStatus.dotColor} ${connectionStatus.isPulsing ? 'animate-pulse' : ''}`}
-                    />
-                    <span className={`whitespace-nowrap text-xs ${connectionStatus.color}`}>
-                        {connectionStatus.text}
-                    </span>
-                </div>
+                {'isThinking' in connectionStatus ? (
+                    <SessionThinkingIndicator compact />
+                ) : (
+                    <div className="flex shrink-0 items-center gap-1.5">
+                        <span
+                            className={`h-2 w-2 rounded-full ${connectionStatus.dotColor} ${connectionStatus.isPulsing ? 'animate-pulse' : ''}`}
+                        />
+                        <span className={`whitespace-nowrap text-xs ${connectionStatus.color}`}>
+                            {connectionStatus.text}
+                        </span>
+                    </div>
+                )}
                 {contextUsage ? (
                     <span className={`min-w-0 whitespace-nowrap text-[10px] ${contextWarning?.color ?? 'text-[var(--app-hint)]'}`}>
                         <span className="sm:hidden">

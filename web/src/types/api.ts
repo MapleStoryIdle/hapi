@@ -306,6 +306,7 @@ export type CodexLocalSessionStatusResponse =
         success: true
         status: CodexLocalSessionRunState
         activeTurnId?: string
+        activeClientMessageId?: string
         waitingForUserInput?: boolean
         /** Current runners always include true or false. */
         controlledByCodexSsh?: boolean

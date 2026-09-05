@@ -1,3 +1,4 @@
+import { useChatPreview } from '@/components/ChatPreviewContext'
 import { OpenLocalServiceSchema, parseLocalServiceUrl, type LocalServiceSource, type OpenLocalServiceRequest } from '@hapi/protocol/localServices'
 import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
 import { useContext, type MouseEvent } from 'react'
@@ -26,6 +27,7 @@ export function parseLocalServiceLaunchHash(hash: string): OpenLocalServiceReque
 
 export function useLocalServiceLink(href: string | undefined): { href: string; onClick: (event: MouseEvent<HTMLAnchorElement>) => void } | null {
     const chat = useOptionalHappyChatContext()
+    const preview = useChatPreview()
     const i18n = useContext(I18nContext)
     if (!chat || !href) return null
     const source: LocalServiceSource = chat.fileLinkTarget ?? { type: 'session', sessionId: chat.sessionId }
@@ -39,6 +41,7 @@ export function useLocalServiceLink(href: string | undefined): { href: string; o
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
             event.preventDefault()
             const request = parseLocalServiceLaunchHash(launchHref.slice(launchHref.indexOf('#')))!
+            if (preview?.({ type: 'url', url: launchHref, localService: { api: chat.api, request } })) return
             if (!openLocalServiceInTab(chat.api, request, { title: t('localService.title'), opening: t('localService.opening'), retry: t('localService.retry'), error: (key) => t(key) })) {
                 // Popup blocking must not make the link inert. Same-tab fallback keeps login.
                 window.location.assign(launchHref)

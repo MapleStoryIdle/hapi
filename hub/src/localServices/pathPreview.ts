@@ -1,14 +1,14 @@
 import type { IncomingHttpHeaders } from 'node:http'
 import type { LocalServiceLease } from './manager'
 
-export type PathPreview = Pick<LocalServiceLease, 'origin' | 'target'> & { basePath: string }
+export type PathPreview = Pick<LocalServiceLease, 'origin' | 'target'> & { basePath: string; frameOrigins?: readonly string[] }
 
 /** A URL capability is deliberately scoped to one lease. Never use HAPI auth
  * cookies/storage in the opaque sandbox, and never forward browser credentials. */
 export function pathPreviewHeaders(headers: IncomingHttpHeaders, preview: PathPreview): IncomingHttpHeaders {
     const result = { ...headers }
     for (const name of [
-        'set-cookie', 'content-security-policy', 'content-security-policy-report-only',
+        'set-cookie', 'x-frame-options', 'content-security-policy', 'content-security-policy-report-only',
         'access-control-allow-origin', 'access-control-allow-credentials', 'access-control-allow-headers',
         'access-control-expose-headers', 'access-control-allow-methods', 'access-control-max-age',
         'clear-site-data', 'service-worker-allowed', 'www-authenticate', 'refresh', 'link',
@@ -26,7 +26,7 @@ export function pathPreviewHeaders(headers: IncomingHttpHeaders, preview: PathPr
         `font-src ${scope} data:`, `media-src ${scope} blob:`,
         `connect-src ${scope} ${scope.replace(/^http/, 'ws')}`,
         "worker-src 'none'", "frame-src 'none'", "object-src 'none'", "base-uri 'none'",
-        `form-action ${scope}`, "frame-ancestors 'none'"
+        `form-action ${scope}`, `frame-ancestors ${preview.frameOrigins?.join(' ') || "'none'"}`
     ].join('; ')
     result['content-type'] ??= 'text/plain; charset=utf-8'
     result['x-content-type-options'] = 'nosniff'

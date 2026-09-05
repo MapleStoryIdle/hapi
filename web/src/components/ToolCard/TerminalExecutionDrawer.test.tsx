@@ -63,24 +63,8 @@ describe('TerminalExecutionDrawer', () => {
         )
 
         const drawer = screen.getByTestId('terminal-execution-drawer')
-        expect(drawer).toHaveClass(
-            'inset-x-0',
-            'bottom-0',
-            'h-[60dvh]',
-            'w-full',
-            'rounded-t-[28px]',
-            'sm:left-1/2',
-            'sm:top-1/2',
-            'sm:bottom-auto',
-            'sm:h-[min(75dvh,50rem)]',
-            'sm:max-h-[calc(100dvh-2rem)]',
-            'sm:w-[min(75vw,60rem)]',
-            'sm:-translate-x-1/2',
-            'sm:-translate-y-1/2',
-            'sm:rounded-2xl',
-            'isolate',
-            'overflow-hidden'
-        )
+        expect(drawer).toHaveClass('question-drawer', 'inset-x-0', 'w-full', 'rounded-t-[28px]', 'overflow-hidden')
+        expect(drawer).toHaveAttribute('data-chat-detail-drawer', 'true')
         expect(drawer).not.toHaveClass('pt-[var(--app-safe-area-top)]')
         expect(drawer.className).not.toContain('backdrop-blur')
         expect(drawer).toHaveTextContent('bun run test:web')
@@ -90,30 +74,22 @@ describe('TerminalExecutionDrawer', () => {
         expect(drawer).toHaveTextContent('1418 tests passed')
         expect(drawer).toHaveTextContent('one warning emitted')
         expect(drawer.querySelector('[data-terminal-execution-overview]')).not.toBeInTheDocument()
-        expect(drawer.querySelector('header')).toHaveClass('relative', 'z-10', 'bg-[var(--app-dialog-bg)]')
-        expect(drawer.querySelector('[data-terminal-execution-drag-handle]')).toHaveClass('sm:hidden')
-        expect(drawer.querySelector('[data-terminal-execution-drag-handle]')).toHaveAttribute('aria-hidden', 'true')
-        expect(drawer.querySelector('[data-terminal-execution-command-strip]')).toHaveTextContent('/bin/zsh -lc "bun run test:web"')
+        expect(drawer.querySelector('[data-question-drawer-handle]')).toHaveClass('touch-none')
+        expect(drawer.querySelector('[data-chat-drawer-body]')).toHaveClass('overflow-y-auto')
         const outputPanel = drawer.querySelector<HTMLElement>('[data-terminal-execution-panel="output"]')
         if (!outputPanel) throw new Error('expected output panel')
 
-        expect(outputPanel).toHaveClass(
-            'relative',
-            'isolate',
-            'flex-1',
-            'overflow-y-auto',
-            'overscroll-contain',
-            'pb-[max(var(--app-safe-area-bottom),1.25rem)]'
-        )
+        expect(outputPanel).toHaveClass('relative', 'isolate')
         expect(outputPanel).not.toHaveAttribute('hidden')
-        expect((`${drawer.className} ${outputPanel.className}`).match(/--app-safe-area-bottom/g)).toHaveLength(1)
+        expect(outputPanel.className).not.toContain('--app-safe-area-bottom')
+        expect(drawer.querySelector('[data-chat-drawer-body]')).toHaveClass('overflow-y-auto', 'overscroll-contain')
         expect(drawer.querySelectorAll('[role="tabpanel"]')).toHaveLength(3)
         expect(drawer.querySelector('[data-terminal-execution-panel="input"]')).toHaveAttribute('hidden')
         expect(drawer.querySelector('[data-terminal-execution-panel="environment"]')).toHaveAttribute('hidden')
         expect(drawer.querySelector('[data-terminal-execution-input]')).toBeInTheDocument()
         expect(drawer.querySelector('[data-terminal-execution-output]')).toBeInTheDocument()
         expect(screen.getByTestId('terminal-execution-close')).toHaveClass('h-11', 'w-11')
-        expect(screen.getByTestId('terminal-execution-close')).toHaveTextContent('Close')
+        expect(screen.getByTestId('terminal-execution-close')).toHaveAccessibleName('Close')
     })
 
     it('defaults to output and switches accessible tab panels by click and keyboard', () => {
@@ -132,7 +108,7 @@ describe('TerminalExecutionDrawer', () => {
         expect(screen.getByRole('tablist', { name: 'bun run test:web' })).toBeInTheDocument()
         expect(outputTab).toHaveAttribute('aria-selected', 'true')
         expect(outputTab).toHaveAttribute('tabindex', '0')
-        expect(outputTab).toHaveClass('min-h-11')
+        expect(outputTab).toHaveClass('chat-segment')
         expect(inputTab).toHaveAttribute('aria-selected', 'false')
         expect(inputTab).toHaveAttribute('tabindex', '-1')
 
@@ -155,7 +131,7 @@ describe('TerminalExecutionDrawer', () => {
             expect(panel).toHaveAttribute('aria-labelledby', tab.id)
         }
 
-        outputPanel.scrollTop = 120
+        expect(drawer.querySelector('[data-chat-drawer-body]')).toContainElement(outputPanel)
 
         fireEvent.click(inputTab)
 
@@ -165,8 +141,6 @@ describe('TerminalExecutionDrawer', () => {
         expect(inputPanel).toHaveAttribute('aria-labelledby', inputTab.id)
         expect(inputPanel).toHaveTextContent('/bin/zsh -lc "bun run test:web"')
         expect(inputPanel).not.toHaveTextContent('1418 tests passed')
-        expect(inputPanel.scrollTop).toBe(0)
-        expect(outputPanel.scrollTop).toBe(120)
         expect(drawer).toContainElement(outputPanel)
         expect(outputPanel).toHaveAttribute('hidden')
         expect(inputPanel).not.toHaveAttribute('hidden')
@@ -281,7 +255,11 @@ describe('TerminalExecutionDrawer', () => {
             </I18nProvider>
         )
 
-        fireEvent.click(screen.getByTestId('terminal-execution-overlay'))
+        // Radix attaches its outside-pointer listener after mount.
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        const overlay = screen.getByTestId('terminal-execution-overlay')
+        fireEvent.pointerDown(overlay, { button: 0, pointerType: 'mouse' })
+        fireEvent.click(overlay)
 
         await waitFor(() => {
             expect(screen.queryByTestId('terminal-execution-drawer')).not.toBeInTheDocument()

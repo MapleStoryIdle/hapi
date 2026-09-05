@@ -28,3 +28,11 @@ describe('local service links', () => {
         expect(OpenLocalServiceSchema.safeParse({ url: 'http://localhost:1234', source: { type: 'session', sessionId: 'one', machineId: 'other' } }).success).toBe(false)
     })
 })
+
+it('accepts only the explicit tab or embed presentation without relaxing URL/source validation', () => {
+    const request = { source: { type: 'session', sessionId: 'one' }, url: 'http://localhost:3000/' }
+    expect(OpenLocalServiceSchema.safeParse({ ...request, presentation: 'embed' }).success).toBe(true)
+    expect(OpenLocalServiceSchema.safeParse({ ...request, presentation: 'tab' }).success).toBe(true)
+    expect(OpenLocalServiceSchema.safeParse({ ...request, presentation: '*' }).success).toBe(false)
+    expect(OpenLocalServiceSchema.safeParse({ ...request, presentation: 'embed', url: 'http://169.254.169.254/' }).success).toBe(false)
+})

@@ -96,30 +96,34 @@ export function getTraceSummaryText(
 // ---------------------------------------------------------------------------
 
 type TraceSectionProps = {
+    layout?: 'default' | 'drawer'
     block: ToolCallBlock
     metadata: SessionMetadataSummary | null
 }
 
-export function TraceSection({ block, metadata }: TraceSectionProps) {
+export function TraceSection({ block, metadata, layout = 'default' }: TraceSectionProps) {
     const { t } = useTranslation()
     const children = getTraceChildren(block)
     if (!children) return null
 
     const state = block.tool.state
     const isCodexAgentTrace = block.tool.name === 'CodexAgent'
-    const defaultOpen = isCodexAgentTrace || state === 'running' || state === 'error' || state === 'pending'
-    const fixedHeight = isCodexAgentTrace
+    const defaultOpen = layout === 'drawer' || isCodexAgentTrace || state === 'running' || state === 'error' || state === 'pending'
+    const fixedHeight = layout !== 'drawer' && isCodexAgentTrace
     const mode = isCodexAgentTrace ? 'session' : 'trace'
 
     // Extract summary metadata from result using typed helper
     const { totalTokens, totalDurationMs, totalToolUseCount } = readSummaryFields(block.tool.result)
     const callCount = totalToolUseCount !== null ? totalToolUseCount : children.length
 
-    const summaryText = getTraceSummaryText(callCount, totalTokens, totalDurationMs, t('tool.trace.callsSuffix'))
+    const summaryText = layout === 'drawer'
+        ? t('subagents.eventCount', { count: children.length })
+        : getTraceSummaryText(callCount, totalTokens, totalDurationMs, t('tool.trace.callsSuffix'))
 
     return (
         <TraceSectionInner
             items={children}
+            title={layout === 'drawer' ? t('subagents.records') : undefined}
             metadata={metadata}
             defaultOpen={defaultOpen}
             summaryText={summaryText}
@@ -134,6 +138,7 @@ export function TraceSection({ block, metadata }: TraceSectionProps) {
 // ---------------------------------------------------------------------------
 
 type TraceSectionInnerProps = {
+    title?: string
     items: ChatBlock[]
     metadata: SessionMetadataSummary | null
     defaultOpen: boolean
@@ -143,6 +148,7 @@ type TraceSectionInnerProps = {
 }
 
 function TraceSectionInner({
+    title,
     items,
     metadata,
     defaultOpen,
@@ -158,13 +164,13 @@ function TraceSectionInner({
             {/* Header row — clickable to toggle */}
             <button
                 type="button"
-                className="flex items-center gap-1 text-left text-xs font-medium text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors"
+                className="chat-trace-toggle flex items-center gap-1 text-left text-xs font-medium text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors"
                 onClick={() => setOpen((v) => !v)}
                 aria-expanded={open}
             >
                 <span className="w-3 text-center select-none">{open ? '▾' : '▸'}</span>
-                <span>{t('tool.trace')}</span>
-                <span className="font-mono font-normal opacity-70">({summaryText})</span>
+                <span>{title ?? t('tool.trace')}</span>
+                <span className="chat-trace-summary font-mono font-normal opacity-70">({summaryText})</span>
             </button>
 
             {open ? (
@@ -224,7 +230,7 @@ function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChild
     const { t } = useTranslation()
     const isSessionMode = mode === 'session'
     const rowClassName = isSessionMode
-        ? 'flex flex-col gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2'
+        ? 'chat-trace-row flex flex-col gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2'
         : 'flex flex-col gap-1'
     const detailClassName = isSessionMode
         ? 'rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm'
@@ -244,17 +250,18 @@ function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChild
             <div className={rowClassName}>
                 <button
                     type="button"
-                    className="flex items-center gap-2 text-left text-xs text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors disabled:pointer-events-none"
+                    className="chat-trace-toggle flex items-center gap-2 text-left text-xs text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors disabled:pointer-events-none"
                     onClick={onToggle}
+                    aria-expanded={expanded}
                     disabled={!onToggle}
                 >
                     {chevron}
-                    <span className="font-medium">{label}</span>
+                    <span className="chat-trace-label shrink-0 whitespace-nowrap font-medium">{label}</span>
                     <span className="min-w-0 truncate">{preview}</span>
                 </button>
                 {expanded && (
                     <div className={detailClassName}>
-                        <MarkdownRenderer content={child.text} />
+                        <MarkdownRenderer standalone content={child.text} />
                     </div>
                 )}
             </div>
@@ -266,8 +273,9 @@ function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChild
             <div className={rowClassName}>
                 <button
                     type="button"
-                    className="flex items-center gap-2 text-left text-xs text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors disabled:pointer-events-none"
+                    className="chat-trace-toggle flex items-center gap-2 text-left text-xs text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors disabled:pointer-events-none"
                     onClick={onToggle}
+                    aria-expanded={expanded}
                     disabled={!onToggle}
                 >
                     {chevron}
@@ -309,8 +317,9 @@ function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChild
         <div className={rowClassName}>
             <button
                 type="button"
-                className="flex items-center gap-2 text-left text-xs text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors disabled:pointer-events-none"
+                className="chat-trace-toggle flex items-center gap-2 text-left text-xs text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors disabled:pointer-events-none"
                 onClick={onToggle}
+                aria-expanded={expanded}
                 disabled={!onToggle}
             >
                 {chevron}

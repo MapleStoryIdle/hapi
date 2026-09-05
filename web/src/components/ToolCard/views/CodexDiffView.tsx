@@ -66,7 +66,6 @@ function renderDiff(block: ToolViewProps['block'], showFileHeader: boolean, surf
             filePath={showFileHeader ? parsed.fileName : undefined}
             variant={showFileHeader ? 'inline' : undefined}
             size={surface === 'dialog' ? 'comfortable' : undefined}
-            scrollY={surface === 'dialog'}
             showHeader={surface !== 'dialog'}
         />
     )

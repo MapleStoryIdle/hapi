@@ -52,7 +52,6 @@ export function MultiEditFullView(props: ToolViewProps) {
                     newString={edit.new_string}
                     variant="inline"
                     size={props.surface === 'dialog' ? 'comfortable' : undefined}
-                    scrollY={props.surface === 'dialog'}
                     showHeader={props.surface !== 'dialog'}
                 />
             ))}

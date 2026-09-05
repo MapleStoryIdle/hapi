@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { stripAnsiAndControls } from '@/components/assistant-ui/markdown-utils'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { ChatDetailDialog } from '@/components/ui/ChatDetailDialog'
 import { CodeBlock } from '@/components/CodeBlock'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -118,8 +118,7 @@ export function CliOutputBlock(props: { text: string }) {
 
     return (
         <div className="overflow-hidden rounded-[20px] bg-[var(--app-tool-card-bg)] p-3 shadow-none">
-            <Dialog>
-                <DialogTrigger asChild>
+            <ChatDetailDialog title={title} desktopClassName="max-w-3xl" trigger={
                     <button type="button" className="w-full text-left">
                         <div className="flex flex-col gap-2">
                             <div className="flex items-center justify-between gap-3">
@@ -145,16 +144,11 @@ export function CliOutputBlock(props: { text: string }) {
                             />
                         </div>
                     </button>
-                </DialogTrigger>
-                <DialogContent className="max-w-3xl">
-                    <DialogHeader>
-                        <DialogTitle>{title}</DialogTitle>
-                    </DialogHeader>
-                    <div className="mt-3 max-h-[75vh] overflow-auto">
+                }>
+                    <div className="mt-3 overflow-x-auto">
                         <CodeBlock code={content} language="shellscript" title="Terminal output" />
                     </div>
-                </DialogContent>
-            </Dialog>
+            </ChatDetailDialog>
         </div>
     )
 }

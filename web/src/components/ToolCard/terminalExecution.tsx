@@ -135,9 +135,9 @@ export function formatTerminalExecutionDuration(durationMs: number | null): stri
 }
 
 function terminalStateColorClass(state: TerminalExecutionState): string {
-    if (state === 'failed') return 'text-red-600'
-    if (state === 'completed') return 'text-emerald-600'
-    if (state === 'pending') return 'text-amber-600'
+    if (state === 'failed') return 'text-[var(--app-badge-error-text)]'
+    if (state === 'completed') return 'text-[var(--app-badge-success-text)]'
+    if (state === 'pending') return 'text-[var(--app-badge-warning-text)]'
     return 'text-[var(--app-hint)]'
 }
 
@@ -188,7 +188,7 @@ function TerminalExecutionDrawerPanel(props: {
     return (
         <div
             aria-labelledby={props.labelledBy}
-            className="relative isolate min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(var(--app-safe-area-bottom),1.25rem)] pt-4 sm:px-6 sm:pb-6"
+            className="relative isolate pt-4 sm:pb-2"
             data-terminal-execution-detail
             data-terminal-execution-panel={props.tab}
             hidden={props.hidden}
@@ -227,29 +227,29 @@ function TerminalExecutionDrawerPanel(props: {
             {props.tab === 'environment' ? (
                 <section className="flex flex-col gap-3" data-terminal-execution-environment>
                     <h3 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('terminal.execution.environment')}</h3>
-                    <dl className="grid gap-2">
-                        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2.5">
-                            <dt className="text-xs font-medium text-[var(--app-hint)]">{props.t('terminal.execution.status')}</dt>
+                    <dl className="chat-sheet-group divide-y divide-[var(--app-border)] px-4">
+                        <div className="py-3">
+                            <dt className="chat-sheet-caption text-[var(--app-hint)]">{props.t('terminal.execution.status')}</dt>
                             <dd className={cn('mt-1 flex items-center gap-2 text-sm font-medium', terminalStateColorClass(props.state))}>
                                 <span className={cn('h-2 w-2 shrink-0 rounded-full', terminalStateDotClass(props.state))} aria-hidden="true" />
                                 {terminalStateLabel(props.state, props.t)}
                             </dd>
                         </div>
                         {props.details.cwd ? (
-                            <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2.5">
-                                <dt className="text-xs font-medium text-[var(--app-hint)]">{props.t('terminal.execution.workingDirectory')}</dt>
-                                <dd className="mt-1 break-all font-mono text-xs leading-5 text-[var(--app-fg)]">{props.details.cwd}</dd>
+                            <div className="py-3">
+                                <dt className="chat-sheet-caption text-[var(--app-hint)]">{props.t('terminal.execution.workingDirectory')}</dt>
+                                <dd className="mt-1 [overflow-wrap:anywhere] font-mono text-sm leading-6 text-[var(--app-fg)]">{props.details.cwd}</dd>
                             </div>
                         ) : null}
                         {props.duration ? (
-                            <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2.5">
-                                <dt className="text-xs font-medium text-[var(--app-hint)]">{props.t('terminal.execution.duration')}</dt>
+                            <div className="py-3">
+                                <dt className="chat-sheet-caption text-[var(--app-hint)]">{props.t('terminal.execution.duration')}</dt>
                                 <dd className="mt-1 font-mono text-sm font-medium text-[var(--app-fg)]">{props.duration}</dd>
                             </div>
                         ) : null}
                         {props.details.exitCode !== null ? (
-                            <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2.5" data-terminal-execution-exit-code>
-                                <dt className="text-xs font-medium text-[var(--app-hint)]">{props.t('terminal.execution.exitCodeLabel')}</dt>
+                            <div className="py-3" data-terminal-execution-exit-code>
+                                <dt className="chat-sheet-caption text-[var(--app-hint)]">{props.t('terminal.execution.exitCodeLabel')}</dt>
                                 <dd className="mt-1 font-mono text-sm font-medium text-[var(--app-fg)]">
                                     {props.t('terminal.execution.exitCode', { code: props.details.exitCode })}
                                 </dd>

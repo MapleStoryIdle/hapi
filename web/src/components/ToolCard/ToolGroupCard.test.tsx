@@ -366,7 +366,7 @@ describe('ToolGroupCard', () => {
         expect(cards[0].dataset.codexSubagentColor).not.toBe(cards[1].dataset.codexSubagentColor)
     })
 
-    it('opens Codex subagent cards in the existing dialog and omits their expanded detail row', async () => {
+    it('opens Codex subagent cards with activity first and basic information in the second tab', async () => {
         const agent = makeToolBlock('codex-agent-detail', 'CodexAgent', {
             summary: 'Inspect the implementation',
             model: 'gpt-5.3-codex',
@@ -404,7 +404,12 @@ describe('ToolGroupCard', () => {
             expect(screen.getByRole('dialog')).toBeInTheDocument()
         })
         expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Agent: Inspect the implementation' })).toBeInTheDocument()
-        expect(within(screen.getByRole('dialog')).getAllByText('dialog-agent-id')).toHaveLength(2)
+        const drawer = screen.getByRole('dialog')
+        expect(drawer).toHaveAttribute('data-chat-detail-drawer', 'true')
+        expect(within(drawer).getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true')
+        expect(within(drawer).queryByText('dialog-agent-id')).not.toBeInTheDocument()
+        fireEvent.click(within(drawer).getByRole('tab', { name: 'Information' }))
+        expect(within(drawer).getByText('dialog-agent-id')).toBeVisible()
     })
 
     it('keeps the source launch order when Codex agents share a timestamp', () => {
@@ -1136,8 +1141,8 @@ describe('ToolGroupCard', () => {
         fireEvent.click(mutationRow!)
 
         const dialog = screen.getByRole('dialog')
-        expect(dialog).toHaveAttribute('data-file-mutation-dialog', 'true')
-        expect(dialog).toHaveClass('left-1/2', 'top-1/2', 'h-[60dvh]', 'rounded-xl')
+        expect(dialog).toHaveAttribute('data-chat-detail-drawer', 'true')
+        expect(dialog).toHaveClass('question-drawer', 'inset-x-0', 'rounded-t-[28px]')
         expect(dialog).not.toHaveClass('inset-0', 'h-[100dvh]', 'w-screen', 'rounded-none')
         expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument()
     })

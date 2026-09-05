@@ -121,6 +121,7 @@ describe('MarkdownRenderer', () => {
         expect(link).toHaveAttribute('title', '/workspace/project/docs/README.md:42')
         expect(link).toHaveClass('text-[var(--app-markdown-link)]')
         expect(link?.querySelector('[data-markdown-link-icon="file"]')).not.toBeNull()
+        expect(link?.querySelector('.message-content-link-label')).toHaveTextContent('README.md:42')
     })
 
     it('shows external Markdown links with a link icon and content-link color', () => {
@@ -130,6 +131,7 @@ describe('MarkdownRenderer', () => {
         expect(link).toHaveAttribute('data-hapi-external-link', 'true')
         expect(link).toHaveClass('text-[var(--app-markdown-link)]')
         expect(link.querySelector('[data-markdown-link-icon="external"]')).not.toBeNull()
+        expect(link.querySelector('.message-content-link-label')).toHaveTextContent('SHAPI docs')
     })
 
     it('keeps clickable file links transparent without changing ordinary code', () => {

@@ -119,7 +119,7 @@ export function QuestionAnswerForm(props: {
                 role={question.multiSelect ? 'checkbox' : 'radio'}
                 aria-checked={checked}
                 disabled={props.disabled || loading}
-                className={getAskUserQuestionOptionFrameClassName(checked, 'min-h-11 w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:pointer-events-none disabled:opacity-50')}
+                className={getAskUserQuestionOptionFrameClassName(checked, 'chat-sheet-option min-h-11 w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:pointer-events-none disabled:opacity-50', true)}
                 onClick={() => {
                     if (!other) return chooseOption(value)
                     haptic.selection()
@@ -142,12 +142,12 @@ export function QuestionAnswerForm(props: {
                 busy={loading}
                 title={t('tool.answerQuestion')}
                 testId="question-answer-form-drawer"
-                trigger={<Button type="button" variant="outline" size="sm" disabled={props.disabled || loading}>{t('tool.answerQuestion')}</Button>}
+                trigger={<Button type="button" variant="outline" size="sm" className="min-h-11" disabled={props.disabled || loading}>{t('tool.answerQuestion')}</Button>}
                 footer={step > 0 || needsSend || loading ? (
                     <div className="flex min-h-11 items-center justify-between gap-3">
-                        {step > 0 ? <Button type="button" variant="outline" disabled={props.disabled || loading} onClick={() => { setStep(step - 1); setError(null) }}>{t('tool.prev')}</Button> : <span />}
+                        {step > 0 ? <Button type="button" variant="outline" className="chat-sheet-action chat-sheet-action-secondary" disabled={props.disabled || loading} onClick={() => { setStep(step - 1); setError(null) }}>{t('tool.prev')}</Button> : <span />}
                         {needsSend ? (
-                            <Button type="button" disabled={props.disabled || loading || !isAnswered(selection, step)} onClick={() => { void continueOrSubmit(selections) }} aria-busy={loading} className="min-h-11 rounded-full px-6">
+                            <Button type="button" disabled={props.disabled || loading || !isAnswered(selection, step)} onClick={() => { void continueOrSubmit(selections) }} aria-busy={loading} className="chat-sheet-action chat-sheet-action-primary px-6">
                                 {loading ? <Spinner size="sm" label={null} /> : null}
                                 {loading ? t('tool.submitting') : isLast ? t('tool.sendAnswer') : t('tool.next')}
                             </Button>
@@ -161,7 +161,7 @@ export function QuestionAnswerForm(props: {
                         <span className="tabular-nums">{step + 1} / {props.questions.length}</span>
                     </div>
                     <div ref={questionRef} tabIndex={-1} role="heading" aria-level={3} className="mb-4 text-base font-medium outline-none"><MarkdownRenderer standalone content={question.question} /></div>
-                    {error ? <p role="alert" className="mb-3 break-words text-sm text-red-600">{error}</p> : null}
+                    {error ? <p role="alert" className="chat-sheet-feedback mb-3">{error}</p> : null}
                     {!pureText ? (
                         <div className="flex flex-col gap-2" role={question.multiSelect ? 'group' : 'radiogroup'} aria-label={question.question}>
                             {question.options.map((item) => option(item.value, item.label, item.description))}
@@ -175,7 +175,7 @@ export function QuestionAnswerForm(props: {
                             onChange={(event) => update({ ...selection, text: event.target.value })}
                             disabled={props.disabled || loading}
                             placeholder={props.textPlaceholder}
-                            className="mt-3 min-h-[88px] w-full resize-y rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-base text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
+                            className="chat-sheet-input mt-3 min-h-[88px] w-full resize-y rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-base text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
                         />
                     ) : null}
                 </div>

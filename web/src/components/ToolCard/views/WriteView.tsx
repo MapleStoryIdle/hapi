@@ -15,7 +15,6 @@ export function WriteView(props: ToolViewProps) {
                 newString={content}
                 variant="inline"
                 size="comfortable"
-                scrollY
                 showHeader={false}
             />
         )

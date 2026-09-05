@@ -201,10 +201,10 @@ function TaskStatusCard(props: { event: TaskStatusEvent; messageId: string }) {
                                     onClick={localServiceLink?.onClick}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className={`${MESSAGE_LINK_CLASS} mt-2 inline-block`}
+                                    className={`${MESSAGE_LINK_CLASS} mt-2`}
                                 >
                                     <MessageLinkIcon href={props.event.actionUrl} external />
-                                    {t(visual.actionKey)}
+                                    <span className="message-content-link-label">{t(visual.actionKey)}</span>
                                 </a>
                             ) : null}
                         </div>

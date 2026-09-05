@@ -28,6 +28,7 @@ import { supportsEffort, supportsModelChange, PI_THINKING_LEVEL_LABELS } from '@
 import type { PiThinkingLevel } from '@hapi/protocol'
 import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
+import { consumeQueuedMessageEdit, useQueuedMessageEdit } from '@/lib/queued-message-edits'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
@@ -44,6 +45,7 @@ import { getPiThinkingLevelOptions, getHighestThinkingLevel, isThinkingLevelSupp
 import { groupModelsByProvider } from './piModelGroups'
 import { PiModelPanel } from './PiModelPanel'
 import { PiThinkingLevelPanel } from './PiThinkingLevelPanel'
+import { SessionThinkingIndicator } from '@/components/SessionThinkingIndicator'
 
 export interface TextInputState {
     text: string
@@ -326,6 +328,8 @@ export function HappyComposer(props: {
     sendError?: ComposerSendError | null
     onClearSendError?: () => void
     showStatusBar?: boolean
+    /** Native sessions report these settings but do not support changing them here. */
+    readOnlyModelInfo?: boolean
     /** Hide file input affordances for transports that only accept text. */
     allowAttachments?: boolean
     activeSideSessions?: ActiveSideSessionChip[]
@@ -460,7 +464,21 @@ export function HappyComposer(props: {
     const prevControlledByUser = useRef(controlledByUser)
     const skillsByName = useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills])
 
-    useComposerDraft(sessionId, composerText, (text) => api.composer().setText(text))
+    const composerDraftReady = useComposerDraft(sessionId, composerText, (text) => api.composer().setText(text))
+    const queuedEdit = useQueuedMessageEdit(sessionId)
+    useEffect(() => {
+        // A draft written while cancellation was in flight belongs to the
+        // user. Leave this handoff saved until that draft is sent/cleared.
+        if (!composerDraftReady || !sessionId || !queuedEdit || sendError || composerText || hasAttachments || selectedSkill || pendingSchedule) return
+        const restored = extractLeadingSkillForComposer(queuedEdit.text, skillsByName)
+        if (restored) setSelectedSkill(restored.skill)
+        api.composer().setText(restored?.text ?? queuedEdit.text)
+        if (queuedEdit.pendingSchedule?.type === 'absolute' && queuedEdit.pendingSchedule.ms > Date.now()) {
+            setPendingSchedule(queuedEdit.pendingSchedule)
+        }
+        setComposerExpanded(true)
+        consumeQueuedMessageEdit(sessionId, queuedEdit.id)
+    }, [composerDraftReady, sessionId, queuedEdit, sendError, composerText, hasAttachments, selectedSkill, pendingSchedule, skillsByName, api, setPendingSchedule])
 
     // assistant-ui clears `composer.text` synchronously the moment a send is
     // invoked AND `SessionChat.handleSend` clears `pendingSchedule` the
@@ -1638,6 +1656,17 @@ export function HappyComposer(props: {
                     onMouseDownCapture={preserveComposerFocusForAction}
                 >
                     {!composerCompact ? overlays : null}
+
+                    {props.readOnlyModelInfo && (model || modelReasoningEffort || thinking) ? (
+                        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 pb-1">
+                            <div data-testid="composer-model-info" className="flex min-w-0 items-center gap-1.5 text-xs text-[var(--app-hint)]">
+                                {model ? <span className="truncate" title={model}>{model}</span> : null}
+                                {model && modelReasoningEffort ? <span aria-hidden="true">·</span> : null}
+                                {modelReasoningEffort ? <span className="shrink-0 capitalize">{modelReasoningEffort}</span> : null}
+                            </div>
+                            {thinking ? <SessionThinkingIndicator compact /> : null}
+                        </div>
+                    ) : null}
 
                     {showStatusBar && shouldShowComposerStatusBar(agentFlavor) ? (
                         <StatusBar

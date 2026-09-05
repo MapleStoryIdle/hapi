@@ -68,3 +68,16 @@ describe('same-origin sandbox preview policy', () => {
         }
     })
 })
+
+it('allows explicit trusted Web origins only, not wildcard or injectable CSP sources', () => {
+    const manager = new LocalServiceManager({
+        mode: 'path', appUrl: 'https://hub.example', frameOrigins: ['https://web.example', '*', 'https://*', 'https://*.example.com', 'https://evil.example; sandbox allow-same-origin', 'https://web.example', 'https://u:p@example.com'],
+        sshHost: 'localhost', sshListenHost: '127.0.0.1', sshPort: 0,
+        canAccessMachine: () => true, openTunnel: async () => ({ ok: false, error: 'not needed' })
+    })
+    expect(manager.frameOrigins).toEqual(['https://hub.example', 'https://web.example'])
+    const headers = pathPreviewHeaders({ 'x-frame-options': 'DENY' }, { ...preview, frameOrigins: manager.frameOrigins })
+    expect(headers['content-security-policy']).toContain('frame-ancestors https://hub.example https://web.example')
+    expect(headers['x-frame-options']).toBeUndefined()
+    expect(headers['content-security-policy']).toContain('sandbox allow-scripts allow-forms;')
+})

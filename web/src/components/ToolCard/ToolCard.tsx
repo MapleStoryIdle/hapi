@@ -6,7 +6,8 @@ import { isObject, safeStringify } from '@hapi/protocol'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { CodeBlock } from '@/components/CodeBlock'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { ChatDetailDialog } from '@/components/ui/ChatDetailDialog'
+import { DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { PermissionFooter } from '@/components/ToolCard/PermissionFooter'
 import { AskUserQuestionFooter } from '@/components/ToolCard/AskUserQuestionFooter'
 import { RequestUserInputFooter } from '@/components/ToolCard/RequestUserInputFooter'
@@ -22,6 +23,7 @@ import { getInputStringAny, truncate } from '@/lib/toolInputUtils'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { TraceSection } from '@/components/ToolCard/trace'
+import { SubagentDetailView } from '@/components/ToolCard/SubagentDetailView'
 import { isSubagentToolName } from '@/chat/subagentTool'
 import { formatTerminalExecutionDuration, getTerminalExecutionToolState, isTerminalExecutionTool, TerminalExecutionDetail } from '@/components/ToolCard/terminalExecution'
 import { TerminalExecutionDrawer } from '@/components/ToolCard/TerminalExecutionDrawer'
@@ -30,7 +32,7 @@ import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutation
 
 const ELAPSED_INTERVAL_MS = 1000
 
-export const FILE_MUTATION_DIALOG_CLASS_NAME = 'flex h-[60dvh] max-h-[60dvh] flex-col overflow-hidden sm:h-[min(75dvh,50rem)] sm:max-h-[calc(100dvh-2rem)]'
+export const FILE_MUTATION_DIALOG_CLASS_NAME = 'flex flex-col overflow-hidden sm:h-[min(75dvh,50rem)] sm:max-h-[calc(100dvh-2rem)]'
 
 export function shouldUseCompactTerminalToolCard(toolName: string, terminalToolDisplayMode: TerminalToolDisplayMode): boolean {
     return isTerminalExecutionTool(toolName) && terminalToolDisplayMode === 'compact'
@@ -284,12 +286,15 @@ export function ToolDetailDialogContent(props: {
     if (isTerminalExecutionTool(toolName)) {
         return <TerminalExecutionDetail block={props.block} />
     }
+    if (toolName === 'CodexAgent' || isSubagentToolName(toolName)) {
+        return <SubagentDetailView key={props.block.id} block={props.block} metadata={props.metadata} />
+    }
     const FullToolView = getToolFullViewComponent(toolName)
     const ResultToolView = getToolResultViewComponent(toolName)
     const fileMutationSummary = getFileMutationDialogSummary(props.block, props.metadata)
     if (fileMutationSummary && FullToolView) {
         return (
-            <div className="mt-3 min-h-0 flex-1 overflow-auto overscroll-contain pr-1">
+            <div className="mt-3 min-h-0 flex-1">
                 <FullToolView block={props.block} metadata={props.metadata} surface="dialog" />
             </div>
         )
@@ -304,8 +309,8 @@ export function ToolDetailDialogContent(props: {
 
     return (
         <div className={cn(
-            'mt-3 flex max-h-[75vh] flex-col gap-4 overflow-auto',
-            toolName === 'CodexPatch' ? 'max-sm:mt-0 max-sm:max-h-none max-sm:flex-1 max-sm:px-5 max-sm:pb-5' : null
+            'mt-3 flex min-h-0 flex-col gap-4',
+            toolName === 'CodexPatch' ? 'max-sm:mt-0 max-sm:flex-1' : null
         )}>
             <div>
                 <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">
@@ -336,7 +341,7 @@ export function ToolDetailDialogHeader(props: {
     const summary = getFileMutationDialogSummary(props.block, props.metadata)
 
     return (
-        <DialogHeader className={summary ? 'shrink-0 border-b border-[var(--app-border)] pb-3 text-left' : undefined}>
+        <DialogHeader className={cn('max-sm:pr-0 max-sm:text-left', summary ? 'shrink-0 border-b border-[var(--app-border)] pb-3 text-left' : undefined)}>
             {summary ? (
                 <div className="flex min-w-0 items-center gap-3" data-file-mutation-dialog-header>
                     <DialogTitle className="min-w-0 flex-1 truncate font-mono" title={summary.fileNames.join(', ')}>
@@ -348,7 +353,7 @@ export function ToolDetailDialogHeader(props: {
                     </span>
                 </div>
             ) : (
-                <DialogTitle>{props.fallbackTitle}</DialogTitle>
+                <DialogTitle className="break-all">{props.fallbackTitle}</DialogTitle>
             )}
         </DialogHeader>
     )
@@ -478,8 +483,11 @@ function ToolCardInner(props: ToolCardProps) {
                         {header}
                     </button>
                 ) : (
-                    <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-                        <DialogTrigger asChild>
+                    <ChatDetailDialog open={detailsOpen} onOpenChange={setDetailsOpen}
+                        title={toolTitle}
+                        desktopClassName={cn('max-w-2xl', useFileMutationDialog ? FILE_MUTATION_DIALOG_CLASS_NAME : null)}
+                        header={<ToolDetailDialogHeader block={props.block} metadata={props.metadata} fallbackTitle={toolTitle} />}
+                        trigger={
                             <button
                                 type="button"
                                 className={cn(
@@ -492,16 +500,10 @@ function ToolCardInner(props: ToolCardProps) {
                             >
                                 {header}
                             </button>
-                        </DialogTrigger>
-                        <DialogContent
-                            className={cn('max-w-2xl', useFileMutationDialog ? FILE_MUTATION_DIALOG_CLASS_NAME : null)}
-                            aria-describedby={undefined}
-                            data-file-mutation-dialog={useFileMutationDialog ? 'true' : undefined}
-                        >
-                            <ToolDetailDialogHeader block={props.block} metadata={props.metadata} fallbackTitle={toolTitle} />
-                            <ToolDetailDialogContent block={props.block} metadata={props.metadata} />
-                        </DialogContent>
-                    </Dialog>
+                        }
+                    >
+                        <ToolDetailDialogContent block={props.block} metadata={props.metadata} />
+                    </ChatDetailDialog>
                 )}
             </CardHeader>
 

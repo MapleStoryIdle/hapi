@@ -32,6 +32,7 @@ describe('UriConfirmDialog', () => {
     it('renders dialog title when open', () => {
         renderDialog()
         expect(screen.getByText('Open this link?')).toBeInTheDocument()
+        expect(screen.getByRole('dialog')).toHaveAccessibleDescription(/custom URI scheme/)
     })
 
     it('displays the scheme prefix in the URI display', () => {

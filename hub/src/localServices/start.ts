@@ -12,7 +12,8 @@ function envPort(env: NodeJS.ProcessEnv, key: string, fallback: number): number 
 export async function startLocalServices(
     getSyncEngine: () => SyncEngine | null,
     appUrl: string,
-    env: NodeJS.ProcessEnv = process.env
+    env: NodeJS.ProcessEnv = process.env,
+    frameOrigins: readonly string[] = []
 ): Promise<{ manager: LocalServiceManager; pathHandler: LocalServiceHandler | null; stop: () => Promise<void> } | null> {
     const originTemplate = env.HAPI_LOCAL_SERVICE_ORIGIN
     const mode = env.HAPI_LOCAL_SERVICE_MODE ?? (originTemplate ? 'domain' : 'off')
@@ -22,6 +23,7 @@ export async function startLocalServices(
         mode,
         originTemplate,
         appUrl,
+        frameOrigins,
         sshHost: env.HAPI_LOCAL_SERVICE_SSH_HOST || new URL(appUrl).hostname.replace(/^\[|\]$/g, ''),
         sshListenHost: env.HAPI_LOCAL_SERVICE_SSH_BIND || '127.0.0.1',
         sshPort: envPort(env, 'HAPI_LOCAL_SERVICE_SSH_PORT', 8320),

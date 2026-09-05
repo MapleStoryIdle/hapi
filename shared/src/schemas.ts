@@ -4,6 +4,15 @@ import { CODEX_COLLABORATION_MODES, PERMISSION_MODES } from './modes'
 export const PermissionModeSchema = z.enum(PERMISSION_MODES)
 export const CodexCollaborationModeSchema = z.enum(CODEX_COLLABORATION_MODES)
 export const SessionEndReasonSchema = z.enum(['completed', 'terminated', 'error', 'handoff'])
+/** Browser-only handoff after a queued message has been cancelled for editing. */
+export const QueuedMessageEditSchema = z.object({
+    id: z.string(),
+    text: z.string(),
+    pendingSchedule: z.union([
+        z.object({ type: z.literal('absolute'), ms: z.number().finite() }),
+        z.object({ type: z.literal('preset'), preset: z.enum(['+5m', '+30m', '+1h', '+4h']) })
+    ]).nullable()
+})
 export type SessionEndReason = z.infer<typeof SessionEndReasonSchema>
 
 const MetadataSummarySchema = z.object({
@@ -477,6 +486,7 @@ export const CodexLocalSessionRealtimeStatusSchema = z.object({
     controlledByCodexSsh: z.boolean().optional(),
     stalledSince: z.number().finite().optional(),
     startedAt: z.number().finite().optional(),
+    activeClientMessageId: z.string().min(1).max(160).optional(),
     progress: CodexLocalSessionDirectSendProgressSchema.optional(),
     lastError: z.string().optional(),
     lastErrorAt: z.number().finite().optional(),

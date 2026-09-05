@@ -259,7 +259,9 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     notificationHub = new NotificationHub(syncEngine, notificationChannels)
 
     // Start HTTP service first (before tunnel, so tunnel has something to forward to)
-    localServices = await startLocalServices(() => syncEngine, config.publicUrl)
+    localServices = await startLocalServices(() => syncEngine, config.publicUrl, process.env, [
+        ...config.corsOrigins.map(normalizeOrigin).filter(Boolean), ...(relayFlag.enabled && relayCorsOrigin ? [relayCorsOrigin] : [])
+    ])
     webServer = await startWebServer({
         getSyncEngine: () => syncEngine,
         getSseManager: () => sseManager,

@@ -5,6 +5,7 @@ import Download from 'yet-another-react-lightbox/plugins/download'
 import Zoom from 'yet-another-react-lightbox/plugins/zoom'
 import 'yet-another-react-lightbox/styles.css'
 import 'yet-another-react-lightbox/plugins/captions.css'
+import { useReducedMotion } from 'motion/react'
 import { useTranslation } from '@/lib/use-translation'
 
 export type ImagePreviewGalleryItem = {
@@ -37,6 +38,7 @@ export function ImagePreview(props: {
     gallery?: readonly ImagePreviewGalleryItem[]
 }) {
     const { t } = useTranslation()
+    const reducedMotion = useReducedMotion()
     const [viewerOpen, setViewerOpen] = useState(false)
     const items = useMemo<ImagePreviewGalleryItem[]>(() => {
         if (props.gallery && props.gallery.length > 0) {
@@ -97,12 +99,13 @@ export function ImagePreview(props: {
             </button>
 
             <Lightbox
+                className="chat-media-viewer"
                 open={viewerOpen}
                 close={closeViewer}
                 index={viewerIndex}
                 slides={slides}
                 plugins={[Captions, Download, Zoom]}
-                animation={{ fade: 160, swipe: 220 }}
+                animation={{ fade: reducedMotion ? 0 : 160, swipe: reducedMotion ? 0 : 220 }}
                 carousel={{
                     finite: items.length <= 1,
                     preload: Math.min(2, Math.max(0, items.length - 1)),
@@ -136,10 +139,10 @@ export function ImagePreview(props: {
                 }}
                 styles={{
                     container: {
-                        backgroundColor: 'rgba(10, 12, 16, 0.96)'
+                        backgroundColor: 'var(--chat-media-bg)'
                     },
                     button: {
-                        filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45))'
+                        filter: 'none'
                     },
                     toolbar: {
                         paddingTop: 'calc(var(--app-safe-area-top) + 8px)',

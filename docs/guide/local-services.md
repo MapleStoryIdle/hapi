@@ -4,12 +4,37 @@ SHAPI can open HTTP(S) links to `localhost`, `127.0.0.1`, and `[::1]` on the
 machine that owns a conversation. Ports come from each URL; they are not fixed.
 Both managed sessions and native Codex sessions are supported.
 
-Click the original message link. SHAPI reserves a new tab immediately, uses the
-existing chat login to create or reuse a dedicated SSH reverse tunnel, and puts
-only a short-lived, one-use ticket in the new tab's URL fragment. Rendering a
-message does not contact the service or open a tunnel. Connection failures show
-a short message and a retry button in that tab. If popups are blocked, the
-authenticated launch route opens in the current tab instead.
+On a phone, tap the original message link: the website loads **directly inside
+the chat bottom drawer**. There is no extra launch confirmation or new tab.
+The drawer remains scrollable, supports drag-to-close, and stays within 70% of
+the visible viewport. Connection errors and retry stay in the drawer too.
+
+SHAPI uses the existing chat login to create or reuse a dedicated SSH reverse
+tunnel. Embedded previews receive a sandbox-only URL capability through the
+authenticated API; no bootstrap page or third-party cookie is required.
+Rendering a message alone never contacts the service or opens a tunnel.
+
+Desktop clicks and the optional "Open in browser" action retain the separate
+tab flow, with a short-lived one-use ticket in the URL fragment. If a popup is
+blocked, that explicitly requested action uses the authenticated launch route.
+
+### Trusted Web origins for embedded previews
+
+Only the configured Hub origin and explicit trusted Web origins may embed
+local services. A separately hosted UI must have its exact origin in
+`CORS_ORIGINS`, for example `https://chat.example.com`; `*` does **not**
+grant iframe access. Relay mode includes the configured official Web origin.
+The local development script includes its Vite Web origin by default.
+An unconfigured parent gets an explicit API 403 instead of a silently blank
+frame. Do not add arbitrary third-party sites to this allowlist.
+
+Both path and domain modes use an opaque sandbox for drawer previews:
+local pages cannot read the chat page, login storage or cookies. Assets,
+fetch/XHR, SSE and WebSocket stay scoped to that local service. Services that
+require browser cookies/localStorage, service workers, third-party CDN/API
+resources or external authentication may need the optional separate-browser
+flow. Domain-mode embedded previews use a different lease origin from normal
+tabs, so existing tab login cookies cannot weaken the drawer sandbox.
 
 ## Choose a mode
 

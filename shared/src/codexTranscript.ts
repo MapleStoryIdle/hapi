@@ -276,15 +276,17 @@ export type CodexLocalSessionStatusRpcResponse = {
     stalledSince?: number
     /** Present while the runner owns a direct native send for this thread. */
     startedAt?: number
+    /** Browser receipt owned by the runner's delivery lane; not proof that Codex accepted it. */
+    activeClientMessageId?: string
     /** Present while the runner can describe its native direct-send hand-off. */
     progress?: CodexLocalSessionDirectSendProgress
-    /** Short runner-side launch/exit failure, if the most recent send failed. */
+    /** Short runner-side delivery diagnostic for the most recent send. */
     lastError?: string
-    /** Runner timestamp for `lastError`, used to associate a browser receipt safely. */
+    /** Runner timestamp for display/expiry only; receipt identity comes from the client message id. */
     lastErrorAt?: number
     /** Browser receipt that caused `lastError`, when the runner knows it. */
     lastErrorClientMessageId?: string
-    /** Stable UI-safe category for the latest native delivery failure. */
+    /** Stable UI-safe category for the latest native delivery diagnostic. */
     lastErrorCode?: CodexLocalSessionDirectSendRecoveryReason
     /** Messages waiting for the native thread to become idle. */
     queuedMessages?: CodexLocalSessionQueuedMessage[]

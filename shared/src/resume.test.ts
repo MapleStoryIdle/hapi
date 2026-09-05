@@ -84,6 +84,7 @@ describe('resume schemas', () => {
                 status: {
                     success: true,
                     status: 'processing',
+                    activeClientMessageId: 'native:active-1',
                     queuedMessageRefs: [{ id: 'queued-1', recoveryRequired: true, recoveryReason: 'codex_timeout' }]
                 },
                 timing: { cache: 'hit', durationMs: 2 }

@@ -155,6 +155,7 @@ start_hub() {
             HAPI_LISTEN_HOST="$HAPI_LOCAL_HOST" \
             HAPI_LISTEN_PORT="$HAPI_LOCAL_HUB_PORT" \
             HAPI_PUBLIC_URL="$HAPI_LOCAL_HUB_URL" \
+            CORS_ORIGINS="${CORS_ORIGINS:-${HAPI_LOCAL_HUB_URL},http://${HAPI_LOCAL_HOST}:${HAPI_LOCAL_WEB_PORT}}" \
             bun run dev
 
     wait_http hub "$HAPI_LOCAL_HUB_URL"

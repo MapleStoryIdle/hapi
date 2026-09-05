@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { DecryptedMessage } from '@/types/api'
+import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import {
     computeCanCancel,
     computeEditPendingSchedule,
-    getQueuedMessageEditText,
     getQueuedMessagePreview,
     getQueuedMessageSummary,
     QueuedMessagesBar,
@@ -16,12 +16,17 @@ import { formatScheduledTime } from '@/lib/scheduledTime'
 const mocks = vi.hoisted(() => ({
     addToast: vi.fn(),
     cancel: vi.fn(),
+    cancelAsync: vi.fn(),
+    composerState: { text: '', attachments: [] as unknown[] },
     setText: vi.fn(),
 }))
 
 vi.mock('@assistant-ui/react', () => ({
     useAssistantApi: () => ({
-        composer: () => ({ setText: mocks.setText }),
+        composer: () => ({
+            getState: () => mocks.composerState,
+            setText: mocks.setText,
+        }),
     }),
 }))
 
@@ -30,6 +35,7 @@ vi.mock('@/hooks/mutations/useCancelQueuedMessage', () => ({
         isPending: false,
         variables: undefined,
         mutate: mocks.cancel,
+        mutateAsync: mocks.cancelAsync,
     }),
 }))
 
@@ -41,7 +47,9 @@ afterEach(() => {
     cleanup()
     mocks.addToast.mockReset()
     mocks.cancel.mockReset()
+    mocks.cancelAsync.mockReset()
     mocks.setText.mockReset()
+    mocks.composerState = { text: '', attachments: [] }
 })
 
 function makeQueuedMessage(
@@ -49,7 +57,15 @@ function makeQueuedMessage(
     createdAt: number,
     scheduledAt: number | null = null,
     text = id,
+    attachmentNames: string[] = [],
 ): DecryptedMessage {
+    const attachments = attachmentNames.map((filename, index) => ({
+        id: `attachment-${index}`,
+        filename,
+        mimeType: 'text/plain',
+        size: 1,
+        path: `/tmp/${filename}`,
+    }))
     return {
         id,
         localId: `local-${id}`,
@@ -58,8 +74,49 @@ function makeQueuedMessage(
         scheduledAt,
         invokedAt: null,
         status: 'queued',
-        content: { role: 'user', content: { type: 'text', text } },
+        content: {
+            role: 'user',
+            content: {
+                type: 'text',
+                text,
+                ...(attachments.length > 0 ? { attachments } : {}),
+            },
+        },
     } as unknown as DecryptedMessage
+}
+
+function renderQueue(
+    queuedMessages: readonly DecryptedMessage[],
+    options: {
+        onEdit?: (params: { id: string; text: string; pendingSchedule: PendingSchedule | null }) => void
+        isEditScopeActive?: () => boolean
+    } = {}
+) {
+    return render(
+        <I18nProvider>
+            <QueuedMessagesBar
+                sessionId="session-1"
+                api={null}
+                queuedMessages={queuedMessages}
+                {...options}
+            />
+        </I18nProvider>
+    )
+}
+
+function openQueueDrawer() {
+    fireEvent.click(screen.getByTestId('queued-messages-trigger'))
+    return screen.getByTestId('queued-messages-drawer')
+}
+
+function createDeferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise
+        reject = rejectPromise
+    })
+    return { promise, resolve, reject }
 }
 
 /**
@@ -225,6 +282,164 @@ describe('QueuedMessagesBar drawer', () => {
     })
 })
 
+describe('QueuedMessagesBar edit recovery', () => {
+    it('hands off text and schedule after the last optimistic row unmounts the bar', async () => {
+        const scheduledAt = Date.now() + 60_000
+        const message = makeQueuedMessage('scheduled-edit', 1, scheduledAt, 'Keep this scheduled prompt')
+        const onEdit = vi.fn()
+        const deferred = createDeferred<{ status: 'cancelled'; localId: string | null }>()
+        mocks.cancelAsync.mockReturnValue(deferred.promise)
+
+        const view = renderQueue([message], { onEdit })
+        openQueueDrawer()
+        fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+
+        expect(mocks.cancelAsync).toHaveBeenCalledWith({
+            sessionId: 'session-1',
+            messageId: message.id,
+            localId: message.localId,
+            snapshot: message,
+        })
+
+        // This mirrors the optimistic removal of the final queued row: the
+        // component goes away before React Query's request has settled.
+        view.rerender(<I18nProvider>{null}</I18nProvider>)
+        expect(screen.queryByTestId('queued-messages-trigger')).not.toBeInTheDocument()
+
+        await act(async () => {
+            deferred.resolve({ status: 'cancelled', localId: message.localId })
+            await deferred.promise
+        })
+
+        expect(onEdit).toHaveBeenCalledWith({
+            id: message.localId,
+            text: 'Keep this scheduled prompt',
+            pendingSchedule: { type: 'absolute', ms: scheduledAt },
+        })
+        expect(mocks.setText).not.toHaveBeenCalled()
+    })
+
+    it('never restores an edit when cancellation loses the invocation race', async () => {
+        const message = makeQueuedMessage('already-invoked', 1, null, 'Too late to edit')
+        const onEdit = vi.fn()
+        mocks.cancelAsync.mockResolvedValue({ status: 'invoked', message })
+
+        renderQueue([message], { onEdit })
+        openQueueDrawer()
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+            await Promise.resolve()
+        })
+
+        expect(onEdit).not.toHaveBeenCalled()
+        expect(mocks.setText).not.toHaveBeenCalled()
+        expect(mocks.addToast).toHaveBeenCalledWith(expect.objectContaining({
+            title: "Message already sent — it can't be edited",
+            kind: 'warning',
+        }))
+    })
+
+    it('never restores an edit when cancellation fails', async () => {
+        const message = makeQueuedMessage('failed-edit', 1, null, 'Keep the queue row')
+        const onEdit = vi.fn()
+        mocks.cancelAsync.mockRejectedValue(new Error('network down'))
+
+        renderQueue([message], { onEdit })
+        openQueueDrawer()
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+            await Promise.resolve()
+        })
+
+        expect(onEdit).not.toHaveBeenCalled()
+        expect(mocks.setText).not.toHaveBeenCalled()
+    })
+
+    it('leaves a pre-existing composer draft untouched before cancelling', () => {
+        const message = makeQueuedMessage('draft-exists', 1, null, 'Queued edit')
+        mocks.composerState = { text: 'A newer draft', attachments: [] }
+
+        renderQueue([message])
+        openQueueDrawer()
+        fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+
+        expect(mocks.cancelAsync).not.toHaveBeenCalled()
+        expect(mocks.addToast).toHaveBeenCalledWith(expect.objectContaining({
+            title: 'Finish or clear your draft before editing a queued message.',
+            kind: 'warning',
+        }))
+    })
+
+    it('keeps the durable handoff when a newer draft starts during cancellation', async () => {
+        const message = makeQueuedMessage('draft-during-cancel', 1, null, 'Queued edit')
+        const onEdit = vi.fn()
+        const deferred = createDeferred<{ status: 'cancelled'; localId: string | null }>()
+        mocks.cancelAsync.mockReturnValue(deferred.promise)
+
+        renderQueue([message], { onEdit })
+        openQueueDrawer()
+        fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+        mocks.composerState = { text: 'A newer draft', attachments: [] }
+
+        await act(async () => {
+            deferred.resolve({ status: 'cancelled', localId: message.localId })
+            await deferred.promise
+        })
+
+        expect(onEdit).toHaveBeenCalledWith({
+            id: message.localId,
+            text: 'Queued edit',
+            pendingSchedule: null,
+        })
+        expect(mocks.setText).not.toHaveBeenCalled()
+    })
+
+    it('uses the standalone composer fallback while its edit scope is active', async () => {
+        const message = makeQueuedMessage('standalone-edit', 1, null, 'Restore this text')
+        mocks.cancelAsync.mockResolvedValue({ status: 'cancelled', localId: message.localId })
+
+        renderQueue([message], { isEditScopeActive: () => true })
+        openQueueDrawer()
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+            await Promise.resolve()
+        })
+
+        expect(mocks.setText).toHaveBeenCalledWith('Restore this text')
+    })
+
+    it('does not use the standalone composer fallback outside its edit scope', async () => {
+        const message = makeQueuedMessage('scope-gone', 1, null, 'Do not restore here')
+        mocks.cancelAsync.mockResolvedValue({ status: 'cancelled', localId: message.localId })
+
+        renderQueue([message], { isEditScopeActive: () => false })
+        openQueueDrawer()
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+            await Promise.resolve()
+        })
+
+        expect(mocks.setText).not.toHaveBeenCalled()
+    })
+
+    it('disables edit for attachment-bearing rows without cancelling them', () => {
+        const message = makeQueuedMessage('attachment-edit', 1, null, 'Analyze this file', ['trace.log'])
+
+        renderQueue([message])
+        openQueueDrawer()
+
+        const editButton = screen.getByRole('button', { name: 'Edit' })
+        expect(editButton).toBeDisabled()
+        expect(screen.getByTitle('Messages with attachments can’t be edited yet.')).toContainElement(editButton)
+        fireEvent.click(editButton)
+        expect(mocks.cancelAsync).not.toHaveBeenCalled()
+    })
+})
+
 describe('getQueuedMessagePreview', () => {
     it('keeps attachment names with a text prompt', () => {
         const message = {
@@ -284,22 +499,6 @@ describe('getQueuedMessagePreview', () => {
             text: '',
             attachmentNames: ['image.png'],
         })
-    })
-})
-
-describe('getQueuedMessageEditText', () => {
-    it('keeps the prompt text when queued message has both text and attachments', () => {
-        expect(getQueuedMessageEditText({
-            text: 'Analyze this screenshot',
-            attachmentNames: ['image.png'],
-        })).toBe('Analyze this screenshot')
-    })
-
-    it('falls back to attachment names for attachment-only queued messages', () => {
-        expect(getQueuedMessageEditText({
-            text: '',
-            attachmentNames: ['image.png', 'trace.log'],
-        })).toBe('image.png, trace.log')
     })
 })
 

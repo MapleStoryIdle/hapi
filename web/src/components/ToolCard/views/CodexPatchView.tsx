@@ -33,7 +33,7 @@ function PatchContent(props: { diff: string }) {
 
     return (
         <div className="overflow-hidden rounded-xl bg-[var(--app-code-bg)]">
-            <div className="max-h-[min(62vh,560px)] overflow-auto">
+            <div className="overflow-x-auto">
                 <div className="w-max min-w-full font-mono text-[13px] leading-6">
                     {lines.map((line, index) => {
                         const isAdded = line.startsWith('+') && !line.startsWith('+++')

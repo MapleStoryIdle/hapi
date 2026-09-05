@@ -514,6 +514,7 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
                     getStatus: () => {
                         success: true
                         status: 'processing'
+                        activeClientMessageId: string
                         queuedMessages: Array<{
                             id: string
                             text: string
@@ -526,6 +527,7 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
             }).nativeCodexSessionDirectSender.getStatus = () => ({
                 success: true,
                 status: 'processing',
+                activeClientMessageId: 'native:active-1',
                 queuedMessages: [{
                     id: 'queued-1',
                     text: 'This text must never enter global SSE',
@@ -544,6 +546,7 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
                 revision: first.snapshot?.revision,
                 status: {
                     status: 'processing',
+                    activeClientMessageId: 'native:active-1',
                     queuedMessageRefs: [{
                         id: 'queued-1',
                         recoveryRequired: true,

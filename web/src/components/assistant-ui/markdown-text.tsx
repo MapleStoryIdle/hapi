@@ -1,3 +1,4 @@
+import { useChatPreview, previewableWebUrl } from '@/components/ChatPreviewContext'
 import '@assistant-ui/react-markdown/styles/dot.css'
 
 import type { ComponentPropsWithoutRef, MouseEvent } from 'react'
@@ -351,13 +352,16 @@ const UriConfirmContext = createContext<UriConfirmContextValue | null>(null)
  */
 export function UriConfirmProvider({ children }: { children: ReactNode }) {
     const [dialog, setDialog] = useState<DialogState>(null)
+    const [dialogOpen, setDialogOpen] = useState(false)
     const { allow, isAllowed } = useAllowedSchemes()
 
     const openUri = useCallback((url: string, scheme: string) => {
         setDialog({ url, scheme })
+        setDialogOpen(true)
     }, [])
 
-    const closeDialog = () => setDialog(null)
+    // Retain content during the shared sheet exit animation.
+    const closeDialog = () => setDialogOpen(false)
 
     const handleOpen = () => {
         if (!dialog) return
@@ -380,7 +384,7 @@ export function UriConfirmProvider({ children }: { children: ReactNode }) {
             {children}
             {dialog !== null && (
                 <UriConfirmDialog
-                    open={true}
+                    open={dialogOpen}
                     url={dialog.url}
                     scheme={dialog.scheme}
                     onCancel={closeDialog}
@@ -524,7 +528,7 @@ function UnavailableFilePathChip(props: ComponentPropsWithoutRef<'a'> & {
                 )}
             >
                 <MessageLinkIcon filePath={fileTarget.path} disabled />
-                {children}
+                <span className="message-content-link-label">{children}</span>
             </span>
             <FilePathCopyButton path={fileTarget.path} />
         </span>
@@ -537,6 +541,8 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
     fileLinkTarget?: HappyChatFileLinkTarget
 }) {
     const navigate = useNavigate()
+    const preview = useChatPreview()
+    const chat = useOptionalHappyChatContext()
     const { fileTarget, sessionId, fileLinkTarget, className, title, onClick, target, rel: propRel, children, ...anchorProps } = props
     const rel = target === '_blank' ? (propRel ?? 'noreferrer') : propRel
     const linkTitle = title ?? formatFileTargetTitle(fileTarget)
@@ -571,6 +577,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
 
         event.preventDefault()
+        if (chat && preview?.({ type: 'file', api: chat.api, source: fileLinkTarget ?? { type: 'session', sessionId }, ...fileTarget })) return
         if (fileLinkTarget?.type === 'native-codex') {
             void navigate({
                 to: '/sessions/codex/$codexSessionId/file',
@@ -612,7 +619,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
                 )}
             >
                 <MessageLinkIcon filePath={fileTarget.path} />
-                {children}
+                <span className="message-content-link-label">{children}</span>
             </a>
         </span>
     )
@@ -637,6 +644,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
  *   never web links.
  */
 function A(props: ComponentPropsWithoutRef<'a'>) {
+    const preview = useChatPreview()
     const chat = useOptionalHappyChatContext()
     const localServiceLink = useLocalServiceLink(props.href)
     // useContext must be called unconditionally before any early return so that
@@ -723,6 +731,10 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
 
         if (classification === 'iana') {
             onClick?.(e)
+            if (!e.defaultPrevented && !localServiceLink && props.download === undefined && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                const destination = previewableWebUrl(url)
+                if (destination && preview?.({ type: 'url', url: destination })) e.preventDefault()
+            }
             localServiceLink?.onClick(e)
             return
         }
@@ -750,7 +762,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
             className={cn(MESSAGE_LINK_CLASS, props.className)}
         >
             <MessageLinkIcon href={href} external={isExternalLink} disabled={classification === 'deny' || !href} />
-            {children}
+            <span className="message-content-link-label">{children}</span>
         </a>
     )
 }

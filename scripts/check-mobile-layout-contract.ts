@@ -148,4 +148,19 @@ if (/backdrop-blur/.test(queuedMessages)) {
     throw new Error('Mobile layout contract violation: queued-message drawer must not add a glass blur')
 }
 
+
+const chatDrawer = source('web/src/components/ui/BottomDrawer.tsx')
+const drawerCss = source('web/src/index.css')
+requireMatch(drawerCss, /--app-mobile-detail-sheet-ratio:\s*0\.7\s*;/, 'mobile chat detail sheets must cap at 70%')
+requireMatch(drawerCss, /max-height:\s*min\(calc\(var\(--drawer-viewport-height,\s*100dvh\)\s*\*\s*var\(--app-mobile-detail-sheet-ratio\)\)/, 'detail sheet cap must follow the visual viewport')
+requireMatch(chatDrawer, /<Dialog\.Portal>/, 'chat drawers must remain outside the composer document flow')
+requireMatch(chatDrawer, /data-chat-drawer-body/, 'chat sheet body must expose its scrolling surface')
+requireMatch(chatDrawer, /overflow-y-auto overscroll-contain/, 'chat sheet body must scroll without moving the chat')
+requireMatch(chatDrawer, /onPointerCancel/, 'cancelled drawer drags must spring back')
+requireMatch(drawerCss, /prefers-reduced-motion:[\s\S]*data-chat-drawer-background/, 'background recession must respect reduced motion')
+
+const localServiceDrawer = source('web/src/components/ChatPreviewDrawer.tsx')
+requireMatch(localServiceDrawer, /presentation:\s*'embed'/, 'local service links must request a direct embedded preview')
+requireMatch(localServiceDrawer, /sandbox="allow-scripts allow-forms"/, 'embedded local services must stay isolated from chat login storage')
+
 console.log('Mobile layout contract verified.')

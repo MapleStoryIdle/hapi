@@ -1,3 +1,4 @@
+import * as chatPreview from '@/components/ChatPreviewContext'
 /**
  * Tests for the custom <A> anchor component and the inlined URL policy helpers
  * in markdown-text.tsx.
@@ -818,5 +819,50 @@ describe('intra-tab cross-provider sync (schemeListeners emitter)', () => {
         })
 
         openSpy.mockRestore()
+    })
+})
+
+describe('mobile chat preview routing', () => {
+    it('opens external content links in the sheet without navigation', () => {
+        const open = vi.fn(() => true)
+        vi.spyOn(chatPreview, 'useChatPreview').mockReturnValue(open)
+        renderAInChat({ href: 'https://example.com/article', children: 'Article' })
+        expect(fireEvent.click(screen.getByRole('link', { name: 'Article' }))).toBe(false)
+        expect(open).toHaveBeenCalledWith({ type: 'url', url: 'https://example.com/article' })
+    })
+    it('keeps modified clicks and downloads outside the sheet', () => {
+        const open = vi.fn(() => true)
+        vi.spyOn(chatPreview, 'useChatPreview').mockReturnValue(open)
+        renderAInChat({ href: 'https://example.com/report', children: 'Report', download: 'report' })
+        fireEvent.click(screen.getByRole('link', { name: 'Report' }))
+        expect(open).not.toHaveBeenCalled()
+        cleanup()
+        renderAInChat({ href: 'https://example.com/article', children: 'Article' })
+        fireEvent.click(screen.getByRole('link', { name: 'Article' }), { ctrlKey: true })
+        expect(open).not.toHaveBeenCalled()
+    })
+    it('keeps native file identity and line in the preview', () => {
+        const open = vi.fn(() => true)
+        vi.spyOn(chatPreview, 'useChatPreview').mockReturnValue(open)
+        const source = { type: 'native-codex' as const, sessionId: 'native', machineId: 'machine' }
+        renderAInChat({ href: './src/index.ts:12', children: 'Source' }, { fileLinkTarget: source })
+        fireEvent.click(screen.getByRole('link', { name: 'Source' }))
+        expect(open).toHaveBeenCalledWith(expect.objectContaining({ type: 'file', source, path: './src/index.ts', line: 12 }))
+        expect(routerMocks.navigate).not.toHaveBeenCalled()
+    })
+    it('previews local services with an authenticated request, not the phone localhost', () => {
+        const open = vi.fn(() => true)
+        vi.spyOn(chatPreview, 'useChatPreview').mockReturnValue(open)
+        const tab = vi.spyOn(localServiceNavigation, 'openLocalServiceInTab').mockReturnValue(true)
+        renderAInChat({ href: 'http://localhost:3000/', children: 'Local app' })
+        fireEvent.click(screen.getByRole('link', { name: 'Local app' }))
+        expect(open).toHaveBeenCalledWith(expect.objectContaining({ type: 'url', localService: { api: expect.anything(), request: { source: { type: 'session', sessionId: 'session-1' }, url: 'http://localhost:3000/' } } }))
+        expect(tab).not.toHaveBeenCalled()
+    })
+    it('does not preview app navigation or unsafe schemes', () => {
+        for (const href of ['/sessions/123', '#section', 'mailto:a@b.com', 'javascript:alert(1)', 'data:text/html,hi', 'https://user:password@example.com']) {
+            expect(chatPreview.previewableWebUrl(href, 'https://hapi.test')).toBeNull()
+        }
+        expect(chatPreview.previewableWebUrl('https://hapi.test/sessions/123', 'https://hapi.test')).toBeNull()
     })
 })

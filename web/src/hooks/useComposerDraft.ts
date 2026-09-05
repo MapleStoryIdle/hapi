@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getDraft, saveDraft } from '@/lib/composer-drafts'
 
 /**
@@ -13,7 +13,8 @@ export function useComposerDraft(
     sessionId: string | undefined,
     composerText: string,
     setText: (text: string) => void,
-): void {
+): boolean {
+    const [readySessionId, setReadySessionId] = useState<string | undefined>(undefined)
     const composerTextRef = useRef(composerText)
     composerTextRef.current = composerText
 
@@ -28,6 +29,7 @@ export function useComposerDraft(
                 setText(draft)
             }
             draftReadyRef.current = true
+            setReadySessionId(sessionId)
         })
 
         return () => {
@@ -38,4 +40,5 @@ export function useComposerDraft(
             draftReadyRef.current = false
         }
     }, [sessionId]) // eslint-disable-line react-hooks/exhaustive-deps
+    return sessionId === undefined || readySessionId === sessionId
 }

@@ -38,12 +38,13 @@ export type LocalServiceLease = {
 }
 type Ticket = { leaseId: string; path: string; expiresAt: number }
 type AccessConnection = { destroy: () => unknown; once: (event: 'close', listener: () => void) => unknown }
-type Grant = { leaseId: string; expiresAt: number; connections: Set<AccessConnection> }
+type Grant = { presentation: 'tab' | 'embed'; leaseId: string; expiresAt: number; connections: Set<AccessConnection> }
 
 export type LocalServiceManagerOptions = {
     mode?: 'domain' | 'path'
     originTemplate?: string
     appUrl: string
+    frameOrigins?: readonly string[]
     sshHost: string
     sshListenHost: string
     sshPort: number
@@ -68,6 +69,7 @@ export function validateLocalServiceOrigin(template: string, appUrl: string): vo
 /** Leases and one-use browser tickets only; no page bodies or credentials on disk. */
 export class LocalServiceManager {
     readonly mode: 'domain' | 'path'
+    readonly frameOrigins: readonly string[]
     private readonly leases = new Map<string, LocalServiceLease>()
     private readonly keys = new Map<string, Promise<LocalServiceLease>>()
     private readonly tickets = new Map<string, Ticket>()
@@ -83,6 +85,14 @@ export class LocalServiceManager {
 
     constructor(private readonly options: LocalServiceManagerOptions) {
         this.mode = options.mode ?? 'domain'
+        this.frameOrigins = [...new Set([new URL(options.appUrl).origin, ...(options.frameOrigins ?? [])].filter((origin) => {
+            // Reuse only explicit trusted UI origins, never CORS wildcards or
+            // user-controlled request Origin values in an embedding policy.
+            try {
+                const url = new URL(origin)
+                return ['http:', 'https:'].includes(url.protocol) && url.origin === origin && !url.hostname.includes('*') && !url.username && !url.password
+            } catch { return false }
+        }))]
         if (this.mode === 'domain') {
             if (!options.originTemplate) throw new Error('Local service preview origin is required in domain mode')
             validateLocalServiceOrigin(options.originTemplate, options.appUrl)
@@ -170,21 +180,36 @@ export class LocalServiceManager {
         this.timer.unref()
     }
 
-    async open(identity: LocalServiceIdentity, machineId: string, source: LocalServiceSource, url: string): Promise<OpenLocalServiceResponse> {
+    async open(identity: LocalServiceIdentity, machineId: string, source: LocalServiceSource, url: string, presentation: 'tab' | 'embed' = 'tab'): Promise<OpenLocalServiceResponse> {
         if (!this.ssh || this.stopped) throw new LocalServiceError('local_service_unavailable', 'Local service access is unavailable')
         const target = parseLocalServiceUrl(url)
         if (!target) throw new LocalServiceError('local_service_invalid_url', 'Expected a loopback HTTP URL')
         if (!this.options.canAccessMachine(identity, machineId)) throw new LocalServiceError('local_service_offline', 'The runner is offline')
-        const key = JSON.stringify([identity.namespace, identity.userId, machineId, source, target.origin])
+        // Domain embeds must not share an origin with cookie-authenticated tabs:
+        // an iframe navigating outside its capability must never inherit a tab grant.
+        const key = JSON.stringify([identity.namespace, identity.userId, machineId, source, target.origin, this.mode === 'domain' ? presentation : null])
         const lease = await this.acquireLease(key, identity, machineId, target)
         this.touch(lease)
         this.sweepTickets()
+        const base = this.mode === 'path' ? `${LOCAL_SERVICE_PATH_PREFIX}${lease.id}` : ''
+        if (presentation === 'embed') {
+            // Reopening the same service must not accumulate orphan grants.
+            // A grant already covers this lease's service, not a single path.
+            let capability = [...this.grants].find(([, grant]) => grant.leaseId === lease.id && grant.presentation === 'embed')?.[0]
+            if (!capability) {
+                if (this.grants.size >= 2_000) throw new LocalServiceError('local_service_busy', 'Too many local service access requests')
+                capability = randomBytes(32).toString('hex')
+                this.grants.set(capability, { presentation, leaseId: lease.id, expiresAt: Date.now() + LOCAL_SERVICE_ACCESS_MS, connections: new Set() })
+            }
+            // Only the authenticated API issues this sandbox-only capability;
+            // the iframe needs neither bootstrap nor third-party cookies.
+            return { url: `${lease.origin}${base}/__shapi_local/embed/${capability}${target.path}${target.hash}`, expiresAt: lease.expiresAt }
+        }
         if ([...this.tickets.values()].filter((ticket) => ticket.leaseId === lease.id).length >= 32 || this.grants.size >= 2_000) {
             throw new LocalServiceError('local_service_busy', 'Too many local service access requests')
         }
         const ticket = randomBytes(32).toString('hex')
         this.tickets.set(ticket, { leaseId: lease.id, path: target.path + target.hash, expiresAt: Date.now() + TICKET_MS })
-        const base = this.mode === 'path' ? `${LOCAL_SERVICE_PATH_PREFIX}${lease.id}` : ''
         return { url: `${lease.origin}${base}/__shapi_local/open#${ticket}`, expiresAt: lease.expiresAt }
     }
 
@@ -297,14 +322,14 @@ export class LocalServiceManager {
         if (!record || record.leaseId !== lease.id || record.expiresAt <= Date.now() || !this.leases.has(lease.id) || this.grants.size >= 2_000) return null
         this.tickets.delete(ticket)
         const cookie = randomBytes(32).toString('hex')
-        this.grants.set(cookie, { leaseId: lease.id, expiresAt: Date.now() + LOCAL_SERVICE_ACCESS_MS, connections: new Set() })
+        this.grants.set(cookie, { presentation: 'tab', leaseId: lease.id, expiresAt: Date.now() + LOCAL_SERVICE_ACCESS_MS, connections: new Set() })
         this.touch(lease)
         return { cookie, path: record.path }
     }
 
-    authorize(lease: LocalServiceLease, cookie: string | undefined, connection?: AccessConnection): boolean {
+    authorize(lease: LocalServiceLease, cookie: string | undefined, connection?: AccessConnection, presentation: 'tab' | 'embed' = 'tab'): boolean {
         const grant = cookie ? this.grants.get(cookie) : undefined
-        if (!grant || grant.leaseId !== lease.id || grant.expiresAt <= Date.now() || !this.leases.has(lease.id)) return false
+        if (!grant || grant.presentation !== presentation || grant.leaseId !== lease.id || grant.expiresAt <= Date.now() || !this.leases.has(lease.id)) return false
         if (connection) {
             grant.connections.add(connection)
             connection.once('close', () => grant.connections.delete(connection))

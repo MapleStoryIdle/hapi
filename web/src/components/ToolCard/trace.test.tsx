@@ -346,7 +346,7 @@ describe('TraceSection', () => {
         expect(container.textContent).not.toContain('Result')
 
         const childButtons = Array.from(container.querySelectorAll('button'))
-            .filter((button) => button.getAttribute('aria-expanded') === null)
+            .filter((button) => button.getAttribute('aria-expanded') === 'false')
         expect(childButtons).toHaveLength(2)
 
         fireEvent.click(childButtons[0])

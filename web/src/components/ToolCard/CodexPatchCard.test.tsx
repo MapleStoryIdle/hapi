@@ -74,8 +74,8 @@ describe('Codex patch card', () => {
 
         const dialogElement = view.getByRole('dialog')
         const dialog = within(dialogElement)
-        expect(dialogElement).toHaveAttribute('data-file-mutation-dialog', 'true')
-        expect(dialogElement).toHaveClass('left-1/2', 'top-1/2', 'h-[60dvh]', 'rounded-xl')
+        expect(dialogElement).toHaveAttribute('data-chat-detail-drawer', 'true')
+        expect(dialogElement).toHaveClass('question-drawer', 'inset-x-0', 'rounded-t-[28px]')
         expect(dialogElement).not.toHaveClass('inset-0', 'bottom-0', 'h-[100dvh]', 'w-screen', 'rounded-none')
         expect(dialog.getByRole('button', { name: 'Close' })).toBeInTheDocument()
         expect(dialog.getByRole('heading', { name: 'App.tsx' })).toBeInTheDocument()

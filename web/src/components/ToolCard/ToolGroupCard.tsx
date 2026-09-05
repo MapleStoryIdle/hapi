@@ -13,7 +13,7 @@ import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutation
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
 import { getCodexAgentReasoningEffort, getCodexAgentSummary, parseCodexSpawnAgentResult } from '@/components/ToolCard/codexAgents'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { ChatDetailDialog } from '@/components/ui/ChatDetailDialog'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { getEventPresentation } from '@/chat/presentation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
@@ -782,18 +782,15 @@ function ToolGroupDetailSurface(props: {
     const useFileMutationDialog = getFileMutationDialogSummary(props.selectedTool, props.metadata) !== null
 
     return (
-        <Dialog open onOpenChange={(nextOpen) => {
+        <ChatDetailDialog open onOpenChange={(nextOpen) => {
             if (!nextOpen) props.onClose()
-        }}>
-            <DialogContent
-                className={cn('max-w-2xl', useFileMutationDialog ? FILE_MUTATION_DIALOG_CLASS_NAME : null)}
-                aria-describedby={undefined}
-                data-file-mutation-dialog={useFileMutationDialog ? 'true' : undefined}
-            >
-                <ToolDetailDialogHeader block={props.selectedTool} metadata={props.metadata} fallbackTitle={props.title} />
-                <ToolDetailDialogContent block={props.selectedTool} metadata={props.metadata} />
-            </DialogContent>
-        </Dialog>
+        }}
+            title={props.title}
+            desktopClassName={cn('max-w-2xl', useFileMutationDialog ? FILE_MUTATION_DIALOG_CLASS_NAME : null)}
+            header={<ToolDetailDialogHeader block={props.selectedTool} metadata={props.metadata} fallbackTitle={props.title} />}
+        >
+            <ToolDetailDialogContent block={props.selectedTool} metadata={props.metadata} />
+        </ChatDetailDialog>
     )
 }
 

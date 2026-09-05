@@ -1026,7 +1026,8 @@ export class NativeCodexSessionDirectSender {
      * A previous runner may already have converted a shared ACK into an
      * explicit recovery queue item. The same exact transcript proof can turn
      * that item into a durable idempotency tombstone instead of showing a
-     * false retry/discard prompt forever.
+     * false retry/discard prompt forever. Do not extend this to codex_timeout:
+     * repeated identical prompts cannot be distinguished by text/time alone.
      */
     private reconcileRecoveryQueueWithTranscript(sessionId: string): boolean {
         const queue = this.queues.get(sessionId)
@@ -1094,6 +1095,7 @@ export class NativeCodexSessionDirectSender {
                 success: true,
                 status: 'processing',
                 startedAt: active.startedAt,
+                ...(active.clientMessageId ? { activeClientMessageId: active.clientMessageId } : {}),
                 progress: { ...active.progress },
                 ...(stalledSince === null ? {} : { stalledSince }),
                 queuedMessages
@@ -1111,6 +1113,9 @@ export class NativeCodexSessionDirectSender {
                 success: true,
                 status: 'processing',
                 startedAt: sharedDelivery.startedAt,
+                ...(sharedDelivery.clientMessageId
+                    ? { activeClientMessageId: sharedDelivery.clientMessageId }
+                    : {}),
                 queuedMessages
             }
         }

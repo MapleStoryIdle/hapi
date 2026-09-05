@@ -57,3 +57,14 @@ describe('AskUserQuestionFooter', () => {
         expect(approve).toHaveBeenCalledWith('s1', 'permission-ask', { answers: { '0': ['Code', 'Tests too'] } })
     })
 })
+
+it('closing and reopening preserves a partial answer without sending it', () => {
+    const approve = setup(true)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Code' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(approve).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Answer question' }))
+    expect(screen.getByRole('checkbox', { name: 'Code' })).toHaveAttribute('aria-checked', 'true')
+    expect(approve).not.toHaveBeenCalled()
+})

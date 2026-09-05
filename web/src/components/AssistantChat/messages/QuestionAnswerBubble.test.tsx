@@ -26,7 +26,7 @@ describe('QuestionAnswerBubble', () => {
             </I18nProvider>
         )
 
-        expect(screen.getByText('Your selection')).toBeInTheDocument()
+        expect(screen.queryByText('Your selection')).not.toBeInTheDocument()
         expect(screen.getByText('Keep it compact')).toBeInTheDocument()
         expect(screen.getByText('Which direction?')).toBeInTheDocument()
         expect(screen.queryByText('Show all details')).not.toBeInTheDocument()
@@ -42,6 +42,8 @@ describe('QuestionAnswerBubble', () => {
 
         const drawer = screen.getByTestId('question-answer-details-drawer')
         expect(drawer).toBeInTheDocument()
+        expect(within(drawer).getByText('Your selection')).toBeInTheDocument()
+        expect(within(screen.getByTestId('question-answer-toggle')).queryByText('Your selection')).not.toBeInTheDocument()
         expect(within(drawer).getByText('Which direction?')).toBeInTheDocument()
         expect(screen.getByText('Show all details')).toBeInTheDocument()
         expect(screen.getByText('Everything visible')).toBeInTheDocument()

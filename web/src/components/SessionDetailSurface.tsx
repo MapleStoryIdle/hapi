@@ -1,3 +1,4 @@
+import { ChatPreviewProvider } from '@/components/ChatPreviewContext'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
@@ -16,16 +17,21 @@ export function SessionDetailSurface(props: {
     className?: string
 }) {
     return (
-        <div
-            className={cn(
-                'relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)]',
-                props.className
-            )}
-            data-session-detail-source={props.source}
-            data-testid={props.testId}
-        >
-            {props.children}
-        </div>
+        <ChatPreviewProvider>
+            <div className="chat-drawer-stage relative h-full min-h-0 overflow-hidden">
+                <div
+                    className={cn(
+                        'relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)]',
+                        props.className
+                    )}
+                    data-session-detail-source={props.source}
+                    data-chat-drawer-background
+                    data-testid={props.testId}
+                >
+                    {props.children}
+                </div>
+            </div>
+        </ChatPreviewProvider>
     )
 }
 

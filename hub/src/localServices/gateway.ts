@@ -157,19 +157,24 @@ export function createLocalServiceHandler(manager: LocalServiceManager) {
                         'set-cookie': `${cookieName(lease)}=${grant.cookie}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${LOCAL_SERVICE_ACCESS_MS / 1_000}${secure}` } })
                 } catch { return reply(400, 'Invalid access request') }
             }
-            if (path.startsWith(INTERNAL_PREFIX)) return reply(404, 'Not found')
-            const capability = pathMode ? /^\/([a-f0-9]{64})(\/.*)$/.exec(path) : null
-            const preview: PathPreview | null = pathMode && capability
-                ? { origin: lease.origin, target: lease.target, basePath: `${entryBase}/${capability[1]}` } : null
+            const embedded = /^\/__shapi_local\/embed\/([a-f0-9]{64})(\/.*)$/.exec(path)
+            if (path.startsWith(INTERNAL_PREFIX) && !embedded) return reply(404, 'Not found')
+            const capability = embedded ?? (pathMode ? /^\/([a-f0-9]{64})(\/.*)$/.exec(path) : null)
+            const preview: PathPreview | null = capability
+                ? {
+                    origin: lease.origin, target: lease.target,
+                    basePath: `${entryBase}${embedded ? '/__shapi_local/embed' : ''}/${capability[1]}`,
+                    ...(embedded ? { frameOrigins: manager.frameOrigins } : {})
+                } : null
             if (pathMode && !preview) return reply(401, 'Open this service from SHAPI / 请从 SHAPI 打开此服务。')
             if (capability) path = capability[2]
             if (live.size >= 200) return reply(429, 'Too many connections')
             const lifetime = new AccessLifetime()
-            if (!manager.authorize(lease, capability?.[1] ?? accessCookie(request, lease), lifetime)) return reply(401, 'Open this service from SHAPI / 请从 SHAPI 打开此服务。')
+            if (!manager.authorize(lease, capability?.[1] ?? accessCookie(request, lease), lifetime, embedded ? 'embed' : 'tab')) return reply(401, 'Open this service from SHAPI / 请从 SHAPI 打开此服务。')
             live.add(lifetime)
             lifetime.once('close', () => live.delete(lifetime))
             const deny = (status: number, message: string) => { lifetime.destroy(); return reply(status, message) }
-            if ((request.headers.has('origin') && request.headers.get('origin') !== lease.origin && !(pathMode && request.headers.get('origin') === 'null'))
+            if ((request.headers.has('origin') && request.headers.get('origin') !== lease.origin && !(preview && request.headers.get('origin') === 'null'))
                 || !['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(request.method)) return deny(403, 'Access denied')
             const destinationType = request.headers.get('sec-fetch-dest')
             if (destinationType === 'serviceworker' || (preview && ['worker', 'sharedworker'].includes(destinationType ?? ''))) {
@@ -199,7 +204,7 @@ export function createLocalServiceHandler(manager: LocalServiceManager) {
             }
             const destination = `${lease.target.protocol}//127.0.0.1:${lease.port}${path}`
             if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-                if (request.method !== 'GET' || request.headers.get('origin') !== (pathMode ? 'null' : lease.origin)) return deny(403, 'Access denied')
+                if (request.method !== 'GET' || request.headers.get('origin') !== (preview ? 'null' : lease.origin)) return deny(403, 'Access denied')
                 for (const name of ['sec-websocket-key', 'sec-websocket-version', 'sec-websocket-extensions', 'sec-websocket-protocol']) headers.delete(name)
                 const protocols = request.headers.get('sec-websocket-protocol')?.split(',').map((value) => value.trim())
                 try {

@@ -14,21 +14,6 @@ function DetailsIcon() {
     )
 }
 
-function getSelectedAnswerSummary(answer: QuestionAnswerPresentation): {
-    text: string
-    hiddenCount: number
-    total: number
-} {
-    const selected = answer.items.flatMap((item) => item.answers)
-    const visible = selected.slice(0, 2)
-
-    return {
-        text: visible.join(' · '),
-        hiddenCount: Math.max(0, selected.length - visible.length),
-        total: selected.length
-    }
-}
-
 function SelectedMark(props: { selected: boolean }) {
     return props.selected ? (
         <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-button)] text-[var(--app-button-text)]" aria-hidden="true">
@@ -50,7 +35,7 @@ function DetailOption(props: {
         <div
             role="listitem"
             className={cn(
-                'flex min-w-0 items-start gap-3 rounded-[16px] border px-3 py-3',
+                'flex min-w-0 items-start gap-3 rounded-[14px] border px-3 py-3',
                 props.selected
                     ? 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]'
                     : 'border-transparent bg-transparent'
@@ -70,7 +55,7 @@ function DetailOption(props: {
                 ) : null}
             </div>
             {props.selected ? (
-                <span className="shrink-0 pt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--app-hint)]">
+                <span className="shrink-0 pt-1 text-xs font-medium text-[var(--app-hint)]">
                     {t('questionAnswer.selected')}
                 </span>
             ) : null}
@@ -109,7 +94,7 @@ function QuestionAnswerDetailItem(props: { item: QuestionAnswerItem; index: numb
                 </div>
             </div>
 
-            <div className="flex flex-col gap-1" role="list" aria-label={t('questionAnswer.completeOptions')}>
+            <div className="chat-sheet-group flex flex-col gap-1 p-1" role="list" aria-label={t('questionAnswer.completeOptions')}>
                 {displayOptions.map((option) => (
                     <DetailOption
                         key={`${option.label}:${option.description ?? ''}`}
@@ -121,8 +106,8 @@ function QuestionAnswerDetailItem(props: { item: QuestionAnswerItem; index: numb
             </div>
 
             {customAnswers.length > 0 ? (
-                <div className="mt-3 rounded-[16px] border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-3" data-question-answer-custom>
-                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--app-hint)]">
+                <div className="chat-sheet-group mt-3 px-4 py-3" data-question-answer-custom>
+                    <div className="mb-1.5 text-xs font-medium text-[var(--app-hint)]">
                         {t('questionAnswer.additionalAnswer')}
                     </div>
                     <div className="flex flex-col gap-1.5">
@@ -142,9 +127,8 @@ function QuestionAnswerDetailItem(props: { item: QuestionAnswerItem; index: numb
 export function QuestionAnswerBubble(props: { answer: QuestionAnswerPresentation }) {
     const { t } = useTranslation()
     const [open, setOpen] = useState(false)
-    const summary = getSelectedAnswerSummary(props.answer)
     const title = t('questionAnswer.title')
-    const summaryText = summary.hiddenCount > 0 ? `${summary.text} +${summary.hiddenCount}` : summary.text
+    const summaryText = props.answer.items.map((item) => [item.question, item.answers.join(' · ')].filter(Boolean).join(': ')).join('; ')
 
     return (
         <div className="w-full min-w-0 max-w-full" data-question-answer-bubble>
@@ -165,7 +149,6 @@ export function QuestionAnswerBubble(props: { answer: QuestionAnswerPresentation
                             <CheckIcon className="h-3.5 w-3.5" />
                         </span>
                         <span className="min-w-0 flex-1">
-                            <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--app-hint)]">{title}</span>
                             {props.answer.items.map((item, index) => (
                                 <span key={item.questionItemId ?? index} className="mt-2 block first:mt-0" data-question-answer-summary-item>
                                     {item.question ? <span className="block whitespace-pre-wrap break-words text-xs leading-5 text-[var(--app-hint)]">{item.question}</span> : null}

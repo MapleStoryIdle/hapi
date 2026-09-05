@@ -1,79 +1,46 @@
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-} from '@/components/ui/dialog'
+import { ChatDetailDialog } from '@/components/ui/ChatDetailDialog'
 import { Button } from '@/components/ui/button'
 import { useTranslation } from '@/lib/use-translation'
 
 export type UriConfirmDialogProps = {
-    /** Whether the dialog is visible. */
     open: boolean
-    /** The full URL being navigated to. */
     url: string
-    /** The scheme portion of the URL (without the colon), e.g. "obsidian". */
     scheme: string
-    /** Called when the user dismisses the dialog without navigating. */
     onCancel: () => void
-    /** Called when the user chooses to open the link once. */
     onOpen: () => void
-    /** Called when the user chooses to always allow this scheme. */
     onAlwaysAllow: (scheme: string) => void
 }
 
-/**
- * Confirmation dialog shown before navigating to a non-IANA URI scheme.
- * Follows the RenameSessionDialog pattern (Radix Dialog + Button + i18n).
- */
+/** Same sheet as message details; each navigation permission remains explicit. */
 export function UriConfirmDialog(props: UriConfirmDialogProps) {
     const { open, url, scheme, onCancel, onOpen, onAlwaysAllow } = props
     const { t } = useTranslation()
-
-    // Split URL into scheme prefix and the rest for visual emphasis.
     const schemePrefix = `${scheme}:`
     const urlRemainder = url.startsWith(schemePrefix) ? url.slice(schemePrefix.length) : url
 
     return (
-        <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onCancel()}>
-            <DialogContent className="max-w-md">
-                <DialogHeader>
-                    <DialogTitle>{t('dialog.uri.title')}</DialogTitle>
-                </DialogHeader>
-                <DialogDescription className="mt-2">
-                    {t('dialog.uri.description')}
-                </DialogDescription>
-
-                {/* URI display with scheme emphasis */}
-                <div className="mt-3 rounded-lg border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 font-mono text-sm break-all">
-                    <span className="font-semibold text-[var(--app-link)]">{schemePrefix}</span>
-                    <span className="text-[var(--app-fg)]">{urlRemainder}</span>
-                </div>
-
-                <div className="mt-4 flex gap-2 justify-end flex-wrap">
-                    <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={onCancel}
-                    >
-                        {t('button.cancel')}
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        onClick={onOpen}
-                    >
-                        {t('dialog.uri.open')}
-                    </Button>
-                    <Button
-                        type="button"
-                        onClick={() => onAlwaysAllow(scheme)}
-                    >
+        <ChatDetailDialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}
+            title={t('dialog.uri.title')} subtitle={t('dialog.uri.description')} desktopClassName="max-w-md"
+            testId="uri-confirm-drawer"
+            footer={
+                <div className="flex flex-col gap-2">
+                    <div className="grid grid-cols-2 gap-3">
+                        <Button type="button" className="chat-sheet-action chat-sheet-action-secondary" onClick={onCancel}>
+                            {t('button.cancel')}
+                        </Button>
+                        <Button type="button" className="chat-sheet-action chat-sheet-action-primary" onClick={onOpen}>
+                            {t('dialog.uri.open')}
+                        </Button>
+                    </div>
+                    <Button type="button" className="chat-sheet-action chat-sheet-action-quiet" onClick={() => onAlwaysAllow(scheme)}>
                         {t('dialog.uri.alwaysAllow', { scheme })}
                     </Button>
                 </div>
-            </DialogContent>
-        </Dialog>
+            }>
+            <div className="chat-sheet-group px-4 py-3 font-mono text-sm [overflow-wrap:anywhere]">
+                <span className="font-semibold text-[var(--app-link)]">{schemePrefix}</span>
+                <span className="text-[var(--app-fg)]">{urlRemainder}</span>
+            </div>
+        </ChatDetailDialog>
     )
 }

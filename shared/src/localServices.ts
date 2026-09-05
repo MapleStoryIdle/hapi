@@ -43,6 +43,7 @@ export type LocalServiceSource = z.infer<typeof LocalServiceSourceSchema>
 
 export const OpenLocalServiceSchema = z.object({
     source: LocalServiceSourceSchema,
+    presentation: z.enum(['tab', 'embed']).optional(),
     url: z.string().max(8_192).refine((value) => parseLocalServiceUrl(value) !== null, 'Expected a loopback HTTP URL')
 }).strict()
 export type OpenLocalServiceRequest = z.infer<typeof OpenLocalServiceSchema>

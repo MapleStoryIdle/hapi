@@ -32,12 +32,16 @@ export function createLocalServiceRoutes(
         if (!machine.active) return c.json({ error: 'Runner is offline', code: 'local_service_offline' }, 409)
         const manager = getManager()
         if (!manager) return c.json({ error: 'Local service access is not configured', code: 'local_service_not_configured' }, 503)
+        const parentOrigin = c.req.header('origin')
+        if (parsed.data.presentation === 'embed' && parentOrigin && !manager.frameOrigins.includes(parentOrigin)) {
+            return c.json({ error: 'This Web origin is not configured for local-service previews. Add its exact origin to CORS_ORIGINS.', code: 'local_service_frame_origin_denied' }, 403)
+        }
         try {
             if (source.type === 'native-codex') {
                 const status = await engine.getCodexLocalSessionStatus(machineId, source.sessionId)
                 if (!status.success) return c.json({ error: 'Native session not found', code: 'local_service_session_missing' }, 404)
             }
-            const opened = await manager.open({ namespace: c.get('namespace'), userId: c.get('userId') }, machineId, source, url)
+            const opened = await manager.open({ namespace: c.get('namespace'), userId: c.get('userId') }, machineId, source, url, parsed.data.presentation)
             c.header('Cache-Control', 'no-store')
             return c.json(opened)
         } catch (error) {

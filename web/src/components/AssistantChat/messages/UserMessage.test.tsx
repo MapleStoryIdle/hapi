@@ -67,6 +67,7 @@ describe('native replies in HappyUserMessage', () => {
         for (const text of ['选择方案？', '轻量方案', '统计频率？', '每小时', 'notes.md']) {
             expect(screen.getByText(text)).toBeInTheDocument()
         }
+        expect(screen.queryByText('Your selection')).not.toBeInTheDocument()
         expect(view.container.textContent).not.toContain('send_user_message_question_reply')
         expect(view.container.textContent).not.toContain('questionItemId')
         expect(view.container.querySelector('#hapi-message-user-text\\:native-answer')).toBeInTheDocument()

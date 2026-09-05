@@ -53,7 +53,7 @@ async function fixture() {
     cleanup.push(() => manager.stop())
     await manager.start()
     handler = createLocalServiceHandler(manager)
-    const open = (path = '/', sessionId = 'session') => manager.open({ namespace: 'owner', userId: 1 }, 'machine', { type: 'session', sessionId }, `http://localhost:${upstream.port}${path}`)
+    const open = (path = '/', sessionId = 'session', presentation: 'tab' | 'embed' = 'tab') => manager.open({ namespace: 'owner', userId: 1 }, 'machine', { type: 'session', sessionId }, `http://localhost:${upstream.port}${path}`, presentation)
     const redeem = (url: string) => fetch(url.split('#')[0].replace(/open$/, 'auth'), {
         method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ ticket: new URL(url).hash.slice(1) }), proxy: ''
     })
@@ -173,4 +173,38 @@ describe('shared-listener preview backpressure', () => {
         expect(upstream.send).toHaveBeenCalledTimes(1)
         expect(destroy).toHaveBeenCalledTimes(1)
     })
+})
+
+it('embedded grants load directly, are sandboxed, cannot become tab grants, and revoke with the lease', async () => {
+    const f = await fixture()
+    const embedded = await f.open('/html?x=1#part', 'session', 'embed')
+    expect(embedded.url).toContain('/__shapi_local/embed/')
+    const url = new URL(embedded.url)
+    const response = await fetch(url, { proxy: '' })
+    expect(response.status).toBe(200)
+    const csp = response.headers.get('content-security-policy')!
+    expect(csp).toContain('frame-ancestors ' + f.origin)
+    expect(csp).toContain('sandbox allow-scripts allow-forms;')
+    expect(csp).not.toContain('allow-same-origin')
+    expect(response.headers.has('set-cookie')).toBe(false)
+    expect(response.headers.has('x-frame-options')).toBe(false)
+    expect(await response.text()).toContain(url.pathname.replace('/html', '/assets/app.js'))
+    const downgraded = embedded.url.replace('/__shapi_local/embed/', '/')
+    expect((await fetch(downgraded, { proxy: '' })).status).toBe(401)
+    const normal = await f.enter('/html')
+    expect((await fetch(f.origin + normal.path.replace(normal.base, normal.base.replace(/\/([a-f0-9]{64})$/, '/__shapi_local/embed/$1')), { proxy: '' })).status).toBe(401)
+    expect((await fetch(embedded.url, { headers: { origin: 'https://evil.example' }, proxy: '' })).status).toBe(403)
+    f.manager.closeLease(url.pathname.split('/')[2])
+    expect((await fetch(embedded.url, { proxy: '' })).status).toBe(410)
+})
+
+it('reuses one iframe grant per service across repeated drawer opens', async () => {
+    const f = await fixture()
+    const first = await f.open('/one', 'session', 'embed')
+    const base = first.url.slice(0, first.url.lastIndexOf('/'))
+    for (let index = 0; index < 35; index++) {
+        const next = await f.open('/two?attempt=' + index, 'session', 'embed')
+        expect(next.url).toBe(base + '/two?attempt=' + index)
+    }
+    expect((await fetch(first.url, { proxy: '' })).status).toBe(200)
 })
