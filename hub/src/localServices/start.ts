@@ -1,6 +1,6 @@
 import type { SyncEngine } from '../sync/syncEngine'
 import { LocalServiceManager } from './manager'
-import { createLocalServiceGateway } from './gateway'
+import { createLocalServiceGateway, createLocalServiceHandler, type LocalServiceHandler } from './gateway'
 
 function envPort(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
     const value = env[key] ?? String(fallback)
@@ -13,10 +13,13 @@ export async function startLocalServices(
     getSyncEngine: () => SyncEngine | null,
     appUrl: string,
     env: NodeJS.ProcessEnv = process.env
-): Promise<{ manager: LocalServiceManager; stop: () => Promise<void> } | null> {
+): Promise<{ manager: LocalServiceManager; pathHandler: LocalServiceHandler | null; stop: () => Promise<void> } | null> {
     const originTemplate = env.HAPI_LOCAL_SERVICE_ORIGIN
-    if (!originTemplate) return null
+    const mode = env.HAPI_LOCAL_SERVICE_MODE ?? (originTemplate ? 'domain' : 'off')
+    if (mode === 'off') return null
+    if (mode !== 'path' && mode !== 'domain') throw new Error('HAPI_LOCAL_SERVICE_MODE must be path, domain, or off')
     const manager = new LocalServiceManager({
+        mode,
         originTemplate,
         appUrl,
         sshHost: env.HAPI_LOCAL_SERVICE_SSH_HOST || new URL(appUrl).hostname.replace(/^\[|\]$/g, ''),
@@ -33,15 +36,18 @@ export async function startLocalServices(
         }
     })
     let gateway: ReturnType<typeof createLocalServiceGateway> | null = null
+    let pathHandler: LocalServiceHandler | null = null
     try {
         await manager.start()
-        gateway = createLocalServiceGateway(manager, envPort(env, 'HAPI_LOCAL_SERVICE_GATEWAY_PORT', 8321))
+        if (mode === 'path') pathHandler = createLocalServiceHandler(manager)
+        else gateway = createLocalServiceGateway(manager, envPort(env, 'HAPI_LOCAL_SERVICE_GATEWAY_PORT', 8321))
     } catch (error) {
         gateway?.stop(true)
         await manager.stop()
         throw error
     }
-    return { manager, stop: async () => {
+    return { manager, pathHandler, stop: async () => {
+        pathHandler?.stop()
         await gateway?.stop(true)
         await manager.stop()
     } }

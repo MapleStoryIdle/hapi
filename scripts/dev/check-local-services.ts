@@ -14,6 +14,7 @@ const root = resolve(import.meta.dir, '../..')
 const state = await mkdtemp(join(tmpdir(), 'shapi-forwarding-check-'))
 const token = crypto.randomUUID()
 const nativeId = crypto.randomUUID()
+const pathMode = Bun.argv.includes('--path')
 const children: Array<{ name: string; process: Bun.Subprocess; log: () => string }> = []
 
 async function unusedPort(): Promise<number> {
@@ -45,7 +46,7 @@ const env: Record<string, string> = {
     DB_PATH: join(state, 'test.db'), CLI_API_TOKEN: token,
     HAPI_API_URL: hubUrl, HAPI_PUBLIC_URL: hubUrl,
     HAPI_LISTEN_HOST: '127.0.0.1', HAPI_LISTEN_PORT: String(hubPort),
-    HAPI_LOCAL_SERVICE_ORIGIN: `http://{id}.localhost:${previewPort}`,
+    ...(pathMode ? { HAPI_LOCAL_SERVICE_MODE: 'path' } : { HAPI_LOCAL_SERVICE_ORIGIN: `http://{id}.localhost:${previewPort}` }),
     HAPI_LOCAL_SERVICE_SSH_HOST: '127.0.0.1',
     HAPI_LOCAL_SERVICE_SSH_BIND: '127.0.0.1',
     HAPI_LOCAL_SERVICE_SSH_PORT: String(sshPort),
@@ -77,7 +78,7 @@ async function json<T>(path: string, bearer?: string, body?: unknown): Promise<T
 function preview(url: URL, path: string, cookie?: string, ticket?: string): Promise<{ status: number; cookie: string; body: string }> {
     return new Promise((resolve, reject) => {
         const request = httpRequest({
-            hostname: '127.0.0.1', port: previewPort, path, method: ticket ? 'POST' : 'GET',
+            hostname: '127.0.0.1', port: pathMode ? hubPort : previewPort, path, method: ticket ? 'POST' : 'GET',
             headers: { host: url.host, ...(cookie ? { cookie } : {}), ...(ticket ? { origin: url.origin, 'content-type': 'application/json' } : {}) }
         }, (response) => {
             let body = ''
@@ -92,7 +93,10 @@ function preview(url: URL, path: string, cookie?: string, ticket?: string): Prom
     })
 }
 
-const service = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: (request) => Response.json({ path: new URL(request.url).pathname, query: new URL(request.url).search, cookie: request.headers.get('cookie') }) })
+const service = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: (request, server) => {
+    if (request.headers.get('upgrade') === 'websocket') { if (server.upgrade(request)) return undefined }
+    return Response.json({ path: new URL(request.url).pathname, query: new URL(request.url).search, cookie: request.headers.get('cookie') })
+}, websocket: { message(ws, data) { ws.send(data) } } })
 try {
     const transcriptDir = join(state, 'codex', 'sessions', '2026', '09', '05')
     await mkdir(transcriptDir, { recursive: true })
@@ -116,17 +120,35 @@ try {
         const request = { source, url: `http://localhost:${service.port}/settings?q=forwarding#section` }
         const opened = await json<OpenLocalServiceResponse>('/api/local-services/open', auth.token, request)
         const url = new URL(opened.url)
-        const unauthenticated = await preview(url, '/settings')
+        if (pathMode) assert.equal(url.origin, hubUrl)
+        const entryBase = pathMode ? url.pathname.replace('/__shapi_local/open', '') : ''
+        const unauthenticated = await preview(url, entryBase + '/settings')
         assert.equal(unauthenticated.status, 401)
-        const entered = await preview(url, '/__shapi_local/auth', undefined, url.hash.slice(1))
+        const entered = await preview(url, entryBase + '/__shapi_local/auth', undefined, url.hash.slice(1))
         assert.equal(entered.status, 200)
-        assert.equal((JSON.parse(entered.body) as { path: string }).path, '/settings?q=forwarding#section')
-        const page = await preview(url, '/settings?q=forwarding', entered.cookie)
+        const path = (JSON.parse(entered.body) as { path: string }).path
+        assert.ok(path.endsWith('/settings?q=forwarding#section'))
+        if (!pathMode) assert.equal(path, '/settings?q=forwarding#section')
+        const page = await preview(url, path.split('#')[0], entered.cookie)
         assert.equal(page.status, 200)
         assert.deepEqual(JSON.parse(page.body), { path: '/settings', query: '?q=forwarding', cookie: null })
         const reopened = await json<OpenLocalServiceResponse>('/api/local-services/open', auth.token, request)
         assert.equal(new URL(reopened.url).host, url.host)
-        console.log(`PASS ${source.type}: authenticated HTTP → machine RPC → SSH → service; ticket isolation; URL preservation; reuse`)
+        assert.equal((await preview(url, entryBase + '/__shapi_local/auth', undefined, url.hash.slice(1))).status, 403)
+        const wsBase = pathMode ? path.split('/').slice(0, 4).join('/') : ''
+        const wsOrigin = pathMode ? hubUrl : `http://127.0.0.1:${previewPort}`
+        const ws = new WebSocket(`${wsOrigin.replace('http', 'ws')}${wsBase}/echo`, {
+            headers: { host: url.host, origin: pathMode ? 'null' : url.origin, ...(entered.cookie ? { cookie: entered.cookie } : {}) }
+        })
+        try {
+            const echoed = new Promise<void>((resolve, reject) => {
+                ws.onopen = () => ws.send('local-service-smoke')
+                ws.onerror = () => reject(new Error('Main Hub WebSocket proxy failed'))
+                ws.onmessage = (event) => { try { assert.equal(event.data, 'local-service-smoke'); resolve() } catch (error) { reject(error) } }
+            })
+            await Promise.race([echoed, new Promise<never>((_resolve, reject) => { const timer = setTimeout(() => reject(new Error('WebSocket check timed out')), 5_000); timer.unref() })])
+        } finally { ws.close() }
+        console.log(`PASS ${pathMode ? 'path' : 'domain'} ${source.type}: authenticated HTTP → machine RPC → SSH → service; ticket isolation; URL preservation; reuse; WebSocket`)
     }
     console.log('PASS complete. No agent was launched; production and existing sessions were untouched.')
 } catch (error) {

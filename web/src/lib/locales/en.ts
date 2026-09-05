@@ -1,7 +1,7 @@
 export default {
   'localService.title': 'Local service',
   'localService.opening': 'Connecting to your computer…',
-  'localService.notConfigured': 'Local service access is not configured on this Hub yet. The administrator needs to set up its preview domain and tunnel.',
+  'localService.notConfigured': 'Local service access is not enabled on this Hub yet. Ask its administrator to enable it.',
   'localService.offline': 'This session’s computer is offline. Start its Runner and try again.',
   'localService.invalid': 'This is not a supported local HTTP or HTTPS link.',
   'localService.busy': 'Too many local services are open. Wait a little and try again.',

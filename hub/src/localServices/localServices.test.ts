@@ -84,6 +84,15 @@ async function fixture(options: { onUploadChunk?: () => void } = {}) {
 }
 
 describe('local service SSH access', () => {
+    it('keeps isolated-origin workers available while refusing service workers', async () => {
+        const f = await fixture()
+        const auth = await f.enter((await f.open()).url)
+        for (const destination of ['worker', 'sharedworker']) {
+            expect((await request(f.port, auth.host, '/worker.js', { headers: { cookie: auth.cookie, 'sec-fetch-dest': destination } })).status).toBe(200)
+        }
+        expect((await request(f.port, auth.host, '/sw.js', { headers: { cookie: auth.cookie, 'sec-fetch-dest': 'serviceworker' } })).status).toBe(403)
+    })
+
     it('opens arbitrary local ports, preserves URLs and application auth, and hides the gateway credential', async () => {
         const f = await fixture()
         const opened = await f.open('/settings?a=1#model')

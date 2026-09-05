@@ -73,6 +73,13 @@ export default defineConfig({
             '/socket.io': {
                 target: hubTarget,
                 ws: true
+            },
+            // Preserve the browser Host header: path previews are served by
+            // the configured public Hub origin, not a separate preview host.
+            '/preview': {
+                target: hubTarget,
+                ws: true,
+                changeOrigin: false
             }
         }
     },

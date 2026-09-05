@@ -52,10 +52,21 @@ not a SHAPI-owned domain. Self-hosters should set `HAPI_RELAY_API` and
 ### Optional local service access
 
 To open Runner-local HTTP(S) links from session messages, configure the dedicated
-SSH endpoint and isolated preview origin. See [Local services](../docs/guide/local-services.md)
-for environment variables, Nginx setup, security boundaries, and limits.
-This is disabled unless `HAPI_LOCAL_SERVICE_ORIGIN` is set; normal Hub startup
-does not open extra ports.
+Runner-to-Hub SSH endpoint and choose a preview mode. Path mode
+(`HAPI_LOCAL_SERVICE_MODE=path`) uses this Hub's existing HTTP/WebSocket listener
+at `/preview/<leaseId>/<grantCapability>/...`; it needs no preview domain or
+gateway port `8321`. The SSH channel still needs a Runner-reachable
+`HAPI_LOCAL_SERVICE_SSH_HOST`, bind address, and port (default `8320`).
+The capability URL is temporary and must not be shared or logged; it is never
+a HAPI JWT.
+
+Domain mode (`HAPI_LOCAL_SERVICE_MODE=domain`) retains the isolated wildcard
+preview origin configured by `HAPI_LOCAL_SERVICE_ORIGIN` and its loopback
+gateway. With no mode set, that origin selects compatible domain mode; with no
+local-service settings, access stays disabled. Set the mode to `off` to disable
+it explicitly. See [Local services](../docs/guide/local-services.md) for the
+environment variables, reverse-proxy logging rules, security boundaries, and
+limits.
 
 Binary (single executable):
 

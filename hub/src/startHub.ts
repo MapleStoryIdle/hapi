@@ -272,7 +272,8 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         corsOrigins,
         relayMode: relayFlag.enabled,
         officialWebUrl,
-        getLocalServices: () => localServices?.manager ?? null
+        getLocalServices: () => localServices?.manager ?? null,
+        getLocalServiceHandler: () => localServices?.pathHandler ?? null
     })
 
     // Start the bot if configured

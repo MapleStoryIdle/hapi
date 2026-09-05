@@ -10,6 +10,7 @@ import {
 
 const TICKET_MS = 30_000
 export const LOCAL_SERVICE_ACCESS_MS = 8 * 60 * 60 * 1_000
+export const LOCAL_SERVICE_PATH_PREFIX = '/preview/'
 
 export class LocalServiceError extends Error {
     constructor(readonly code: string, message: string) { super(message) }
@@ -40,7 +41,8 @@ type AccessConnection = { destroy: () => unknown; once: (event: 'close', listene
 type Grant = { leaseId: string; expiresAt: number; connections: Set<AccessConnection> }
 
 export type LocalServiceManagerOptions = {
-    originTemplate: string
+    mode?: 'domain' | 'path'
+    originTemplate?: string
     appUrl: string
     sshHost: string
     sshListenHost: string
@@ -65,6 +67,7 @@ export function validateLocalServiceOrigin(template: string, appUrl: string): vo
 
 /** Leases and one-use browser tickets only; no page bodies or credentials on disk. */
 export class LocalServiceManager {
+    readonly mode: 'domain' | 'path'
     private readonly leases = new Map<string, LocalServiceLease>()
     private readonly keys = new Map<string, Promise<LocalServiceLease>>()
     private readonly tickets = new Map<string, Ticket>()
@@ -79,7 +82,17 @@ export class LocalServiceManager {
     private stopped = false
 
     constructor(private readonly options: LocalServiceManagerOptions) {
-        validateLocalServiceOrigin(options.originTemplate, options.appUrl)
+        this.mode = options.mode ?? 'domain'
+        if (this.mode === 'domain') {
+            if (!options.originTemplate) throw new Error('Local service preview origin is required in domain mode')
+            validateLocalServiceOrigin(options.originTemplate, options.appUrl)
+        } else {
+            const app = new URL(options.appUrl)
+            if (app.username || app.password || app.pathname !== '/' || app.search || app.hash
+                || (app.protocol !== 'https:' && !(app.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(app.hostname)))) {
+                throw new Error('Path previews require an HTTPS Hub origin (HTTP loopback is allowed for development)')
+            }
+        }
     }
 
     async start(): Promise<void> {
@@ -171,7 +184,8 @@ export class LocalServiceManager {
         }
         const ticket = randomBytes(32).toString('hex')
         this.tickets.set(ticket, { leaseId: lease.id, path: target.path + target.hash, expiresAt: Date.now() + TICKET_MS })
-        return { url: `${lease.origin}/__shapi_local/open#${ticket}`, expiresAt: lease.expiresAt }
+        const base = this.mode === 'path' ? `${LOCAL_SERVICE_PATH_PREFIX}${lease.id}` : ''
+        return { url: `${lease.origin}${base}/__shapi_local/open#${ticket}`, expiresAt: lease.expiresAt }
     }
 
     private async acquireLease(key: string, identity: LocalServiceIdentity, machineId: string, target: LocalServiceTarget): Promise<LocalServiceLease> {
@@ -205,7 +219,8 @@ export class LocalServiceManager {
         const server = createServer({ pauseOnConnect: true }, (socket) => this.forwardSocket(id, socket))
         const lease: LocalServiceLease = {
             id, key, identity, machineId, target,
-            origin: new URL(this.options.originTemplate.replace('{id}', id)).origin,
+            origin: this.mode === 'path' ? new URL(this.options.appUrl).origin
+                : new URL(this.options.originTemplate!.replace('{id}', id)).origin,
             expiresAt: Date.now() + LOCAL_SERVICE_LEASE_MS,
             server, port: 0, client: null, claimed: false,
             secret: randomBytes(32).toString('hex'), authDeadline: Date.now() + 15_000,
@@ -260,10 +275,20 @@ export class LocalServiceManager {
     }
 
     findHost(host: string | undefined): LocalServiceLease | null {
+        if (this.mode !== 'domain') return null
         const id = /^([a-f0-9]{32})\./.exec(host ?? '')?.[1]
         const lease = id ? this.leases.get(id) : undefined
         if (!lease || new URL(lease.origin).host !== host?.toLowerCase() || lease.expiresAt <= Date.now()) return null
         if (!this.options.canAccessMachine(lease.identity, lease.machineId)) return null
+        return lease
+    }
+
+    findPath(host: string | undefined, pathname: string): LocalServiceLease | null {
+        if (this.mode !== 'path') return null
+        const id = /^\/preview\/([a-f0-9]{32})\//.exec(pathname)?.[1]
+        const lease = id ? this.leases.get(id) : undefined
+        if (!lease || new URL(lease.origin).host !== host?.toLowerCase() || lease.expiresAt <= Date.now()
+            || !this.options.canAccessMachine(lease.identity, lease.machineId)) return null
         return lease
     }
 

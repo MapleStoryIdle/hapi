@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute } from 'workbox-precaching'
 import { registerRoute } from 'workbox-routing'
-import { CacheFirst, NetworkFirst } from 'workbox-strategies'
+import { CacheFirst, NetworkFirst, NetworkOnly } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import {
     cleanupExpiredShareTransfers,
@@ -11,6 +11,9 @@ import {
 import { shareTargetPathname } from './lib/sharePath'
 
 const sharePath = shareTargetPathname()
+const staticAssetsCacheName = 'static-assets'
+const legacyPreviewCacheScanLimit = 80
+const previewMethods = ['DELETE', 'GET', 'HEAD', 'PATCH', 'POST', 'PUT'] as const
 
 declare const self: ServiceWorkerGlobalScope & {
     __WB_MANIFEST: Array<string | { url: string; revision?: string }>
@@ -29,14 +32,29 @@ type PushPayload = {
     }
 }
 
+function isPreviewPath(pathname: string): boolean {
+    return pathname === '/preview' || pathname.startsWith('/preview/')
+}
+
+// Local-service path previews contain a bearer capability in the URL. Keep
+// every interceptable request network-only, including uploads.
+for (const method of previewMethods) {
+    registerRoute(
+        ({ url }) => isPreviewPath(url.pathname),
+        new NetworkOnly(),
+        method
+    )
+}
+
 precacheAndRoute(self.__WB_MANIFEST)
 
 registerRoute(
     ({ request, sameOrigin, url }) => sameOrigin
+        && !isPreviewPath(url.pathname)
         && url.pathname.includes('/assets/')
         && ['script', 'style', 'font', 'image'].includes(request.destination),
     new CacheFirst({
-        cacheName: 'static-assets',
+        cacheName: staticAssetsCacheName,
         plugins: [
             new ExpirationPlugin({
                 maxEntries: 80,
@@ -121,7 +139,16 @@ self.addEventListener('message', (event) => {
 })
 
 self.addEventListener('activate', (event) => {
-    event.waitUntil(self.clients.claim())
+    event.waitUntil(
+        Promise.all([
+            self.clients.claim(),
+            // A prior Service Worker could have put a preview response in the
+            // static runtime cache. Do not inspect or clear unrelated caches.
+            cleanupLegacyPreviewCache().catch((error) => {
+                console.warn('preview cache cleanup failed', error)
+            })
+        ])
+    )
 })
 
 self.addEventListener('push', (event) => {
@@ -181,6 +208,15 @@ async function handleShareTarget(request: Request): Promise<Response> {
         console.error('share-target ingest failed', error)
         return Response.redirect(new URL(`${sharePath}?error=ingest`, origin).toString(), 303)
     }
+}
+
+async function cleanupLegacyPreviewCache(): Promise<void> {
+    if (!(await caches.keys()).includes(staticAssetsCacheName)) return
+    const cache = await caches.open(staticAssetsCacheName)
+    const previewRequests = (await cache.keys())
+        .filter((request) => isPreviewPath(new URL(request.url).pathname))
+        .slice(0, legacyPreviewCacheScanLimit)
+    await Promise.all(previewRequests.map((request) => cache.delete(request)))
 }
 
 // Best-effort GC for stale share transfers (TTL-only — never blocks

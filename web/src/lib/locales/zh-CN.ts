@@ -1,7 +1,7 @@
 export default {
   'localService.title': '本地服务',
   'localService.opening': '正在连接你的电脑…',
-  'localService.notConfigured': '此 Hub 尚未配置本地服务访问。需要管理员先配置预览域名和隧道。',
+  'localService.notConfigured': '此 Hub 尚未启用本地服务访问。请让管理员启用此功能。',
   'localService.offline': '会话所在电脑不在线，请启动对应 Runner 后重试。',
   'localService.invalid': '这不是支持的本地 HTTP 或 HTTPS 链接。',
   'localService.busy': '同时打开的本地服务较多，请稍后重试。',

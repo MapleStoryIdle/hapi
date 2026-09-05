@@ -21,6 +21,7 @@ import { createMachinesRoutes } from './routes/machines'
 import { createGitRoutes } from './routes/git'
 import { createLocalServiceRoutes } from './routes/localServices'
 import type { LocalServiceManager } from '../localServices/manager'
+import type { LocalServiceHandler, LocalServiceWebSocket } from '../localServices/gateway'
 import { createOpenVikingRoutes } from './routes/openViking'
 import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
@@ -434,6 +435,7 @@ export async function startWebServer(options: {
     relayMode?: boolean
     officialWebUrl?: string
     getLocalServices?: () => LocalServiceManager | null
+    getLocalServiceHandler?: () => LocalServiceHandler | null
 }): Promise<BunServer<WebSocketData>> {
     const isCompiled = isBunCompiled()
     const embeddedAssetMap = isCompiled ? await loadEmbeddedAssetMap() : null
@@ -470,7 +472,9 @@ export async function startWebServer(options: {
             ...originalWsHandler,
             open(ws: unknown) {
                 const wsAny = ws as ServerWebSocket<{ _qwenProxy?: boolean; _geminiProxy?: boolean }>
-                if (wsAny.data?._geminiProxy) {
+                if ((ws as ServerWebSocket<Partial<LocalServiceWebSocket>>).data?._localService) {
+                    options.getLocalServiceHandler?.()?.websocket.open(ws as ServerWebSocket<LocalServiceWebSocket>)
+                } else if (wsAny.data?._geminiProxy) {
                     geminiProxyHandler.open(wsAny)
                 } else if (wsAny.data?._qwenProxy) {
                     qwenProxyHandler.open(wsAny)
@@ -480,7 +484,14 @@ export async function startWebServer(options: {
             },
             message(ws: unknown, message: unknown) {
                 const wsAny = ws as ServerWebSocket<{ _qwenProxy?: boolean; _geminiProxy?: boolean }>
-                if (wsAny.data?._geminiProxy) {
+                if ((ws as ServerWebSocket<Partial<LocalServiceWebSocket>>).data?._localService) {
+                    // Enforce the preview-specific limits rather than increasing
+                    // Socket.IO / voice limits on this shared listener.
+                    const data = message as string | Buffer
+                    if (Buffer.byteLength(data) > 8 * 1024 * 1024) {
+                        (ws as ServerWebSocket<LocalServiceWebSocket>).data.lifetime.destroy()
+                    } else options.getLocalServiceHandler?.()?.websocket.message(ws as ServerWebSocket<LocalServiceWebSocket>, data)
+                } else if (wsAny.data?._geminiProxy) {
                     geminiProxyHandler.message(wsAny, message as string)
                 } else if (wsAny.data?._qwenProxy) {
                     qwenProxyHandler.message(wsAny, message as string)
@@ -490,7 +501,9 @@ export async function startWebServer(options: {
             },
             close(ws: unknown, code: number, reason: string) {
                 const wsAny = ws as ServerWebSocket<{ _qwenProxy?: boolean; _geminiProxy?: boolean }>
-                if (wsAny.data?._geminiProxy) {
+                if ((ws as ServerWebSocket<Partial<LocalServiceWebSocket>>).data?._localService) {
+                    options.getLocalServiceHandler?.()?.websocket.close(ws as ServerWebSocket<LocalServiceWebSocket>)
+                } else if (wsAny.data?._geminiProxy) {
                     geminiProxyHandler.close(wsAny, code, reason)
                 } else if (wsAny.data?._qwenProxy) {
                     qwenProxyHandler.close(wsAny, code, reason)
@@ -499,8 +512,17 @@ export async function startWebServer(options: {
                 }
             }
         },
-        fetch: async (req: Request, server: { upgrade: (req: Request, opts?: unknown) => boolean }) => {
+        fetch: async (req: Request, server: BunServer<LocalServiceWebSocket>) => {
             const url = new URL(req.url)
+            // Before the app logger, API middleware and SPA/static fallback:
+            // preview paths must neither enter the asset cache nor be logged.
+            if (url.pathname === '/preview' || url.pathname.startsWith('/preview/')) {
+                const handler = options.getLocalServiceHandler?.()
+                if (handler) return handler.fetch(req, server)
+                return new Response('Local service path access is not enabled / 未启用本地服务路径访问。', {
+                    status: 503, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }
+                })
+            }
             if (url.pathname.startsWith('/socket.io/')) {
                 return socketHandler.fetch(req, server as never)
             }
