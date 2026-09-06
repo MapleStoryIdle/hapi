@@ -117,7 +117,7 @@ export function getNativeCodexDirectSendPhase(input: {
     progress?: CodexLocalSessionDirectSendProgress | null
     hasAgentReply?: boolean
 }): NativeCodexDirectSendPhase | null {
-    const activeEchoes = input.directMessageEchoes.filter((echo) => echo.status !== 'failed')
+    const activeEchoes = input.directMessageEchoes.filter((echo) => echo.status !== 'failed' && !echo.deliveryState)
     if (input.pendingDirectSendCount > 0 || activeEchoes.some((echo) => echo.deliveryPhase === 'launching')) {
         return 'launching'
     }
@@ -471,7 +471,7 @@ function buildNativeDirectEchoMessages(
             content: { type: 'text', text: echo.text }
         },
         createdAt: echo.createdAt,
-        status: echo.status,
+        status: echo.deliveryState ? 'sent' : echo.status,
         originalText: echo.text
     }))
 }
@@ -1169,11 +1169,13 @@ export function CodexSessionContextPage(props: {
                 })
             }
             const queuedMessageIds = new Set(queuedMessages?.map((message) => message.id) ?? [])
+            const deliveryReceipts = new Map(response.deliveryReceipts?.map((receipt) => [receipt.id, receipt.state]))
             const discardedExternalWriterEchoId = response.lastErrorCode === 'external_writer_active'
                 ? response.lastErrorClientMessageId ?? null
                 : null
             updateNativeDirectMessageEchoes(nativeDirectMessageScope, (current) => {
-                if (discardedExternalWriterEchoId && current.some((echo) => echo.id === discardedExternalWriterEchoId)) {
+                if (discardedExternalWriterEchoId && current.some((echo) => echo.id === discardedExternalWriterEchoId
+                    && !echo.deliveryState && !deliveryReceipts.has(echo.id))) {
                     // A writer conflict is reported before turn/start, so the
                     // optimistic bubble is known not to exist in Codex.
                     return current.filter((echo) => echo.id !== discardedExternalWriterEchoId)
@@ -1195,6 +1197,18 @@ export function CodexSessionContextPage(props: {
                     ? current.findIndex((echo) => echo.id === response.activeClientMessageId)
                     : -1
                 const next = current.map((echo, index) => {
+                    const receipt = deliveryReceipts.get(echo.id)
+                    if (receipt || echo.deliveryState) {
+                        const deliveryState = echo.deliveryState === 'delivered' ? 'delivered' : receipt ?? echo.deliveryState
+                        const deliveryPhase = response.activeClientMessageId === echo.id && response.progress
+                            ? response.progress.phase : echo.deliveryPhase
+                        const phaseStartedAt = response.activeClientMessageId === echo.id && response.progress
+                            ? response.progress.phaseStartedAt : echo.phaseStartedAt
+                        if (echo.deliveryState === deliveryState && echo.status === 'queued'
+                            && echo.deliveryPhase === deliveryPhase && echo.phaseStartedAt === phaseStartedAt) return echo
+                        changed = true
+                        return { ...echo, status: 'queued' as const, deliveryState, deliveryPhase, phaseStartedAt }
+                    }
                     if (queuedMessageIds.has(echo.queueId ?? echo.id)) {
                         if (echo.status === 'queued' && echo.deliveryPhase === 'queued') return echo
                         changed = true
@@ -1281,11 +1295,13 @@ export function CodexSessionContextPage(props: {
             if (!current?.clientMessageId) return current
             const id = current.clientMessageId
             const confirmed = transcriptConfirmedNativeDirectMessageIds.has(id)
+                || status?.deliveryReceipts?.some((receipt) => receipt.id === id)
+                || currentNativeDirectMessageEchoes.some((echo) => echo.id === id && echo.deliveryState)
                 || status?.activeClientMessageId === id
                 || status?.queuedMessages?.some((message) => message.id === id && !message.recoveryRequired)
             return confirmed ? null : current
         })
-    }, [statusQuery.data, transcriptConfirmedNativeDirectMessageIds])
+    }, [currentNativeDirectMessageEchoes, statusQuery.data, transcriptConfirmedNativeDirectMessageIds])
     const oldestPage = olderPages[0] ?? contextQuery.data
     const hasMoreMessages = oldestPage?.page.hasMore ?? false
     const loadMore = useCallback(async () => {
@@ -1349,13 +1365,18 @@ export function CodexSessionContextPage(props: {
         ? statusQuery.data.queuedMessages.filter((message) => !discardedNativeRecoveryIdsRef.current.has(message.id))
         : null
     const activeNativeClientMessageId = statusQuery.data?.success === true ? statusQuery.data.activeClientMessageId : undefined
+    const acknowledgedNativeMessageIds = useMemo(() => new Set([
+        ...currentNativeDirectMessageEchoes.filter((echo) => echo.deliveryState).map((echo) => echo.id),
+        ...(statusQuery.data?.success === true ? statusQuery.data.deliveryReceipts?.map((receipt) => receipt.id) ?? [] : [])
+    ]), [currentNativeDirectMessageEchoes, statusQuery.data])
     const reconciledNativeQueuedMessages = useMemo(() => {
         const runnerQueueIds = new Set(runnerQueuedMessages?.map((message) => message.id) ?? [])
         return nativeQueuedMessages.filter((message) => (
             message.id !== activeNativeClientMessageId
+            && !acknowledgedNativeMessageIds.has(message.id)
             && (!transcriptConfirmedNativeDirectMessageIds.has(message.id) || runnerQueueIds.has(message.id))
         ))
-    }, [activeNativeClientMessageId, nativeQueuedMessages, runnerQueuedMessages, transcriptConfirmedNativeDirectMessageIds])
+    }, [acknowledgedNativeMessageIds, activeNativeClientMessageId, nativeQueuedMessages, runnerQueuedMessages, transcriptConfirmedNativeDirectMessageIds])
     // A native transcript echo is stronger proof than the browser-local queue
     // placeholder. Clear that placeholder as soon as the original message is
     // visible, unless the runner still explicitly reports the same receipt as
@@ -1384,7 +1405,7 @@ export function CodexSessionContextPage(props: {
         const staleQueued = nativeStalledSince !== null ? reconciledNativeQueuedMessages[0] : null
         const runnerFailedEcho = directStatusErrorCode && directStatusErrorClientMessageId
             && directStatusErrorClientMessageId !== activeNativeClientMessageId
-            ? currentNativeDirectMessageEchoes.find((echo) => echo.id === directStatusErrorClientMessageId) ?? null
+            ? currentNativeDirectMessageEchoes.find((echo) => echo.id === directStatusErrorClientMessageId && !acknowledgedNativeMessageIds.has(echo.id)) ?? null
             : null
         // Older runners can explicitly reject a send while their transcript
         // state is unknown. Preserve that browser receipt as manual-only
@@ -1392,6 +1413,7 @@ export function CodexSessionContextPage(props: {
         // for the short implicit resend window.
         const rejectedUnknownStatusEcho = currentNativeDirectMessageEchoes.find((echo) => (
             echo.status === 'failed'
+            && !acknowledgedNativeMessageIds.has(echo.id)
             && echo.deliveryPhase === 'queued'
             && echo.queueId === null
         )) ?? null
@@ -1403,7 +1425,7 @@ export function CodexSessionContextPage(props: {
             ))
             : null
         const orphanedEcho = currentNativeDirectMessageEchoes.find((echo) => (
-                echo.id !== activeNativeClientMessageId && (
+                !acknowledgedNativeMessageIds.has(echo.id) && echo.id !== activeNativeClientMessageId && (
                 (
                     echo.status === 'queued'
                     && echo.deliveryPhase === 'queued'
@@ -1444,6 +1466,7 @@ export function CodexSessionContextPage(props: {
         }
     }, [
         connectionNow,
+        acknowledgedNativeMessageIds,
         activeNativeClientMessageId,
         currentNativeDirectMessageEchoes,
         directStatusErrorClientMessageId,
@@ -1901,7 +1924,7 @@ export function CodexSessionContextPage(props: {
                 throw new ApiError(response.error, 409, response.code)
             }
             updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
-                message.id !== candidate.id
+                message.id !== candidate.id || message.deliveryState
                     ? message
                     : {
                         ...message,
@@ -1934,7 +1957,7 @@ export function CodexSessionContextPage(props: {
             const rejected = isConfirmedNativeSendRejection(error, { recovery: true })
             updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
                 message.id === candidate.id
-                    ? message.status === 'queued' ? message : {
+                    ? message.status === 'queued' || message.deliveryState ? message : {
                         ...message,
                         status: rejected ? 'failed' as const : 'sending' as const,
                         deliveryPhase: 'matching' as const,
@@ -2105,7 +2128,7 @@ export function CodexSessionContextPage(props: {
                     throw new ApiError(response.error, 409, response.code)
                 }
                 updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
-                    message.id !== echoId
+                    message.id !== echoId || message.deliveryState
                         ? message
                         : {
                             ...message,
@@ -2150,9 +2173,9 @@ export function CodexSessionContextPage(props: {
                 // creating a second prompt with a new client id.
                 updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => (
                     rejectedByExternalWriter
-                        ? current.filter((message) => message.id !== echoId)
+                        ? current.filter((message) => message.id !== echoId || message.deliveryState)
                         : current.map((message) => (
-                            message.id !== echoId || message.status === 'queued'
+                            message.id !== echoId || message.status === 'queued' || message.deliveryState
                                 ? message
                                 : needsVerification
                                     ? {
@@ -2407,14 +2430,15 @@ export function CodexSessionContextPage(props: {
                             connectionPhaseStartedAt={directSendPhaseStartedAt}
                             connectionStartedAt={connectionStartedAt}
                             deliveryReceipt={showUnconfirmedReceipt ? (
-                                <div data-testid="codex-native-recovery" data-receipt-state="unconfirmed" className="px-3 py-2 text-sm text-[var(--app-hint)]">
+                                <details key={nativeRecoveryCandidate.candidate?.id} data-testid="codex-native-recovery" data-receipt-state="unconfirmed" className="px-3 py-2 text-sm text-[var(--app-hint)]">
+                                    <summary className="cursor-pointer min-h-11 content-center">{t('recentCodex.direct.receipt.details')}</summary>
                                     <p>{t('recentCodex.direct.receipt.unconfirmed')}</p>
                                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                                        <button type="button" className="min-h-11 text-[var(--app-link)]" onClick={() => void refetchNativeSnapshot()} disabled={statusQuery.isFetching}>{t('recentCodex.retry')}</button>
+                                        <button type="button" className="min-h-11 text-[var(--app-link)]" onClick={() => void refetchNativeSnapshot()} disabled={statusQuery.isFetching}>{t('recentCodex.direct.receipt.refresh')}</button>
                                         <button type="button" className="min-h-11 text-[var(--app-link)] disabled:opacity-50" onClick={() => void recoverNativeDelivery()} disabled={!canRecoverNativeDelivery || isRecoveringNativeDelivery || isDiscardingNativeRecovery}>{t('recentCodex.direct.receipt.resend')}</button>
                                         <button type="button" className="min-h-11" onClick={() => void discardNativeRecovery()} disabled={isDiscardingNativeRecovery}>{t('recentCodex.direct.recovery.discard')}</button>
                                     </div>
-                                </div>
+                                </details>
                             ) : null}
                             composerDisabled={composerDisabled}
                             composerNotice={composerNotice}

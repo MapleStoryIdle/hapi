@@ -487,6 +487,10 @@ export const CodexLocalSessionRealtimeStatusSchema = z.object({
     stalledSince: z.number().finite().optional(),
     startedAt: z.number().finite().optional(),
     activeClientMessageId: z.string().min(1).max(160).optional(),
+    deliveryReceipts: z.array(z.object({
+        id: z.string().min(1).max(160),
+        state: z.enum(['accepted', 'delivered'])
+    }).strict()).max(100).optional(),
     progress: CodexLocalSessionDirectSendProgressSchema.optional(),
     lastError: z.string().optional(),
     lastErrorAt: z.number().finite().optional(),

@@ -293,6 +293,8 @@ export default {
   'recentCodex.direct.recovery.title': 'No new session feedback yet',
   'recentCodex.direct.receipt.unconfirmed': 'Message saved. Delivery is not confirmed yet; this does not mean it failed.',
   'recentCodex.direct.receipt.resend': 'Send again (may duplicate)',
+  'recentCodex.direct.receipt.details': 'Message status',
+  'recentCodex.direct.receipt.refresh': 'Refresh status',
   'recentCodex.direct.recovery.launchFailedTitle': 'Message delivery could not start',
   'recentCodex.direct.recovery.stalled': 'There has been no new activity for a while. Queued messages are saved and will not retry automatically.',
   'recentCodex.direct.recovery.uncertain': 'Message delivery has not been confirmed. Your message is saved; refresh status first. Retrying may run the message twice.',

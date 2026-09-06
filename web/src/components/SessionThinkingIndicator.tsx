@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
 import { useTranslation } from '@/lib/use-translation'
 
-const LABEL_ROTATION_MS = 8_000
+function randomLabelDuration(): number {
+    return (12 + Math.floor(Math.random() * 13)) * 1_000
+}
 
 const GENERIC_THINKING_LABELS = {
     en: ['Thinking', 'Pondering', 'Working'],
@@ -31,6 +33,7 @@ export function SessionThinkingIndicator(props: {
     label?: string
     startedAt?: number | null
     compact?: boolean
+    showElapsed?: boolean
 }) {
     const { locale } = useTranslation()
     const reducedMotion = useReducedMotion() === true
@@ -41,32 +44,33 @@ export function SessionThinkingIndicator(props: {
     const suppliedLabel = props.label?.trim() ? props.label : undefined
     const genericLabels = GENERIC_THINKING_LABELS[locale]
     const labelCount = genericLabels.length
+    const showElapsed = props.showElapsed !== false
 
     useEffect(() => {
-        let lastRotationAt = Date.now()
-        setNow(lastRotationAt)
+        setNow(Date.now())
         if (!suppliedLabel) {
             setLabelIndex(Math.floor(Math.random() * labelCount))
         }
+        let nextRotationAt = suppliedLabel ? Infinity : Date.now() + randomLabelDuration()
         const timer = window.setInterval(() => {
             const currentTime = Date.now()
-            setNow(currentTime)
-            if (!suppliedLabel && currentTime - lastRotationAt >= LABEL_ROTATION_MS) {
-                lastRotationAt = currentTime
+            if (showElapsed) setNow(currentTime)
+            if (!suppliedLabel && currentTime >= nextRotationAt) {
                 // Pick any other phrase equally, without repeating the previous one.
                 const offset = 1 + Math.floor(Math.random() * (labelCount - 1))
                 setLabelIndex((previous) => (previous + offset) % labelCount)
+                nextRotationAt = currentTime + randomLabelDuration()
             }
         }, 1_000)
         return () => window.clearInterval(timer)
-    }, [startedAt, suppliedLabel, labelCount])
+    }, [startedAt, suppliedLabel, labelCount, showElapsed])
 
     const elapsed = Math.max(0, now - startedAt)
     const label = suppliedLabel ?? genericLabels[labelIndex]
     const compact = props.compact === true
 
     return (
-        <div
+        <span
             className={`session-thinking flex min-w-0 items-center ${compact ? 'min-h-5 gap-1.5 text-xs' : 'min-h-6 gap-2 text-sm'}`}
             data-testid="session-thinking-indicator"
             data-reduced-motion={reducedMotion}
@@ -96,9 +100,11 @@ export function SessionThinkingIndicator(props: {
             >
                 {label}
             </span>
-            <span className="min-w-[6ch] shrink-0 text-right tabular-nums text-[var(--app-hint)]" aria-hidden="true">
-                {formatThinkingDuration(elapsed)}
-            </span>
-        </div>
+            {showElapsed ? (
+                <span className="min-w-[6ch] shrink-0 text-right tabular-nums text-[var(--app-hint)]" aria-hidden="true">
+                    {formatThinkingDuration(elapsed)}
+                </span>
+            ) : null}
+        </span>
     )
 }

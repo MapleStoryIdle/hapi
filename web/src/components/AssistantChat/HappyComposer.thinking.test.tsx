@@ -30,16 +30,20 @@ describe('composer thinking independent of metadata bar', () => {
         render(tree({ active: true, thinking: true, showStatusBar: true, agentFlavor: 'codex' }))
         expect(screen.getAllByTestId('session-thinking-indicator')).toHaveLength(1)
     })
-    it('removes thinking on permission wait, offline, voice connection, and idle', () => {
+    it('keeps an empty fixed-height slot on permission wait, offline, voice connection, and idle', () => {
         const props = { active: true, thinking: true, showStatusBar: false }
         const view = render(tree(props))
         expect(screen.getByTestId('session-thinking-indicator')).toBeInTheDocument()
+        const slot = screen.getByTestId('composer-thinking-slot')
+        expect(slot).toHaveClass('h-6')
         for (const override of [
             { agentState: { requests: { q: { tool: 'AskUserQuestion', arguments: {}, createdAt: null } } } },
             { active: false }, { voiceStatus: 'connecting' as const }, { thinking: false }
         ]) {
             view.rerender(tree({ ...props, ...override }))
             expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
+            expect(screen.getByTestId('composer-thinking-slot')).toBe(slot)
+            expect(slot).toBeEmptyDOMElement()
         }
     })
 })

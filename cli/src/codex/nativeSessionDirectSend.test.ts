@@ -366,7 +366,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('persists a queue-add acknowledgement as non-terminal recovery work across restart', async () => {
+    it('preserves a queue-add acknowledgement and its FIFO barrier across restart without replay', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-ack-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789094'
         const sharedClient = new FakeAppServerClient()
@@ -424,12 +424,12 @@ describe('NativeCodexSessionDirectSender', () => {
             try {
                 await expect(replacement.sendWithExternalControlCheck(sessionId, 'Persist once', undefined, 'ssh:ack-1')).resolves.toMatchObject({
                     success: true,
-                    status: 'queued',
-                    queuedMessages: [expect.objectContaining({
-                        id: 'ssh:ack-1',
-                        recoveryRequired: true,
-                        recoveryReason: 'runner_restarted'
-                    })]
+                    status: 'processing',
+                    queuedMessages: []
+                })
+                expect(replacement.getStatus(sessionId)).toMatchObject({
+                    activeClientMessageId: 'ssh:ack-1',
+                    deliveryReceipts: [{ id: 'ssh:ack-1', state: 'accepted' }]
                 })
                 expect(replacementClient.requestCalls).toEqual([])
                 expect(replacementClient.resumeCalls).toEqual([])
@@ -491,13 +491,10 @@ describe('NativeCodexSessionDirectSender', () => {
         try {
             const status = sender.getStatus(sessionId)
             if (!status.success) throw new Error('Expected native queue status')
-            expect(status.queuedMessages).toHaveLength(51)
-            expect(status.queuedMessages?.[0]).toMatchObject({
-                id: acceptedId,
-                recoveryRequired: true,
-                recoveryReason: 'runner_restarted'
-            })
-            expect(status.queuedMessages?.[50]).toMatchObject({ id: lastQueuedId })
+            expect(status.queuedMessages).toHaveLength(50)
+            expect(status.activeClientMessageId).toBe(acceptedId)
+            expect(status.deliveryReceipts).toEqual([{ id: acceptedId, state: 'accepted' }])
+            expect(status.queuedMessages?.[49]).toMatchObject({ id: lastQueuedId })
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
@@ -1108,8 +1105,8 @@ describe('NativeCodexSessionDirectSender', () => {
                 true
             )).resolves.toMatchObject({ success: false, code: 'session_busy' })
 
-            // A response arriving after timeout cannot turn A into an ACK
-            // receipt or release B around its manual-recovery barrier.
+            // A late, exact ACK resolves A without replaying it. B must still
+            // wait for A's transcript evidence, not a generic idle snapshot.
             resolveQueueAdd({
                 queuedSubmission: {
                     id: 'native-queued-submission-1',
@@ -1120,14 +1117,9 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(sharedClient.requestCalls).toHaveLength(1)
             const finalStatus = sender.getStatus(sessionId)
             if (!finalStatus.success) throw new Error('Expected native queue status')
-            expect(finalStatus.queuedMessages).toEqual([
-                expect.objectContaining({
-                    id: 'ssh:submit-timeout-a',
-                    recoveryRequired: true,
-                    recoveryReason: 'session_status_unknown'
-                }),
-                expect.objectContaining({ id: 'ssh:submit-timeout-b' })
-            ])
+            expect(finalStatus.queuedMessages).toEqual([expect.objectContaining({ id: 'ssh:submit-timeout-b' })])
+            expect(finalStatus.deliveryReceipts).toEqual([{ id: 'ssh:submit-timeout-a', state: 'accepted' }])
+            expect(finalStatus.lastErrorCode).toBeUndefined()
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
@@ -1249,7 +1241,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('turns an unbound shared ACK into recovery before draining later FIFO work', async () => {
+    it('keeps an acknowledged shared send pending beyond twenty seconds without replay or draining later work', async () => {
         vi.useFakeTimers()
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-ack-timeout-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789086'
@@ -1291,22 +1283,58 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(secondClient.requestCalls).toEqual([])
 
             runState = 'processing'
-            await vi.advanceTimersByTimeAsync(20_000)
+            await vi.advanceTimersByTimeAsync(120_000)
 
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
-                lastErrorCode: 'session_status_unknown',
+                activeClientMessageId: 'ssh:timeout-a',
+                deliveryReceipts: [{ id: 'ssh:timeout-a', state: 'accepted' }],
                 queuedMessages: [
-                    expect.objectContaining({
-                        id: 'ssh:timeout-a',
-                        recoveryRequired: true,
-                        recoveryReason: 'session_status_unknown'
-                    }),
                     expect.objectContaining({ id: 'ssh:timeout-b' })
                 ]
             })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('lastErrorCode')
             expect(firstClient.requestCalls).toHaveLength(1)
             expect(secondClient.requestCalls).toEqual([])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('consumes each native user record once when two queued prompts have identical text', async () => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-shared-identical-'))
+        const sessionId = '89345678-1234-4234-8234-123456789087'
+        const clients = [new FakeAppServerClient(), new FakeAppServerClient()]
+        let clientIndex = 0
+        let now = 100
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(), () => now, 1_000,
+            { getSummary: () => ({ id: sessionId, title: 'Same prompts', cwd, file: '/not-read.jsonl', modifiedAt: now, runState: 'idle' }) },
+            null, null, null, async () => true, () => clients[clientIndex++]!
+        )
+        try {
+            await sender.sendWithExternalControlCheck(sessionId, '1-1', undefined, 'same:first')
+            await flushMicrotasks()
+            now = 150
+            await sender.sendWithExternalControlCheck(sessionId, '1-1', undefined, 'same:second')
+            await flushMicrotasks()
+            now = 200
+            sender.notifyTranscriptChanged(sessionId, [{ text: '1-1', createdAt: 200 }])
+            await vi.advanceTimersByTimeAsync(1)
+            await flushMicrotasks()
+            sender.notifyTranscriptChanged(sessionId, [{ text: '1-1', createdAt: 200 }])
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                activeClientMessageId: 'same:second',
+                deliveryReceipts: [{ id: 'same:first', state: 'delivered' }, { id: 'same:second', state: 'accepted' }]
+            })
+            now = 300
+            sender.notifyTranscriptChanged(sessionId, [{ text: '1-1', createdAt: 300 }])
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                deliveryReceipts: [{ id: 'same:first', state: 'delivered' }, { id: 'same:second', state: 'delivered' }]
+            })
+            for (const client of clients) expect(client.requestCalls).toHaveLength(1)
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
@@ -2312,7 +2340,10 @@ describe('NativeCodexSessionDirectSender', () => {
                 turn: { id: 'native-turn-1' },
                 status: 'completed'
             })
-            expect(sender.getStatus(sessionId)).toEqual({ success: true, status: 'idle', queuedMessages: [] })
+            expect(sender.getStatus(sessionId)).toEqual({
+                success: true, status: 'idle', queuedMessages: [],
+                deliveryReceipts: [{ id: 'native:bridge-1', state: 'delivered' }]
+            })
             expect(client.disconnectCalls).toBe(1)
         } finally {
             sender.dispose()
@@ -2474,7 +2505,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('stops an accepted bridge that stays unknown and saves an explicit recovery receipt', async () => {
+    it('keeps an accepted bridge alive when transcript feedback is delayed', async () => {
         vi.useFakeTimers()
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-bridge-unknown-workspace-'))
         const sessionId = '83345678-1234-4234-8234-123456789012'
@@ -2506,29 +2537,24 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(client.startTurnCalls).toHaveLength(1)
 
             runState = 'unknown'
-            now = 20_001
+            now = 120_001
             await vi.advanceTimersByTimeAsync(1_000)
 
-            expect(client.disconnectCalls).toBe(1)
+            expect(client.disconnectCalls).toBe(0)
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
-                status: 'unknown',
-                lastErrorClientMessageId: 'native:unknown-bridge',
-                lastErrorCode: 'session_status_unknown',
-                queuedMessages: [{
-                    id: 'native:unknown-bridge',
-                    text: 'Do not spin forever',
-                    recoveryRequired: true,
-                    recoveryReason: 'session_status_unknown'
-                }]
+                status: 'processing',
+                deliveryReceipts: [{ id: 'native:unknown-bridge', state: 'accepted' }],
+                queuedMessages: []
             })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('lastErrorCode')
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
         }
     })
 
-    it('stops a fallback child with no transcript evidence and saves it for recovery', async () => {
+    it('does not kill a live fallback child just because transcript evidence is delayed', async () => {
         vi.useFakeTimers()
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-exec-unknown-workspace-'))
         const sessionId = '84345678-1234-4234-8234-123456789012'
@@ -2563,7 +2589,15 @@ describe('NativeCodexSessionDirectSender', () => {
             now = 20_001
             await vi.advanceTimersByTimeAsync(1_000)
 
-            expect(kill).toHaveBeenCalledWith('SIGTERM')
+            expect(kill).not.toHaveBeenCalled()
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                activeClientMessageId: 'native:unknown-exec', queuedMessages: []
+            })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('lastErrorCode')
+            // Only an actual child failure closes the live hand-off.
+            child.emit('error', new Error('Native child exited unexpectedly'))
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
                 status: 'unknown',
@@ -2580,7 +2614,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('keeps a timed-out duplicate prompt recoverable when only the earlier prompt has transcript evidence', async () => {
+    it('never uses the earlier identical prompt to confirm a later ambiguous send', async () => {
         vi.useFakeTimers()
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-exec-timeout-evidence-workspace-'))
         const sessionId = '85345678-1234-4234-8234-123456789012'
@@ -2624,20 +2658,21 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(sender.send(sessionId, '1+1', undefined, 'native:second')).toMatchObject({ success: true, status: 'processing' })
             now = 20_501
             await vi.advanceTimersByTimeAsync(1_000)
-            expect(secondKill).toHaveBeenCalledWith('SIGTERM')
+            expect(secondKill).not.toHaveBeenCalled()
+            secondChild.emit('error', new Error('Lost child response'))
             // The old identical record may appear again in a watcher window.
             sender.notifyTranscriptChanged(sessionId, [{ text: '1+1', createdAt: 0 }])
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true, status: 'idle', lastErrorClientMessageId: 'native:second',
-                lastErrorCode: 'codex_timeout', queuedMessages: [expect.objectContaining({
-                    id: 'native:second', recoveryRequired: true, recoveryReason: 'codex_timeout'
+                lastErrorCode: 'session_status_unknown', queuedMessages: [expect.objectContaining({
+                    id: 'native:second', recoveryRequired: true, recoveryReason: 'session_status_unknown'
                 })]
             })
             expect(stored).toEqual(expect.arrayContaining([expect.objectContaining({
-                id: 'native:second', recoveryRequired: true, recoveryReason: 'codex_timeout'
+                id: 'native:second', recoveryRequired: true, recoveryReason: 'session_status_unknown'
             })]))
             expect(stored.find((item) => item.id === 'native:second')?.transcriptConfirmed).not.toBe(true)
-            expect(sender.needsTranscriptDeliveryEvidence(sessionId)).toBe(false)
+            expect(sender.needsTranscriptDeliveryEvidence(sessionId)).toBe(true)
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })

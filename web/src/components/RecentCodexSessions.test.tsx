@@ -958,9 +958,11 @@ describe('RecentCodexSessions', () => {
         expect(pendingGroup?.querySelector('[data-kanban-group-count]')).toBeNull()
         const processingGroup = board.querySelector('[data-kanban-group="processing"]')
         expect(processingGroup).toHaveTextContent('Thinking')
-        expect(processingGroup?.querySelector('[data-kanban-thinking-label]')).toHaveTextContent('Thinking...')
-        expect(processingGroup?.querySelector('.session-kanban-thinking-dot-second')).not.toBeNull()
-        expect(processingGroup?.querySelector('.session-kanban-thinking-dot-third')).not.toBeNull()
+        const thinkingIndicator = processingGroup?.querySelector('[data-testid="session-thinking-indicator"]')
+        expect(thinkingIndicator).toHaveAccessibleName('Thinking')
+        expect(thinkingIndicator).toHaveAttribute('data-tone', 'warm')
+        expect(thinkingIndicator?.querySelector('.session-thinking__label')).toHaveTextContent(/Thinking|Pondering|Working/)
+        expect(thinkingIndicator?.querySelector('.tabular-nums')).toBeNull()
         expect(processingGroup?.querySelector('[data-kanban-group-count]')).toBeNull()
         expect(pinnedGroup?.querySelector('[data-kanban-group-count]')).toBeNull()
         expect(board.querySelectorAll('[data-kanban-group-count]')).toHaveLength(0)
@@ -1001,7 +1003,6 @@ describe('RecentCodexSessions', () => {
 
         for (const [group, id, color] of [
             [pendingGroup, 'pending', 'text-[#F59E0B]'],
-            [processingGroup, 'processing', 'text-[#34C759]'],
             [pinnedGroup, 'pinned', 'text-[var(--app-hint)]']
         ] as const) {
             expect(group?.querySelector('h2')).toHaveClass('font-semibold')
@@ -1009,8 +1010,9 @@ describe('RecentCodexSessions', () => {
             expect(icon).toHaveAttribute('aria-hidden', 'true')
             expect(icon).toHaveClass(color)
         }
-        expect(processingGroup?.querySelector('[data-kanban-thinking-spinner]')).toHaveClass('motion-safe:animate-spin')
-        expect(processingGroup?.querySelector('[data-kanban-thinking-spinner] path')).toBeInTheDocument()
+        expect(thinkingIndicator?.querySelector('svg')).toHaveClass('session-thinking__glyph')
+        expect(thinkingIndicator?.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+        expect(processingGroup?.querySelector('h2')).toHaveClass('font-semibold')
         expect(pinnedGroup?.querySelector('[data-kanban-group-icon="pinned"]')).toHaveAttribute('fill', 'currentColor')
 
         const unpinButton = screen.getByRole('button', { name: 'Unpin session' })

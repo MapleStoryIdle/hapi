@@ -47,6 +47,16 @@ export function getNativeCodexRealtimeSnapshot(
     const value = asRecord(event.snapshot)
     const status = asRecord(value?.status)
     const timing = asRecord(value?.timing)
+    const deliveryReceipts = status?.deliveryReceipts
+    const validDeliveryReceipts = deliveryReceipts === undefined || (
+        Array.isArray(deliveryReceipts) && deliveryReceipts.length <= 100
+        && deliveryReceipts.every((entry) => {
+            const receipt = asRecord(entry)
+            return receipt !== null && typeof receipt.id === 'string'
+                && receipt.id.length > 0 && receipt.id.length <= 160
+                && (receipt.state === 'accepted' || receipt.state === 'delivered')
+        })
+    )
     const queuedMessageRefs = status?.queuedMessageRefs
     const validQueuedMessageRefs = queuedMessageRefs === undefined || (
         Array.isArray(queuedMessageRefs)
@@ -80,6 +90,7 @@ export function getNativeCodexRealtimeSnapshot(
         || (status.controlledByCodexSsh !== undefined && typeof status.controlledByCodexSsh !== 'boolean')
         || 'queuedMessages' in (status ?? {})
         || !validQueuedMessageRefs
+        || !validDeliveryReceipts
         || (timing?.cache !== 'hit' && timing?.cache !== 'miss')
         || typeof timing.durationMs !== 'number'
         || !Number.isFinite(timing.durationMs)

@@ -10,26 +10,34 @@ import { AssistantRuntimeProvider } from '@assistant-ui/react'
 import { useHappyRuntime } from '../src/lib/assistant-runtime'
 import { I18nProvider } from '../src/lib/i18n-context'
 
+let acceptedClientMessageId: string | undefined
 const api = {
     getCodexSessionSnapshot: async () => ({
         success: true, session: { id: 'fixture', cwd: '/workspace/shapi', title: 'Native send check', modifiedAt: Date.now(), model: 'gpt-5.6', modelReasoningEffort: 'high' },
         messages: [{ id: 'original', createdAt: 1, content: { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'Ready for your next message.' } } } }],
         page: { limit: 50, hasMore: false, nextBefore: null }, version: { runnerEpoch: 'fixture', revision: 1 }, revision: 1,
-        status: { success: true, status: 'idle', queuedMessages: [] }, timing: { cache: 'hit', durationMs: 0 }
+        status: { success: true, status: 'idle', queuedMessages: [],
+            ...(acceptedClientMessageId ? { deliveryReceipts: [{ id: acceptedClientMessageId, state: 'accepted' }] } : {})
+        }, timing: { cache: 'hit', durationMs: 0 }
     }),
     getCodexSessionComposerCapabilities: async () => ({ success: true, skills: [], commands: [] }),
     getMachineCodexSubscriptionLimits: async () => ({ success: true, limits: null }),
-    sendCodexSessionMessage: async () => { throw new ApiError('timeout', 408, 'request_timeout') }
+    sendCodexSessionMessage: async (_sessionId: string, payload: { clientMessageId: string }) => {
+        if (new URLSearchParams(location.search).has('ack')) acceptedClientMessageId = payload.clientMessageId
+        throw new ApiError('timeout', 408, 'request_timeout')
+    }
 } as unknown as ApiClient
 
 const emptyBlocks = [] as const
-function ManagedComposer() {
+function ManagedComposer(props: { native?: boolean }) {
     const [state, setState] = useState<'thinking' | 'waiting' | 'idle'>('thinking')
     const runtime = useHappyRuntime({ session: { active: true, thinking: state !== 'idle' }, blocks: emptyBlocks,
         isSending: false, onSendMessage: () => {}, onAbort: async () => {} })
     return <div data-testid="managed-composer">
         <AssistantRuntimeProvider runtime={runtime}>
-            <HappyComposer active thinking={state !== 'idle'} showStatusBar={false} agentFlavor="codex"
+            <HappyComposer active thinking={state !== 'idle'} showStatusBar={false} agentFlavor={props.native ? null : 'codex'}
+                readOnlyModelInfo={props.native} model={props.native ? 'gpt-5.6' : undefined}
+                modelReasoningEffort={props.native ? 'high' : undefined}
                 agentState={state === 'waiting' ? { requests: { q: { tool: 'AskUserQuestion', arguments: {}, createdAt: null } } } : null} />
         </AssistantRuntimeProvider>
         <button className="min-h-11 px-2" onClick={() => setState('waiting')}>HAPI: wait</button>
@@ -47,7 +55,7 @@ function Demo() {
     return <main className="mx-auto max-w-lg space-y-8 p-5">
         <h1 className="text-lg font-semibold">SHAPI · Thinking</h1>
         <section className="space-y-3"><h2>Native</h2><NativeSendStatusMessage phase={phase} label={phase === 'launching' ? 'Starting connection' : 'Matching Agent'} startedAt={startedAt} waitingForOutput={phase === 'connected'} waitingStartedAt={startedAt} /></section>
-        <section className="space-y-3"><h2>HAPI</h2><ManagedComposer /></section>
+        <section className="space-y-3"><h2>HAPI</h2><ManagedComposer native={new URLSearchParams(location.search).has('nativeComposer')} /></section>
         <nav className="flex flex-wrap gap-3">{(['launching', 'matching', 'connected', null] as const).map((value) => <button className="min-h-11 rounded-xl border px-3" key={value ?? 'reply'} onClick={() => setPhase(value)}>{value ?? 'Reply received'}</button>)}</nav>
     </main>
 }

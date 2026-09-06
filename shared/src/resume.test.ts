@@ -85,6 +85,7 @@ describe('resume schemas', () => {
                     success: true,
                     status: 'processing',
                     activeClientMessageId: 'native:active-1',
+                    deliveryReceipts: [{ id: 'native:ack-1', state: 'accepted' }, { id: 'native:done-1', state: 'delivered' }],
                     queuedMessageRefs: [{ id: 'queued-1', recoveryRequired: true, recoveryReason: 'codex_timeout' }]
                 },
                 timing: { cache: 'hit', durationMs: 2 }

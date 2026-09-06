@@ -1659,10 +1659,12 @@ export function HappyComposer(props: {
                 >
                     {!composerCompact ? overlays : null}
 
-                    {(!showStatusBar || !shouldShowComposerStatusBar(agentFlavor))
-                        && shouldShowThinkingIndicator({ active, thinking, agentState, voiceStatus }) ? (
-                        <div className="flex justify-start px-2 pb-1">
-                            <SessionThinkingIndicator compact />
+                    {!showStatusBar || !shouldShowComposerStatusBar(agentFlavor) ? (
+                        // Keep the measured dock height stable when a turn starts or ends.
+                        <div className="flex h-6 justify-start px-2 pb-1" data-testid="composer-thinking-slot">
+                            {shouldShowThinkingIndicator({ active, thinking, agentState, voiceStatus }) ? (
+                                <SessionThinkingIndicator compact />
+                            ) : null}
                         </div>
                     ) : null}
 

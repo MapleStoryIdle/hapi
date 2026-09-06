@@ -278,6 +278,8 @@ export type CodexLocalSessionStatusRpcResponse = {
     startedAt?: number
     /** Browser receipt owned by the runner's delivery lane; not proof that Codex accepted it. */
     activeClientMessageId?: string
+    /** Receipt-specific evidence from Codex, distinct from a runner queue ACK. */
+    deliveryReceipts?: Array<{ id: string; state: 'accepted' | 'delivered' }>
     /** Present while the runner can describe its native direct-send hand-off. */
     progress?: CodexLocalSessionDirectSendProgress
     /** Short runner-side delivery diagnostic for the most recent send. */

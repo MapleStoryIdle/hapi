@@ -168,6 +168,75 @@ async function waitForQuietRecoveryNotice() {
 }
 
 describe('CodexSessionContextPage', () => {
+    it.each(['accepted', 'delivered'] as const)('retains a %s Codex receipt through stale errors and page re-entry', async (state) => {
+        const createdAt = Date.now() - 60_000
+        const key = JSON.stringify(['machine-1', 'codex-thread-1'])
+        localStorage.setItem('hapi:native-codex-direct-messages:v1', JSON.stringify({
+            [key]: [{
+                id: 'confirmed-1', text: 'A confirmed prompt', createdAt,
+                status: 'sending', deliveryPhase: 'matching', phaseStartedAt: createdAt,
+                queueId: null, observedTranscriptMessageIds: [], observedThroughPosition: null
+            }]
+        }))
+        const api = createApi()
+        const staleStatus = {
+            success: true, status: 'idle', queuedMessages: [],
+            lastError: 'Old launch error', lastErrorCode: 'launch_failed', lastErrorClientMessageId: 'confirmed-1'
+        }
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            ...staleStatus, deliveryReceipts: [{ id: 'confirmed-1', state }]
+        })
+        const page = renderPage({ api })
+        await screen.findByText('A confirmed prompt')
+        await waitFor(() => expect(JSON.parse(localStorage.getItem('hapi:native-codex-direct-messages:v1')!)[key][0].deliveryState).toBe(state))
+        expect(screen.queryByTestId('composer-send-error')).toBeNull()
+        page.unmount()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue(staleStatus)
+        renderPage({ api })
+        await screen.findByText('A confirmed prompt')
+        const now = Date.now()
+        vi.spyOn(Date, 'now').mockReturnValue(now + 30_000)
+        // Let the real feedback clock tick, even though this snapshot lacks ACKs.
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_100)) })
+        expect(screen.queryByTestId('codex-native-recovery')).toBeNull()
+        expect(screen.queryByTestId('composer-send-error')).toBeNull()
+        expect(api.sendCodexSessionMessage).not.toHaveBeenCalled()
+    })
+
+    it('matches identical prompts by receipt id and keeps uncertain actions collapsed until opened', async () => {
+        const createdAt = Date.now() - 60_000
+        const key = JSON.stringify(['machine-1', 'codex-thread-1'])
+        localStorage.setItem('hapi:native-codex-direct-messages:v1', JSON.stringify({
+            [key]: ['first', 'second'].map((id) => ({
+                id, text: '1-1', createdAt,
+                status: 'sending', deliveryPhase: 'matching', phaseStartedAt: createdAt,
+                queueId: null, observedTranscriptMessageIds: [], observedThroughPosition: null
+            }))
+        }))
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true, status: 'idle', queuedMessages: [],
+            deliveryReceipts: [{ id: 'first', state: 'delivered' }]
+        })
+        renderPage({ api })
+        const details = await waitForQuietRecoveryNotice()
+        expect(details.tagName).toBe('DETAILS')
+        expect(details).not.toHaveAttribute('open')
+        expect(within(details).getByText('Message saved. Delivery is not confirmed yet; this does not mean it failed.')).not.toBeVisible()
+        const saved = JSON.parse(localStorage.getItem('hapi:native-codex-direct-messages:v1')!)[key]
+        expect(saved[0].deliveryState).toBe('delivered')
+        expect(saved[1].deliveryState).toBeUndefined()
+        expect(api.sendCodexSessionMessage).not.toHaveBeenCalled()
+        fireEvent.click(within(details).getByText('Message status'))
+        expect(details).toHaveAttribute('open')
+        fireEvent.click(within(details).getByRole('button', { name: 'Refresh status' }))
+        expect(api.sendCodexSessionMessage).not.toHaveBeenCalled()
+        fireEvent.click(within(details).getByRole('button', { name: 'Discard message' }))
+        await waitFor(() => expect(api.discardCodexSessionMessage).toHaveBeenCalledWith('codex-thread-1', {
+            machineId: 'machine-1', clientMessageId: 'second'
+        }))
+    })
+
     it('removes a queued placeholder when the runner names its active receipt', async () => {
         const api = createApi()
         let clientMessageId = ''

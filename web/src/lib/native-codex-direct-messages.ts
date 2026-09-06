@@ -34,6 +34,8 @@ export type NativeCodexDirectMessageEcho = {
     /** The runner's timestamp for the current stage, or browser receipt time. */
     phaseStartedAt: number
     queueId: string | null
+    /** Monotonic Codex acknowledgement, independent of later snapshot windows. */
+    deliveryState?: 'accepted' | 'delivered'
     observedTranscriptMessageIds: readonly string[]
     observedThroughPosition: number | null
 }
@@ -120,6 +122,8 @@ function parseEcho(value: unknown, now: number): NativeCodexDirectMessageEcho | 
         deliveryPhase,
         phaseStartedAt,
         queueId,
+        ...((record.deliveryState === 'accepted' || record.deliveryState === 'delivered')
+            ? { deliveryState: record.deliveryState } : {}),
         observedTranscriptMessageIds,
         observedThroughPosition
     }

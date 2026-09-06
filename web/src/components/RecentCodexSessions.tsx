@@ -33,6 +33,7 @@ import { getDetachedBranchLabel } from '@/lib/files-i18n'
 import { useMachineGitBranch } from '@/hooks/queries/useGitBranch'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
+import { SessionThinkingIndicator } from '@/components/SessionThinkingIndicator'
 import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { useNativeCodexRealtime } from '@/lib/native-codex-realtime-context'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -811,35 +812,6 @@ function GitDirtyIndicator(props: { label: string }) {
     )
 }
 
-function ThinkingKanbanLabel(props: { label: string }) {
-    return (
-        <span className="inline-flex whitespace-nowrap" data-kanban-thinking-label>
-            {props.label}
-            <span className="inline-flex w-[1.35em]" aria-hidden="true">
-                <span>.</span>
-                <span className="session-kanban-thinking-dot-second">.</span>
-                <span className="session-kanban-thinking-dot-third">.</span>
-            </span>
-        </span>
-    )
-}
-
-function ThinkingKanbanSpinner() {
-    return (
-        <svg
-            viewBox="0 0 20 20"
-            fill="none"
-            className="h-3.5 w-3.5 shrink-0 text-[#34C759] motion-safe:animate-spin"
-            aria-hidden="true"
-            data-kanban-group-icon="processing"
-            data-kanban-thinking-spinner
-        >
-            <circle cx="10" cy="10" r="8" stroke="var(--app-border)" strokeWidth="2" />
-            <path d="M10 2a8 8 0 0 1 8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-    )
-}
-
 function getDirectoryKey(directory: string | null): string {
     return directory ?? NO_DIRECTORY_KEY
 }
@@ -1562,19 +1534,17 @@ export function RecentCodexSessions(props: {
                         return (
                             <section key={group.id} className="min-w-0" data-kanban-group={group.id}>
                                 <div className="cupertino-kanban-heading flex items-center gap-2 px-1">
-                                    {group.id === 'processing' ? (
-                                        <ThinkingKanbanSpinner />
-                                    ) : (
+                                    {group.id !== 'processing' ? (
                                         <GroupIcon
                                             className={`h-3.5 w-3.5 shrink-0 ${presentation.iconClassName}`}
                                             {...(group.id === 'pinned' ? { fill: 'currentColor' } : {})}
                                             aria-hidden="true"
                                             data-kanban-group-icon={group.id}
                                         />
-                                    )}
+                                    ) : null}
                                     <h2 className={KANBAN_HEADING_CLASS_NAME}>
                                         {group.id === 'processing' ? (
-                                            <ThinkingKanbanLabel label={t(presentation.labelKey)} />
+                                            <SessionThinkingIndicator compact showElapsed={false} />
                                         ) : t(presentation.labelKey)}
                                     </h2>
                                 </div>

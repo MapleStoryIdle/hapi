@@ -293,6 +293,8 @@ export default {
   'recentCodex.direct.recovery.title': '暂未收到新的会话反馈',
   'recentCodex.direct.receipt.unconfirmed': '消息已保存，正在等待送达确认，不代表发送失败。',
   'recentCodex.direct.receipt.resend': '再次发送（可能重复）',
+  'recentCodex.direct.receipt.details': '消息状态',
+  'recentCodex.direct.receipt.refresh': '刷新状态',
   'recentCodex.direct.recovery.launchFailedTitle': '消息未能启动投递',
   'recentCodex.direct.recovery.stalled': '很久没有新内容。排队消息已保存，不会自动重发。',
   'recentCodex.direct.recovery.uncertain': '暂时无法确认消息是否送达。消息已保存，请先刷新状态；确认重试可能重复执行。',
