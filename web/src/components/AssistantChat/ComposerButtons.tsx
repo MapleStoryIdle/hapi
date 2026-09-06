@@ -1010,6 +1010,8 @@ export function ComposerButtons(props: {
     settingsReasoningLabel?: string | null
     fastModeActive?: boolean
     settingsOpen?: boolean
+    /** Display the shared model control without allowing settings changes. */
+    settingsReadOnly?: boolean
     contextUsageLabel?: string
     contextUsageDetails?: ContextUsageDetails | null
     permissionMode?: PermissionMode
@@ -1853,8 +1855,9 @@ export function ComposerButtons(props: {
                         <button
                             ref={props.settingsButtonRef}
                             type="button"
-                            aria-label={t('composer.settings')}
-                            title={t('composer.settings')}
+                            data-testid={props.settingsReadOnly ? 'composer-model-info' : undefined}
+                            aria-label={props.settingsReadOnly ? t('composer.modelReadOnly', { model: props.settingsLabel ?? t('misc.model') }) : t('composer.settings')}
+                            title={props.settingsReadOnly ? t('composer.modelReadOnly', { model: props.settingsLabel ?? t('misc.model') }) : t('composer.settings')}
                             className={`settings-button flex h-[42px] max-w-[46vw] shrink-0 items-center gap-2 rounded-full px-3 text-base transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-none ${
                                 props.settingsOpen
                                     ? 'bg-[var(--app-bg)] text-[var(--app-fg)]'
@@ -1868,7 +1871,7 @@ export function ComposerButtons(props: {
                                 setShowContextUsageMenu(false)
                                 props.onSettingsToggle()
                             }}
-                            disabled={props.controlsDisabled}
+                            disabled={props.controlsDisabled || props.settingsReadOnly}
                         >
                             {props.fastModeActive ? (
                                 <Zap

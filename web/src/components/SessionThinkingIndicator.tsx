@@ -3,6 +3,7 @@ import { useReducedMotion } from 'motion/react'
 import { useTranslation } from '@/lib/use-translation'
 
 const LABEL_ROTATION_MS = 12_000
+const WARM_AFTER_MS = 10_000
 
 const GENERIC_THINKING_LABELS = {
     en: ['Thinking', 'Pondering', 'Working'],
@@ -35,7 +36,6 @@ export function SessionThinkingIndicator(props: {
     const { locale } = useTranslation()
     const reducedMotion = useReducedMotion() === true
     const mountedAt = useRef(Date.now())
-    const labelStartedAt = useRef(Date.now())
     const startedAt = getStartedAt(props.startedAt, mountedAt.current)
     const [now, setNow] = useState(() => Date.now())
     const suppliedLabel = props.label?.trim() ? props.label : undefined
@@ -47,38 +47,46 @@ export function SessionThinkingIndicator(props: {
     }, [startedAt])
 
     const genericLabels = GENERIC_THINKING_LABELS[locale]
+    const elapsed = Math.max(0, now - startedAt)
     const labelIndex = reducedMotion
         ? 0
-        : Math.floor(Math.max(0, now - labelStartedAt.current) / LABEL_ROTATION_MS) % genericLabels.length
+        : Math.floor(elapsed / LABEL_ROTATION_MS) % genericLabels.length
     const label = suppliedLabel ?? genericLabels[labelIndex]
     const compact = props.compact === true
 
     return (
         <div
-            className={`flex items-center ${compact ? 'min-h-5 gap-1.5 text-xs' : 'min-h-6 gap-2 text-sm'}`}
+            className={`session-thinking flex min-w-0 items-center ${compact ? 'min-h-5 gap-1.5 text-xs' : 'min-h-6 gap-2 text-sm'}`}
             data-testid="session-thinking-indicator"
+            data-reduced-motion={reducedMotion}
+            // Warmth is visual only, never a timeout, error, or progress estimate.
+            data-tone={!suppliedLabel && elapsed >= WARM_AFTER_MS ? 'warm' : 'default'}
             role="status"
             aria-live="polite"
             aria-atomic="true"
             aria-label={label}
         >
             <svg
-                className={`${compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} shrink-0 text-[var(--app-badge-warning-text)] ${reducedMotion ? '' : 'animate-spin'}`}
+                className={`session-thinking__glyph ${compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} shrink-0`}
                 viewBox="0 0 24 24"
                 fill="none"
                 aria-hidden="true"
             >
-                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
-                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity="0.85" />
+                <path
+                    d="M12 3v18M3 12h18M7.5 4.2l9 15.6M4.2 7.5l15.6 9M7.5 19.8l9-15.6M4.2 16.5l15.6-9"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                />
             </svg>
             <span
-                className={`shrink-0 font-medium text-[var(--app-badge-warning-text)] ${suppliedLabel ? '' : locale === 'zh-CN' ? 'w-[4em]' : 'w-[9ch]'}`}
+                className={`session-thinking__label min-w-0 font-medium ${suppliedLabel ? 'break-words' : locale === 'zh-CN' ? 'w-[4em] shrink-0' : 'w-[9ch] shrink-0'}`}
                 aria-hidden="true"
             >
                 {label}
             </span>
             <span className="min-w-[6ch] shrink-0 text-right tabular-nums text-[var(--app-hint)]" aria-hidden="true">
-                {formatThinkingDuration(now - startedAt)}
+                {formatThinkingDuration(elapsed)}
             </span>
         </div>
     )

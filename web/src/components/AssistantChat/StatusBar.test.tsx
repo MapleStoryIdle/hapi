@@ -36,26 +36,36 @@ describe('StatusBar thinking state', () => {
     })
 
     it('keeps voice, offline, permission, and idle states ahead of the thinking branch', () => {
+        vi.useFakeTimers()
         const permissionState: AgentState = {
             requests: {
                 permission: { tool: 'Bash', arguments: {}, createdAt: null }
             }
         }
-        const view = render(statusBar({ voiceStatus: 'connecting' }))
+        const view = render(statusBar())
+        expect(vi.getTimerCount()).toBe(1)
+        view.rerender(statusBar({ voiceStatus: 'connecting' }))
 
         expect(screen.getByText('voice.connecting')).toBeInTheDocument()
         expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
+        expect(vi.getTimerCount()).toBe(0)
 
         view.rerender(statusBar({ active: false }))
         expect(screen.getByText('misc.offline')).toBeInTheDocument()
         expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
 
+        view.rerender(statusBar())
+        expect(vi.getTimerCount()).toBe(1)
         view.rerender(statusBar({ agentState: permissionState }))
         expect(screen.getByText('misc.permissionRequired')).toBeInTheDocument()
         expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
+        expect(vi.getTimerCount()).toBe(0)
 
+        view.rerender(statusBar())
+        expect(vi.getTimerCount()).toBe(1)
         view.rerender(statusBar({ thinking: false }))
         expect(screen.getByText('misc.online')).toBeInTheDocument()
         expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
+        expect(vi.getTimerCount()).toBe(0)
     })
 })

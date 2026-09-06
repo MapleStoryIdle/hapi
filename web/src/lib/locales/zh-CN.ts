@@ -905,6 +905,7 @@ export default {
 
   // Composer buttons
   'composer.settings': '设置',
+  'composer.modelReadOnly': '当前模型：{model}（只读，此会话不支持切换模型）',
   'composer.moreTools': '更多工具',
   'composer.menu.input': '输入',
   'composer.menu.execution': '执行方式',

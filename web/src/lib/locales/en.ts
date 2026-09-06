@@ -901,6 +901,7 @@ export default {
 
   // Composer buttons
   'composer.settings': 'Settings',
+  'composer.modelReadOnly': 'Current model: {model} (read-only; model switching is unavailable)',
   'composer.moreTools': 'More tools',
   'composer.menu.input': 'Input',
   'composer.menu.execution': 'Execution',

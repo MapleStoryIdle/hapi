@@ -1210,9 +1210,11 @@ export function HappyComposer(props: {
             ?? null,
         [codexReasoningEffortOptions, modelReasoningEffort]
     )
-    const currentReasoningLabel = currentReasoningOption
-        ? formatReasoningLabel(currentReasoningOption.value, currentReasoningOption.label, locale)
-        : null
+    const currentReasoningLabel = props.readOnlyModelInfo
+        ? modelReasoningEffort ? formatReasoningLabel(modelReasoningEffort, modelReasoningEffort, locale) : null
+        : currentReasoningOption
+            ? formatReasoningLabel(currentReasoningOption.value, currentReasoningOption.label, locale)
+            : null
     const compactModelLabel = formatCompactModelLabel(currentModelLabel)
     const settingsLabel = currentReasoningLabel
         ? `${compactModelLabel} ${currentReasoningLabel}`
@@ -1657,14 +1659,9 @@ export function HappyComposer(props: {
                 >
                     {!composerCompact ? overlays : null}
 
-                    {props.readOnlyModelInfo && (model || modelReasoningEffort || thinking) ? (
-                        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 pb-1">
-                            <div data-testid="composer-model-info" className="flex min-w-0 items-center gap-1.5 text-xs text-[var(--app-hint)]">
-                                {model ? <span className="truncate" title={model}>{model}</span> : null}
-                                {model && modelReasoningEffort ? <span aria-hidden="true">·</span> : null}
-                                {modelReasoningEffort ? <span className="shrink-0 capitalize">{modelReasoningEffort}</span> : null}
-                            </div>
-                            {thinking ? <SessionThinkingIndicator compact /> : null}
+                    {props.readOnlyModelInfo && thinking ? (
+                        <div className="flex justify-end px-2 pb-1">
+                            <SessionThinkingIndicator compact />
                         </div>
                     ) : null}
 
@@ -1878,10 +1875,11 @@ export function HappyComposer(props: {
                                 canSend={canSend}
                                 controlsDisabled={controlsDisabled}
                                 locked={locked}
-                                showSettingsButton={showSettingsButton}
+                                showSettingsButton={showSettingsButton || Boolean(props.readOnlyModelInfo && (model || modelReasoningEffort))}
+                                settingsReadOnly={props.readOnlyModelInfo}
                                 onSettingsToggle={handleSettingsToggle}
                                 settingsButtonRef={settingsButtonRef}
-                                settingsLabel={settingsLabel}
+                                settingsLabel={props.readOnlyModelInfo ? [model, currentReasoningLabel].filter(Boolean).join(' ') : settingsLabel}
                                 settingsModelLabel={compactModelLabel}
                                 settingsReasoningLabel={currentReasoningLabel}
                                 fastModeActive={serviceTier?.trim().toLowerCase() === 'fast'}

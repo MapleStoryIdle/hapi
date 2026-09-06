@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "katex/dist/katex.min.css";
 @import "./styles/chat-overlays.css";
+@import "./styles/thinking-indicator.css";
 @config "../tailwind.config.ts";
 
 :root {

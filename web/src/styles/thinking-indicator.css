@@ -1,0 +1,70 @@
+/* Shared by native connection/turn status and the ordinary HAPI composer.
+ * CSS owns the frames; React only updates the local elapsed clock once a second. */
+.session-thinking {
+    --thinking-ink: var(--app-hint);
+}
+
+.session-thinking[data-tone="warm"] {
+    --thinking-ink: var(--app-badge-warning-text);
+}
+
+.session-thinking__glyph {
+    color: var(--thinking-ink);
+    transform-origin: center;
+    animation: session-thinking-breathe 2.4s ease-in-out infinite;
+    transition: color 600ms ease;
+}
+
+.session-thinking__label {
+    color: var(--thinking-ink);
+}
+
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+    .session-thinking__label {
+        /* Sweep toward the foreground color, not white: readable in both themes. */
+        background-image: linear-gradient(110deg,
+            var(--thinking-ink) 35%, var(--app-fg) 50%, var(--thinking-ink) 65%);
+        background-size: 250% 100%;
+        background-clip: text;
+        -webkit-background-clip: text;
+        color: transparent;
+        animation: session-thinking-shimmer 3.2s ease-in-out infinite;
+    }
+}
+
+@keyframes session-thinking-breathe {
+    0%, 100% { transform: scale(0.88) rotate(-12deg); opacity: 0.7; }
+    50% { transform: scale(1) rotate(12deg); opacity: 1; }
+}
+
+@keyframes session-thinking-shimmer {
+    0%, 15% { background-position: 100% 0; }
+    85%, 100% { background-position: 0% 0; }
+}
+
+.session-thinking[data-reduced-motion="true"] .session-thinking__glyph,
+.session-thinking[data-reduced-motion="true"] .session-thinking__label {
+    animation: none;
+    transition: none;
+    background-image: none;
+    color: var(--thinking-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .session-thinking__glyph,
+    .session-thinking__label {
+        animation: none;
+        transition: none;
+        background-image: none;
+        color: var(--thinking-ink);
+    }
+}
+
+@media (forced-colors: active) {
+    .session-thinking__glyph,
+    .session-thinking__label {
+        animation: none;
+        background-image: none;
+        color: CanvasText;
+    }
+}

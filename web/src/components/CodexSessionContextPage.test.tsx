@@ -234,12 +234,18 @@ describe('CodexSessionContextPage', () => {
         expect(screen.getByRole('textbox')).toHaveValue('Definitely not delivered')
     })
 
-    it('shows actual native model and reasoning settings as read-only composer metadata', async () => {
+    it('shows native model and reasoning in the disabled shared composer control', async () => {
         renderPage()
         const metadata = await screen.findByTestId('composer-model-info')
-        expect(metadata).toHaveTextContent('gpt-5.6-terra')
+        expect(metadata).toHaveTextContent('5.6-terra')
         expect(metadata).toHaveTextContent('high')
-        expect(within(metadata).queryByRole('button')).toBeNull()
+        expect(metadata).toBeDisabled()
+        expect(metadata).toHaveClass('settings-button')
+        fireEvent.focus(screen.getByRole('textbox'))
+        expect(metadata).toHaveAccessibleName(/gpt-5.6-terra high.*read-only/)
+        expect(screen.getByRole('textbox').closest('.grid')).toContainElement(metadata)
+        fireEvent.click(metadata)
+        expect(screen.queryByRole('button', { name: 'Model' })).toBeNull()
     })
 
     it('never restores a possibly delivered prompt after a timeout and reconciles its late transcript', async () => {
@@ -501,6 +507,7 @@ describe('CodexSessionContextPage', () => {
         renderPage({ api })
 
         expect(await screen.findByTestId('codex-native-waiting-for-local-input')).toHaveTextContent('Waiting for local input')
+        expect(screen.queryByTestId('session-thinking-indicator')).not.toBeInTheDocument()
         expect(screen.getByTestId('codex-native-waiting-for-local-input')).toHaveTextContent('Return to the local Codex session')
         // The compact alert is deliberately absent while the full notice is
         // open; it appears only after the five-second auto-collapse.

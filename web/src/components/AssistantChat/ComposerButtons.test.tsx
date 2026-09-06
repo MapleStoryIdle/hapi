@@ -846,3 +846,31 @@ describe('ContextUsageProgressRail', () => {
         expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
     })
 })
+
+describe('shared model control read-only state', () => {
+    afterEach(cleanup)
+
+    it.each([true, false])('uses the shared style and only allows editable controls to open (readOnly=%s)', (readOnly) => {
+        const toggle = vi.fn()
+        const noop = () => {}
+        renderInProviders(
+            <ComposerButtons
+                canSend={false} controlsDisabled={false} showSettingsButton
+                settingsReadOnly={readOnly} onSettingsToggle={toggle}
+                settingsLabel="gpt-5.6-terra high" settingsModelLabel="5.6-terra" settingsReasoningLabel="high"
+                showTerminalButton={false} terminalDisabled={false} terminalLabel="Terminal" onTerminal={noop}
+                showAbortButton={false} abortDisabled={false} isAborting={false} onAbort={noop}
+                showSwitchButton={false} switchDisabled={false} isSwitching={false} onSwitch={noop}
+                voiceEnabled={false} voiceStatus="disconnected" onVoiceToggle={noop} onSend={noop}
+            />
+        )
+        const button = screen.getByRole('button', { name: readOnly ? /Current model:.*read-only/ : 'Settings' })
+        expect(button).toHaveClass('settings-button')
+        expect(button).toHaveTextContent('5.6-terra')
+        expect(button).toHaveTextContent('high')
+        if (readOnly) expect(button).toBeDisabled()
+        else expect(button).toBeEnabled()
+        fireEvent.click(button)
+        expect(toggle).toHaveBeenCalledTimes(readOnly ? 0 : 1)
+    })
+})
