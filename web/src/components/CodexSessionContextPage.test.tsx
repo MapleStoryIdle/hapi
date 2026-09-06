@@ -489,6 +489,19 @@ describe('CodexSessionContextPage', () => {
         })
     })
 
+    it('aligns native thinking to the left and uses the warm tone immediately', async () => {
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing'
+        })
+        renderPage({ api })
+
+        const indicator = await screen.findByTestId('session-thinking-indicator')
+        expect(indicator.parentElement).toHaveClass('justify-start')
+        expect(indicator).toHaveAttribute('data-tone', 'warm')
+    })
+
     it('shows a local-only input wait while keeping the native turn busy', async () => {
         const api = createApi()
         ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({

@@ -32,7 +32,7 @@ describe('SessionThinkingIndicator', () => {
         expect(status).toHaveAttribute('aria-label', 'Thinking')
         expect(status.querySelector('svg')).toHaveClass('session-thinking__glyph')
         expect(status).toHaveAttribute('data-reduced-motion', 'false')
-        expect(status).toHaveAttribute('data-tone', 'default')
+        expect(status).toHaveAttribute('data-tone', 'warm')
 
         await act(async () => { vi.advanceTimersByTime(12_000) })
         expect(screen.getByRole('status', { name: 'Pondering' })).toHaveTextContent('Pondering13s')
@@ -60,17 +60,15 @@ describe('SessionThinkingIndicator', () => {
         expect(vi.getTimerCount()).toBe(0)
     })
 
-    it('warms at ten seconds and resets the clock, tone, and phrase for a new turn', async () => {
+    it('starts warm immediately and resets the clock and phrase for a new turn', async () => {
         vi.useFakeTimers()
         vi.setSystemTime(100_000)
         const view = renderIndicator({ startedAt: 100_000 })
         const status = screen.getByRole('status')
 
-        await act(async () => { vi.advanceTimersByTime(9_000) })
-        expect(status).toHaveAttribute('data-tone', 'default')
-        await act(async () => { vi.advanceTimersByTime(1_000) })
+        expect(status).toHaveTextContent('Thinking0s')
         expect(status).toHaveAttribute('data-tone', 'warm')
-        await act(async () => { vi.advanceTimersByTime(2_000) })
+        await act(async () => { vi.advanceTimersByTime(12_000) })
         expect(status).toHaveAccessibleName('Pondering')
 
         view.rerender(
@@ -79,7 +77,7 @@ describe('SessionThinkingIndicator', () => {
             </I18nContext.Provider>
         )
         expect(status).toHaveTextContent('Thinking0s')
-        expect(status).toHaveAttribute('data-tone', 'default')
+        expect(status).toHaveAttribute('data-tone', 'warm')
         expect(vi.getTimerCount()).toBe(1)
         view.unmount()
         expect(vi.getTimerCount()).toBe(0)

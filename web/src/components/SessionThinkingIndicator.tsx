@@ -3,7 +3,6 @@ import { useReducedMotion } from 'motion/react'
 import { useTranslation } from '@/lib/use-translation'
 
 const LABEL_ROTATION_MS = 12_000
-const WARM_AFTER_MS = 10_000
 
 const GENERIC_THINKING_LABELS = {
     en: ['Thinking', 'Pondering', 'Working'],
@@ -60,7 +59,7 @@ export function SessionThinkingIndicator(props: {
             data-testid="session-thinking-indicator"
             data-reduced-motion={reducedMotion}
             // Warmth is visual only, never a timeout, error, or progress estimate.
-            data-tone={!suppliedLabel && elapsed >= WARM_AFTER_MS ? 'warm' : 'default'}
+            data-tone={suppliedLabel ? 'default' : 'warm'}
             role="status"
             aria-live="polite"
             aria-atomic="true"

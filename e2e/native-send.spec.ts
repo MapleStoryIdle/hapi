@@ -22,7 +22,7 @@ test('native and HAPI use one mobile thinking style with immediate transitions',
 })
 
 for (const theme of ['light', 'dark', 'oled']) {
-    test(`thinking breathes and shimmers, then warms without layout shifts (${theme})`, async ({ page }, info) => {
+    test(`thinking starts warm, breathes and shimmers without layout shifts (${theme})`, async ({ page }, info) => {
         await page.clock.install()
         await page.goto(fixture)
         await page.evaluate((value) => { document.documentElement.dataset.theme = value }, theme)
@@ -30,7 +30,9 @@ for (const theme of ['light', 'dark', 'oled']) {
         const indicators = page.getByTestId('session-thinking-indicator')
         await expect(indicators).toHaveCount(2)
         const indicator = indicators.first()
-        await expect(indicator).toHaveAttribute('data-tone', 'default')
+        for (const status of await indicators.all()) {
+            await expect(status).toHaveAttribute('data-tone', 'warm')
+        }
         const bounds = await indicator.boundingBox()
         const glyph = indicator.locator('svg')
         const transform = await glyph.evaluate((el) => getComputedStyle(el).transform)

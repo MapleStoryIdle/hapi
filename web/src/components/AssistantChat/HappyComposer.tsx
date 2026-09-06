@@ -1660,7 +1660,7 @@ export function HappyComposer(props: {
                     {!composerCompact ? overlays : null}
 
                     {props.readOnlyModelInfo && thinking ? (
-                        <div className="flex justify-end px-2 pb-1">
+                        <div className="flex justify-start px-2 pb-1">
                             <SessionThinkingIndicator compact />
                         </div>
                     ) : null}
