@@ -1,12 +1,14 @@
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { isObject, safeStringify } from '@hapi/protocol'
 import type { ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
+import { ChatDetailTabs } from '@/components/ui/ChatDetailTabs'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { getInputStringAny } from '@/lib/toolInputUtils'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { getCodexAgentActivity, getCodexAgentFieldRows, getCodexAgentPrompt } from './codexAgents'
+import { DetailCopyButton } from '@/components/ui/DetailCopyButton'
 import { TraceSection } from './trace'
 import { extractTextFromResult } from './views/_results'
 
@@ -23,7 +25,6 @@ export function SubagentDetailView(props: { block: ToolCallBlock; metadata: Sess
         const body = rootRef.current?.closest('[data-chat-drawer-body]')
         if (body) body.scrollTop = 0
     }, [tab])
-    const refs = useRef<Array<HTMLButtonElement | null>>([])
     const { tool } = props.block
     const activity = getCodexAgentActivity(tool.input)
     const prompt = getCodexAgentPrompt(tool.input)
@@ -46,40 +47,16 @@ export function SubagentDetailView(props: { block: ToolCallBlock; metadata: Sess
             ? 'bg-[var(--app-badge-success-bg)] text-[var(--app-badge-success-text)]'
             : 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
 
-    function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
-        const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1
-            : event.key === 'ArrowRight' || event.key === 'ArrowLeft' ? 1 - index : null
-        if (next === null) return
-        event.preventDefault()
-        setTab(TABS[next])
-        refs.current[next]?.focus()
-    }
-
     return (
         <div ref={rootRef} className="min-w-0" data-subagent-details>
-            <div className="sticky top-0 z-10 bg-[var(--app-dialog-bg)] pb-3">
-                <div className="chat-segmented" role="tablist" aria-label={t('subagents.drawerTitle')}>
-                    {TABS.map((value, index) => (
-                        <button
-                            key={value}
-                            ref={(element) => { refs.current[index] = element }}
-                            type="button"
-                            id={`${id}-tab-${value}`}
-                            role="tab"
-                            aria-selected={tab === value}
-                            aria-controls={`${id}-panel-${value}`}
-                            tabIndex={tab === value ? 0 : -1}
-                            onClick={() => setTab(value)}
-                            onKeyDown={(event) => onTabKeyDown(event, index)}
-                            className="chat-segment"
-                        >{t(`subagents.tab.${value}`)}</button>
-                    ))}
-                </div>
+            <div className="sticky top-0 z-10 bg-[var(--app-dialog-bg)] pb-2">
+                <ChatDetailTabs tabs={TABS.map((value) => ({ value, label: t(`subagents.tab.${value}`) }))}
+                    value={tab} onChange={setTab} idPrefix={id} label={t('subagents.drawerTitle')} />
             </div>
-            <div role="tabpanel" id={`${id}-panel-${tab}`} aria-labelledby={`${id}-tab-${tab}`} tabIndex={0} className="min-w-0 space-y-4 outline-none">
+            <div role="tabpanel" id={`${id}-panel-${tab}`} aria-labelledby={`${id}-tab-${tab}`} tabIndex={0} className="min-w-0 space-y-3 outline-none">
                 {tab === 'activity' ? (
                     <>
-                        <section className="chat-sheet-group p-4">
+                        <section className="px-1 py-1">
                             <span className={cn('inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-semibold', stateClass)} role="status">
                                 <span className={cn('h-1.5 w-1.5 rounded-full bg-current', tool.state === 'running' && 'motion-safe:animate-pulse')} aria-hidden="true" />
                                 {t(`subagents.state.${tool.state}`)}
@@ -99,14 +76,14 @@ export function SubagentDetailView(props: { block: ToolCallBlock; metadata: Sess
                     </>
                 ) : (
                     <>
-                        <dl className="chat-sheet-group divide-y divide-[var(--app-border)] px-4">
+                        <dl className="chat-sheet-group divide-y divide-[var(--app-border)] px-3">
                             {rows.map((row) => (
-                                <div key={row.label} className="grid grid-cols-[minmax(5rem,0.35fr)_minmax(0,1fr)] gap-3 py-3 text-sm">
+                                <div key={row.label} className="grid grid-cols-[minmax(5rem,0.35fr)_minmax(0,1fr)] gap-3 py-2 text-sm">
                                     <dt className="text-[var(--app-hint)]">{t(`subagents.field.${row.label}`)}</dt>
-                                    <dd className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-[var(--app-fg)]">{row.value}</dd>
+                                    <dd className="flex min-w-0 items-start gap-1 text-[var(--app-fg)]"><span className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{row.value}</span>{row.value.length > 32 ? <DetailCopyButton value={row.value} label={`${t('code.copy')} ${t(`subagents.field.${row.label}`)}`} /> : null}</dd>
                                 </div>
                             ))}
-                            <div className="grid grid-cols-[minmax(5rem,0.35fr)_minmax(0,1fr)] gap-3 py-3 text-sm">
+                            <div className="grid grid-cols-[minmax(5rem,0.35fr)_minmax(0,1fr)] gap-3 py-2 text-sm">
                                 <dt className="text-[var(--app-hint)]">{t('subagents.startedAt')}</dt>
                                 <dd className="text-[var(--app-fg)]">{new Date(tool.startedAt ?? tool.createdAt).toLocaleString()}</dd>
                             </div>
@@ -114,12 +91,12 @@ export function SubagentDetailView(props: { block: ToolCallBlock; metadata: Sess
                         {prompt ? (
                             <section>
                                 <h3 className="mb-2 text-xs font-medium text-[var(--app-hint)]">{t('subagents.task')}</h3>
-                                <div className="chat-sheet-group p-4"><MarkdownRenderer standalone content={prompt} /></div>
+                                <div className="chat-sheet-group p-3"><MarkdownRenderer standalone content={prompt} /></div>
                             </section>
                         ) : null}
-                        <details className="chat-sheet-group p-4">
-                            <summary className="min-h-11 cursor-pointer py-3 text-sm text-[var(--app-hint)]">{t('subagents.rawData')}</summary>
-                            <pre className="mt-3 whitespace-pre-wrap break-all text-xs text-[var(--app-fg)]">{safeStringify({ input: tool.input, result: tool.result })}</pre>
+                        <details className="chat-sheet-group p-3">
+                            <summary className="min-h-11 cursor-pointer py-2.5 text-sm text-[var(--app-hint)]">{t('subagents.rawData')}</summary>
+                            <pre className="mt-2 whitespace-pre-wrap break-all text-xs text-[var(--app-fg)]">{safeStringify({ input: tool.input, result: tool.result })}</pre>
                         </details>
                     </>
                 )}

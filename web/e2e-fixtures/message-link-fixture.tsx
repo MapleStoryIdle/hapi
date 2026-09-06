@@ -2,6 +2,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import '../src/index.css'
 import { MarkdownRenderer } from '../src/components/MarkdownRenderer'
+import { HappyChatProvider } from '../src/components/AssistantChat/context'
+import type { ApiClient } from '../src/api/client'
 import { I18nProvider } from '../src/lib/i18n-context'
 
 const cases = [
@@ -19,6 +21,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     <MarkdownRenderer standalone content={`Before ${content} after.`} />
                 </div>
             ))}
+            {new URLSearchParams(location.search).has('unavailable') ? <HappyChatProvider value={{
+                api: {} as ApiClient, sessionId: 'fixture', metadata: { path: '/workspace/hapi', host: 'local' },
+                terminalToolDisplayMode: 'compact', disabled: false, onRefresh: () => {},
+                hasMoreMessages: false, isLoadingMoreMessages: false, loadOlderMessagesPreservingScroll: async () => false,
+            }}><div data-testid="unavailable-file"><MarkdownRenderer standalone content="[private.ts](/outside/private.ts)" /></div></HappyChatProvider> : null}
         </main>
     </I18nProvider>
 )

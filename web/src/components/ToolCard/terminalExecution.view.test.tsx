@@ -66,33 +66,31 @@ describe('TerminalExecutionDetail', () => {
         expect(screen.getByText('/workspace/hapi')).toBeInTheDocument()
     })
 
-    it('keeps drawer environment metadata separate from command and output', () => {
+    it('keeps drawer metadata separate from command and output', () => {
         const view = render(
             <I18nProvider>
                 <TerminalExecutionDetail
                     block={makeBlock()}
-                    drawerTab="environment"
-                    labelledBy="terminal-tab-environment"
-                    panelId="terminal-panel-environment"
+                    drawerTab="details"
+                    labelledBy="terminal-tab-details"
+                    panelId="terminal-panel-details"
                     surface="drawer"
                 />
             </I18nProvider>
         )
 
-        const panel = view.container.querySelector<HTMLElement>('[data-terminal-execution-panel="environment"]')
+        const panel = view.container.querySelector<HTMLElement>('[data-terminal-execution-panel="details"]')
         if (!panel) throw new Error('expected environment panel')
 
         expect(panel).toHaveAttribute('role', 'tabpanel')
-        expect(panel).toHaveAttribute('id', 'terminal-panel-environment')
-        expect(panel).toHaveAttribute('aria-labelledby', 'terminal-tab-environment')
+        expect(panel).toHaveAttribute('id', 'terminal-panel-details')
+        expect(panel).toHaveAttribute('aria-labelledby', 'terminal-tab-details')
         expect(panel).toHaveClass('relative', 'isolate')
         expect(panel.className).not.toContain('--app-safe-area-bottom')
-        expect(panel).toHaveTextContent('Status')
-        expect(panel).toHaveTextContent('Failed')
+        expect(panel).not.toHaveTextContent('Status')
         expect(panel).toHaveTextContent('Working directory')
         expect(panel).toHaveTextContent('/workspace/hapi')
-        expect(panel).toHaveTextContent('Duration')
-        expect(panel).toHaveTextContent('1.3s')
+        expect(panel).not.toHaveTextContent('Duration')
         expect(panel).toHaveTextContent('Exit code')
         expect(panel).toHaveTextContent('exit 1')
         expect(panel).not.toHaveTextContent('/bin/zsh -lc "bun test"')

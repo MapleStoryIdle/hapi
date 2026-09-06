@@ -41,10 +41,11 @@ for (const theme of ['light', 'dark', 'oled']) {
         const background = await label.evaluate((el) => getComputedStyle(el).backgroundPosition)
         await expect.poll(() => label.evaluate((el) => getComputedStyle(el).backgroundPosition)).not.toBe(background)
 
-        await page.clock.fastForward(13_000)
-        for (const status of await indicators.all()) {
+        const previousLabels = await indicators.locator('.session-thinking__label').allTextContents()
+        await page.clock.fastForward(8_000)
+        for (const [index, status] of (await indicators.all()).entries()) {
             await expect(status).toHaveAttribute('data-tone', 'warm')
-            await expect(status).toHaveAccessibleName('Pondering')
+            await expect(status.locator('.session-thinking__label')).not.toHaveText(previousLabels[index])
         }
         const warmBounds = await indicator.boundingBox()
         expect(warmBounds?.width).toBe(bounds?.width)
@@ -54,7 +55,7 @@ for (const theme of ['light', 'dark', 'oled']) {
     })
 }
 
-test('reduced motion keeps the thinking text still but the elapsed clock live', async ({ page }) => {
+test('reduced motion disables animation without freezing thinking labels or the clock', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.clock.install()
     await page.goto(fixture)
@@ -67,9 +68,11 @@ test('reduced motion keeps the thinking text still but the elapsed clock live', 
         await expect(indicator.locator('.session-thinking__label')).toHaveCSS('animation-name', 'none')
         await expect(indicator.locator('.session-thinking__label')).toHaveCSS('background-image', 'none')
     }
-    await page.clock.fastForward(24_000)
+    const previousLabel = await indicators.first().locator('.session-thinking__label').innerText()
+    await page.clock.fastForward(8_000)
     await expect(indicators.first()).toHaveAccessibleName('Thinking')
-    await expect(indicators.first()).toContainText('24s')
+    await expect(indicators.first().locator('.session-thinking__label')).not.toHaveText(previousLabel)
+    await expect(indicators.first()).toContainText('8s')
     await page.getByRole('button', { name: 'Reply received' }).tap()
     await expect(indicators).toHaveCount(1)
 })
@@ -92,4 +95,27 @@ test('mobile native composer shows actual model and does not restore timed-out s
     await textbox.focus()
     await expect(model).toBeInViewport()
     await page.screenshot({ path: info.outputPath('native-composer-mobile.png') })
+})
+
+
+test('managed HAPI shows rotating thinking above the left of its real composer, not the hidden metadata bar', async ({ page }, info) => {
+    await page.clock.install()
+    await page.goto(fixture)
+    const composer = page.getByTestId('managed-composer')
+    const indicator = composer.getByTestId('session-thinking-indicator')
+    await expect(indicator).toBeVisible()
+    const statusBox = (await indicator.boundingBox())!
+    const inputBox = (await composer.getByRole('textbox').boundingBox())!
+    expect(statusBox.y + statusBox.height).toBeLessThanOrEqual(inputBox.y)
+    expect(statusBox.x).toBeLessThan(inputBox.x + inputBox.width / 2)
+    const previousLabel = await indicator.locator('.session-thinking__label').innerText()
+    await page.clock.fastForward(8_000)
+    await expect(indicator.locator('.session-thinking__label')).not.toHaveText(previousLabel)
+    await page.screenshot({ path: info.outputPath('managed-hapi-thinking.png') })
+    await composer.getByRole('button', { name: 'HAPI: wait' }).tap()
+    await expect(indicator).toHaveCount(0)
+    await composer.getByRole('button', { name: 'HAPI: run' }).tap()
+    await expect(indicator).toBeVisible()
+    await composer.getByRole('button', { name: 'HAPI: idle' }).tap()
+    await expect(indicator).toHaveCount(0)
 })

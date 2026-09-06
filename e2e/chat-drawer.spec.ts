@@ -59,7 +59,7 @@ test('terminal tabs, file target line and sandboxed URL fallback remain usable',
     const terminal = page.getByTestId('terminal-execution-drawer')
     await expect(terminal).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
     expect((await terminal.boundingBox())!.height).toBeLessThanOrEqual(844 * .7 + 1)
-    await terminal.getByRole('tab', { name: 'Environment' }).tap()
+    await terminal.getByRole('tab', { name: 'Details' }).tap()
     await expect(terminal.getByText('/workspace/hapi', { exact: true })).toBeVisible()
     await terminal.getByRole('button', { name: 'Close' }).tap()
     await expect(terminal).toBeHidden()
@@ -73,6 +73,16 @@ test('terminal tabs, file target line and sandboxed URL fallback remain usable',
     await expect(preview.locator('iframe')).not.toHaveAttribute('sandbox', /allow-same-origin|allow-top-navigation/)
     await expect(preview.getByRole('link', { name: 'Open in browser' })).toBeInViewport()
     expect((await preview.boundingBox())!.height).toBeLessThanOrEqual(844 * .7 + 1)
+})
+
+test('content links open in the shared drawer without leaving the conversation', async ({ page }) => {
+    await page.goto(fixture)
+    const originalUrl = page.url()
+    await page.getByRole('link', { name: 'Content web link' }).tap()
+    const drawer = page.getByTestId('chat-preview-drawer')
+    await expect(drawer).toBeVisible()
+    await expect(drawer.locator('iframe')).toHaveAttribute('src', /\/content\/article$/)
+    expect(page.url()).toBe(originalUrl)
 })
 
 test('question close preserves choices and busy submission cannot dismiss', async ({ page }) => {
@@ -360,6 +370,111 @@ test('long edit has one vertical scroller and desktop terminal shares one inset'
     const content = await terminal.locator('[data-chat-drawer-body]').boundingBox()
     expect(Math.abs(tabs!.x - header!.x)).toBeLessThan(1)
     expect(Math.abs(content!.x - header!.x)).toBeLessThan(1)
-    await terminal.getByRole('tab', { name: 'Environment' }).click()
+    await terminal.getByRole('tab', { name: 'Details' }).click()
     await page.screenshot({ path: info.outputPath('terminal-desktop-ios.png') })
 })
+
+
+test('compact terminal combines command/output, preserves reading position and supports wrapping', async ({ page }, info) => {
+    await page.goto(`${fixture}?long-command`)
+    await page.getByRole('button', { name: 'Terminal detail' }).tap()
+    const drawer = page.getByTestId('terminal-execution-drawer')
+    await expect(drawer).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+    await expect(drawer.getByRole('tab')).toHaveCount(2)
+    await expect(drawer.getByRole('tab', { name: 'Command & output' })).toHaveAttribute('aria-selected', 'true')
+    const tabs = drawer.getByRole('tablist')
+    expect((await tabs.boundingBox())!.height).toBe(44)
+    const command = drawer.locator('[data-terminal-execution-input] pre')
+    await expect(command).toBeInViewport()
+    await expect(drawer.locator('[data-terminal-execution-output]')).toBeVisible()
+    expect(await command.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
+    await drawer.getByRole('button', { name: 'Wrap lines' }).tap()
+    await expect(command).toHaveCSS('white-space', 'pre-wrap')
+    expect(await command.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+    await drawer.getByRole('button', { name: 'Wrap lines' }).tap()
+    const body = drawer.locator('[data-chat-drawer-body]')
+    expect(await body.evaluate((el) => [...el.querySelectorAll('*')].filter((child) =>
+        ['auto', 'scroll'].includes(getComputedStyle(child).overflowY) && child.scrollHeight > child.clientHeight + 1
+    ).length)).toBe(0)
+    await body.evaluate((el) => { el.scrollTop = 200; el.dispatchEvent(new Event('scroll')) })
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-terminal-lines', { detail: 120 })))
+    await expect(drawer.locator('[data-terminal-execution-output]')).toContainText('Test 120 passed')
+    await expect(body).toHaveJSProperty('scrollTop', 200)
+    await body.evaluate((el) => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')) })
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-terminal-lines', { detail: 140 })))
+    await expect.poll(() => body.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(32)
+    await drawer.getByRole('tab', { name: 'Details' }).tap()
+    await expect(drawer.getByText('/workspace/hapi', { exact: true })).toBeVisible()
+    await drawer.getByRole('tab', { name: 'Command & output' }).tap()
+    await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBeGreaterThan(200)
+    await body.evaluate((el) => { el.scrollTop = 0 })
+    await page.screenshot({ path: info.outputPath('terminal-compact-light.png') })
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+    await page.screenshot({ path: info.outputPath('terminal-compact-dark.png') })
+    expect((await drawer.boundingBox())!.height).toBeLessThanOrEqual(844 * .7 + 1)
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    expect(await tabs.evaluate((el) => getComputedStyle(el, '::before').transitionDuration)).toBe('0s')
+})
+
+test('compact terminal remains readable with Chinese labels', async ({ page }, info) => {
+    await page.addInitScript(() => localStorage.setItem('hapi-lang', 'zh-CN'))
+    await page.goto(fixture)
+    await page.getByRole('button', { name: 'Terminal detail' }).tap()
+    const drawer = page.getByTestId('terminal-execution-drawer')
+    await expect(drawer).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+    await expect(drawer.getByRole('tab')).toHaveText(['命令与输出', '详情'])
+    await expect(drawer.locator('[data-terminal-execution-input]')).toHaveText(/bun run test:web/)
+    await expect(drawer.getByRole('button', { name: '复制输出' })).toBeInViewport()
+    await expect(page.locator('body')).toHaveJSProperty('scrollWidth', 390)
+    await page.screenshot({ path: info.outputPath('terminal-compact-zh.png') })
+    await drawer.getByRole('tab', { name: '详情', exact: true }).tap()
+    await expect(drawer.getByText('/workspace/hapi', { exact: true })).toBeInViewport()
+    await page.screenshot({ path: info.outputPath('terminal-details-zh.png') })
+})
+
+
+test('file drawer title uses its filename and copies the full workspace path', async ({ page }, info) => {
+    await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', {
+        configurable: true, value: { writeText: async (text: string) => { sessionStorage.setItem('copied-path', text) } }
+    }))
+    await page.goto(fixture)
+    await page.getByRole('button', { name: 'File preview', exact: true }).tap()
+    const drawer = page.getByTestId('chat-preview-drawer')
+    await expect(drawer.getByRole('heading', { name: 'example.ts', exact: true })).toBeVisible()
+    await expect(drawer.locator('header')).not.toContainText('src/')
+    const copy = drawer.getByRole('button', { name: 'Copy path' })
+    await expect(copy).toHaveText('')
+    await expect(copy.locator('svg')).toBeVisible()
+    const headingBox = (await drawer.getByRole('heading', { name: 'example.ts', exact: true }).boundingBox())!
+    const copyBox = (await copy.boundingBox())!
+    expect(copyBox.x - headingBox.x - headingBox.width).toBeLessThanOrEqual(8)
+    expect(copyBox.width).toBeGreaterThanOrEqual(44)
+    await copy.tap()
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem('copied-path'))).toBe('/workspace/hapi/src/example.ts')
+    await page.screenshot({ path: info.outputPath('file-name-copy-path.png') })
+})
+
+for (const theme of ['light', 'dark', 'oled']) {
+    test(`file drawer restores original diff row colors (${theme})`, async ({ page }, info) => {
+        await page.goto(fixture)
+        await page.evaluate((value) => { document.documentElement.dataset.theme = value }, theme)
+        await page.getByRole('button', { name: 'File preview', exact: true }).tap()
+        const drawer = page.getByTestId('chat-preview-drawer')
+        await drawer.getByRole('button', { name: 'Changes', exact: true }).tap()
+        for (const [text, token] of [['+added line', '--app-diff-added-bg'], ['-removed line', '--app-diff-removed-bg']]) {
+            const row = drawer.getByText(text, { exact: true })
+            await expect(row).toBeVisible()
+            await expect.poll(() => row.evaluate((el, name) => {
+                const probe = document.createElement('div')
+                probe.style.backgroundColor = `var(${name})`
+                el.append(probe)
+                const matches = getComputedStyle(el).backgroundColor === getComputedStyle(probe).backgroundColor
+                probe.remove()
+                return matches
+            }, token)).toBe(true)
+            await expect(row).toHaveCSS('border-left-width', '2px')
+        }
+        await expect(drawer).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+        await page.screenshot({ path: info.outputPath(`file-diff-${theme}.png`) })
+    })
+}

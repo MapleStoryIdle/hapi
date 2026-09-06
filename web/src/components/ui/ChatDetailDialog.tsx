@@ -7,5 +7,5 @@ export function ChatDetailDialog(props: Omit<ComponentProps<typeof BottomDrawer>
     onOpenChange?: (open: boolean) => void
 }) {
     const [localOpen, setLocalOpen] = useState(false)
-    return <BottomDrawer {...props} desktopDialog open={props.open ?? localOpen} onOpenChange={props.onOpenChange ?? setLocalOpen} />
+    return <BottomDrawer density="compact" {...props} desktopDialog open={props.open ?? localOpen} onOpenChange={props.onOpenChange ?? setLocalOpen} />
 }

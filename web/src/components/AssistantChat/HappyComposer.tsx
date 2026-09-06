@@ -32,7 +32,7 @@ import { consumeQueuedMessageEdit, useQueuedMessageEdit } from '@/lib/queued-mes
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
-import { shouldShowComposerStatusBar, StatusBar } from '@/components/AssistantChat/StatusBar'
+import { shouldShowComposerStatusBar, shouldShowThinkingIndicator, StatusBar } from '@/components/AssistantChat/StatusBar'
 import { ComposerButtons, ContextUsageProgressRail, GoalModeIcon, PlanModeIcon, ToolbarMenu, UnifiedButton, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
@@ -1659,7 +1659,8 @@ export function HappyComposer(props: {
                 >
                     {!composerCompact ? overlays : null}
 
-                    {props.readOnlyModelInfo && thinking ? (
+                    {(!showStatusBar || !shouldShowComposerStatusBar(agentFlavor))
+                        && shouldShowThinkingIndicator({ active, thinking, agentState, voiceStatus }) ? (
                         <div className="flex justify-start px-2 pb-1">
                             <SessionThinkingIndicator compact />
                         </div>

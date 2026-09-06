@@ -1,10 +1,16 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent } from '@/chat/types'
 import zhCN from '@/lib/locales/zh-CN'
 
 const state = vi.hoisted(() => ({
-    event: null as unknown
+    event: null as unknown,
+    preview: null as null | ((value: unknown) => boolean)
+}))
+
+vi.mock('@/components/ChatPreviewContext', async (importOriginal) => ({
+    ...await importOriginal<typeof import('@/components/ChatPreviewContext')>(),
+    useChatPreview: () => state.preview
 }))
 
 vi.mock('@assistant-ui/react', async () => {
@@ -37,7 +43,10 @@ function renderEvent(event: AgentEvent) {
     return render(<HappySystemMessage />)
 }
 
-afterEach(() => cleanup())
+afterEach(() => {
+    cleanup()
+    state.preview = null
+})
 
 describe('HappySystemMessage — quota events', () => {
     it.each(['http_forbidden', 'unknown', 'network_error'] as const)('shows the approved HTTP 403 copy for %s', (code) => {
@@ -72,6 +81,18 @@ describe('HappySystemMessage — quota events', () => {
             'https://chatgpt.com/codex/settings/usage'
         )
         expect(screen.getByRole('link', { name: 'taskStatus.usage.action' })).toHaveClass('message-content-link', 'no-underline')
+    })
+
+    it('opens a task action as content in the shared mobile preview', () => {
+        const preview = vi.fn(() => true)
+        state.preview = preview
+        renderEvent({
+            type: 'task-status', status: 'failed', source: 'codex', code: 'usage_limit',
+            message: 'Limit', recoverable: false, actionUrl: 'https://chatgpt.com/codex/settings/usage'
+        })
+
+        expect(fireEvent.click(screen.getByRole('link', { name: 'taskStatus.usage.action' }))).toBe(false)
+        expect(preview).toHaveBeenCalledWith({ type: 'url', url: 'https://chatgpt.com/codex/settings/usage' })
     })
 
     it('uses the compact context-divider treatment for Codex usage updates', () => {

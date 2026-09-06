@@ -1234,6 +1234,11 @@ html[data-theme="oled"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-typ
     cursor: not-allowed;
 }
 
+/* Unavailable files retain their disabled icon, but their text uses link blue. */
+.aui-md-file-link[aria-disabled="true"] .message-content-link-label {
+    color: var(--app-markdown-link);
+}
+
 .message-content-link code {
     border: 0;
     border-radius: 0;

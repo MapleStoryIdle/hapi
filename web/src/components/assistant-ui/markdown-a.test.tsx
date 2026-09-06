@@ -865,4 +865,11 @@ describe('mobile chat preview routing', () => {
         }
         expect(chatPreview.previewableWebUrl('https://hapi.test/sessions/123', 'https://hapi.test')).toBeNull()
     })
+    it('previews same-origin content without swallowing real HAPI navigation', () => {
+        expect(chatPreview.previewableWebUrl('/docs/article', 'https://hapi.test')).toBe('https://hapi.test/docs/article')
+        expect(chatPreview.previewableWebUrl('./article', 'https://hapi.test')).toBe('https://hapi.test/article')
+        for (const href of ['/', '/sessions', '/browse/repo', '/memory', '/settings', '/shares/abc']) {
+            expect(chatPreview.previewableWebUrl(href, 'https://hapi.test')).toBeNull()
+        }
+    })
 })

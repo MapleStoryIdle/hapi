@@ -8,6 +8,7 @@ import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { useTranslation } from '@/lib/use-translation'
 import { getConversationMessageAnchorId } from '@/chat/outline'
 import { MessageTimestamp } from '@/components/AssistantChat/messages/MessageTimestamp'
+import { previewableWebUrl, useChatPreview } from '@/components/ChatPreviewContext'
 
 type TaskStatusEvent = Extract<AgentEvent, { type: 'task-status' }>
 type AutomationHeartbeatEvent = Extract<AgentEvent, { type: 'automation-heartbeat' }>
@@ -174,6 +175,7 @@ function AutomationHeartbeatCard(props: { event: AutomationHeartbeatEvent; messa
 function TaskStatusCard(props: { event: TaskStatusEvent; messageId: string }) {
     const { t } = useTranslation()
     const localServiceLink = useLocalServiceLink(props.event.actionUrl)
+    const preview = useChatPreview()
     const visual = taskStatusVisual(props.event)
     const Icon = visual.Icon
 
@@ -198,7 +200,13 @@ function TaskStatusCard(props: { event: TaskStatusEvent; messageId: string }) {
                             {visual.actionKey && props.event.actionUrl ? (
                                 <a
                                     href={localServiceLink?.href ?? props.event.actionUrl}
-                                    onClick={localServiceLink?.onClick}
+                                    onClick={(event) => {
+                                        localServiceLink?.onClick(event)
+                                        if (event.defaultPrevented || localServiceLink || event.button !== 0
+                                            || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                                        const destination = previewableWebUrl(props.event.actionUrl!)
+                                        if (destination && preview?.({ type: 'url', url: destination })) event.preventDefault()
+                                    }}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className={`${MESSAGE_LINK_CLASS} mt-2`}

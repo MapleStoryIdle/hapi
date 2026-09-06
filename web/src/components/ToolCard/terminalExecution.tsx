@@ -1,3 +1,6 @@
+import { useLayoutEffect, useRef } from 'react'
+import { TerminalTranscript } from './TerminalTranscript'
+import { DetailCopyButton } from '@/components/ui/DetailCopyButton'
 import type { ToolCallBlock } from '@/chat/types'
 import { isObject } from '@hapi/protocol'
 import { CodeBlock } from '@/components/CodeBlock'
@@ -18,7 +21,7 @@ export type TerminalExecutionDetails = {
 
 export type TerminalExecutionState = 'pending' | 'running' | 'completed' | 'failed'
 
-export type TerminalExecutionDrawerTab = 'output' | 'input' | 'environment'
+export type TerminalExecutionDrawerTab = 'transcript' | 'details'
 
 export function isTerminalExecutionTool(toolName: string): boolean {
     return TERMINAL_EXECUTION_TOOL_NAMES.has(toolName)
@@ -176,88 +179,65 @@ type TerminalExecutionDetailProps = {
 function TerminalExecutionDrawerPanel(props: {
     details: TerminalExecutionDetails
     state: TerminalExecutionState
-    duration: string | null
     tab: TerminalExecutionDrawerTab
     panelId?: string
     labelledBy?: string
     hidden?: boolean
     t: (key: string, params?: Record<string, string | number>) => string
 }) {
-    const hasOutput = Boolean(props.details.stdout || props.details.stderr)
+    const rootRef = useRef<HTMLDivElement>(null)
+    const savedScroll = useRef(0)
+    const followOutput = useRef(false)
+    useLayoutEffect(() => {
+        if (props.hidden) return
+        const root = rootRef.current
+        const body = root?.closest<HTMLElement>('[data-chat-drawer-body]')
+        if (!root || !body) return
+        body.scrollTop = savedScroll.current
+        const onScroll = () => {
+            savedScroll.current = body.scrollTop
+            followOutput.current = body.scrollHeight - body.clientHeight - body.scrollTop <= 32
+        }
+        onScroll()
+        body.addEventListener('scroll', onScroll, { passive: true })
+        // Observe only the active panel. Keep reading position unless the user is at the bottom.
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+            if (props.tab === 'transcript' && followOutput.current) body.scrollTop = body.scrollHeight
+        })
+        observer?.observe(root)
+        return () => { body.removeEventListener('scroll', onScroll); observer?.disconnect() }
+    }, [props.hidden, props.tab])
+
+    useLayoutEffect(() => {
+        if (props.hidden || props.tab !== 'transcript' || !followOutput.current) return
+        const body = rootRef.current?.closest<HTMLElement>('[data-chat-drawer-body]')
+        // Update before the browser delivers queued scroll events for the old
+        // content height, which would otherwise incorrectly disable following.
+        if (body) body.scrollTop = body.scrollHeight
+    }, [props.hidden, props.tab, props.details.command, props.details.stdout, props.details.stderr])
 
     return (
-        <div
-            aria-labelledby={props.labelledBy}
-            className="relative isolate pt-4 sm:pb-2"
-            data-terminal-execution-detail
-            data-terminal-execution-panel={props.tab}
-            hidden={props.hidden}
-            id={props.panelId}
-            role="tabpanel"
-            tabIndex={props.hidden ? -1 : 0}
-        >
-            {props.tab === 'output' ? (
-                <section className="flex flex-col gap-3" data-terminal-execution-output>
-                    <h3 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('terminal.execution.output')}</h3>
-                    {props.details.stderr ? (
-                        <CodeBlock code={props.details.stderr} language="text" title={props.t('terminal.stderr')} size="comfortable" />
-                    ) : null}
-                    {props.details.stdout ? (
-                        <CodeBlock code={props.details.stdout} language="text" title={props.t('terminal.stdout')} size="comfortable" />
-                    ) : null}
-                    {!hasOutput ? (
-                        <p className="rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-3 text-sm leading-6 text-[var(--app-hint)]">
-                            {terminalOutputFallback(props.state, props.t)}
-                        </p>
-                    ) : null}
-                </section>
-            ) : null}
-
-            {props.tab === 'input' ? (
-                <section className="flex flex-col gap-3" data-terminal-execution-input>
-                    <h3 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('terminal.execution.input')}</h3>
-                    {props.details.command ? (
-                        <CodeBlock code={props.details.command} language="bash" title={props.t('terminal.execution.command')} size="comfortable" />
-                    ) : (
-                        <p className="text-sm text-[var(--app-hint)]">{props.t('terminal.execution.commandUnavailable')}</p>
-                    )}
-                </section>
-            ) : null}
-
-            {props.tab === 'environment' ? (
-                <section className="flex flex-col gap-3" data-terminal-execution-environment>
-                    <h3 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('terminal.execution.environment')}</h3>
-                    <dl className="chat-sheet-group divide-y divide-[var(--app-border)] px-4">
-                        <div className="py-3">
-                            <dt className="chat-sheet-caption text-[var(--app-hint)]">{props.t('terminal.execution.status')}</dt>
-                            <dd className={cn('mt-1 flex items-center gap-2 text-sm font-medium', terminalStateColorClass(props.state))}>
-                                <span className={cn('h-2 w-2 shrink-0 rounded-full', terminalStateDotClass(props.state))} aria-hidden="true" />
-                                {terminalStateLabel(props.state, props.t)}
-                            </dd>
-                        </div>
-                        {props.details.cwd ? (
-                            <div className="py-3">
-                                <dt className="chat-sheet-caption text-[var(--app-hint)]">{props.t('terminal.execution.workingDirectory')}</dt>
-                                <dd className="mt-1 [overflow-wrap:anywhere] font-mono text-sm leading-6 text-[var(--app-fg)]">{props.details.cwd}</dd>
-                            </div>
-                        ) : null}
-                        {props.duration ? (
-                            <div className="py-3">
-                                <dt className="chat-sheet-caption text-[var(--app-hint)]">{props.t('terminal.execution.duration')}</dt>
-                                <dd className="mt-1 font-mono text-sm font-medium text-[var(--app-fg)]">{props.duration}</dd>
-                            </div>
-                        ) : null}
-                        {props.details.exitCode !== null ? (
-                            <div className="py-3" data-terminal-execution-exit-code>
-                                <dt className="chat-sheet-caption text-[var(--app-hint)]">{props.t('terminal.execution.exitCodeLabel')}</dt>
-                                <dd className="mt-1 font-mono text-sm font-medium text-[var(--app-fg)]">
-                                    {props.t('terminal.execution.exitCode', { code: props.details.exitCode })}
-                                </dd>
-                            </div>
-                        ) : null}
-                    </dl>
-                </section>
-            ) : null}
+        <div ref={rootRef} aria-labelledby={props.labelledBy} className="relative isolate pb-1"
+            data-terminal-execution-detail data-terminal-execution-panel={props.tab}
+            hidden={props.hidden} id={props.panelId} role="tabpanel" tabIndex={props.hidden ? -1 : 0}>
+            {props.tab === 'transcript' ? <TerminalTranscript details={props.details} state={props.state} /> : (
+                <dl className="chat-sheet-group divide-y divide-[var(--app-border)] px-3" data-terminal-execution-environment>
+                    {props.details.cwd ? <div className="chat-detail-field">
+                        <dt>{props.t('terminal.execution.workingDirectory')}</dt>
+                        <dd className="flex min-w-0 items-center gap-1">
+                            <span className="min-w-0 flex-1 [overflow-wrap:anywhere] font-mono">{props.details.cwd}</span>
+                            <DetailCopyButton value={props.details.cwd} label={props.t('terminal.execution.copyDirectory')} />
+                        </dd>
+                    </div> : null}
+                    {props.details.exitCode !== null ? <div className="chat-detail-field" data-terminal-execution-exit-code>
+                        <dt>{props.t('terminal.execution.exitCodeLabel')}</dt>
+                        <dd className="font-mono">{props.t('terminal.execution.exitCode', { code: props.details.exitCode })}</dd>
+                    </div> : null}
+                    {!props.details.cwd && props.details.exitCode === null ? <div className="py-3 text-sm text-[var(--app-hint)]">
+                        {props.t('terminal.execution.noDetails')}
+                    </div> : null}
+                </dl>
+            )}
         </div>
     )
 }
@@ -274,8 +254,7 @@ export function TerminalExecutionDetail(props: TerminalExecutionDetailProps) {
             <TerminalExecutionDrawerPanel
                 details={details}
                 state={state}
-                duration={duration}
-                tab={props.drawerTab ?? 'output'}
+                tab={props.drawerTab ?? 'transcript'}
                 panelId={props.panelId}
                 labelledBy={props.labelledBy}
                 hidden={props.hidden}

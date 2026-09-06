@@ -87,11 +87,11 @@ describe('NativeSendStatusMessage', () => {
         }))
 
         expect(screen.getByTestId('session-thinking-indicator')).toBeInTheDocument()
-        expect(screen.getByRole('status', { name: 'Thinking' })).toHaveTextContent('Thinking1s')
+        expect(screen.getByRole('status', { name: 'Thinking' }).querySelector('span:last-child')).toHaveTextContent('1s')
         expect(screen.queryByTestId('codex-direct-send-phase-connected')).toBeNull()
 
         await act(async () => { vi.advanceTimersByTime(1_000) })
-        expect(screen.getByRole('status', { name: 'Thinking' })).toHaveTextContent('Thinking2s')
+        expect(screen.getByRole('status', { name: 'Thinking' }).querySelector('span:last-child')).toHaveTextContent('2s')
 
         view.unmount()
         expect(vi.getTimerCount()).toBe(0)

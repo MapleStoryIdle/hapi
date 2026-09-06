@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '../src/index.css'
@@ -27,6 +27,12 @@ function Content() {
     const preview = useChatPreview()
     const [question, setQuestion] = useState(false)
     const [terminal, setTerminal] = useState(false)
+    const [terminalLines, setTerminalLines] = useState(100)
+    useEffect(() => {
+        const update = (event: Event) => setTerminalLines((event as CustomEvent<number>).detail)
+        window.addEventListener('fixture-terminal-lines', update)
+        return () => window.removeEventListener('fixture-terminal-lines', update)
+    }, [])
     const [sent, setSent] = useState(0)
     return <>
         <header className="p-5 text-lg font-semibold">SHAPI · Chat drawer test</header>
@@ -47,12 +53,13 @@ function Content() {
             <button className="block rounded-xl border p-3" onClick={() => setTerminal(true)}>Terminal detail</button>
             <TerminalExecutionDrawer open={terminal} onOpenChange={setTerminal} block={{
                 kind: 'tool-call', id: 'terminal', localId: null, createdAt: 100, children: [],
-                tool: { id: 'terminal', name: 'CodexBash', state: 'completed', input: { command: 'bun run test:web', cwd: '/workspace/hapi' },
-                    result: { stdout: Array.from({length: 100}, (_, i) => `Test ${i + 1} passed`).join('\n'), exit_code: 0 },
+                tool: { id: 'terminal', name: 'CodexBash', state: 'completed', input: { command: new URLSearchParams(location.search).has('long-command') ? 'cat /workspace/' + 'long-folder/'.repeat(20) + 'build.log' : 'bun run test:web', cwd: '/workspace/hapi' },
+                    result: { stdout: Array.from({length: terminalLines}, (_, i) => `Test ${i + 1} passed`).join('\n'), exit_code: 0 },
                     createdAt: 100, startedAt: 200, completedAt: 2450, description: null }
             }} />
-            <button className="block rounded-xl border p-3" onClick={() => preview?.({ type: 'file', api, source: { type: 'session', sessionId: 'fixture' }, path: 'src/example.ts', line: 80 })}>File preview</button>
+            <button className="block rounded-xl border p-3" onClick={() => preview?.({ type: 'file', api, source: { type: 'session', sessionId: 'fixture' }, workspacePath: '/workspace/hapi', path: 'src/example.ts', line: 80 })}>File preview</button>
             <button className="block rounded-xl border p-3" onClick={() => preview?.({ type: 'url', url: 'https://example.com/' })}>Web preview</button>
+            <MarkdownRenderer standalone content="[Content web link](/content/article)" />
             <button className="block rounded-xl border p-3" onClick={() => preview?.({ type: 'url', url: '/local-service#fixture', localService: { api, request: { source: { type: 'session', sessionId: 'fixture' }, url: 'http://localhost:3000/' } } })}>Local service preview</button>
             <button className="block rounded-xl border p-3" onClick={() => setQuestion(true)}>Choose options</button>
             {question ? <QuestionAnswerForm questions={[{ id: 'colors', header: 'Preferences', question: 'Pick colors', multiSelect: true, options: [
@@ -67,7 +74,7 @@ function Content() {
             }] }} />
             <ChatDetailDialog title="Linked details" testId="linked-details-drawer" trigger={<button className="block rounded-xl border p-3">Linked details</button>}>
                 <MarkdownRenderer standalone content="[Open note](obsidian://open?vault=fixture)" />
-                <button className="min-h-11" onClick={() => preview?.({ type: 'file', api, source: { type: 'session', sessionId: 'fixture' }, path: 'src/example.ts' })}>Nested file</button>
+                <button className="min-h-11" onClick={() => preview?.({ type: 'file', api, source: { type: 'session', sessionId: 'fixture' }, workspacePath: '/workspace/hapi', path: 'src/example.ts' })}>Nested file</button>
             </ChatDetailDialog>
             <ImagePreview src={'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="#406f99"/><circle cx="300" cy="200" r="100" fill="#eef2f7"/></svg>')}
                 fileName="sample.svg" label="Example image" buttonClassName="block w-40 rounded-xl border p-2" />

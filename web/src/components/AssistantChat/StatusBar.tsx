@@ -30,6 +30,17 @@ type StandardConnectionStatus = {
 
 type ConnectionStatus = StandardConnectionStatus | { isThinking: true }
 
+/** Thinking has its own visibility, independent of optional usage/model metadata. */
+export function shouldShowThinkingIndicator(props: {
+    active: boolean
+    thinking: boolean
+    agentState?: AgentState | null
+    voiceStatus?: ConversationStatus
+}): boolean {
+    return props.active && props.thinking && props.voiceStatus !== 'connecting'
+        && Object.keys(props.agentState?.requests ?? {}).length === 0
+}
+
 function getConnectionStatus(
     active: boolean,
     thinking: boolean,
@@ -68,7 +79,7 @@ function getConnectionStatus(
         }
     }
 
-    if (thinking) {
+    if (shouldShowThinkingIndicator({ active, thinking, agentState, voiceStatus })) {
         return { isThinking: true }
     }
 

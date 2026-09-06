@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
 import { useTranslation } from '@/lib/use-translation'
 
-const LABEL_ROTATION_MS = 12_000
+const LABEL_ROTATION_MS = 8_000
 
 const GENERIC_THINKING_LABELS = {
     en: ['Thinking', 'Pondering', 'Working'],
@@ -37,19 +37,31 @@ export function SessionThinkingIndicator(props: {
     const mountedAt = useRef(Date.now())
     const startedAt = getStartedAt(props.startedAt, mountedAt.current)
     const [now, setNow] = useState(() => Date.now())
+    const [labelIndex, setLabelIndex] = useState(0)
     const suppliedLabel = props.label?.trim() ? props.label : undefined
+    const genericLabels = GENERIC_THINKING_LABELS[locale]
+    const labelCount = genericLabels.length
 
     useEffect(() => {
-        setNow(Date.now())
-        const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+        let lastRotationAt = Date.now()
+        setNow(lastRotationAt)
+        if (!suppliedLabel) {
+            setLabelIndex(Math.floor(Math.random() * labelCount))
+        }
+        const timer = window.setInterval(() => {
+            const currentTime = Date.now()
+            setNow(currentTime)
+            if (!suppliedLabel && currentTime - lastRotationAt >= LABEL_ROTATION_MS) {
+                lastRotationAt = currentTime
+                // Pick any other phrase equally, without repeating the previous one.
+                const offset = 1 + Math.floor(Math.random() * (labelCount - 1))
+                setLabelIndex((previous) => (previous + offset) % labelCount)
+            }
+        }, 1_000)
         return () => window.clearInterval(timer)
-    }, [startedAt])
+    }, [startedAt, suppliedLabel, labelCount])
 
-    const genericLabels = GENERIC_THINKING_LABELS[locale]
     const elapsed = Math.max(0, now - startedAt)
-    const labelIndex = reducedMotion
-        ? 0
-        : Math.floor(elapsed / LABEL_ROTATION_MS) % genericLabels.length
     const label = suppliedLabel ?? genericLabels[labelIndex]
     const compact = props.compact === true
 
@@ -63,7 +75,7 @@ export function SessionThinkingIndicator(props: {
             role="status"
             aria-live="polite"
             aria-atomic="true"
-            aria-label={label}
+            aria-label={suppliedLabel ?? genericLabels[0]}
         >
             <svg
                 className={`session-thinking__glyph ${compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} shrink-0`}

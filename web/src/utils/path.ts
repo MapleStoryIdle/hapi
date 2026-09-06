@@ -23,3 +23,11 @@ export function basename(path: string): string {
     const parts = normalized.split('/').filter(Boolean)
     return parts.length > 0 ? parts[parts.length - 1] : path
 }
+
+/** Presentation/copy only. File API paths and workspace access checks are unchanged. */
+export function resolveFullPath(path: string, workspacePath?: string | null): string {
+    if (!workspacePath || /^(?:[a-z]:[\\/]|[\\/]|~[\\/])/i.test(path)) return path
+    const separator = workspacePath.includes('\\') ? '\\' : '/'
+    const relative = path.replace(/^\.[\\/]/, '').split(/[\\/]/).join(separator)
+    return `${workspacePath.replace(/[\\/]+$/, '')}${separator}${relative}`
+}

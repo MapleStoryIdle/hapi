@@ -1,6 +1,6 @@
 import { expect, test, devices } from '@playwright/test'
 
-test.use({ ...devices['iPhone 13'] })
+test.use({ ...devices['iPhone 13'], browserName: 'chromium' })
 
 test('message link icons travel with their labels and long labels stay within the message', async ({ page }) => {
     await page.goto('/e2e-fixtures/message-link-fixture.html')
@@ -42,4 +42,25 @@ test('message link icons travel with their labels and long labels stay within th
         expect(boxes.overflow).toBe(false)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+
+test('unavailable file text stays blue without changing the disabled icon or navigation', async ({ page }) => {
+    await page.goto('/e2e-fixtures/message-link-fixture.html?unavailable')
+    const file = page.getByTestId('unavailable-file').getByRole('link')
+    await expect(file).toHaveAttribute('aria-disabled', 'true')
+    const icon = file.locator('[data-markdown-link-icon="disabled"]')
+    await expect(icon).toBeVisible()
+    for (const theme of ['light', 'dark', 'oled']) {
+        await page.evaluate((value) => { document.documentElement.dataset.theme = value }, theme)
+        // Theme colors transition; compare settled live values, not the old frame.
+        await expect.poll(() => file.evaluate((el) =>
+            getComputedStyle(el.querySelector('.message-content-link-label')!).color
+                === getComputedStyle(document.querySelector('.message-content-link')!).color
+        )).toBe(true)
+        await expect.poll(() => file.evaluate((el) =>
+            getComputedStyle(el.querySelector('[data-markdown-link-icon="disabled"]')!).color === getComputedStyle(el).color
+        )).toBe(true)
+    }
+    await expect(file).not.toHaveAttribute('href')
 })

@@ -8,6 +8,7 @@ export type ChatFilePreview = {
     api: ApiClient
     source: LocalServiceSource
     path: string
+    workspacePath?: string | null
     line?: number
     column?: number
     staged?: boolean
@@ -47,14 +48,24 @@ function PreviewRoot({ children }: { children: ReactNode }) {
     )
 }
 
-/** Only content web links; keep app navigation, fragments and custom schemes intact. */
-export function previewableWebUrl(href: string, origin = window.location.origin): string | null {
-    if (!/^(https?:\/\/|\/\/)/i.test(href)) return null
+const APP_ROUTE = /^\/(?:sessions(?:\/|$)|browse(?:\/|$)|memory(?:\/|$)|settings(?:\/|$)|local-service(?:\/|$)|shares?(?:\/|$))/
+
+function appRoutePath(pathname: string): string | null {
+    const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+    if (!base) return pathname
+    if (pathname === base) return '/'
+    return pathname.startsWith(`${base}/`) ? pathname.slice(base.length) : null
+}
+
+/** Content HTTP(S) links use previews; HAPI routes, fragments and custom schemes keep their own navigation. */
+export function previewableWebUrl(href: string, base = window.location.href): string | null {
+    if (!href || /^[#?]/.test(href)) return null
     try {
-        const url = new URL(href, origin)
+        const url = new URL(href, base)
         if (!['http:', 'https:'].includes(url.protocol)) return null
         if (url.username || url.password) return null
-        if (url.origin === origin) return null
+        const routePath = url.origin === new URL(base).origin ? appRoutePath(url.pathname) : null
+        if (routePath && (routePath === '/' || APP_ROUTE.test(routePath))) return null
         return url.href
     } catch { return null }
 }

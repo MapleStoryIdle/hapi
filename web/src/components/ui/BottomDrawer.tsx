@@ -18,6 +18,8 @@ export function BottomDrawer(props: {
     title: string
     subtitle?: string
     trigger?: ReactElement
+    /** Detail previews may be denser; approval sheets retain their spacing. */
+    density?: 'compact'
     /** Keep the original centered layout on desktop for detail previews. */
     desktopDialog?: boolean
     desktopClassName?: string
@@ -142,6 +144,7 @@ export function BottomDrawer(props: {
                         left: 'calc(50% + (var(--app-safe-area-left) - var(--app-safe-area-right)) / 2)'
                     }}
                     data-chat-overlay
+                    data-density={props.density}
                     data-testid={props.testId}
                     aria-describedby={props.subtitle ? descriptionId : undefined}
                     aria-busy={props.busy || undefined}
@@ -176,6 +179,7 @@ export function BottomDrawer(props: {
                     ref={contentRef}
                     aria-describedby={props.subtitle ? descriptionId : undefined}
                     data-chat-overlay
+                    data-density={props.density}
                     aria-busy={props.busy || undefined}
                     data-chat-detail-drawer={props.desktopDialog || undefined}
                     data-testid={props.testId}

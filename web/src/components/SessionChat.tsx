@@ -1700,7 +1700,7 @@ function SessionChatInner(props: SessionChatProps) {
     const openPreview = useChatPreview()
     const handleViewFileDiff = useCallback((file: { path: string; staged: boolean; unstaged: boolean; status?: string }) => {
         setOutlineOpen(false)
-        if (openPreview?.({ type: 'file', api: props.api, source: { type: 'session', sessionId: props.session.id }, path: file.path, staged: file.staged && !file.unstaged, diff: file.status !== 'untracked' })) return
+        if (openPreview?.({ type: 'file', api: props.api, source: { type: 'session', sessionId: props.session.id }, workspacePath: props.session.metadata?.path, path: file.path, staged: file.staged && !file.unstaged, diff: file.status !== 'untracked' })) return
         navigate({
             to: '/sessions/$sessionId/file',
             params: { sessionId: props.session.id },
@@ -1710,7 +1710,7 @@ function SessionChatInner(props: SessionChatProps) {
                 from: 'session'
             }
         })
-    }, [navigate, props.session.id, props.api, openPreview])
+    }, [navigate, props.session.id, props.session.metadata?.path, props.api, openPreview])
 
     const handleToggleOutline = useCallback(() => {
         setOutlineOpen((open) => !open)

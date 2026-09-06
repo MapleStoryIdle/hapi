@@ -577,7 +577,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
 
         event.preventDefault()
-        if (chat && preview?.({ type: 'file', api: chat.api, source: fileLinkTarget ?? { type: 'session', sessionId }, ...fileTarget })) return
+        if (chat && preview?.({ type: 'file', api: chat.api, source: fileLinkTarget ?? { type: 'session', sessionId }, workspacePath: chat.metadata?.path, ...fileTarget })) return
         if (fileLinkTarget?.type === 'native-codex') {
             void navigate({
                 to: '/sessions/codex/$codexSessionId/file',
