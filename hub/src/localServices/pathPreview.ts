@@ -1,5 +1,7 @@
 import type { IncomingHttpHeaders } from 'node:http'
 import type { LocalServiceLease } from './manager'
+import { previewRuntime } from './previewRuntime'
+import { rewritePreviewScript } from './previewScript'
 
 export type PathPreview = Pick<LocalServiceLease, 'origin' | 'target'> & { basePath: string; frameOrigins?: readonly string[] }
 
@@ -57,27 +59,14 @@ export function rewritePreviewCss(css: string, preview: PathPreview, upstreamPat
         .replace(/(@import\s+)(["'])([^"']+)\2/gi, (_all, prefix: string, _quote: string, url: string) => prefix + JSON.stringify(rewrite(url)))
 }
 
-function runtime(preview: PathPreview): string {
-    const config = JSON.stringify({ origin: preview.origin, base: preview.basePath, target: preview.target.origin }).replaceAll('<', '\\u003c')
-    // URL adaptation only. CSP + the server-side lease/grant check are the
-    // security boundary; monkey-patching browser APIs is never trusted.
-    return `(()=>{const c=${config};
-const map=(value,ws=false)=>{try{const s=String(value);const current=new URL(location.href);const tail=current.pathname.slice(c.base.length)+current.search;const u=new URL(s,c.target+tail);const origin=ws?u.origin.replace(/^ws/,'http'):u.origin;if(origin===c.origin&&u.pathname.startsWith(c.base+'/'))return s;if(origin!==c.target&&origin!==c.origin)return s;return (ws?c.origin.replace(/^http/,'ws'):c.origin)+c.base+u.pathname+u.search+u.hash;}catch{return value;}};
-const originalFetch=window.fetch;window.fetch=function(input,options){if(input instanceof Request){const next=new Request(map(input.url),input);return originalFetch.call(this,next,{...options,credentials:'omit'});}return originalFetch.call(this,map(input),{...options,credentials:'omit'});};
-const open=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(method,url,...rest){return open.call(this,method,map(url),...rest);};
-for(const key of ['WebSocket','EventSource']){const Native=window[key];if(Native)window[key]=new Proxy(Native,{construct(Target,args){args[0]=map(args[0],key==='WebSocket');if(key==='EventSource')args[1]={...args[1],withCredentials:false};return Reflect.construct(Target,args);}});}
-document.addEventListener('click',e=>{const a=e.target.closest?.('a[href]');if(a){const value=a.getAttribute('href');if(value&&!value.startsWith('#'))a.setAttribute('href',map(value));}},true);
-document.addEventListener('submit',e=>{const f=e.target;if(f instanceof HTMLFormElement)f.action=map(f.getAttribute('action')||location.href);},true);
-})();`
-}
-
 export function rewritePreviewHtml(response: Response, preview: PathPreview, upstreamPath: string): Response {
     let injected = false
     const inject = () => {
         if (injected) return ''
         injected = true
-        return `<script>${runtime(preview)}</script>`
+        return `<script>${previewRuntime({ origin: preview.origin, base: preview.basePath, target: preview.target.origin, parents: preview.frameOrigins ?? [] })}</script>`
     }
+    let inlineScript: string | null = null
     return new HTMLRewriter()
         .on('head', { element(element) { element.prepend(inject(), { html: true }) } })
         .on('body', { element(element) { element.prepend(inject(), { html: true }) } })
@@ -85,6 +74,20 @@ export function rewritePreviewHtml(response: Response, preview: PathPreview, ups
         .on('meta[http-equiv]', { element(element) {
             if (['refresh', 'content-security-policy', 'set-cookie'].includes(element.getAttribute('http-equiv')?.toLowerCase() ?? '')) element.remove()
         } })
+        .on('script', {
+            element(element) {
+                const type = element.getAttribute('type')?.toLowerCase() ?? ''
+                inlineScript = !element.hasAttribute('src') && ['', 'module', 'text/javascript', 'application/javascript'].includes(type) ? '' : null
+                if (inlineScript !== null) element.onEndTag((tag) => {
+                    const source = inlineScript ?? ''
+                    inlineScript = null
+                    tag.before(rewritePreviewScript(source).replace(/<\/script/gi, '<\\/script'), { html: true })
+                })
+            },
+            text(chunk) {
+                if (inlineScript !== null) { inlineScript += chunk.text; chunk.remove() }
+            }
+        })
         .on('*', { element(element) {
             for (const name of ['href', 'src', 'action', 'formaction', 'poster']) {
                 const value = element.getAttribute(name)

@@ -1,4 +1,5 @@
 import type { OpenLocalServiceRequest, OpenLocalServiceResponse } from '@hapi/protocol/localServices'
+import type { NativeCodexSessionControlAction, NativeCodexSessionControlResponse } from '@hapi/protocol/codexSessionControl'
 import type {
     AttachmentMetadata,
     AuthResponse,
@@ -51,17 +52,26 @@ import type {
     DeleteUploadResponse,
     FileReadResponse,
     GitBranchResponse,
+    GitBranchesResponse,
     GitCommandResponse,
     ListDirectoryResponse,
     MachineListDirectoryResponse,
     MachinePathsExistsResponse,
+    MachineGitBranchCreateRequest,
+    MachineGitBranchCommitRequest,
+    MachineGitBranchPushRequest,
+    MachineGitBranchSwitchRequest,
     OpencodeModelsResponse,
     OpencodeReasoningEffortResponse,
     CreateSideSessionResponse,
     ReopenSessionResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
-import type { AgentFlavor } from '@hapi/protocol'
+import type {
+    AgentFlavor,
+    NativeCodexAttachmentDeleteResponse,
+    NativeCodexAttachmentStageResponse
+} from '@hapi/protocol'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
 
 type ApiClientOptions = {
@@ -361,6 +371,17 @@ export class ApiClient {
         )
     }
 
+    async controlCodexSession(
+        sessionId: string,
+        machineId: string,
+        action: NativeCodexSessionControlAction
+    ): Promise<NativeCodexSessionControlResponse> {
+        return await this.request<NativeCodexSessionControlResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/control`,
+            { method: 'POST', body: JSON.stringify({ machineId, ...action }) }
+        )
+    }
+
     async getCodexSessionComposerCapabilities(
         sessionId: string,
         machineId: string
@@ -380,6 +401,8 @@ export class ApiClient {
             clientMessageId?: string
             /** Explicit user-confirmed retry after a stale/uncertain native hand-off. */
             forceRecovery?: boolean
+            /** Opaque Runner-local attachment references. */
+            attachmentIds?: string[]
         },
         options?: { signal?: AbortSignal }
     ): Promise<SendCodexLocalSessionMessageResponse> {
@@ -406,6 +429,38 @@ export class ApiClient {
                 method: 'POST',
                 body: JSON.stringify(payload)
             }
+        )
+    }
+
+    async uploadCodexSessionAttachment(
+        sessionId: string,
+        machineId: string,
+        filename: string,
+        file: Blob,
+        mimeType: string
+    ): Promise<NativeCodexAttachmentStageResponse> {
+        const form = new FormData()
+        form.set('machineId', machineId)
+        form.set('file', file, filename)
+        form.set('filename', filename)
+        form.set('mimeType', mimeType)
+        return await this.request<NativeCodexAttachmentStageResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/uploads`,
+            { method: 'POST', body: form },
+            0,
+            undefined,
+            UPLOAD_REQUEST_TIMEOUT_MS
+        )
+    }
+
+    async deleteCodexSessionAttachment(
+        sessionId: string,
+        machineId: string,
+        attachmentId: string
+    ): Promise<NativeCodexAttachmentDeleteResponse> {
+        return await this.request<NativeCodexAttachmentDeleteResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/uploads/${encodeURIComponent(attachmentId)}/delete`,
+            { method: 'POST', body: JSON.stringify({ machineId }) }
         )
     }
 
@@ -1008,6 +1063,58 @@ export class ApiClient {
     async getMachineGitBranch(machineId: string, cwd: string): Promise<GitBranchResponse> {
         return await this.request<GitBranchResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/git-branch?cwd=${encodeURIComponent(cwd)}`
+        )
+    }
+
+    async getMachineGitBranches(machineId: string, cwd: string): Promise<GitBranchesResponse> {
+        return await this.request<GitBranchesResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/git-branches?cwd=${encodeURIComponent(cwd)}`
+        )
+    }
+
+    async switchMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchSwitchRequest
+    ): Promise<GitBranchesResponse> {
+        return await this.request<GitBranchesResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/git-branches/switch`,
+            { method: 'POST', body: JSON.stringify(request) }
+        )
+    }
+
+    async createMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchCreateRequest
+    ): Promise<GitBranchesResponse> {
+        return await this.request<GitBranchesResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/git-branches`,
+            { method: 'POST', body: JSON.stringify(request) }
+        )
+    }
+
+    async commitMachineGitChanges(
+        machineId: string,
+        request: MachineGitBranchCommitRequest
+    ): Promise<GitBranchesResponse> {
+        return await this.request<GitBranchesResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/git-branches/commit`,
+            { method: 'POST', body: JSON.stringify(request) },
+            0,
+            undefined,
+            75_000
+        )
+    }
+
+    async pushMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchPushRequest
+    ): Promise<GitBranchesResponse> {
+        return await this.request<GitBranchesResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/git-branches/push`,
+            { method: 'POST', body: JSON.stringify(request) },
+            0,
+            undefined,
+            75_000
         )
     }
 

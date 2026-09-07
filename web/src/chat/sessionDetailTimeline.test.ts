@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { AgentReasoningBlock, AgentTextBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
 import {
     buildIncrementalSessionDetailTimeline,
-    buildSessionDetailTimeline
+    buildSessionDetailTimeline,
+    hasCurrentTurnProcess
 } from './sessionDetailTimeline'
 
 function userBlock(): UserTextBlock {
@@ -108,6 +109,36 @@ describe('buildSessionDetailTimeline', () => {
         expect(native.visible[0]?.kind).toBe('user-text')
         expect(native.visible[1]?.kind).toBe('tool-group')
         expect(native.visible[2]?.kind).toBe('agent-text')
+    })
+
+    it('only treats a process in the latest user turn as current', () => {
+        const secondUser: UserTextBlock = {
+            ...userBlock(),
+            id: 'user-2',
+            createdAt: 5,
+            text: 'Continue'
+        }
+        const currentTool: ToolCallBlock = {
+            ...toolBlock(),
+            id: 'tool-2',
+            createdAt: 6,
+            invokedAt: 6,
+            tool: {
+                ...toolBlock().tool,
+                id: 'tool-2',
+                createdAt: 6,
+                startedAt: 6
+            }
+        }
+        const beforeCurrentProcess = buildSessionDetailTimeline([
+            userBlock(), toolBlock(), agentBlock(), secondUser
+        ], { hasMoreMessages: false, runActive: true })
+        const withCurrentProcess = buildSessionDetailTimeline([
+            userBlock(), toolBlock(), agentBlock(), secondUser, currentTool
+        ], { hasMoreMessages: false, runActive: true })
+
+        expect(hasCurrentTurnProcess(beforeCurrentProcess.grouped, { minCreatedAt: secondUser.createdAt })).toBe(false)
+        expect(hasCurrentTurnProcess(withCurrentProcess.grouped, { minCreatedAt: secondUser.createdAt })).toBe(true)
     })
 
     it('keeps the current turn expanded while it is running', () => {

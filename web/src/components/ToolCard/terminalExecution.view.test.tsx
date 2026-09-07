@@ -66,36 +66,14 @@ describe('TerminalExecutionDetail', () => {
         expect(screen.getByText('/workspace/hapi')).toBeInTheDocument()
     })
 
-    it('keeps drawer metadata separate from command and output', () => {
-        const view = render(
-            <I18nProvider>
-                <TerminalExecutionDetail
-                    block={makeBlock()}
-                    drawerTab="details"
-                    labelledBy="terminal-tab-details"
-                    panelId="terminal-panel-details"
-                    surface="drawer"
-                />
-            </I18nProvider>
-        )
-
-        const panel = view.container.querySelector<HTMLElement>('[data-terminal-execution-panel="details"]')
-        if (!panel) throw new Error('expected environment panel')
-
-        expect(panel).toHaveAttribute('role', 'tabpanel')
-        expect(panel).toHaveAttribute('id', 'terminal-panel-details')
-        expect(panel).toHaveAttribute('aria-labelledby', 'terminal-tab-details')
-        expect(panel).toHaveClass('relative', 'isolate')
-        expect(panel.className).not.toContain('--app-safe-area-bottom')
-        expect(panel).not.toHaveTextContent('Status')
-        expect(panel).toHaveTextContent('Working directory')
-        expect(panel).toHaveTextContent('/workspace/hapi')
-        expect(panel).not.toHaveTextContent('Duration')
-        expect(panel).toHaveTextContent('Exit code')
-        expect(panel).toHaveTextContent('exit 1')
-        expect(panel).not.toHaveTextContent('/bin/zsh -lc "bun test"')
-        expect(panel).not.toHaveTextContent('test output')
-        expect(panel).not.toHaveTextContent('test failure')
-        expect(panel).not.toHaveTextContent('SECRET_TOKEN=must-not-render')
+    it('keeps the drawer as one output surface with an exit code footer', () => {
+        const view = render(<I18nProvider><TerminalExecutionDetail block={makeBlock()} surface="drawer" /></I18nProvider>)
+        expect(screen.queryByRole('tabpanel')).toBeNull()
+        const output = view.container.querySelector('[data-terminal-execution-output]')!
+        expect(output).toHaveTextContent('test output')
+        expect(output).toHaveTextContent('test failure')
+        expect(output.lastElementChild).toHaveAttribute('data-terminal-execution-exit-code')
+        expect(output.lastElementChild).toHaveTextContent('Exit code1')
+        expect(view.container).not.toHaveTextContent('SECRET_TOKEN')
     })
 })

@@ -6,12 +6,14 @@ import type { ToolGroupBlock } from '@/chat/toolGroups'
 import { HappyChatProvider } from '@/components/AssistantChat/context'
 import {
     ToolGroupCard,
+    formatToolGroupCompactTitle,
     assignCodexSubagentCardColors,
     getCodexSubagentCardColor,
     getCodexSubagentCardIdentity,
     getCodexSubagentCardState
 } from '@/components/ToolCard/ToolGroupCard'
 import type { TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
+import type { ToolGroupExpansionState, ToolGroupExpansionStates } from '@/components/ToolCard/toolGroupExpansion'
 import { I18nProvider } from '@/lib/i18n-context'
 
 function makeToolBlock(id: string, name: string, input: unknown = {}, toolOverrides: Partial<ToolCallBlock['tool']> = {}): ToolCallBlock {
@@ -76,6 +78,22 @@ function makeGroup(overrides: Partial<ToolGroupBlock> = {}): ToolGroupBlock {
         ...overrides,
     }
 }
+
+describe('compact summary separators', () => {
+    it.each(['Processed', '已处理'])('adds duration once for %s', (label) => {
+        const tool = makeToolBlock('command', 'Bash', { command: 'git status; git diff' }, { durationMs: 3000 })
+        const group = makeGroup({ tools: [tool] })
+        const t = () => label
+        expect(formatToolGroupCompactTitle(group, 5000, t)).toBe('git status; git diff; 3s')
+        expect(formatToolGroupCompactTitle({ ...group, forceGenericCompactTitle: true }, 5000, t)).toBe(`${label} 3s`)
+        tool.tool.durationMs = 0
+        expect(formatToolGroupCompactTitle({ ...group, forceGenericCompactTitle: true }, 5000, t)).toBe(label)
+        expect(formatToolGroupCompactTitle(group, 5000, t)).toBe('git status; git diff')
+        tool.tool.input = { title: 'Check files; ' }
+        tool.tool.durationMs = 3000
+        expect(formatToolGroupCompactTitle(group, 5000, t)).toBe('Check files; 3s')
+    })
+})
 
 function renderCard(block: ToolGroupBlock, options?: {
     loadOlder?: () => Promise<boolean>
@@ -645,7 +663,7 @@ describe('ToolGroupCard', () => {
         fireEvent.click(within(view.container).getByRole('button'))
 
         expect(within(view.container).queryByText('Failed')).not.toBeInTheDocument()
-        expect(within(view.container).getByRole('button', { name: /ls \/definitely-not-exists 1s/i })).toHaveAttribute('aria-expanded', 'true')
+        expect(within(view.container).getByRole('button', { name: /ls \/definitely-not-exists; 1s/i })).toHaveAttribute('aria-expanded', 'true')
         expect(within(view.container).queryByText('1.3s')).not.toBeInTheDocument()
         expect(within(view.container).queryByText('exit 1')).not.toBeInTheDocument()
         expect(within(view.container).queryByText('The agent did not return terminal output for this command.')).not.toBeInTheDocument()
@@ -794,7 +812,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /bun test 2s/i })).toHaveAttribute('aria-expanded', 'false')
+        expect(within(view.container).getByRole('button', { name: /bun test; 2s/i })).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByText('Processed 2s')).not.toBeInTheDocument()
     })
 
@@ -829,7 +847,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const toggle = within(view.container).getByRole('button', { name: /bun test 6s/i })
+        const toggle = within(view.container).getByRole('button', { name: /bun test; 6s/i })
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
 
         fireEvent.click(toggle)
@@ -869,7 +887,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /bun test 9s/i })).toHaveAttribute('aria-expanded', 'false')
+        expect(within(view.container).getByRole('button', { name: /bun test; 9s/i })).toHaveAttribute('aria-expanded', 'false')
     })
 
     it('uses action-specific processing titles for active single tool groups', () => {
@@ -906,10 +924,10 @@ describe('ToolGroupCard', () => {
         }), { terminalToolDisplayMode: 'compact' })
 
         const toggle = within(view.container)
-            .getAllByRole('button', { name: /bun test \d+s/i })
+            .getAllByRole('button', { name: /bun test; \d+s/i })
             .find((button) => button.hasAttribute('aria-expanded'))
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
+        expect(screen.queryByText(/Processing; \d+s/i)).not.toBeInTheDocument()
     })
 
     it('uses the latest active action instead of Processing for aggregated groups', () => {
@@ -952,10 +970,10 @@ describe('ToolGroupCard', () => {
         }), { terminalToolDisplayMode: 'compact' })
 
         const toggle = within(view.container)
-            .getAllByRole('button', { name: /bun test \d+s/i })
+            .getAllByRole('button', { name: /bun test; \d+s/i })
             .find((button) => button.hasAttribute('aria-expanded'))
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
+        expect(screen.queryByText(/Processing; \d+s/i)).not.toBeInTheDocument()
     })
 
     it('uses the newest reasoning action while the native turn remains active', () => {
@@ -1002,11 +1020,11 @@ describe('ToolGroupCard', () => {
         }), { terminalToolDisplayMode: 'compact' })
 
         const toggle = within(view.container)
-            .getAllByRole('button', { name: /Verifying the final result \d+s/i })
+            .getAllByRole('button', { name: /Verifying the final result; \d+s/i })
             .find((button) => button.hasAttribute('aria-expanded'))
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
         expect(toggle?.querySelector('.motion-safe\\:animate-pulse')).not.toBeNull()
-        expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
+        expect(screen.queryByText(/Processing; \d+s/i)).not.toBeInTheDocument()
     })
 
     it('treats running tools as active even when summary counts are stale', () => {
@@ -1043,10 +1061,10 @@ describe('ToolGroupCard', () => {
         }), { terminalToolDisplayMode: 'compact' })
 
         const toggle = within(view.container)
-            .getAllByRole('button', { name: /bun test \d+s/i })
+            .getAllByRole('button', { name: /bun test; \d+s/i })
             .find((button) => button.hasAttribute('aria-expanded'))
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.queryByText(/Processing \d+s/i)).not.toBeInTheDocument()
+        expect(screen.queryByText(/Processing; \d+s/i)).not.toBeInTheDocument()
     })
 
     it('uses the raw command when a mutation has no parsed file target', () => {
@@ -1188,7 +1206,7 @@ describe('ToolGroupCard', () => {
 
         const toggle = within(view.container).getByRole('button', { name: /processed 2s/i })
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
-        expect(screen.queryByText('Ran 2s')).not.toBeInTheDocument()
+        expect(screen.queryByText('Ran; 2s')).not.toBeInTheDocument()
 
         fireEvent.click(toggle)
 
@@ -1236,7 +1254,7 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        expect(within(view.container).getByRole('button', { name: /used imagegen 2s/i })).toBeInTheDocument()
+        expect(within(view.container).getByRole('button', { name: /used imagegen; 2s/i })).toBeInTheDocument()
         expect(screen.queryByText(/Processed 2s/i)).not.toBeInTheDocument()
     })
 
@@ -1341,7 +1359,7 @@ describe('ToolGroupCard', () => {
         expect(screen.queryByText('bun test')).not.toBeInTheDocument()
     })
 
-    it('keeps an auto-open compact group open until an explicit turn completion', async () => {
+    it('automatically closes an untouched compact group when processing completes', async () => {
         const startedAt = Date.now() - 10_000
 
         function makeActiveGroup(active: boolean): ToolGroupBlock {
@@ -1384,6 +1402,12 @@ describe('ToolGroupCard', () => {
 
         function Harness() {
             const [active, setActive] = useState(true)
+            const [expansionStates, setExpansionStates] = useState<ToolGroupExpansionStates>({})
+            const setToolGroupExpansionState = useCallback((key: string, state: ToolGroupExpansionState) => {
+                setExpansionStates((current) => current[key] === state
+                    ? current
+                    : { ...current, [key]: state })
+            }, [])
             return (
                 <I18nProvider>
                     <HappyChatProvider value={{
@@ -1396,6 +1420,8 @@ describe('ToolGroupCard', () => {
                         hasMoreMessages: false,
                         isLoadingMoreMessages: false,
                         loadOlderMessagesPreservingScroll: vi.fn(async () => false),
+                        toolGroupExpansionStates: expansionStates,
+                        setToolGroupExpansionState,
                     }}>
                         <button type="button" onClick={() => setActive(false)}>finish</button>
                         <ToolGroupCard block={makeActiveGroup(active)} metadata={{ path: 'repo', host: 'local' }} />
@@ -1415,9 +1441,9 @@ describe('ToolGroupCard', () => {
 
         await waitFor(() => {
             toggle = within(view.container).getByRole('button', { name: /processed/i })
-            expect(toggle).toHaveAttribute('aria-expanded', 'true')
+            expect(toggle).toHaveAttribute('aria-expanded', 'false')
         })
-        expect(screen.getByText('bun test')).toBeInTheDocument()
+        expect(screen.queryByText('bun test')).not.toBeInTheDocument()
     })
 
     it('auto-loads older history after expand when the group is incomplete', async () => {

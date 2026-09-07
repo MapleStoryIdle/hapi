@@ -74,6 +74,17 @@ describe('SessionActionMenu - Reopen action', () => {
 })
 
 describe('SessionActionMenu - capability-scoped actions', () => {
+    it('opens the shared Git branch picker entry when a Git project is available', () => {
+        const onGitBranches = vi.fn()
+        const onClose = vi.fn()
+        renderMenu({ onGitBranches, onClose })
+
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Git branches' }))
+
+        expect(onGitBranches).toHaveBeenCalledTimes(1)
+        expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
     it('supports a native-session menu without rendering SHAPI lifecycle actions', () => {
         const onRefresh = vi.fn()
         const onFork = vi.fn()

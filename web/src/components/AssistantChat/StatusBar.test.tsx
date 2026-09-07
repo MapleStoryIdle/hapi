@@ -24,12 +24,12 @@ function statusBar(props: Partial<StatusBarProps> = {}) {
 }
 
 describe('StatusBar thinking state', () => {
-    it('uses the shared thinking indicator', () => {
+    it('leaves thinking to the message thread', () => {
         vi.useFakeTimers()
         const view = render(statusBar())
 
-        expect(screen.getByTestId('session-thinking-indicator')).toBeInTheDocument()
-        expect(screen.getByRole('status', { name: 'Thinking' })).toBeInTheDocument()
+        expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
+        expect(screen.queryByRole('status', { name: 'Thinking' })).toBeNull()
 
         view.unmount()
         expect(vi.getTimerCount()).toBe(0)
@@ -43,7 +43,7 @@ describe('StatusBar thinking state', () => {
             }
         }
         const view = render(statusBar())
-        expect(vi.getTimerCount()).toBe(1)
+        expect(vi.getTimerCount()).toBe(0)
         view.rerender(statusBar({ voiceStatus: 'connecting' }))
 
         expect(screen.getByText('voice.connecting')).toBeInTheDocument()
@@ -55,14 +55,14 @@ describe('StatusBar thinking state', () => {
         expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
 
         view.rerender(statusBar())
-        expect(vi.getTimerCount()).toBe(1)
+        expect(vi.getTimerCount()).toBe(0)
         view.rerender(statusBar({ agentState: permissionState }))
         expect(screen.getByText('misc.permissionRequired')).toBeInTheDocument()
         expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
         expect(vi.getTimerCount()).toBe(0)
 
         view.rerender(statusBar())
-        expect(vi.getTimerCount()).toBe(1)
+        expect(vi.getTimerCount()).toBe(0)
         view.rerender(statusBar({ thinking: false }))
         expect(screen.getByText('misc.online')).toBeInTheDocument()
         expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()

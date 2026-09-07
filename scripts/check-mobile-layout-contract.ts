@@ -60,6 +60,14 @@ const queueTrigger = source('web/src/components/SessionDetailQueueTrigger.tsx')
 const bottomDock = source('web/src/components/SessionDetailBottomDock.tsx')
 const viewportHeight = source('web/src/hooks/useViewportHeight.ts')
 
+if (/composer-thinking-slot|<SessionThinkingIndicator/.test(source('web/src/components/AssistantChat/HappyComposer.tsx'))
+    || /<SessionThinkingIndicator/.test(source('web/src/components/AssistantChat/StatusBar.tsx'))
+    || /styles\/dot\.css/.test(source('web/src/components/assistant-ui/markdown-text.tsx'))) {
+    throw new Error('Thinking must be a standalone thread row, without composer space or Markdown dots')
+}
+requireMatch(sessionChat, /<ThreadThinkingMessage/, 'managed sessions must render thread thinking feedback')
+requireMatch(source('web/src/components/CodexSessionContextPage.tsx'), /<ThreadThinkingMessage/, 'native sessions must render thread thinking feedback')
+
 // Approved visual values. Do not weaken this script to work around a change:
 // obtain product approval, then update this guard and the contract document
 // together so the approval is explicit in the diff.
@@ -162,5 +170,9 @@ requireMatch(drawerCss, /prefers-reduced-motion:[\s\S]*data-chat-drawer-backgrou
 const localServiceDrawer = source('web/src/components/ChatPreviewDrawer.tsx')
 requireMatch(localServiceDrawer, /presentation:\s*'embed'/, 'local service links must request a direct embedded preview')
 requireMatch(localServiceDrawer, /sandbox="allow-scripts allow-forms"/, 'embedded local services must stay isolated from chat login storage')
+requireMatch(localServiceDrawer, /<DetailCopyButton[^>]*new URL\(preview\.url, window\.location\.href\)\.href[^>]*chatPreview\.copyLink[^>]*iconOnly/, 'web previews must offer an icon to copy the absolute original or local-service launch URL')
+if (/chatPreview\.(?:frameHint|localServiceHint|openExternal)|openLocalServiceInTab/.test(localServiceDrawer)) {
+    throw new Error('Mobile layout contract violation: web previews must show the page directly without a permanent browser fallback prompt')
+}
 
 console.log('Mobile layout contract verified.')

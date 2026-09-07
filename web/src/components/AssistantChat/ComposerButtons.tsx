@@ -1012,6 +1012,7 @@ export function ComposerButtons(props: {
     settingsOpen?: boolean
     /** Display the shared model control without allowing settings changes. */
     settingsReadOnly?: boolean
+    onSettingsReadOnlyClick?: () => void
     contextUsageLabel?: string
     contextUsageDetails?: ContextUsageDetails | null
     permissionMode?: PermissionMode
@@ -1869,9 +1870,10 @@ export function ComposerButtons(props: {
                                 setShowSkillMenu(false)
                                 setShowSchedulePicker(false)
                                 setShowContextUsageMenu(false)
-                                props.onSettingsToggle()
+                                if (props.settingsReadOnly) props.onSettingsReadOnlyClick?.()
+                                else props.onSettingsToggle()
                             }}
-                            disabled={props.controlsDisabled || props.settingsReadOnly}
+                            disabled={props.controlsDisabled || (props.settingsReadOnly && !props.onSettingsReadOnlyClick)}
                         >
                             {props.fastModeActive ? (
                                 <Zap

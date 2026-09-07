@@ -11,7 +11,6 @@ import type { ConversationStatus } from '@/realtime/types'
 import type { ThreadGoal } from '@/types/api'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
 import { isFastServiceTier } from './codexFastMode'
-import { SessionThinkingIndicator } from '@/components/SessionThinkingIndicator'
 import { useTranslation } from '@/lib/use-translation'
 
 const PERMISSION_TONE_CLASSES: Record<PermissionModeTone, string> = {
@@ -274,9 +273,7 @@ export function StatusBar(props: StatusBarProps) {
     return (
         <div className="flex min-w-0 items-center justify-between gap-2 px-2 pb-1">
             <div className="flex min-w-0 items-baseline gap-2 sm:gap-3">
-                {'isThinking' in connectionStatus ? (
-                    <SessionThinkingIndicator compact />
-                ) : (
+                {'isThinking' in connectionStatus ? null : (
                     <div className="flex shrink-0 items-center gap-1.5">
                         <span
                             className={`h-2 w-2 rounded-full ${connectionStatus.dotColor} ${connectionStatus.isPulsing ? 'animate-pulse' : ''}`}

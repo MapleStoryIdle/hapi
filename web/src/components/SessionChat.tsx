@@ -1,4 +1,6 @@
 import { ChatPreviewProvider, useChatPreview } from '@/components/ChatPreviewContext'
+import { ThreadThinkingMessage } from '@/components/ThreadThinkingMessage'
+import { getThinkingStartedAt } from '@/lib/thinking-started-at'
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
@@ -27,6 +29,7 @@ import { buildConversationOutline } from '@/chat/outline'
 import { isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
 import {
     buildIncrementalSessionDetailTimeline,
+    hasCurrentTurnProcess,
     type SessionDetailTimelineCache
 } from '@/chat/sessionDetailTimeline'
 import { isQueuedForInvocation, mergeMessages } from '@/lib/messages'
@@ -1455,6 +1458,7 @@ function SessionChatInner(props: SessionChatProps) {
         () => getLatestUserTurnCreatedAt(normalizedMessages),
         [normalizedMessages]
     )
+    const thinkingStartedAt = useMemo(() => getThinkingStartedAt(normalizedMessages), [normalizedMessages])
     const turnCompletionKey = useMemo(
         () => getLatestTurnCompletionKey(normalizedMessages),
         [normalizedMessages]
@@ -1462,6 +1466,10 @@ function SessionChatInner(props: SessionChatProps) {
     const hasRunningChildAgent = useMemo(
         () => turnCompletionKey === null && hasAbortableAgentRun(reduced.blocks, latestUserTurnCreatedAt),
         [latestUserTurnCreatedAt, reduced.blocks, turnCompletionKey]
+    )
+    const hasThinkingChildAgent = useMemo(
+        () => hasAbortableAgentRun(reduced.blocks, latestUserTurnCreatedAt),
+        [latestUserTurnCreatedAt, reduced.blocks]
     )
     const latestPlanStatus = useMemo(
         () => extractLatestPlanStatus(reconciled.blocks, { minCreatedAt: latestUserTurnCreatedAt }),
@@ -1540,6 +1548,10 @@ function SessionChatInner(props: SessionChatProps) {
     const timeline = timelineResult.timeline
     const groupedVisibleBlocks = timeline.grouped
     const visibleBlocks = timeline.visible
+    const currentTurnProcessVisible = useMemo(
+        () => hasCurrentTurnProcess(groupedVisibleBlocks, { minCreatedAt: latestUserTurnCreatedAt }),
+        [groupedVisibleBlocks, latestUserTurnCreatedAt]
+    )
     useEffect(() => {
         timelineCacheRef.current = timelineResult.cache
     }, [timelineResult.cache])
@@ -2029,6 +2041,14 @@ function SessionChatInner(props: SessionChatProps) {
                         bottomAccessoryExpanded={bottomAccessoryExpanded}
                         scrollButtonPositionReady={scrollButtonPositionReady}
                         onOutlineOpenChange={setOutlineOpen}
+                        trailingMessage={
+                            <ThreadThinkingMessage
+                                startedAt={thinkingStartedAt}
+                                running={props.session.active && (props.session.thinking || hasThinkingChildAgent || props.isSending)}
+                                waitingForUser={Object.keys(props.session.agentState?.requests ?? {}).length > 0 || voice?.status === 'connecting'}
+                                hasProcess={currentTurnProcessVisible}
+                            />
+                        }
                     />
 
                     {showCodexQuickReply ? (

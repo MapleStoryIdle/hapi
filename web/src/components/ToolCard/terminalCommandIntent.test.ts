@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandIntentTitle, getTerminalCommandSummary, usesTerminalCommandAsLabel } from '@/components/ToolCard/terminalCommandIntent'
+import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandIntentTitle, getTerminalCommandSummary, usesTerminalCommandAsLabel, joinTerminalSummaryParts } from '@/components/ToolCard/terminalCommandIntent'
 
 describe('terminal command intent', () => {
+    it('joins summary fragments once, without dangling or duplicate separators', () => {
+        expect(joinTerminalSummaryParts(['git status;', '; git diff; ', '3s'])).toBe('git status; git diff; 3s')
+        expect(joinTerminalSummaryParts(['git status', '', null, undefined])).toBe('git status')
+        expect(joinTerminalSummaryParts(['GET · example.com/api', '2s'])).toBe('GET · example.com/api; 2s')
+        expect(joinTerminalSummaryParts(['', ';', null])).toBe('')
+    })
     it('keeps shell file reads as requests and includes their explicit targets', () => {
         expect(getTerminalCommandIntent({
             command: `/bin/zsh -lc "cat package.json; find src -type f | sort; sed -n '1,220p' README.md"`
@@ -175,13 +181,13 @@ describe('terminal command intent', () => {
         const intent = getTerminalCommandIntent(input)
 
         expect(intent && usesTerminalCommandAsLabel(intent)).toBe(true)
-        expect(intent && getTerminalCommandIntentLabel(input, intent)).toBe('bun run typecheck · bun run test')
+        expect(intent && getTerminalCommandIntentLabel(input, intent)).toBe('bun run typecheck; bun run test')
     })
 
     it('keeps one or two recognized commands instead of the full shell script', () => {
         expect(getTerminalCommandSummary({
             command: 'git -C /workspace/hapi status --short; rg -n "ToolGroupCard" web/src; echo done'
-        })).toBe('git status · rg')
+        })).toBe('git status; rg')
         expect(getTerminalCommandSummary({
             command: 'node scripts/rewrite.mjs --verbose --all'
         })).toBeNull()
@@ -201,8 +207,8 @@ describe('terminal command intent', () => {
             ]); text(results.length);`
         }
 
-        expect(getTerminalCommandSummary(input)).toBe('git status · git diff · +1')
-        expect(getTerminalCommandDisplayTitle(input)).toBe('git status · git diff · +1')
+        expect(getTerminalCommandSummary(input)).toBe('git status; git diff; +1')
+        expect(getTerminalCommandDisplayTitle(input)).toBe('git status; git diff; +1')
     })
 
     it('does not expose Codex Desktop orchestration as Run const', () => {

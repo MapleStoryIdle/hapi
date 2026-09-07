@@ -23,6 +23,7 @@ type SessionActionMenuProps = {
     onRefresh?: () => void
     refreshLabel?: string
     refreshPending?: boolean
+    onGitBranches?: () => void
     onFork?: () => void
     forkLabel?: string
     forkPendingLabel?: string
@@ -199,6 +200,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onRefresh,
         refreshLabel,
         refreshPending,
+        onGitBranches,
         onFork,
         forkLabel,
         forkPendingLabel,
@@ -252,6 +254,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleFork = () => {
         onClose()
         onFork?.()
+    }
+
+    const handleGitBranches = () => {
+        onClose()
+        onGitBranches?.()
     }
 
     const handleToggleFiles = () => {
@@ -356,7 +363,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
 
     const baseItemClassName =
         'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
-    const hasTopActions = Boolean(onRefresh || onFork || onToggleFiles || onToggleOutline || onCreateSideSession)
+    const hasTopActions = Boolean(onRefresh || onGitBranches || onFork || onToggleFiles || onToggleOutline || onCreateSideSession)
     const hasLifecycleActions = Boolean(onRename || onExport || onArchive || onReopen || onDelete)
 
     return (
@@ -388,6 +395,18 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     >
                         <RefreshIcon className="text-[var(--app-hint)]" />
                         {refreshLabel ?? t('recentCodex.refresh')}
+                    </button>
+                ) : null}
+
+                {onGitBranches ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleGitBranches}
+                    >
+                        <GitBranch className="h-[18px] w-[18px] shrink-0 text-[var(--app-hint)]" strokeWidth={1.8} aria-hidden="true" />
+                        {t('session.action.gitBranches')}
                     </button>
                 ) : null}
 

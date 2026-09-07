@@ -153,6 +153,29 @@ function transformAssistantGroup(group: VisibleChatBlock[]): VisibleChatBlock[] 
     ]
 }
 
+/**
+ * A live turn can contain several process groups. Only its newest process
+ * opens itself; older activity remains quiet until the operator asks for it.
+ */
+function markLatestActiveProcessDefaultOpen(blocks: VisibleChatBlock[]): VisibleChatBlock[] {
+    const latestActiveIndex = blocks.findLastIndex((block) => (
+        isToolGroupBlock(block)
+        && (block.turnActive === true || block.tools.some((tool) => (
+            tool.tool.state === 'running' || tool.tool.state === 'pending'
+        )))
+    ))
+    if (latestActiveIndex === -1) return blocks
+
+    return blocks.map((block, index) => {
+        if (!isToolGroupBlock(block)) return block
+        const active = block.turnActive === true || block.tools.some((tool) => (
+            tool.tool.state === 'running' || tool.tool.state === 'pending'
+        ))
+        if (!active) return block
+        return { ...block, defaultOpen: index === latestActiveIndex }
+    })
+}
+
 export function groupAssistantResultDetails(
     blocks: VisibleChatBlock[],
     options: {
@@ -198,5 +221,7 @@ export function groupAssistantResultDetails(
     }
 
     flushGroup()
-    return transformed
+    return options.runActive
+        ? markLatestActiveProcessDefaultOpen(transformed)
+        : transformed
 }

@@ -188,7 +188,7 @@ describe('getToolPresentation — file access semantics', () => {
         })
 
         expect(presentation).toMatchObject({
-            title: 'bun run typecheck · bun run test',
+            title: 'bun run typecheck; bun run test',
             subtitle: null
         })
     })

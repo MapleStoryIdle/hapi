@@ -1,5 +1,4 @@
 import { useChatPreview, previewableWebUrl } from '@/components/ChatPreviewContext'
-import '@assistant-ui/react-markdown/styles/dot.css'
 
 import type { ComponentPropsWithoutRef, MouseEvent } from 'react'
 import { useState, useCallback, useEffect, useMemo, createContext, useContext, type ReactNode } from 'react'

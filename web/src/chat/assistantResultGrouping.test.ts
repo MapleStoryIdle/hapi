@@ -156,6 +156,7 @@ describe('groupAssistantResultDetails', () => {
             kind: 'tool-group',
             id: 'tool-group:active-process:tool-1',
             turnActive: true,
+            defaultOpen: false,
             tools: [firstTool],
             detailBlocks: [firstTool, { id: 'reasoning-1' }]
         })
@@ -166,6 +167,7 @@ describe('groupAssistantResultDetails', () => {
             kind: 'tool-group',
             id: 'tool-group:active-process:tool-2',
             turnActive: true,
+            defaultOpen: true,
             tools: [secondTool],
             detailBlocks: [secondTool, processText]
         })

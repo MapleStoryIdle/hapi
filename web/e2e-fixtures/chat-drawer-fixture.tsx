@@ -14,10 +14,12 @@ import { ImagePreview } from '../src/components/ImagePreview'
 import { EditView } from '../src/components/ToolCard/views/EditView'
 import { ToolCard } from '../src/components/ToolCard/ToolCard'
 import type { ApiClient } from '../src/api/client'
+import { localServiceLaunchHref } from '../src/lib/local-service-links'
 
 const reviewStartedAt = Date.now() - 45_000
 
 const api = {
+    readCodexSessionFile: async () => ({ success: false, error: new URLSearchParams(location.search).get('file-error') || 'ENOENT: no such file /private/example.png' }),
     openLocalService: async () => ({ url: location.origin + '/__shapi_local/embed/' + 'b'.repeat(64) + '/local-app', expiresAt: Date.now() + 60_000 }),
     readSessionFile: async () => ({ success: true, content: btoa(Array.from({ length: 100 }, (_, i) => `const line${i + 1} = "hello"`).join('\n')) }),
     getGitDiffFile: async () => ({ success: true, stdout: '+added line\n-removed line' })
@@ -58,9 +60,10 @@ function Content() {
                     createdAt: 100, startedAt: 200, completedAt: 2450, description: null }
             }} />
             <button className="block rounded-xl border p-3" onClick={() => preview?.({ type: 'file', api, source: { type: 'session', sessionId: 'fixture' }, workspacePath: '/workspace/hapi', path: 'src/example.ts', line: 80 })}>File preview</button>
+            <button className="block rounded-xl border p-3" onClick={() => preview?.({ type: 'file', api, source: { type: 'native-codex', machineId: 'fixture-machine', sessionId: 'fixture' }, path: 'example.ts' })}>Unavailable file preview</button>
             <button className="block rounded-xl border p-3" onClick={() => preview?.({ type: 'url', url: 'https://example.com/' })}>Web preview</button>
             <MarkdownRenderer standalone content="[Content web link](/content/article)" />
-            <button className="block rounded-xl border p-3" onClick={() => preview?.({ type: 'url', url: '/local-service#fixture', localService: { api, request: { source: { type: 'session', sessionId: 'fixture' }, url: 'http://localhost:3000/' } } })}>Local service preview</button>
+            <button className="block rounded-xl border p-3" onClick={() => preview?.({ type: 'url', url: localServiceLaunchHref('http://localhost:3000/', { type: 'session', sessionId: 'fixture' })!, localService: { api, request: { source: { type: 'session', sessionId: 'fixture' }, url: 'http://localhost:3000/' } } })}>Local service preview</button>
             <button className="block rounded-xl border p-3" onClick={() => setQuestion(true)}>Choose options</button>
             {question ? <QuestionAnswerForm questions={[{ id: 'colors', header: 'Preferences', question: 'Pick colors', multiSelect: true, options: [
                 { value: 'blue', label: 'Blue', description: 'The color of the sky' }, { value: 'green', label: 'Green', description: 'The color of leaves' }

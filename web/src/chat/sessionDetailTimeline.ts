@@ -31,6 +31,24 @@ export type SessionDetailTimeline = {
 }
 
 /**
+ * A tool group is the single Process row rendered in the shared thread.
+ * Thinking is only a pre-process placeholder, so historical groups and a
+ * previous user turn must never suppress the current turn's indicator.
+ */
+export function hasCurrentTurnProcess(
+    blocks: readonly VisibleChatBlock[],
+    options: { minCreatedAt?: number | null } = {}
+): boolean {
+    return blocks.some((block) => (
+        isToolGroupBlock(block)
+        // A child-agent card is its own live surface. Keep the separate
+        // thinking row for it, per the child-agent activity contract.
+        && block.tools.some((tool) => tool.tool.name !== 'CodexAgent')
+        && (options.minCreatedAt == null || block.createdAt >= options.minCreatedAt)
+    ))
+}
+
+/**
  * The session store preserves block identity for unchanged history. Retain the
  * last derived timeline so a stream update only rebuilds the active turn after
  * its last user-message boundary. A user message is a safe separator for both

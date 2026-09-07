@@ -1,6 +1,6 @@
 import * as React from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { X } from 'lucide-react'
+import { Loader2, Play, X } from 'lucide-react'
 import type { CodexLocalSessionQueuedMessage } from '@/types/api'
 import { useTranslation } from '@/lib/use-translation'
 import { QueueIcon, SessionDetailQueueTrigger } from '@/components/SessionDetailQueueTrigger'
@@ -16,6 +16,10 @@ import { QueueIcon, SessionDetailQueueTrigger } from '@/components/SessionDetail
 export function NativeQueuedMessagesBar(props: {
     messages: readonly CodexLocalSessionQueuedMessage[]
     onExpandedChange?: (expanded: boolean) => void
+    paused?: boolean
+    resuming?: boolean
+    resumeDisabled?: boolean
+    onResume?: () => void
 }) {
     const { t } = useTranslation()
     const [open, setOpen] = React.useState(false)
@@ -26,18 +30,18 @@ export function NativeQueuedMessagesBar(props: {
     }, [open, props.onExpandedChange])
 
     React.useEffect(() => {
-        if (props.messages.length === 0) {
+        if (props.messages.length === 0 && !props.paused) {
             setOpen(false)
         }
-    }, [props.messages.length])
+    }, [props.messages.length, props.paused])
 
-    if (props.messages.length === 0) {
+    if (props.messages.length === 0 && !props.paused) {
         return null
     }
 
     // Match the SHAPI queue entry: show the first pending prompt as the quick
     // preview, while the drawer remains the place for the complete list.
-    const preview = props.messages[0]?.text.trim() || t('queuedMessages.emptyPreview')
+    const preview = props.messages[0]?.text.trim() || t(props.paused ? 'recentCodex.control.queuePaused' : 'queuedMessages.emptyPreview')
 
     return (
         <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -46,7 +50,7 @@ export function NativeQueuedMessagesBar(props: {
                     <SessionDetailQueueTrigger
                         testId="native-queued-messages-trigger"
                         label={t('queuedMessages.open', { count: props.messages.length })}
-                        statusLabel={t('queuedMessages.label')}
+                        statusLabel={t(props.paused ? 'recentCodex.control.paused' : 'queuedMessages.label')}
                         preview={preview}
                         count={props.messages.length}
                         open={open}
@@ -73,9 +77,21 @@ export function NativeQueuedMessagesBar(props: {
                                 </span>
                             </div>
                             <Dialog.Description className="mt-0.5 text-xs leading-5 text-[var(--app-hint)]">
-                                {t('recentCodex.queue.drawerDescription')}
+                                {t(props.paused ? 'recentCodex.control.queuePaused' : 'recentCodex.queue.drawerDescription')}
                             </Dialog.Description>
                         </div>
+                        {props.paused && props.onResume ? (
+                            <button
+                                type="button"
+                                aria-label={t('recentCodex.control.resumeQueue')}
+                                title={t('recentCodex.control.resumeQueue')}
+                                disabled={props.resuming || props.resumeDisabled}
+                                onClick={props.onResume}
+                                className="touch-manipulation flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-link)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-40"
+                            >
+                                {props.resuming ? <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Play className="h-5 w-5" aria-hidden="true" />}
+                            </button>
+                        ) : null}
                         <Dialog.Close
                             type="button"
                             aria-label={t('button.close')}

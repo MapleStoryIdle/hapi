@@ -6,6 +6,11 @@ import { queryKeys } from '@/lib/query-keys'
 const GIT_BRANCH_STALE_TIME_MS = 60_000
 const GIT_BRANCH_REFRESH_INTERVAL_MS = 60_000
 
+type MachineGitBranchQueryOptions = {
+    /** Detail headers only need an initial probe; project lists stay live. */
+    refetchInterval?: number | false
+}
+
 /**
  * Read only the branch line from `git status`. The session-list project header
  * deliberately avoids the file-diff requests used by the Files view.
@@ -55,11 +60,13 @@ export function useMachineGitBranch(
     api: ApiClient | null,
     machineId: string | null,
     cwd: string | null,
-    enabled = true
+    enabled = true,
+    options?: MachineGitBranchQueryOptions
 ): {
     branch: string | null
     isWorktree: boolean
     isDirty: boolean
+    isGitRepository: boolean
 } {
     const resolvedMachineId = machineId ?? 'unknown'
     const resolvedCwd = cwd?.trim() ?? ''
@@ -82,7 +89,9 @@ export function useMachineGitBranch(
         },
         enabled: Boolean(enabled && api && machineId && resolvedCwd),
         staleTime: GIT_BRANCH_STALE_TIME_MS,
-        refetchInterval: GIT_BRANCH_REFRESH_INTERVAL_MS,
+        refetchInterval: options?.refetchInterval === undefined
+            ? GIT_BRANCH_REFRESH_INTERVAL_MS
+            : options.refetchInterval,
         refetchIntervalInBackground: false,
         refetchOnWindowFocus: true,
         retry: false
@@ -91,6 +100,7 @@ export function useMachineGitBranch(
     return {
         branch: query.data?.branch ?? null,
         isWorktree: query.data?.isWorktree === true,
-        isDirty: query.data?.isDirty === true
+        isDirty: query.data?.isDirty === true,
+        isGitRepository: query.data !== null && query.data !== undefined
     }
 }

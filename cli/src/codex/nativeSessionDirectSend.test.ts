@@ -12,6 +12,7 @@ import {
     type NativeCodexSessionDirectSendStoredItem,
     type SpawnNativeCodexProcess
 } from './nativeSessionDirectSend'
+import { FileNativeCodexSessionControlStore, type NativeCodexSessionControlState, type NativeCodexSessionControlStore } from './nativeCodexControlStore'
 import { NativeKanbanFeedbackStore } from './nativeKanbanFeedbackStore'
 import type { InitializeParams, ThreadResumeParams, TurnStartParams, TurnStartResponse } from './appServerTypes'
 
@@ -40,14 +41,20 @@ class FakeAppServerClient implements NativeCodexAppServerClient {
     startTurnCalls: TurnStartParams[] = []
     requestCalls: Array<{ method: string; params: unknown }> = []
     disconnectCalls = 0
+    connectError: Error | null = null
     resumeError: Error | null = null
     startTurnError: Error | null = null
     requestError: Error | null = null
     queueAddResponse: unknown | null = null
+    threadReadResponse: unknown = null
+    interruptResponse: unknown = {}
+    interruptError: Error | null = null
+    interruptCalls: Array<{ threadId: string; turnId: string }> = []
     initializeHook: (() => void) | null = null
 
     async connect(): Promise<void> {
         this.connectCalls += 1
+        if (this.connectError) throw this.connectError
     }
 
     async initialize(params: InitializeParams): Promise<unknown> {
@@ -80,7 +87,16 @@ class FakeAppServerClient implements NativeCodexAppServerClient {
                 }
             }
         }
+        if (method === 'thread/read') {
+            return this.threadReadResponse ?? { thread: { id: 'native-thread' }, turns: [] }
+        }
         return {}
+    }
+
+    async interruptTurn(params: { threadId: string; turnId: string }): Promise<Record<string, unknown>> {
+        this.interruptCalls.push(params)
+        if (this.interruptError) throw this.interruptError
+        return this.interruptResponse as Record<string, unknown>
     }
 
     async disconnect(): Promise<void> {
@@ -134,6 +150,565 @@ function writeTranscript(options: {
 }
 
 describe('NativeCodexSessionDirectSender', () => {
+    it('uses localImage for images and keeps other attachment paths inside the native prompt envelope', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-attachment-turn-'))
+        const sessionId = '78345678-1234-4234-8234-123456789000'
+        const client = new FakeAppServerClient()
+        const attachmentIds = ['a'.repeat(32), 'b'.repeat(32)]
+        const resolver = vi.fn(() => ({
+            success: true as const,
+            attachments: [
+                {
+                    id: attachmentIds[0]!,
+                    filename: 'diagram.png',
+                    mimeType: 'image/png',
+                    size: 3,
+                    kind: 'image' as const,
+                    path: '/runner-private/diagram.png'
+                },
+                {
+                    id: attachmentIds[1]!,
+                    filename: 'notes.md',
+                    mimeType: 'text/markdown',
+                    size: 4,
+                    kind: 'file' as const,
+                    path: '/runner-private/notes.md'
+                }
+            ]
+        }))
+        const cleaner = vi.fn()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            { getSummary: () => ({ id: sessionId, title: 'Native', cwd, file: '/not-read.jsonl', modifiedAt: 100, runState: 'idle' }) },
+            () => client,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            resolver,
+            cleaner
+        )
+
+        try {
+            expect(sender.send(
+                sessionId,
+                'Please inspect these files',
+                undefined,
+                'native-attachment-receipt',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                attachmentIds
+            )).toMatchObject({ success: true, status: 'processing' })
+            await flushMicrotasks()
+
+            expect(client.startTurnCalls).toHaveLength(1)
+            const input = client.startTurnCalls[0]!.input
+            expect(input).toContainEqual({ type: 'localImage', path: '/runner-private/diagram.png' })
+            const text = input.find((part) => part.type === 'text')
+            expect(text).toMatchObject({ type: 'text' })
+            if (text?.type === 'text') {
+                expect(text.text).toContain('/runner-private/notes.md')
+                expect(text.text).not.toContain('/runner-private/diagram.png')
+            }
+
+            client.emit('turn/completed', {
+                threadId: sessionId,
+                turn: { id: 'native-turn-1', status: 'completed' }
+            })
+            expect(cleaner).toHaveBeenCalledWith(sessionId, attachmentIds)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('interrupts the exact private app-server turn and waits for its terminal notification', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-control-private-'))
+        const sessionId = '78345678-1234-4234-8234-123456789012'
+        let runState: 'idle' | 'processing' = 'idle'
+        const client = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState
+                })
+            },
+            () => client
+        )
+
+        try {
+            expect(sender.send(sessionId, 'private turn')).toMatchObject({ success: true, status: 'processing' })
+            await flushMicrotasks()
+            expect(client.startTurnCalls).toHaveLength(1)
+
+            await expect(sender.control(
+                sessionId,
+                { action: 'stop', expectedTurnId: 'wrong-turn' },
+                { controlledByCodexSsh: false, activeTurnId: 'wrong-turn' }
+            )).resolves.toMatchObject({ success: false, code: 'turn_changed' })
+            expect(client.interruptCalls).toEqual([])
+
+            await expect(sender.control(
+                sessionId,
+                { action: 'stop', expectedTurnId: 'native-turn-1' },
+                { controlledByCodexSsh: false, activeTurnId: 'native-turn-1' }
+            )).resolves.toMatchObject({
+                success: true,
+                controls: { stoppingTurnId: 'native-turn-1', queuePaused: true }
+            })
+            expect(client.interruptCalls).toEqual([{ threadId: sessionId, turnId: 'native-turn-1' }])
+
+            // A stale idle snapshot or another turn's terminal must not
+            // clear the exact stop marker before native Codex confirms this
+            // turn's own terminal lifecycle.
+            sender.notifyTranscriptLifecycle(sessionId, [{ type: 'task_complete', turnId: 'other-turn' }])
+            expect(sender.getControls(sessionId).stoppingTurnId).toBe('native-turn-1')
+
+            client.emit('turn/completed', {
+                threadId: sessionId,
+                turn: { id: 'native-turn-1', status: 'interrupted' }
+            })
+            runState = 'idle'
+            expect(sender.getControls(sessionId, { controlledByCodexSsh: false, activeTurnId: null })).toMatchObject({
+                queuePaused: true,
+                canStop: false
+            })
+            expect(sender.getControls(sessionId).stoppingTurnId).toBeUndefined()
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('requires a fresh exact shared thread/read before interrupting a Desktop turn', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-control-shared-'))
+        const sessionId = '78345678-1234-4234-8234-123456789013'
+        const client = new FakeAppServerClient()
+        client.threadReadResponse = {
+            thread: { id: 'another-thread' },
+            turns: [{ id: 'desktop-turn', status: 'inProgress' }]
+        }
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Desktop thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'processing'
+                })
+            },
+            null,
+            null,
+            null,
+            async () => true,
+            () => client
+        )
+
+        try {
+            await expect(sender.control(
+                sessionId,
+                { action: 'stop', expectedTurnId: 'desktop-turn' },
+                { controlledByCodexSsh: true, activeTurnId: 'desktop-turn' }
+            )).resolves.toMatchObject({ success: false, code: 'turn_changed' })
+            expect(client.interruptCalls).toEqual([])
+
+            client.threadReadResponse = {
+                thread: { id: sessionId },
+                turns: [{ id: 'desktop-turn', status: 'inProgress' }]
+            }
+            await expect(sender.control(
+                sessionId,
+                { action: 'stop', expectedTurnId: 'desktop-turn' },
+                { controlledByCodexSsh: true, activeTurnId: 'desktop-turn' }
+            )).resolves.toMatchObject({ success: true, controls: { stoppingTurnId: 'desktop-turn' } })
+            expect(client.interruptCalls).toEqual([{ threadId: sessionId, turnId: 'desktop-turn' }])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not manufacture a stopping marker when shared stop setup fails before interrupt bytes', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-control-shared-connect-fail-'))
+        const sessionId = '78345678-1234-4234-8234-123456789016'
+        const client = new FakeAppServerClient()
+        client.connectError = new Error('socket unavailable')
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Desktop thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'processing'
+                })
+            },
+            null,
+            null,
+            null,
+            async () => true,
+            () => client
+        )
+
+        try {
+            await expect(sender.control(
+                sessionId,
+                { action: 'stop', expectedTurnId: 'desktop-turn' },
+                { controlledByCodexSsh: true, activeTurnId: 'desktop-turn' }
+            )).resolves.toMatchObject({ success: false, code: 'control_failed' })
+            expect(client.interruptCalls).toEqual([])
+            expect(sender.getControls(sessionId, { controlledByCodexSsh: true, activeTurnId: 'desktop-turn' })).not.toHaveProperty('stoppingTurnId')
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps a durable pause across restart and applies a captured configuration to the next private turn', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-control-persist-'))
+        const sessionId = '78345678-1234-4234-8234-123456789014'
+        const persisted: NativeCodexSessionControlState[] = [{
+            sessionId,
+            configuration: {},
+            queuePaused: true
+        }]
+        const controlStore: NativeCodexSessionControlStore = {
+            load: () => persisted.map((state) => ({ ...state, configuration: { ...state.configuration } })),
+            save: (states) => {
+                persisted.splice(0, persisted.length, ...states.map((state) => ({ ...state, configuration: { ...state.configuration } })))
+            }
+        }
+        const child = new FakeChildProcess()
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
+        const client = new FakeAppServerClient()
+        let runState: 'idle' | 'processing' = 'idle'
+        const lookup = { getSummary: () => ({
+            id: sessionId,
+            title: 'Native thread',
+            cwd,
+            file: '/not-read.jsonl',
+            modifiedAt: 100,
+            runState
+        }) }
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1,
+            lookup,
+            () => client,
+            null,
+            null,
+            null,
+            null,
+            controlStore
+        )
+
+        try {
+            await expect(sender.control(
+                sessionId,
+                { action: 'configure', configuration: { model: 'gpt-5.6', modelReasoningEffort: 'high', serviceTier: 'fast' } },
+                { controlledByCodexSsh: false, activeTurnId: null }
+            )).resolves.toMatchObject({ success: true })
+            expect(sender.send(sessionId, 'configured message')).toMatchObject({ success: true, status: 'queued' })
+            expect(spawn).not.toHaveBeenCalled()
+            await expect(sender.control(
+                sessionId,
+                { action: 'resumeQueue' },
+                { controlledByCodexSsh: false, activeTurnId: null }
+            )).resolves.toMatchObject({ success: true, controls: { queuePaused: false } })
+            await flushAsyncWork()
+            await flushMicrotasks()
+            expect(client.startTurnCalls[0]).toMatchObject({
+                model: 'gpt-5.6',
+                effort: 'high',
+                serviceTierForTurn: 'priority'
+            })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('carries captured model, effort, and tier into the exec fallback', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-control-exec-config-'))
+        const sessionId = '78345678-1234-4234-8234-123456789017'
+        const child = new FakeChildProcess()
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1_000,
+            { getSummary: () => ({ id: sessionId, title: 'Native', cwd, file: '/not-read', modifiedAt: 1, runState: 'idle' }) }
+        )
+
+        try {
+            await expect(sender.control(
+                sessionId,
+                { action: 'configure', configuration: { model: 'gpt-5.6', modelReasoningEffort: 'high', serviceTier: 'fast' } },
+                { controlledByCodexSsh: false, activeTurnId: null }
+            )).resolves.toMatchObject({ success: true })
+            expect(sender.send(sessionId, 'configured fallback')).toMatchObject({ success: true, status: 'processing' })
+            expect(spawn).toHaveBeenCalledWith([
+                'exec',
+                'resume',
+                '--model',
+                'gpt-5.6',
+                '-c',
+                'model_reasoning_effort="high"',
+                '-c',
+                'service_tier="fast"',
+                '--json',
+                '--skip-git-repo-check',
+                sessionId,
+                'configured fallback'
+            ], cwd)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('resumes an idle queued send after a concurrent configure releases its reservation', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-control-config-queue-'))
+        const sessionId = '78345678-1234-4234-8234-123456789021'
+        const child = new FakeChildProcess()
+        const spawn = vi.fn<SpawnNativeCodexProcess>(() => child as never)
+        let resolveValidation!: (result: { success: true }) => void
+        const validation = new Promise<{ success: true }>((resolve) => {
+            resolveValidation = resolve
+        })
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1_000,
+            { getSummary: () => ({ id: sessionId, title: 'Native', cwd, file: '/not-read', modifiedAt: 1, runState: 'idle' }) },
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            async () => validation
+        )
+
+        try {
+            const configure = sender.control(
+                sessionId,
+                { action: 'configure', configuration: { model: 'gpt-5.6' } },
+                { controlledByCodexSsh: false, activeTurnId: null }
+            )
+            await flushMicrotasks()
+            expect(sender.send(sessionId, 'queued during configure')).toMatchObject({ success: true, status: 'queued' })
+            expect(spawn).not.toHaveBeenCalled()
+
+            resolveValidation({ success: true })
+            await expect(configure).resolves.toMatchObject({ success: true })
+            await flushAsyncWork()
+            expect(spawn).toHaveBeenCalledTimes(1)
+            // The send was accepted before configure committed, so its
+            // immutable receipt correctly keeps the prior empty snapshot.
+            expect(spawn).toHaveBeenCalledWith([
+                'exec', 'resume', '--json', '--skip-git-repo-check', sessionId, 'queued during configure'
+            ], cwd)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not let paused recovery bypass the native queue control gate', () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-control-recovery-paused-'))
+        const sessionId = '78345678-1234-4234-8234-123456789018'
+        const clientMessageId = 'native:paused-recovery'
+        const queued: NativeCodexSessionDirectSendStoredItem[] = [{
+            sessionId,
+            id: clientMessageId,
+            text: 'needs confirmation',
+            deliveryText: 'needs confirmation',
+            queuedAt: 100,
+            recoveryRequired: true,
+            recoveryReason: 'session_status_unknown'
+        }]
+        const controlState: NativeCodexSessionControlState = {
+            sessionId,
+            configuration: {},
+            queuePaused: true
+        }
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1_000,
+            { getSummary: () => ({ id: sessionId, title: 'Native', cwd, file: '/not-read', modifiedAt: 1, runState: 'idle' }) },
+            null,
+            { load: () => [...queued], save: (items) => queued.splice(0, queued.length, ...items) },
+            null,
+            null,
+            null,
+            { load: () => [{ ...controlState }], save: () => {} }
+        )
+
+        try {
+            expect(sender.send(sessionId, 'needs confirmation', undefined, clientMessageId, true)).toMatchObject({
+                success: false,
+                code: 'session_busy'
+            })
+            expect(spawn).not.toHaveBeenCalled()
+            expect(queued[0]).toMatchObject({ id: clientMessageId, recoveryRequired: true })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('fails closed on corrupted native control state and never resumes a saved queue', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-native-control-corrupt-'))
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-control-corrupt-workspace-'))
+        const sessionId = '78345678-1234-4234-8234-123456789019'
+        const controlPath = join(root, 'native-codex-controls.json')
+        writeFileSync(controlPath, '{not-json')
+        const queued: NativeCodexSessionDirectSendStoredItem[] = [{
+            sessionId,
+            id: 'native:restart-queued',
+            text: 'saved queue item',
+            deliveryText: 'saved queue item',
+            queuedAt: 100,
+            recoveryRequired: false
+        }]
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const sender = new NativeCodexSessionDirectSender(
+            spawn,
+            () => 123,
+            1,
+            { getSummary: () => ({ id: sessionId, title: 'Native', cwd, file: '/not-read', modifiedAt: 1, runState: 'idle' }) },
+            null,
+            { load: () => [...queued], save: () => {} },
+            null,
+            null,
+            null,
+            new FileNativeCodexSessionControlStore(controlPath)
+        )
+
+        try {
+            expect(spawn).not.toHaveBeenCalled()
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                queuedMessages: [{ id: 'native:restart-queued' }]
+            })
+            expect(sender.getControls(sessionId)).toMatchObject({
+                canStop: false,
+                canConfigure: false,
+                queuePaused: true,
+                unavailableReason: 'unsupported'
+            })
+            expect(sender.send(sessionId, 'new message')).toMatchObject({ success: false, code: 'launch_failed' })
+            expect(spawn).not.toHaveBeenCalled()
+        } finally {
+            sender.dispose()
+            rmSync(root, { recursive: true, force: true })
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not send an interrupt when persisting the stop reservation fails', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-control-fail-'))
+        const sessionId = '78345678-1234-4234-8234-123456789015'
+        const client = new FakeAppServerClient()
+        const controlStore: NativeCodexSessionControlStore = {
+            load: () => [],
+            save: () => { throw new Error('disk full') }
+        }
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            { getSummary: () => ({ id: sessionId, title: 'Native', cwd, file: '/not-read', modifiedAt: 1, runState: 'idle' }) },
+            () => client,
+            null,
+            null,
+            null,
+            null,
+            controlStore
+        )
+
+        try {
+            expect(sender.send(sessionId, 'hello')).toMatchObject({ success: true })
+            await flushMicrotasks()
+            await expect(sender.control(
+                sessionId,
+                { action: 'stop', expectedTurnId: 'native-turn-1' },
+                { controlledByCodexSsh: false, activeTurnId: 'native-turn-1' }
+            )).resolves.toMatchObject({ success: false, code: 'control_failed' })
+            expect(client.interruptCalls).toEqual([])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('rechecks the private active object if the ownership probe spans turn completion', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-control-private-race-'))
+        const sessionId = '78345678-1234-4234-8234-123456789020'
+        const client = new FakeAppServerClient()
+        let runState: 'idle' | 'processing' = 'idle'
+        let resolveOwnership!: (owned: boolean) => void
+        const ownership = new Promise<boolean>((resolve) => {
+            resolveOwnership = resolve
+        })
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            { getSummary: () => ({ id: sessionId, title: 'Native', cwd, file: '/not-read', modifiedAt: 1, runState }) },
+            () => client,
+            null,
+            null,
+            () => ownership
+        )
+
+        try {
+            expect(sender.send(sessionId, 'race')).toMatchObject({ success: true, status: 'processing' })
+            await flushMicrotasks()
+            const stopPromise = sender.control(
+                sessionId,
+                { action: 'stop', expectedTurnId: 'native-turn-1' },
+                { controlledByCodexSsh: false, activeTurnId: 'native-turn-1' }
+            )
+            await flushMicrotasks()
+            client.emit('turn/completed', { threadId: sessionId, turn: { id: 'native-turn-1', status: 'completed' } })
+            runState = 'idle'
+            resolveOwnership(false)
+            await expect(stopPromise).resolves.toMatchObject({ success: false, code: 'turn_changed' })
+            expect(client.interruptCalls).toEqual([])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('submits an idle SSH-controlled ordinary message with queue/add while archive stays locked', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-controlled-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789099'

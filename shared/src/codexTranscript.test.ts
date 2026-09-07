@@ -18,6 +18,7 @@ import {
     normalizeCodexCustomToolOutput,
     readLocalCodexSessionSummary
 } from './codexTranscript'
+import { formatNativeCodexAttachmentPrompt } from './nativeCodexAttachments'
 
 const originalCodexHome = process.env.CODEX_HOME
 
@@ -888,6 +889,42 @@ describe('getCodexTranscriptTailSummary', () => {
         ])
 
         expect(summary.lastUserMessage).toBe('Open the selected application.')
+    })
+
+    it('keeps native attachment metadata but strips the Runner-private path', () => {
+        const privatePath = '/Users/example/.shapi/native-codex-attachments/aabbccddeeff00112233445566778899/content'
+        const prompt = formatNativeCodexAttachmentPrompt('Please review this file.', [{
+            id: 'aabbccddeeff00112233445566778899',
+            filename: 'review.md',
+            mimeType: 'text/markdown',
+            size: 42,
+            kind: 'file',
+            path: privatePath
+        }], { includeImagePaths: true })
+        const record = JSON.stringify({
+            type: 'response_item',
+            payload: {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: prompt }]
+            }
+        })
+        const accumulator = createCodexTranscriptImportAccumulator()
+        appendCodexTranscriptImportLines(accumulator, [record])
+
+        expect(getCodexTranscriptTailSummary([record]).lastUserMessage).toBe('Please review this file.')
+        expect(accumulator.messages).toMatchObject([{
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'Please review this file.',
+                attachments: [{
+                    id: 'aabbccddeeff00112233445566778899',
+                    filename: 'review.md'
+                }]
+            }
+        }])
+        expect(JSON.stringify(accumulator.messages)).not.toContain(privatePath)
     })
 })
 

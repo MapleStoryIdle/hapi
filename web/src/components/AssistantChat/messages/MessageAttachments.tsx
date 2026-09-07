@@ -143,8 +143,12 @@ export function MessageAttachments(props: { attachments: AttachmentMetadata[] })
     const { attachments } = props
     if (!attachments || attachments.length === 0) return null
 
-    const images = attachments.filter(a => isPreviewableImageMimeType(a.mimeType))
-    const files = attachments.filter(a => !isPreviewableImageMimeType(a.mimeType))
+    // Native Codex stores the source file exclusively on its Runner. Its
+    // opaque handle is intentionally not readable through SHAPI's managed
+    // upload endpoint, so render it as a normal file card even for images.
+    const isNativeCodexAttachment = (attachment: AttachmentMetadata) => attachment.path.startsWith('native-codex:')
+    const images = attachments.filter(a => !isNativeCodexAttachment(a) && isPreviewableImageMimeType(a.mimeType))
+    const files = attachments.filter(a => isNativeCodexAttachment(a) || !isPreviewableImageMimeType(a.mimeType))
 
     return (
         <div className="mt-2 flex flex-col gap-2">

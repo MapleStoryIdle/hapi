@@ -2,7 +2,8 @@ import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/
 import { randomUUID } from 'node:crypto'
 import { MAX_UPLOAD_CHUNK_BYTES } from '@hapi/protocol'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
-import { LOCAL_SERVICE_RPC, type LocalServiceTunnelRequest, type LocalServiceTunnelResponse } from '@hapi/protocol/localServices'
+import { LOCAL_SERVICE_RPC, type LocalServiceTunnelRequest } from '@hapi/protocol/localServices'
+import { openLocalServiceSocketTunnel, type LocalServiceTunnel } from '../localServices/socketTransport'
 import type {
     CodexLocalSessionComposerCapabilitiesRpcResponse,
     ArchiveCodexLocalSessionRpcResponse,
@@ -13,7 +14,10 @@ import type {
     CodexLocalSessionsRpcResponse,
     DiscardCodexLocalSessionMessageRpcResponse,
     NativeCodexDeliveryPolicy,
+    NativeCodexAttachment,
     NativeKanbanFeedbackReviewGuard,
+    NativeCodexSessionControlAction,
+    NativeCodexSessionControlResponse,
     SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import type {
@@ -22,7 +26,11 @@ import type {
     NativeKanbanFeedbackDeleteRequest,
     NativeKanbanFeedbackDeleteResponse,
     NativeKanbanFeedbackStageRequest,
-    NativeKanbanFeedbackStageResponse
+    NativeKanbanFeedbackStageResponse,
+    NativeCodexAttachmentDeleteRequest,
+    NativeCodexAttachmentDeleteResponse,
+    NativeCodexAttachmentStageRequest,
+    NativeCodexAttachmentStageResponse
 } from '@hapi/protocol'
 import type {
     CodexSubscriptionLimitsResponse,
@@ -37,6 +45,7 @@ import type {
     FileReadResponse,
     GeneratedImageResponse,
     GitBranchResponse,
+    GitBranchesResponse,
     LocalPreviewHttpRequest,
     LocalPreviewHttpResponse,
     LocalPreviewProbeRequest,
@@ -47,6 +56,10 @@ import type {
     OpenVikingContextReadResponse,
     OpenVikingStatusResponse,
     ListDirectoryResponse,
+    MachineGitBranchCreateRequest,
+    MachineGitBranchCommitRequest,
+    MachineGitBranchPushRequest,
+    MachineGitBranchSwitchRequest,
     OpencodeModelsResponse,
     OpencodeModelSummary,
     OpencodeReasoningEffortResponse,
@@ -65,6 +78,8 @@ import type { RpcRegistry } from '../socket/rpcRegistry'
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
 const MODEL_LIST_RPC_TIMEOUT_MS = 120_000
 const SIDE_SESSION_FORK_RPC_TIMEOUT_MS = 90_000
+const GIT_BRANCH_MUTATION_RPC_TIMEOUT_MS = 45_000
+const GIT_BRANCH_REMOTE_RPC_TIMEOUT_MS = 75_000
 const UPLOAD_CANCEL_TIMEOUT_MS = 5_000
 
 /**
@@ -90,6 +105,7 @@ export class RpcTargetMissingError extends Error {
 
 export type RpcCommandResponse = CommandResponse
 export type RpcGitBranchResponse = GitBranchResponse
+export type RpcGitBranchesResponse = GitBranchesResponse
 export type RpcReadFileResponse = FileReadResponse
 export type RpcGeneratedImageResponse = GeneratedImageResponse
 export type RpcUploadFileResponse = UploadFileResponse
@@ -120,6 +136,8 @@ export type RpcDiscardCodexLocalSessionMessageResponse = DiscardCodexLocalSessio
 export type RpcSendCodexLocalSessionMessageResponse = SendCodexLocalSessionMessageRpcResponse
 export type RpcNativeKanbanFeedbackStageResponse = NativeKanbanFeedbackStageResponse
 export type RpcNativeKanbanFeedbackDeleteResponse = NativeKanbanFeedbackDeleteResponse
+export type RpcNativeCodexAttachmentStageResponse = NativeCodexAttachmentStageResponse
+export type RpcNativeCodexAttachmentDeleteResponse = NativeCodexAttachmentDeleteResponse
 export type RpcForkCodexSideSessionResponse =
     | { type: 'success'; childCodexThreadId: string; parentCodexThreadId: string }
     | { type: 'error'; message: string; code?: string }
@@ -343,6 +361,17 @@ export class RpcGateway {
         }) as RpcCodexLocalSessionStatusResponse
     }
 
+    async controlCodexLocalSession(
+        machineId: string,
+        sessionId: string,
+        action: NativeCodexSessionControlAction
+    ): Promise<NativeCodexSessionControlResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ControlCodexLocalSession, {
+            sessionId,
+            ...action
+        }) as NativeCodexSessionControlResponse
+    }
+
     async getCodexLocalSessionComposerCapabilities(
         machineId: string,
         sessionId: string
@@ -360,7 +389,8 @@ export class RpcGateway {
         clientMessageId?: string,
         forceRecovery?: boolean,
         deliveryPolicy?: NativeCodexDeliveryPolicy,
-        reviewGuard?: NativeKanbanFeedbackReviewGuard
+        reviewGuard?: NativeKanbanFeedbackReviewGuard,
+        attachmentIds?: readonly string[]
     ): Promise<RpcSendCodexLocalSessionMessageResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.SendCodexLocalSessionMessage, {
             sessionId,
@@ -369,7 +399,8 @@ export class RpcGateway {
             ...(clientMessageId === undefined ? {} : { clientMessageId }),
             ...(forceRecovery === true ? { forceRecovery: true } : {}),
             ...(deliveryPolicy === undefined || deliveryPolicy === 'default' ? {} : { deliveryPolicy }),
-            ...(deliveryPolicy === 'untrusted-review' && reviewGuard ? { reviewGuard } : {})
+            ...(deliveryPolicy === 'untrusted-review' && reviewGuard ? { reviewGuard } : {}),
+            ...(attachmentIds?.length ? { attachmentIds: [...attachmentIds] } : {})
         }) as RpcSendCodexLocalSessionMessageResponse
     }
 
@@ -417,6 +448,42 @@ export class RpcGateway {
         return { success: false, error: typeof record.error === 'string' ? record.error : 'Could not delete native feedback stage' }
     }
 
+    async stageNativeCodexAttachment(
+        machineId: string,
+        request: NativeCodexAttachmentStageRequest
+    ): Promise<RpcNativeCodexAttachmentStageResponse> {
+        const socket = this.getSocketForMachine(machineId, 'native-codex-attachment:stage')
+        const response = await socket.timeout(DEFAULT_RPC_TIMEOUT_MS).emitWithAck('native-codex-attachment:stage', request) as NativeCodexAttachmentStageResponse | unknown
+        if (!response || typeof response !== 'object') return { success: false, error: 'Unexpected native attachment stage response' }
+        const record = response as Record<string, unknown>
+        const attachment = record.attachment
+        if (
+            record.success === true
+            && attachment
+            && typeof attachment === 'object'
+            && typeof (attachment as Record<string, unknown>).id === 'string'
+            && typeof (attachment as Record<string, unknown>).filename === 'string'
+            && typeof (attachment as Record<string, unknown>).mimeType === 'string'
+            && typeof (attachment as Record<string, unknown>).size === 'number'
+            && ((attachment as Record<string, unknown>).kind === 'image' || (attachment as Record<string, unknown>).kind === 'file')
+        ) {
+            return { success: true, attachment: attachment as NativeCodexAttachment }
+        }
+        return { success: false, error: typeof record.error === 'string' ? record.error : 'Could not stage native attachment' }
+    }
+
+    async deleteNativeCodexAttachment(
+        machineId: string,
+        request: NativeCodexAttachmentDeleteRequest
+    ): Promise<RpcNativeCodexAttachmentDeleteResponse> {
+        const socket = this.getSocketForMachine(machineId, 'native-codex-attachment:delete')
+        const response = await socket.timeout(DEFAULT_RPC_TIMEOUT_MS).emitWithAck('native-codex-attachment:delete', request) as NativeCodexAttachmentDeleteResponse | unknown
+        if (!response || typeof response !== 'object') return { success: false, error: 'Unexpected native attachment delete response' }
+        const record = response as Record<string, unknown>
+        if (record.success === true && typeof record.deleted === 'boolean') return { success: true, deleted: record.deleted }
+        return { success: false, error: typeof record.error === 'string' ? record.error : 'Could not delete native attachment' }
+    }
+
     async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {
         const result = await this.machineRpc(machineId, RPC_METHODS.PathExists, { paths }) as RpcPathExistsResponse | unknown
         if (!result || typeof result !== 'object') {
@@ -437,6 +504,53 @@ export class RpcGateway {
 
     async getMachineGitBranch(machineId: string, cwd: string): Promise<RpcGitBranchResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.GetMachineGitBranch, { cwd }) as RpcGitBranchResponse
+    }
+
+    async getMachineGitBranches(machineId: string, cwd: string): Promise<RpcGitBranchesResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.GetMachineGitBranches, { cwd }) as RpcGitBranchesResponse
+    }
+
+    async switchMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchSwitchRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.machineRpc(
+            machineId,
+            RPC_METHODS.SwitchMachineGitBranch,
+            request,
+            GIT_BRANCH_MUTATION_RPC_TIMEOUT_MS
+        ) as RpcGitBranchesResponse
+    }
+
+    async createMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchCreateRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.CreateMachineGitBranch, request) as RpcGitBranchesResponse
+    }
+
+    async commitMachineGitChanges(
+        machineId: string,
+        request: MachineGitBranchCommitRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.machineRpc(
+            machineId,
+            RPC_METHODS.CommitMachineGitChanges,
+            request,
+            GIT_BRANCH_REMOTE_RPC_TIMEOUT_MS
+        ) as RpcGitBranchesResponse
+    }
+
+    async pushMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchPushRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.machineRpc(
+            machineId,
+            RPC_METHODS.PushMachineGitBranch,
+            request,
+            GIT_BRANCH_REMOTE_RPC_TIMEOUT_MS
+        ) as RpcGitBranchesResponse
     }
 
     async readMachineFile(machineId: string, cwd: string, path: string): Promise<RpcReadFileResponse> {
@@ -683,8 +797,12 @@ export class RpcGateway {
         return await this.machineRpc(machineId, RPC_METHODS.LocalPreviewCheck, request) as RpcLocalPreviewProbeResponse
     }
 
-    async openLocalServiceTunnel(machineId: string, request: LocalServiceTunnelRequest): Promise<LocalServiceTunnelResponse> {
-        return await this.machineRpc(machineId, LOCAL_SERVICE_RPC, request) as LocalServiceTunnelResponse
+    async openLocalServiceTunnel(machineId: string, request: LocalServiceTunnelRequest, namespace: string): Promise<LocalServiceTunnel> {
+        const method = `${machineId}:${LOCAL_SERVICE_RPC}`
+        const socketId = this.rpcRegistry.getSocketIdForMethod(method)
+        const socket = socketId ? this.io.of('/cli').sockets.get(socketId) : undefined
+        if (!socket) throw new RpcTargetMissingError(method, 'socket-disconnected')
+        return await openLocalServiceSocketTunnel(socket, machineId, namespace, request)
     }
 
     async proxyLocalPreviewRequest(machineId: string, request: LocalPreviewHttpRequest): Promise<RpcLocalPreviewHttpResponse> {

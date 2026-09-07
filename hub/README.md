@@ -51,12 +51,14 @@ not a SHAPI-owned domain. Self-hosters should set `HAPI_RELAY_API` and
 
 ### Optional local service access
 
-To open Runner-local HTTP(S) links from session messages, configure the dedicated
-Runner-to-Hub SSH endpoint and choose a preview mode. Path mode
+To open Runner-local HTTP(S) links from session messages, upgrade both the Hub
+and Runner, then choose a preview mode. Path mode
 (`HAPI_LOCAL_SERVICE_MODE=path`) uses this Hub's existing HTTP/WebSocket listener
 at `/preview/<leaseId>/<grantCapability>/...`; it needs no preview domain or
-gateway port `8321`. The SSH channel still needs a Runner-reachable
-`HAPI_LOCAL_SERVICE_SSH_HOST`, bind address, and port (default `8320`).
+gateway port `8321`. All traffic uses the Runner's existing authenticated
+Socket.IO connection to the Hub. No SSH endpoint, extra public port, firewall
+rule, or additional domain is needed. Old `HAPI_LOCAL_SERVICE_SSH_*` settings
+are unused and can be removed.
 The capability URL is temporary and must not be shared or logged; it is never
 a HAPI JWT.
 

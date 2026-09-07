@@ -203,6 +203,65 @@ describe('ApiClient error mapping', () => {
         )
     })
 
+    it('uses the machine Git branch picker endpoints', async () => {
+        const payload = {
+            success: true,
+            currentBranch: 'main',
+            isDirty: false,
+            changedFileCount: 0,
+            additions: 0,
+            deletions: 0,
+            localBranches: [{ ref: 'main', name: 'main' }],
+            remoteBranches: [{ ref: 'origin/main', name: 'main' }]
+        }
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+            .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+            .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+            .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+            .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getMachineGitBranches('machine / one', '/work/project name')).resolves.toEqual(payload)
+        await expect(api.switchMachineGitBranch('machine / one', {
+            cwd: '/work/project name',
+            target: { kind: 'remote', ref: 'origin/main' },
+            confirmDirty: true
+        })).resolves.toEqual(payload)
+        await expect(api.createMachineGitBranch('machine / one', {
+            cwd: '/work/project name',
+            name: 'feature/new'
+        })).resolves.toEqual(payload)
+        await expect(api.commitMachineGitChanges('machine / one', {
+            cwd: '/work/project name',
+            message: 'Add branch controls'
+        })).resolves.toEqual(payload)
+        await expect(api.pushMachineGitBranch('machine / one', {
+            cwd: '/work/project name'
+        })).resolves.toEqual(payload)
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe(
+            '/api/machines/machine%20%2F%20one/git-branches?cwd=%2Fwork%2Fproject%20name'
+        )
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/machines/machine%20%2F%20one/git-branches/switch')
+        expect((fetchMock.mock.calls[1]?.[1] as RequestInit).method).toBe('POST')
+        expect((fetchMock.mock.calls[1]?.[1] as RequestInit).body).toBe(JSON.stringify({
+            cwd: '/work/project name',
+            target: { kind: 'remote', ref: 'origin/main' },
+            confirmDirty: true
+        }))
+        expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/machines/machine%20%2F%20one/git-branches')
+        expect(fetchMock.mock.calls[3]?.[0]).toBe('/api/machines/machine%20%2F%20one/git-branches/commit')
+        expect((fetchMock.mock.calls[3]?.[1] as RequestInit).body).toBe(JSON.stringify({
+            cwd: '/work/project name',
+            message: 'Add branch controls'
+        }))
+        expect(fetchMock.mock.calls[4]?.[0]).toBe('/api/machines/machine%20%2F%20one/git-branches/push')
+        expect((fetchMock.mock.calls[4]?.[1] as RequestInit).body).toBe(JSON.stringify({
+            cwd: '/work/project name'
+        }))
+    })
+
     it('reads a native Codex file through its owning runner with encoded identifiers', async () => {
         fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
             success: true,

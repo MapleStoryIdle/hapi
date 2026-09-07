@@ -305,6 +305,7 @@ export type CodexLocalSessionStatusResponse =
     | {
         success: true
         status: CodexLocalSessionRunState
+        controls?: import('@hapi/protocol/codexSessionControl').NativeCodexSessionControls
         activeTurnId?: string
         activeClientMessageId?: string
         deliveryReceipts?: Array<{ id: string; state: 'accepted' | 'delivered' }>

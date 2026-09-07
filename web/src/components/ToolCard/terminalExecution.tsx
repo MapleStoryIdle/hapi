@@ -1,6 +1,5 @@
 import { useLayoutEffect, useRef } from 'react'
 import { TerminalTranscript } from './TerminalTranscript'
-import { DetailCopyButton } from '@/components/ui/DetailCopyButton'
 import type { ToolCallBlock } from '@/chat/types'
 import { isObject } from '@hapi/protocol'
 import { CodeBlock } from '@/components/CodeBlock'
@@ -21,7 +20,6 @@ export type TerminalExecutionDetails = {
 
 export type TerminalExecutionState = 'pending' | 'running' | 'completed' | 'failed'
 
-export type TerminalExecutionDrawerTab = 'transcript' | 'details'
 
 export function isTerminalExecutionTool(toolName: string): boolean {
     return TERMINAL_EXECUTION_TOOL_NAMES.has(toolName)
@@ -170,26 +168,16 @@ function terminalOutputFallback(
 type TerminalExecutionDetailProps = {
     block: ToolCallBlock
     surface?: 'dialog' | 'drawer'
-    drawerTab?: TerminalExecutionDrawerTab
-    panelId?: string
-    labelledBy?: string
-    hidden?: boolean
 }
 
 function TerminalExecutionDrawerPanel(props: {
     details: TerminalExecutionDetails
     state: TerminalExecutionState
-    tab: TerminalExecutionDrawerTab
-    panelId?: string
-    labelledBy?: string
-    hidden?: boolean
-    t: (key: string, params?: Record<string, string | number>) => string
 }) {
     const rootRef = useRef<HTMLDivElement>(null)
     const savedScroll = useRef(0)
     const followOutput = useRef(false)
     useLayoutEffect(() => {
-        if (props.hidden) return
         const root = rootRef.current
         const body = root?.closest<HTMLElement>('[data-chat-drawer-body]')
         if (!root || !body) return
@@ -202,42 +190,23 @@ function TerminalExecutionDrawerPanel(props: {
         body.addEventListener('scroll', onScroll, { passive: true })
         // Observe only the active panel. Keep reading position unless the user is at the bottom.
         const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
-            if (props.tab === 'transcript' && followOutput.current) body.scrollTop = body.scrollHeight
+            if (followOutput.current) body.scrollTop = body.scrollHeight
         })
         observer?.observe(root)
         return () => { body.removeEventListener('scroll', onScroll); observer?.disconnect() }
-    }, [props.hidden, props.tab])
+    }, [])
 
     useLayoutEffect(() => {
-        if (props.hidden || props.tab !== 'transcript' || !followOutput.current) return
+        if (!followOutput.current) return
         const body = rootRef.current?.closest<HTMLElement>('[data-chat-drawer-body]')
         // Update before the browser delivers queued scroll events for the old
         // content height, which would otherwise incorrectly disable following.
         if (body) body.scrollTop = body.scrollHeight
-    }, [props.hidden, props.tab, props.details.command, props.details.stdout, props.details.stderr])
+    }, [props.details.command, props.details.stdout, props.details.stderr, props.details.exitCode])
 
     return (
-        <div ref={rootRef} aria-labelledby={props.labelledBy} className="relative isolate pb-1"
-            data-terminal-execution-detail data-terminal-execution-panel={props.tab}
-            hidden={props.hidden} id={props.panelId} role="tabpanel" tabIndex={props.hidden ? -1 : 0}>
-            {props.tab === 'transcript' ? <TerminalTranscript details={props.details} state={props.state} /> : (
-                <dl className="chat-sheet-group divide-y divide-[var(--app-border)] px-3" data-terminal-execution-environment>
-                    {props.details.cwd ? <div className="chat-detail-field">
-                        <dt>{props.t('terminal.execution.workingDirectory')}</dt>
-                        <dd className="flex min-w-0 items-center gap-1">
-                            <span className="min-w-0 flex-1 [overflow-wrap:anywhere] font-mono">{props.details.cwd}</span>
-                            <DetailCopyButton value={props.details.cwd} label={props.t('terminal.execution.copyDirectory')} />
-                        </dd>
-                    </div> : null}
-                    {props.details.exitCode !== null ? <div className="chat-detail-field" data-terminal-execution-exit-code>
-                        <dt>{props.t('terminal.execution.exitCodeLabel')}</dt>
-                        <dd className="font-mono">{props.t('terminal.execution.exitCode', { code: props.details.exitCode })}</dd>
-                    </div> : null}
-                    {!props.details.cwd && props.details.exitCode === null ? <div className="py-3 text-sm text-[var(--app-hint)]">
-                        {props.t('terminal.execution.noDetails')}
-                    </div> : null}
-                </dl>
-            )}
+        <div ref={rootRef} className="relative isolate pb-1" data-terminal-execution-detail data-terminal-execution-panel="transcript">
+            <TerminalTranscript details={props.details} state={props.state} />
         </div>
     )
 }
@@ -254,11 +223,6 @@ export function TerminalExecutionDetail(props: TerminalExecutionDetailProps) {
             <TerminalExecutionDrawerPanel
                 details={details}
                 state={state}
-                tab={props.drawerTab ?? 'transcript'}
-                panelId={props.panelId}
-                labelledBy={props.labelledBy}
-                hidden={props.hidden}
-                t={t}
             />
         )
     }

@@ -1,4 +1,4 @@
-/** Real HTTP → authenticated Hub → machine RPC → Runner → SSH → HTTP smoke check.
+/** Real HTTP → authenticated Hub → existing machine socket → Runner → HTTP smoke check.
  * Uses disposable state and loopback ports; never starts an agent or touches production.
  * Run from the repository root: bun scripts/dev/check-local-services.ts
  */
@@ -37,7 +37,6 @@ async function eventually<T>(read: () => Promise<T | undefined>, label: string):
 }
 
 const hubPort = await unusedPort()
-const sshPort = await unusedPort()
 const previewPort = await unusedPort()
 const hubUrl = `http://127.0.0.1:${hubPort}`
 const env: Record<string, string> = {
@@ -47,9 +46,6 @@ const env: Record<string, string> = {
     HAPI_API_URL: hubUrl, HAPI_PUBLIC_URL: hubUrl,
     HAPI_LISTEN_HOST: '127.0.0.1', HAPI_LISTEN_PORT: String(hubPort),
     ...(pathMode ? { HAPI_LOCAL_SERVICE_MODE: 'path' } : { HAPI_LOCAL_SERVICE_ORIGIN: `http://{id}.localhost:${previewPort}` }),
-    HAPI_LOCAL_SERVICE_SSH_HOST: '127.0.0.1',
-    HAPI_LOCAL_SERVICE_SSH_BIND: '127.0.0.1',
-    HAPI_LOCAL_SERVICE_SSH_PORT: String(sshPort),
     HAPI_LOCAL_SERVICE_GATEWAY_PORT: String(previewPort),
     TELEGRAM_NOTIFICATION: 'false'
 }
@@ -148,7 +144,7 @@ try {
             })
             await Promise.race([echoed, new Promise<never>((_resolve, reject) => { const timer = setTimeout(() => reject(new Error('WebSocket check timed out')), 5_000); timer.unref() })])
         } finally { ws.close() }
-        console.log(`PASS ${pathMode ? 'path' : 'domain'} ${source.type}: authenticated HTTP → machine RPC → SSH → service; ticket isolation; URL preservation; reuse; WebSocket`)
+        console.log(`PASS ${pathMode ? 'path' : 'domain'} ${source.type}: authenticated HTTP → existing machine socket → service; ticket isolation; URL preservation; reuse; WebSocket`)
     }
     console.log('PASS complete. No agent was launched; production and existing sessions were untouched.')
 } catch (error) {

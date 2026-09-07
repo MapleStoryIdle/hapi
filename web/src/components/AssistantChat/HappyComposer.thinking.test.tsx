@@ -18,32 +18,28 @@ function tree(props: ComponentProps<typeof HappyComposer>) {
     return <QueryClientProvider client={new QueryClient()}><I18nProvider><Harness {...props} /></I18nProvider></QueryClientProvider>
 }
 
-describe('composer thinking independent of metadata bar', () => {
-    it.each(['claude', 'codex', 'cursor'])('shows %s thinking with the same hidden metadata bar used by SessionChat', (agentFlavor) => {
+describe('thinking belongs to the thread, not the composer', () => {
+    it.each(['claude', 'codex', 'cursor'])('does not reserve thinking space for %s', (agentFlavor) => {
         render(tree({ active: true, thinking: true, showStatusBar: false, agentFlavor }))
-        const indicator = screen.getByTestId('session-thinking-indicator')
-        expect(indicator.parentElement).toHaveClass('justify-start')
-        expect(indicator).toHaveAttribute('data-tone', 'warm')
+        expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
+        expect(screen.queryByTestId('composer-thinking-slot')).toBeNull()
         expect(screen.getByRole('textbox')).toBeInTheDocument()
     })
     it('does not duplicate thinking when the full status bar is enabled', () => {
         render(tree({ active: true, thinking: true, showStatusBar: true, agentFlavor: 'codex' }))
-        expect(screen.getAllByTestId('session-thinking-indicator')).toHaveLength(1)
+        expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
     })
-    it('keeps an empty fixed-height slot on permission wait, offline, voice connection, and idle', () => {
+    it('does not add a slot on permission wait, offline, voice connection, or idle', () => {
         const props = { active: true, thinking: true, showStatusBar: false }
         const view = render(tree(props))
-        expect(screen.getByTestId('session-thinking-indicator')).toBeInTheDocument()
-        const slot = screen.getByTestId('composer-thinking-slot')
-        expect(slot).toHaveClass('h-6')
+        expect(screen.queryByTestId('composer-thinking-slot')).toBeNull()
         for (const override of [
             { agentState: { requests: { q: { tool: 'AskUserQuestion', arguments: {}, createdAt: null } } } },
             { active: false }, { voiceStatus: 'connecting' as const }, { thinking: false }
         ]) {
             view.rerender(tree({ ...props, ...override }))
             expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()
-            expect(screen.getByTestId('composer-thinking-slot')).toBe(slot)
-            expect(slot).toBeEmptyDOMElement()
+            expect(screen.queryByTestId('composer-thinking-slot')).toBeNull()
         }
     })
 })

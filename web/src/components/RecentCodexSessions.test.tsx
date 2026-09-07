@@ -858,7 +858,7 @@ describe('RecentCodexSessions', () => {
         }
     })
 
-    it('renders priority-ordered Kanban groups, one completed count, and a quiet thinking animation', async () => {
+    it('renders priority-ordered Kanban groups without a completed heading and preserves thinking animation', async () => {
         const api = createApi()
         api.getCodexSessions = vi.fn(async () => ({
             success: true as const,
@@ -972,12 +972,10 @@ describe('RecentCodexSessions', () => {
         expect(processingGroup?.querySelector('[data-kanban-card-time]')).toBeNull()
         const completedGroup = board.querySelector('[data-kanban-group="completed"]')
         expect(completedGroup).toHaveTextContent('Completed Codex task')
-        const completedDivider = completedGroup?.querySelector('[data-kanban-completed-divider]')
-        expect(completedDivider).toHaveAttribute('role', 'separator')
-        expect(completedDivider).toHaveTextContent('Completed·1')
-        expect(completedDivider).toHaveClass('justify-center')
-        expect(completedDivider?.querySelectorAll('[data-kanban-divider-line]')).toHaveLength(0)
-        expect(completedDivider?.querySelector('[data-motion-icon="completed"]')).not.toBeNull()
+        expect(completedGroup?.querySelector('[data-kanban-completed-divider]')).toBeNull()
+        expect(completedGroup?.querySelector('h2')).toBeNull()
+        expect(completedGroup?.querySelector('[data-kanban-date-group] h3')).not.toBeNull()
+        expect(completedGroup?.querySelector('.cupertino-kanban-date-groups')).not.toHaveClass('mt-3')
         expect(board.querySelectorAll('[data-kanban-card-column]')).toHaveLength(4)
         for (const column of board.querySelectorAll('[data-kanban-card-column]')) {
             expect(column).not.toHaveClass('pl-5')

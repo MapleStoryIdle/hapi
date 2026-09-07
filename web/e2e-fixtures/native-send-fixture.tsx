@@ -9,19 +9,37 @@ import { HappyComposer } from '../src/components/AssistantChat/HappyComposer'
 import { AssistantRuntimeProvider } from '@assistant-ui/react'
 import { useHappyRuntime } from '../src/lib/assistant-runtime'
 import { I18nProvider } from '../src/lib/i18n-context'
+import { ToastProvider } from '../src/lib/toast-context'
+import type { NativeCodexSessionControlAction, NativeCodexSessionControls } from '@hapi/protocol/codexSessionControl'
 
 let acceptedClientMessageId: string | undefined
+const controlsDemo = new URLSearchParams(location.search).has('controls')
+let nativeControls: NativeCodexSessionControls = {
+    canStop: true, canConfigure: true, configuration: {}, queuePaused: false
+}
 const api = {
     getCodexSessionSnapshot: async () => ({
         success: true, session: { id: 'fixture', cwd: '/workspace/shapi', title: 'Native send check', modifiedAt: Date.now(), model: 'gpt-5.6', modelReasoningEffort: 'high' },
         messages: [{ id: 'original', createdAt: 1, content: { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'Ready for your next message.' } } } }],
         page: { limit: 50, hasMore: false, nextBefore: null }, version: { runnerEpoch: 'fixture', revision: 1 }, revision: 1,
-        status: { success: true, status: 'idle', queuedMessages: [],
+        status: { success: true, status: controlsDemo && nativeControls.canStop ? 'processing' : 'idle', queuedMessages: [],
+            ...(controlsDemo ? { controls: nativeControls, activeTurnId: nativeControls.canStop ? 'fixture-turn' : undefined } : {}),
             ...(acceptedClientMessageId ? { deliveryReceipts: [{ id: acceptedClientMessageId, state: 'accepted' }] } : {})
         }, timing: { cache: 'hit', durationMs: 0 }
     }),
     getCodexSessionComposerCapabilities: async () => ({ success: true, skills: [], commands: [] }),
     getMachineCodexSubscriptionLimits: async () => ({ success: true, limits: null }),
+    getMachineCodexModels: async () => ({ success: true, models: [
+        { id: 'gpt-5.6', displayName: 'GPT-5.6', isDefault: true, defaultReasoningEffort: 'high', supportedReasoningEfforts: ['low', 'medium', 'high'], serviceTiers: ['priority', 'fast'] },
+        { id: 'gpt-5.6-mini', displayName: 'GPT-5.6 Mini (demo)', isDefault: false, defaultReasoningEffort: 'medium', supportedReasoningEfforts: ['low', 'medium', 'high'], serviceTiers: [] }
+    ] }),
+    controlCodexSession: async (_sessionId: string, _machineId: string, action: NativeCodexSessionControlAction) => {
+        // Browser-only fixture: no runner connection and no live turn interruption.
+        if (action.action === 'configure') nativeControls = { ...nativeControls, configuration: { ...nativeControls.configuration, ...action.configuration } }
+        if (action.action === 'stop') nativeControls = { ...nativeControls, canStop: false, queuePaused: true }
+        if (action.action === 'resumeQueue') nativeControls = { ...nativeControls, queuePaused: false }
+        return { success: true, controls: nativeControls }
+    },
     sendCodexSessionMessage: async (_sessionId: string, payload: { clientMessageId: string }) => {
         if (new URLSearchParams(location.search).has('ack')) acceptedClientMessageId = payload.clientMessageId
         throw new ApiError('timeout', 408, 'request_timeout')
@@ -59,4 +77,4 @@ function Demo() {
         <nav className="flex flex-wrap gap-3">{(['launching', 'matching', 'connected', null] as const).map((value) => <button className="min-h-11 rounded-xl border px-3" key={value ?? 'reply'} onClick={() => setPhase(value)}>{value ?? 'Reply received'}</button>)}</nav>
     </main>
 }
-ReactDOM.createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><I18nProvider><Demo /></I18nProvider></QueryClientProvider>)
+ReactDOM.createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><I18nProvider><ToastProvider><Demo /></ToastProvider></I18nProvider></QueryClientProvider>)

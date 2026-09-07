@@ -238,6 +238,8 @@ export interface TurnStartParams {
      * `null` selects the standard tier explicitly; omit to leave it unchanged.
      */
     serviceTier?: string | null;
+    /** Codex 0.153+ turn-scoped tier override: `priority` (Fast) or `default`. */
+    serviceTierForTurn?: 'priority' | 'default';
     effort?: ReasoningEffort;
     summary?: ReasoningSummary;
     personality?: string;
@@ -259,7 +261,6 @@ export interface TurnInterruptParams {
 }
 
 export interface TurnInterruptResponse {
-    ok: boolean;
     [key: string]: unknown;
 }
 

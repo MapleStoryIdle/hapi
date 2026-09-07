@@ -36,6 +36,24 @@ const attachments: AttachmentMetadata[] = [
 ]
 
 describe('MessageAttachments', () => {
+    it('renders native Codex images as local file cards without requesting a managed-upload blob', () => {
+        const getUploadedFileBlob = vi.fn()
+        render(
+            <HappyChatProvider value={makeContext(getUploadedFileBlob)}>
+                <MessageAttachments attachments={[{
+                    id: 'a'.repeat(32),
+                    filename: 'diagram.png',
+                    mimeType: 'image/png',
+                    size: 3,
+                    path: `native-codex:${'a'.repeat(32)}`
+                }]} />
+            </HappyChatProvider>
+        )
+
+        expect(screen.getByText('diagram.png')).toBeInTheDocument()
+        expect(getUploadedFileBlob).not.toHaveBeenCalled()
+    })
+
     it('opens uploaded images as one message-level gallery', async () => {
         const getUploadedFileBlob = vi.fn(async (sessionId: string, path: string) => {
             return new Blob([path], { type: 'image/png' })

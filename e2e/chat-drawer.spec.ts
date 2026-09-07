@@ -1,7 +1,98 @@
 import { expect, test, devices, type Page } from '@playwright/test'
+import { localServiceUnavailable } from '../hub/src/localServices/unavailable'
 
 test.use({ ...devices['iPhone 13'], browserName: 'chromium' })
 const fixture = '/e2e-fixtures/chat-drawer-fixture.html'
+
+test('terminal input and output share a compact reading surface', async ({ page }, info) => {
+    await page.goto(fixture + '?long-command')
+    await page.getByRole('button', { name: 'Terminal detail', exact: true }).tap()
+    const drawer = page.getByTestId('terminal-execution-drawer')
+    await expect(drawer).toBeVisible()
+    await expect(drawer).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+    await expect(drawer.getByRole('tab')).toHaveCount(0)
+    const titleRow = await drawer.getByRole('heading').first().boundingBox()
+    const directoryRow = await drawer.locator('[data-terminal-directory]').boundingBox()
+    const statusRow = await drawer.locator('[data-terminal-status]').boundingBox()
+    expect(directoryRow!.y).toBeGreaterThanOrEqual(titleRow!.y + titleRow!.height)
+    expect(statusRow!.y).toBeGreaterThanOrEqual(directoryRow!.y + directoryRow!.height)
+    expect(Math.abs(titleRow!.x - directoryRow!.x)).toBeLessThan(1)
+    const durationRow = await drawer.locator('[data-terminal-duration]').boundingBox()
+    expect(Math.abs(titleRow!.x - durationRow!.x)).toBeLessThan(1)
+    const icons = drawer.locator('[data-terminal-header-icon]')
+    await expect(icons).toHaveCount(3)
+    const iconBounds = await icons.evaluateAll(elements => elements.map(el => {
+        const { x, width, height } = el.getBoundingClientRect()
+        return { x, width, height }
+    }))
+    for (const icon of iconBounds) {
+        expect(icon.x).toBe(iconBounds[0].x)
+        expect(icon.width).toBe(20)
+        expect(icon.height).toBe(20)
+    }
+    await expect(drawer.locator('[data-terminal-status]')).toHaveText('2.3s')
+    await expect(drawer.getByRole('img', { name: 'Completed' })).toBeVisible()
+    const surface = drawer.locator('.terminal-transcript-surface')
+    await expect(surface).toHaveCount(1)
+    await expect(surface.locator(':scope > .terminal-transcript-section')).toHaveCount(2)
+    const command = surface.locator('[data-terminal-execution-input] pre')
+    const output = surface.locator('[data-terminal-execution-output] pre')
+    for (const code of [command, output]) {
+        await expect(code).toHaveCSS('font-size', '13px')
+        await expect(code).toHaveCSS('line-height', '20px')
+        await expect(code).toHaveCSS('white-space', 'pre')
+    }
+    expect(await command.evaluate(el => getComputedStyle(el).color)).toBe(await output.evaluate(el => getComputedStyle(el).color))
+    const labels = surface.locator('.terminal-transcript-label')
+    expect(await labels.nth(0).evaluate(el => getComputedStyle(el).color)).toBe(await labels.nth(1).evaluate(el => getComputedStyle(el).color))
+    await expect(surface.locator('[data-terminal-execution-output]')).toHaveCSS('border-top-width', '1px')
+    await drawer.getByRole('button', { name: 'Wrap lines' }).tap()
+    for (const code of [command, output]) await expect(code).toHaveCSS('white-space', 'pre-wrap')
+    await expect(surface.locator('[data-terminal-execution-input]').getByRole('button', { name: 'Copy command' })).toBeInViewport()
+    await expect(surface.locator('[data-terminal-execution-output]').getByRole('button', { name: 'Copy output' })).toBeVisible()
+    const viewport = await page.evaluate(() => window.visualViewport!.height)
+    expect((await drawer.boundingBox())!.height).toBeLessThanOrEqual(viewport * .7 + 1)
+    await page.screenshot({ path: info.outputPath('terminal-unified-mobile.png') })
+})
+
+for (const language of ['zh-CN', 'en']) {
+    test(`unreachable local service stays in the drawer and retries in place (${language})`, async ({ page, context }, info) => {
+        const zh = language === 'zh-CN'
+        await page.addInitScript((locale) => localStorage.setItem('hapi-lang', locale), language)
+        let attempts = 0
+        await page.route('**/__shapi_local/embed/**', async (route) => {
+            attempts++
+            if (attempts > 1) {
+                await route.fulfill({ contentType: 'text/html', body: '<h1>Local service restored</h1>' })
+                return
+            }
+            const response = localServiceUnavailable(new Request(route.request().url(), { headers: {
+                'sec-fetch-dest': 'iframe', 'accept-language': language
+            } }), [new URL(page.url()).origin])
+            await route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() })
+        })
+        await page.goto(fixture)
+        await page.waitForLoadState('networkidle')
+        const originalUrl = page.url()
+        await page.getByRole('button', { name: 'Local service preview', exact: true }).tap()
+        const drawer = page.getByTestId('chat-preview-drawer')
+        const frame = drawer.frameLocator('iframe')
+        await expect(frame.getByRole('alert')).toHaveText(zh ? '无法连接服务器' : 'Unable to connect to the server')
+        await expect(drawer.getByRole('button', { name: zh ? '复制链接' : 'Copy link' })).toBeInViewport()
+        await expect(drawer.getByRole('link')).toHaveCount(0)
+        await expect(frame.getByRole('link')).toHaveCount(0)
+        const retry = frame.getByRole('button', { name: zh ? '重新连接' : 'Try again' })
+        await expect(retry).toBeInViewport()
+        expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+        expect(attempts).toBe(1)
+        if (zh) await page.screenshot({ path: info.outputPath('local-service-unavailable-zh.png') })
+        await retry.tap()
+        await expect(frame.getByRole('heading', { name: 'Local service restored' })).toBeVisible()
+        expect(attempts).toBe(2)
+        expect(page.url()).toBe(originalUrl)
+        expect(context.pages()).toHaveLength(1)
+    })
+}
 
 async function dragHandle(page: Page, distance: number) {
     const handle = page.locator('[data-question-drawer-handle]').last()
@@ -51,7 +142,7 @@ test('content-sized sheet caps at 70%, scrolls inside, dismisses and restores la
     await expect(long).toBeHidden()
 })
 
-test('terminal tabs, file target line and sandboxed URL fallback remain usable', async ({ page }) => {
+test('terminal metadata, file target line and sandboxed URL preview remain usable', async ({ page }) => {
     await page.route('https://example.com/', (route) => route.fulfill({ contentType: 'text/html', body: '<h1>External content</h1>' }))
     await page.goto(fixture)
     await page.waitForLoadState('networkidle')
@@ -59,7 +150,6 @@ test('terminal tabs, file target line and sandboxed URL fallback remain usable',
     const terminal = page.getByTestId('terminal-execution-drawer')
     await expect(terminal).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
     expect((await terminal.boundingBox())!.height).toBeLessThanOrEqual(844 * .7 + 1)
-    await terminal.getByRole('tab', { name: 'Details' }).tap()
     await expect(terminal.getByText('/workspace/hapi', { exact: true })).toBeVisible()
     await terminal.getByRole('button', { name: 'Close' }).tap()
     await expect(terminal).toBeHidden()
@@ -71,7 +161,9 @@ test('terminal tabs, file target line and sandboxed URL fallback remain usable',
     await page.getByRole('button', { name: 'Web preview', exact: true }).tap()
     await expect(preview.locator('iframe')).toBeVisible()
     await expect(preview.locator('iframe')).not.toHaveAttribute('sandbox', /allow-same-origin|allow-top-navigation/)
-    await expect(preview.getByRole('link', { name: 'Open in browser' })).toBeInViewport()
+    await expect(preview.getByRole('button', { name: 'Copy link' })).toBeInViewport()
+    await expect(preview.getByRole('link', { name: 'Open in browser' })).toHaveCount(0)
+    await expect(preview.getByText(/Some sites do not allow/)).toHaveCount(0)
     expect((await preview.boundingBox())!.height).toBeLessThanOrEqual(844 * .7 + 1)
 })
 
@@ -128,23 +220,68 @@ test('desktop keeps centered details and no background recession', async ({ page
     await expect(page.locator('[data-chat-drawer-background]')).toHaveCSS('transform', 'none')
 })
 
-test('local service opens directly inside the drawer without an extra click or new page', async ({ page, context }) => {
-    await page.route('**/__shapi_local/embed/**', (route) => route.fulfill({
-        contentType: 'text/html',
-        body: '<!doctype html><h1>My local website</h1><p>Running on the conversation computer.</p>' + '<p>Scrollable local content</p>'.repeat(70)
-    }))
+test('local service opens directly and copies its reconnectable link without opening a new page', async ({ page, context }, info) => {
+    await page.addInitScript(() => {
+        localStorage.setItem('hapi-lang', 'zh-CN')
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true, value: { writeText: async (text: string) => { sessionStorage.setItem('copied-preview-link', text) } }
+        })
+    })
+    await page.route('**/__shapi_local/embed/**', (route) => {
+        const url = new URL(route.request().url())
+        if (url.pathname.endsWith('/favicon.svg')) return route.fulfill({
+            contentType: 'image/svg+xml',
+            body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><rect width="20" height="20" rx="4" fill="#2574dd"/></svg>'
+        })
+        const icon = new URL('./favicon.svg', url).href
+        return route.fulfill({
+            contentType: 'text/html',
+            body: '<!doctype html><title>My local website</title><h1>My local website</h1><p>Running on the conversation computer.</p>'
+                + '<p>Scrollable local content</p>'.repeat(70)
+                + `<script>parent.postMessage({type:'shapi:preview-metadata',title:document.title,icon:${JSON.stringify(icon)}},${JSON.stringify(url.origin)})</script>`
+        })
+    })
     await page.goto(fixture)
     await page.waitForLoadState('networkidle')
     const pages = context.pages().length
     await page.getByRole('button', { name: 'Local service preview', exact: true }).tap()
     const drawer = page.getByTestId('chat-preview-drawer')
     await expect(drawer.frameLocator('iframe').getByRole('heading', { name: 'My local website' })).toBeVisible()
+    await expect(drawer.getByRole('heading', { name: 'My local website' })).toBeVisible()
+    await expect(drawer.locator('img')).toBeVisible()
+    await expect.poll(() => drawer.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0)
+    await expect(drawer.getByText(/网站功能受预览限制/)).toHaveCount(0)
+    await expect(drawer.getByRole('link', { name: '在浏览器打开' })).toHaveCount(0)
+    const copy = drawer.getByRole('button', { name: '复制链接' })
+    await expect(copy).toHaveText('')
+    await expect(copy.locator('svg')).toBeVisible()
+    await expect(copy).toBeInViewport()
+    expect((await copy.boundingBox())!.width).toBeGreaterThanOrEqual(44)
+    expect((await copy.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+    await copy.tap()
+    const copied = new URL((await page.evaluate(() => sessionStorage.getItem('copied-preview-link')))!)
+    expect(copied.origin).toBe(new URL(page.url()).origin)
+    expect(copied.pathname).toBe('/local-service')
+    const params = new URLSearchParams(copied.hash.slice(1))
+    expect(params.get('url')).toBe('http://localhost:3000/')
+    expect(JSON.parse(params.get('source')!)).toEqual({ type: 'session', sessionId: 'fixture' })
+    expect(copied.pathname).not.toContain('/embed/')
     expect(context.pages()).toHaveLength(pages)
     expect(page.url()).toContain(fixture)
     const height = await page.evaluate(() => window.visualViewport!.height)
     expect((await drawer.boundingBox())!.height).toBeLessThanOrEqual(height * .7 + 1)
-    await expect(drawer.getByRole('button', { name: 'Close' })).toBeVisible()
-    await drawer.getByRole('button', { name: 'Close' }).tap()
+    await expect(drawer.getByRole('button', { name: '关闭' })).toBeVisible()
+    await page.screenshot({ path: info.outputPath('local-web-preview-copy-zh.png') })
+    const frame = await drawer.locator('iframe').elementHandle().then((element) => element!.contentFrame())
+    const longTitle = 'OpenViking Studio — 项目知识库和本地文件管理 '.repeat(3)
+    await frame!.evaluate(({ title, origin }) => parent.postMessage({ type: 'shapi:preview-metadata', title }, origin), {
+        title: longTitle, origin: new URL(page.url()).origin
+    })
+    await expect(drawer.getByRole('heading', { name: longTitle.trim() })).toHaveCSS('text-overflow', 'ellipsis')
+    expect(await drawer.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    await expect(copy).toBeInViewport()
+    await expect(drawer.getByRole('button', { name: '关闭' })).toBeInViewport()
+    await drawer.getByRole('button', { name: '关闭' }).tap()
     await expect(drawer).toBeHidden()
 })
 
@@ -365,12 +502,9 @@ test('long edit has one vertical scroller and desktop terminal shares one inset'
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.getByRole('button', { name: 'Terminal detail' }).click()
     const terminal = page.getByTestId('terminal-execution-drawer')
-    const tabs = await terminal.getByRole('tablist').boundingBox()
     const header = await terminal.locator('header').boundingBox()
     const content = await terminal.locator('[data-chat-drawer-body]').boundingBox()
-    expect(Math.abs(tabs!.x - header!.x)).toBeLessThan(1)
     expect(Math.abs(content!.x - header!.x)).toBeLessThan(1)
-    await terminal.getByRole('tab', { name: 'Details' }).click()
     await page.screenshot({ path: info.outputPath('terminal-desktop-ios.png') })
 })
 
@@ -380,12 +514,21 @@ test('compact terminal combines command/output, preserves reading position and s
     await page.getByRole('button', { name: 'Terminal detail' }).tap()
     const drawer = page.getByTestId('terminal-execution-drawer')
     await expect(drawer).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
-    await expect(drawer.getByRole('tab')).toHaveCount(2)
-    await expect(drawer.getByRole('tab', { name: 'Command & output' })).toHaveAttribute('aria-selected', 'true')
-    const tabs = drawer.getByRole('tablist')
-    expect((await tabs.boundingBox())!.height).toBe(44)
+    await expect(drawer.getByRole('tab')).toHaveCount(0)
     const command = drawer.locator('[data-terminal-execution-input] pre')
     await expect(command).toBeInViewport()
+    const commandPanel = drawer.locator('[data-terminal-execution-input]')
+    const outputPanel = drawer.locator('[data-terminal-execution-output]')
+    const assertCommandStyle = async () => {
+        expect(await commandPanel.evaluate((el) => getComputedStyle(el).backgroundColor))
+            .toBe(await outputPanel.evaluate((el) => getComputedStyle(el).backgroundColor))
+        await expect(commandPanel).toHaveCSS('border-inline-start-width', '0px')
+        await expect(outputPanel).toHaveCSS('border-top-width', '1px')
+        await expect(command.locator('code')).toHaveCSS('font-family', /monospace/)
+        expect(await command.locator('code').textContent()).toMatch(/^cat \/workspace\//)
+        await expect(page.locator('body')).toHaveJSProperty('scrollWidth', 390)
+    }
+    await assertCommandStyle()
     await expect(drawer.locator('[data-terminal-execution-output]')).toBeVisible()
     expect(await command.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
     await drawer.getByRole('button', { name: 'Wrap lines' }).tap()
@@ -403,17 +546,15 @@ test('compact terminal combines command/output, preserves reading position and s
     await body.evaluate((el) => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')) })
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-terminal-lines', { detail: 140 })))
     await expect.poll(() => body.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(32)
-    await drawer.getByRole('tab', { name: 'Details' }).tap()
     await expect(drawer.getByText('/workspace/hapi', { exact: true })).toBeVisible()
-    await drawer.getByRole('tab', { name: 'Command & output' }).tap()
     await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBeGreaterThan(200)
     await body.evaluate((el) => { el.scrollTop = 0 })
     await page.screenshot({ path: info.outputPath('terminal-compact-light.png') })
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+    await assertCommandStyle()
     await page.screenshot({ path: info.outputPath('terminal-compact-dark.png') })
     expect((await drawer.boundingBox())!.height).toBeLessThanOrEqual(844 * .7 + 1)
     await page.emulateMedia({ reducedMotion: 'reduce' })
-    expect(await tabs.evaluate((el) => getComputedStyle(el, '::before').transitionDuration)).toBe('0s')
 })
 
 test('compact terminal remains readable with Chinese labels', async ({ page }, info) => {
@@ -422,13 +563,24 @@ test('compact terminal remains readable with Chinese labels', async ({ page }, i
     await page.getByRole('button', { name: 'Terminal detail' }).tap()
     const drawer = page.getByTestId('terminal-execution-drawer')
     await expect(drawer).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
-    await expect(drawer.getByRole('tab')).toHaveText(['命令与输出', '详情'])
+    await expect(drawer.getByRole('tab')).toHaveCount(0)
     await expect(drawer.locator('[data-terminal-execution-input]')).toHaveText(/bun run test:web/)
-    await expect(drawer.getByRole('button', { name: '复制输出' })).toBeInViewport()
+    const copyOutput = drawer.locator('[data-terminal-execution-output]').getByRole('button', { name: '复制输出' })
+    await expect(copyOutput).toBeInViewport()
+    for (const name of ['自动换行', '复制命令', '复制输出']) {
+        const button = drawer.getByRole('button', { name })
+        await expect(button).toHaveText('')
+        await expect(button.locator('svg')).toBeVisible()
+        const bounds = await button.boundingBox()
+        expect(bounds!.width).toBeGreaterThanOrEqual(44)
+        expect(bounds!.height).toBeGreaterThanOrEqual(44)
+    }
     await expect(page.locator('body')).toHaveJSProperty('scrollWidth', 390)
     await page.screenshot({ path: info.outputPath('terminal-compact-zh.png') })
-    await drawer.getByRole('tab', { name: '详情', exact: true }).tap()
     await expect(drawer.getByText('/workspace/hapi', { exact: true })).toBeInViewport()
+    const copyDirectory = drawer.getByRole('button', { name: '复制目录' })
+    await expect(copyDirectory).toHaveText('')
+    await expect(copyDirectory.locator('svg')).toBeVisible()
     await page.screenshot({ path: info.outputPath('terminal-details-zh.png') })
 })
 

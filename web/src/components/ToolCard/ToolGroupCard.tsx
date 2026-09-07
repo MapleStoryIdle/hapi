@@ -8,7 +8,7 @@ import { FILE_MUTATION_DIALOG_CLASS_NAME, ToolDetailDialogContent, ToolDetailDia
 import { getTerminalExecutionToolState, isTerminalExecutionTool } from '@/components/ToolCard/terminalExecution'
 import { TerminalExecutionDrawer } from '@/components/ToolCard/TerminalExecutionDrawer'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
-import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandSummary } from '@/components/ToolCard/terminalCommandIntent'
+import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandSummary, joinTerminalSummaryParts } from '@/components/ToolCard/terminalCommandIntent'
 import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutationDetail'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
 import { getCodexAgentReasoningEffort, getCodexAgentSummary, parseCodexSpawnAgentResult } from '@/components/ToolCard/codexAgents'
@@ -213,13 +213,26 @@ export function formatToolGroupCompactTitle(
     now: number,
     t: (key: string, params?: Record<string, string | number>) => string
 ): string {
+    const label = getToolGroupCompactLabel(block, t)
+    const duration = formatCompactDuration(getToolGroupDurationMs(block, now))
+    if (!isToolGroupActive(block) && label === t('toolGroup.compact.processed', { duration: '' }).trim()) {
+        return [label, duration].filter(Boolean).join(' ')
+    }
+    return joinTerminalSummaryParts([
+        label,
+        duration
+    ])
+}
+
+function getToolGroupCompactLabel(
+    block: ToolGroupBlock,
+    t: (key: string, params?: Record<string, string | number>) => string
+): string {
     const active = isToolGroupActive(block)
-    const durationMs = getToolGroupDurationMs(block, now)
-    const renderedDuration = formatCompactDuration(durationMs)
     const latestLiveBlock = getLatestLiveProcessBlock(block)
     if (latestLiveBlock?.kind === 'agent-text' || latestLiveBlock?.kind === 'agent-reasoning') {
         const activity = formatLiveProcessText(latestLiveBlock.text)
-        if (activity) return `${activity} ${renderedDuration}`.trim()
+        if (activity) return activity
     }
 
     const liveTool = latestLiveBlock?.kind === 'tool-call' ? latestLiveBlock : null
@@ -230,8 +243,8 @@ export function formatToolGroupCompactTitle(
         : getToolGroupSkillName(block)
     if (skillName) {
         return active
-            ? t('toolGroup.compact.skill.processing', { skill: skillName, duration: renderedDuration }).trim()
-            : t('toolGroup.compact.skill.processed', { skill: skillName, duration: renderedDuration }).trim()
+            ? t('toolGroup.compact.skill.processing', { skill: skillName, duration: '' }).trim()
+            : t('toolGroup.compact.skill.processed', { skill: skillName, duration: '' }).trim()
     }
 
     const latestActiveTool = active
@@ -243,7 +256,7 @@ export function formatToolGroupCompactTitle(
     if (displayTool) {
         const invocationTitle = getInputStringAny(displayTool.tool.input, ['title'])?.trim()
         if (invocationTitle) {
-            return `${formatCompactRawText(invocationTitle)} ${renderedDuration}`.trim()
+            return formatCompactRawText(invocationTitle)
         }
 
         if (isTerminalExecutionTool(displayTool.tool.name)) {
@@ -253,8 +266,7 @@ export function formatToolGroupCompactTitle(
                 : terminalIntent
                     ? getTerminalCommandDisplayTitle(displayTool.tool.input, t)
                     : getTerminalCommandSummary(displayTool.tool.input)
-            if (terminalLabel) return `${terminalLabel} ${renderedDuration}`.trim()
-            return `${t('terminal.execution.title')} ${renderedDuration}`.trim()
+            return terminalLabel || t('terminal.execution.title')
         }
 
         const status = active ? 'processing' : 'processed'
@@ -264,7 +276,7 @@ export function formatToolGroupCompactTitle(
             if (fileTarget) {
                 return t(`toolGroup.compact.single.${status}.mutationTarget`, {
                     target: formatCompactRawText(fileTarget),
-                    duration: renderedDuration
+                    duration: ''
                 }).trim()
             }
 
@@ -272,12 +284,12 @@ export function formatToolGroupCompactTitle(
             if (command) {
                 return t(`toolGroup.compact.single.${status}.commandFallback`, {
                     command: formatCompactRawText(command),
-                    duration: renderedDuration
+                    duration: ''
                 }).trim()
             }
         }
         if (kind !== 'other') {
-            return t(`toolGroup.compact.single.${status}.${kind}`, { duration: renderedDuration }).trim()
+            return t(`toolGroup.compact.single.${status}.${kind}`, { duration: '' }).trim()
         }
 
         const presentation = getToolPresentation({
@@ -289,13 +301,13 @@ export function formatToolGroupCompactTitle(
             metadata: null
         }, t)
         if (presentation.title) {
-            return `${formatCompactRawText(presentation.title)} ${renderedDuration}`.trim()
+            return formatCompactRawText(presentation.title)
         }
     }
 
     return active
-        ? t('toolGroup.compact.processing', { duration: renderedDuration }).trim()
-        : t('toolGroup.compact.processed', { duration: renderedDuration }).trim()
+        ? t('toolGroup.compact.processing', { duration: '' }).trim()
+        : t('toolGroup.compact.processed', { duration: '' }).trim()
 }
 
 function CompactDetailBlock(props: { block: Exclude<NonNullable<ToolGroupBlock['detailBlocks']>[number], ToolCallBlock> }) {
@@ -819,7 +831,7 @@ export function ToolGroupCard(props: {
     const primaryExpansionStateKey = getPrimaryToolGroupExpansionStateKey(props.block)
     const usesManagedExpansionState = ctx.setToolGroupExpansionState !== undefined
     const defaultExpansionState = getDefaultToolGroupExpansionState(
-        props.block.defaultOpen || (!props.block.forceCompact && (ctx.toolGroupRunActive === true || hasActiveTools))
+        props.block.defaultOpen || (!props.block.forceCompact && hasActiveTools)
     )
     const expansionState = resolveToolGroupExpansionState(
         props.block,
@@ -860,6 +872,20 @@ export function ToolGroupCard(props: {
         }
         ctx.setToolGroupExpansionState?.(primaryExpansionStateKey, defaultExpansionState)
     }, [ctx, defaultExpansionState, expansionStateKeys, primaryExpansionStateKey, usesManagedExpansionState])
+
+    // A live process becomes a historical Processed card as the next snapshot
+    // arrives. Close only automatic expansion; an explicit user choice stays.
+    useEffect(() => {
+        if (!usesManagedExpansionState || defaultExpansionState !== 'auto-closed') {
+            return
+        }
+        const autoOpenKeys = expansionStateKeys.filter((key) => (
+            ctx.toolGroupExpansionStates?.[key] === 'auto-open'
+        ))
+        for (const key of autoOpenKeys) {
+            ctx.setToolGroupExpansionState?.(key, 'auto-closed')
+        }
+    }, [ctx, defaultExpansionState, expansionStateKeys, usesManagedExpansionState])
 
     function clearRetryTimer() {
         if (retryTimerRef.current === null) {

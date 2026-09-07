@@ -51,15 +51,24 @@ export type OpenLocalServiceResponse = { url: string; expiresAt: number }
 
 export const LocalServiceTunnelRequestSchema = z.object({
     id: z.string().regex(/^[a-f0-9]{32}$/),
-    secret: z.string().regex(/^[a-f0-9]{64}$/),
-    sshHost: z.string().min(1).max(253),
-    sshPort: z.number().int().min(1).max(65_535),
-    remotePort: z.number().int().min(1).max(65_535),
-    hostFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     targetUrl: z.string().max(8_192).refine((value) => parseLocalServiceUrl(value) !== null),
     expiresAt: z.number().int().positive()
 }).strict()
 export type LocalServiceTunnelRequest = z.infer<typeof LocalServiceTunnelRequestSchema>
 export type LocalServiceTunnelResponse = { ok: true } | { ok: false; error: string }
 
-export const LOCAL_SERVICE_RPC = 'localService.openTunnel'
+// A new method prevents an old SSH-only Runner from silently accepting this protocol.
+export const LOCAL_SERVICE_RPC = 'localService.openSocketTunnel'
+
+export const LOCAL_SERVICE_CHUNK_BYTES = 64 * 1024
+export const LOCAL_SERVICE_FRAME_TIMEOUT_MS = 30_000
+export type LocalServiceFrame =
+    | { type: 'open'; id: string; leaseId: string }
+    | { type: 'data'; id: string; seq: number; bytes: Uint8Array }
+    | { type: 'end'; id: string; seq: number }
+    | { type: 'close'; id: string }
+    | { type: 'release'; leaseId: string }
+export type LocalServiceFrameHandler = (frame: unknown, ack: (accepted: boolean) => void) => void
+export interface LocalServiceTransportEvents {
+    'local-service:frame': LocalServiceFrameHandler
+}

@@ -26,6 +26,22 @@ for (const variant of [
         await expect(label).toHaveCSS('animation-name', variant.reducedMotion ? 'none' : 'session-thinking-shimmer')
         await expect(indicator.locator('svg')).toHaveCSS('animation-name', variant.reducedMotion ? 'none' : 'session-thinking-breathe')
         await expect(group.locator('[data-kanban-group-count], [data-kanban-card-time], .tabular-nums')).toHaveCount(0)
+        await expect(page.locator('[data-kanban-completed-divider]')).toHaveCount(0)
+        await expect(page.locator('[data-kanban-group="completed"] h2')).toHaveCount(0)
+        const recentIcon = page.locator('[data-kanban-group-icon="recent"]')
+        await expect(recentIcon).toHaveCSS('width', '14px')
+        await expect(recentIcon).toHaveCSS('height', '14px')
+        for (const icon of await page.locator('[data-kanban-date-emoji], .session-thinking__glyph').all()) {
+            await expect(icon).toHaveCSS('width', '14px')
+            await expect(icon).toHaveCSS('height', '14px')
+        }
+        const dateHeadings = page.locator('[data-kanban-date-group] h3')
+        await expect(dateHeadings).toHaveCount(2)
+        for (const heading of await page.locator('.cupertino-kanban-heading h2, .cupertino-kanban-date-heading, .session-thinking__label').all()) {
+            await expect(heading).toHaveCSS('font-size', '15px')
+            await expect(heading).toHaveCSS('font-weight', '600')
+            await expect(heading).toHaveCSS('line-height', '24px')
+        }
         const before = await Promise.all((await cards.all()).map((card) => card.boundingBox()))
         const indicatorBefore = await indicator.boundingBox()
         await expect(label).toHaveText(variant.locale === 'en' ? 'Thinking' : '思考中')

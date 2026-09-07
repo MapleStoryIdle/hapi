@@ -2,17 +2,11 @@ import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type Server } from 'node:http'
 import { connect, type AddressInfo } from 'node:net'
 import { gzipSync, gunzipSync } from 'node:zlib'
-import type { LocalServiceTunnelRequest, LocalServiceTunnelResponse } from '@hapi/protocol/localServices'
+import type { LocalServiceTunnelRequest } from '@hapi/protocol/localServices'
 import { LOCAL_SERVICE_ACCESS_MS, LocalServiceManager, validateLocalServiceOrigin } from './manager'
 import { createLocalServiceGateway, localServiceRequestHeaders, localServiceResponseHeaders } from './gateway'
 
-// Runtime integration with the actual Runner implementation; not part of Hub's TS root.
-const { LocalServiceTunnels } = await import(new URL('../../../cli/src/runner/localServiceTunnels.ts', import.meta.url).href) as {
-    LocalServiceTunnels: new (blockedPorts?: () => number[]) => {
-        open: (request: LocalServiceTunnelRequest) => Promise<LocalServiceTunnelResponse>
-        dispose: () => void
-    }
-}
+import { localServiceSocketFixture } from './socketTransport.fixture'
 
 const cleanup: Array<() => Promise<void> | void> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
@@ -55,18 +49,19 @@ async function fixture(options: { onUploadChunk?: () => void } = {}) {
         response.end(JSON.stringify({ path: incoming.url, headers: incoming.headers, body }))
     })
     const localPort = await listen(local)
-    const runner = new LocalServiceTunnels()
+    const transport = await localServiceSocketFixture('machine-1')
+    const runner = transport.runner
     let opens = 0
     const issued: LocalServiceTunnelRequest[] = []
     let online = true
     const manager = new LocalServiceManager({
-        originTemplate: 'http://{id}.localhost', appUrl: 'http://localhost:5173', sshHost: '127.0.0.1', sshListenHost: '127.0.0.1', sshPort: 0,
+        originTemplate: 'http://{id}.localhost', appUrl: 'http://localhost:5173',
         canAccessMachine: (identity, machineId) => online && identity.namespace === 'owner' && machineId === 'machine-1',
-        openTunnel: (_machineId, input) => { opens += 1; issued.push(input); return runner.open(input) }
+        openTunnel: (_machineId, input) => { opens += 1; issued.push(input); return transport.openTunnel(_machineId, input) }
     })
     await manager.start()
     cleanup.push(() => manager.stop())
-    cleanup.push(() => runner.dispose())
+    cleanup.push(() => transport.close())
     const gateway = createLocalServiceGateway(manager)
     cleanup.push(() => { gateway.stop(true) })
     const port = gateway.port!
@@ -83,7 +78,7 @@ async function fixture(options: { onUploadChunk?: () => void } = {}) {
     return { manager, runner, port, open, openUrl, enter, issued, get opens() { return opens }, offline: () => { online = false } }
 }
 
-describe('local service SSH access', () => {
+describe('local service access over the existing Hub socket', () => {
     it('keeps isolated-origin workers available while refusing service workers', async () => {
         const f = await fixture()
         const auth = await f.enter((await f.open()).url)
@@ -182,12 +177,10 @@ describe('local service SSH access', () => {
         }
     })
 
-    it('rejects reuse of an already claimed SSH credential', async () => {
+    it('rejects reuse of an already registered lease identity', async () => {
         const f = await fixture()
         await f.open()
-        const second = new LocalServiceTunnels()
-        cleanup.push(() => second.dispose())
-        expect((await second.open(f.issued[0])).ok).toBe(false)
+        expect((await f.runner.open(f.issued[0])).ok).toBe(false)
     })
 
     it('revokes access when the Runner goes offline', async () => {
@@ -237,11 +230,11 @@ describe('local service SSH access', () => {
         cleanup.push(() => client.close())
         const message = await new Promise<string>((resolve, reject) => {
             const timeout = setTimeout(() => reject(new Error('WebSocket timed out')), 3_000)
-            client.onopen = () => client.send(binary ? Buffer.from('hello through SSH') : 'hello through SSH')
+            client.onopen = () => client.send(binary ? Buffer.from('hello through Hub') : 'hello through Hub')
             client.onmessage = (event) => { clearTimeout(timeout); resolve(typeof event.data === 'string' ? event.data : Buffer.from(event.data as ArrayBuffer).toString()) }
             client.onerror = () => { clearTimeout(timeout); reject(new Error('WebSocket failed')) }
         })
-        expect(message).toBe('hello through SSH')
+        expect(message).toBe('hello through Hub')
         expect(client.protocol).toBe('shapi-test')
         const closed = new Promise<void>((resolve) => { client.onclose = () => resolve() })
         f.manager.closeLease(auth.host.split('.')[0])

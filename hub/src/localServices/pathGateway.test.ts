@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test'
 import { gzipSync } from 'node:zlib'
-import type { LocalServiceTunnelRequest, LocalServiceTunnelResponse } from '@hapi/protocol/localServices'
 import { LocalServiceManager } from './manager'
 import { createLocalServiceHandler, type LocalServiceHandler, type LocalServiceWebSocket } from './gateway'
 
-const { LocalServiceTunnels } = await import(new URL('../../../cli/src/runner/localServiceTunnels.ts', import.meta.url).href) as {
-    LocalServiceTunnels: new () => { open: (request: LocalServiceTunnelRequest) => Promise<LocalServiceTunnelResponse>; dispose: () => void }
-}
+import { localServiceSocketFixture } from './socketTransport.fixture'
+
 const cleanup: Array<() => Promise<unknown> | void> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
@@ -20,6 +18,7 @@ async function fixture() {
         }
         if (path === '/jump') return new Response(null, { status: 302, headers: { location: '../next?q=1#part' } })
         if (path === '/escape') return new Response(null, { status: 302, headers: { location: 'https://external.example/' } })
+        if (path === '/large') return new Response(new Uint8Array(6 * 1024 * 1024).fill(73))
         if (path === '/html') return new Response(gzipSync('<html><head><script src="/assets/app.js"></script></head><body>hello</body></html>'), {
             headers: { 'content-type': 'text/html', 'content-encoding': 'gzip', 'content-security-policy': 'sandbox allow-same-origin', 'set-cookie': 'hub=overwrite; Path=/' }
         })
@@ -45,10 +44,10 @@ async function fixture() {
     })
     cleanup.push(() => { handler?.stop(); hub.stop(true) })
     const origin = `http://127.0.0.1:${hub.port}`
-    const runner = new LocalServiceTunnels()
-    cleanup.push(() => runner.dispose())
-    const manager = new LocalServiceManager({ mode: 'path', appUrl: origin, sshHost: '127.0.0.1', sshListenHost: '127.0.0.1', sshPort: 0,
-        canAccessMachine: () => true, openTunnel: (_machine, request) => runner.open(request)
+    const transport = await localServiceSocketFixture()
+    cleanup.push(() => transport.close())
+    const manager = new LocalServiceManager({ mode: 'path', appUrl: origin,
+        canAccessMachine: () => true, openTunnel: transport.openTunnel
     })
     cleanup.push(() => manager.stop())
     await manager.start()
@@ -64,10 +63,53 @@ async function fixture() {
         const result = await response.json() as { path: string }
         return { opened, path: result.path, base: result.path.split('/').slice(0, 4).join('/') }
     }
-    return { manager, origin, open, redeem, enter, get requests() { return requests } }
+    return { manager, transport, origin, open, redeem, enter, upstream, get requests() { return requests } }
 }
 
-describe('same-domain path gateway through real Runner SSH', () => {
+describe('same-domain path gateway through the real Runner Hub socket', () => {
+    it('streams a multi-frame binary response without truncation', async () => {
+        const f = await fixture()
+        const entry = await f.enter('/large')
+        const response = await fetch(f.origin + entry.path, { proxy: '' })
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        expect(bytes.length).toBe(6 * 1024 * 1024)
+        expect(bytes.every((byte) => byte === 73)).toBe(true)
+    })
+
+    it('revokes old grants on socket disconnect and rebuilds once after reconnect', async () => {
+        const f = await fixture()
+        const old = await f.open('/html', 'session', 'embed')
+        const disconnected = new Promise<void>((resolve) => f.transport.serverSocket.once('disconnect', () => resolve()))
+        f.transport.client.disconnect()
+        await disconnected
+        expect((await fetch(old.url, { proxy: '' })).status).toBe(410)
+        await f.transport.reconnect()
+        const reopened = await Promise.all([f.open('/html', 'session', 'embed'), f.open('/html', 'session', 'embed')])
+        expect(reopened[0].url).toBe(reopened[1].url)
+        expect(reopened[0].url).not.toBe(old.url)
+        expect((await fetch(reopened[0].url, { proxy: '' })).status).toBe(200)
+        expect((await fetch(old.url, { proxy: '' })).status).toBe(410)
+    })
+
+    it('renders an in-preview connection error when the local port has no listener', async () => {
+        const f = await fixture()
+        const entry = await f.open('/html', 'session', 'embed')
+        await f.upstream.stop(true)
+        const response = await fetch(entry.url, { proxy: '', headers: {
+            'sec-fetch-dest': 'iframe', 'accept-language': 'zh-CN,zh;q=0.9'
+        } })
+        expect(response.status).toBe(502)
+        expect(response.headers.get('content-type')).toContain('text/html')
+        const content = await response.text()
+        expect(content).toContain('无法连接服务器')
+        expect(content).toContain('重新连接')
+        expect(content).not.toContain('浏览器')
+        expect(content).not.toContain(new URL(entry.url).pathname)
+        expect(response.headers.get('content-security-policy')).toContain('frame-ancestors ' + f.origin)
+        expect(response.headers.get('content-security-policy')).not.toContain('allow-same-origin')
+        expect(response.headers.has('set-cookie')).toBe(false)
+    })
+
     it('redeems once, preserves URL and strips Hub credentials in both directions', async () => {
         const f = await fixture()
         const entry = await f.enter('/settings?q=1#part')

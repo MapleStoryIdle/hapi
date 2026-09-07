@@ -841,6 +841,14 @@ function getTerminalCommandForSummary(input: unknown): string | null {
     return (payload.endsWith(quote) ? payload.slice(0, -1) : payload).trim() || raw
 }
 
+/** Presentation only: never apply this to executable or copied command text. */
+export function joinTerminalSummaryParts(parts: readonly (string | null | undefined)[]): string {
+    return parts
+        .map((part) => part?.replace(/^[\s;]+|[\s;]+$/g, '') ?? '')
+        .filter(Boolean)
+        .join('; ')
+}
+
 /** Return one or two meaningful commands, never the complete shell script. */
 export function getTerminalCommandSummary(input: unknown): string | null {
     const rawCommand = getTerminalCommandForSummary(input)
@@ -856,7 +864,7 @@ export function getTerminalCommandSummary(input: unknown): string | null {
     if (summaries.length === 0) return null
     const visible = summaries.slice(0, 2)
     const remaining = summaries.length - visible.length
-    return remaining > 0 ? `${visible.join(' · ')} · +${remaining}` : visible.join(' · ')
+    return joinTerminalSummaryParts([...visible, remaining > 0 ? `+${remaining}` : null])
 }
 
 export function getTerminalCommandIntentLabel(

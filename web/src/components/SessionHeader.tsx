@@ -11,6 +11,7 @@ import {
     type SessionConnectionHealth
 } from '@/lib/session-connection-context'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { GitBranchesDrawer } from '@/components/GitBranchesDrawer'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -22,6 +23,7 @@ import type { StatusBarProps } from '@/components/AssistantChat/StatusBar'
 import { CheckIcon, CopyIcon } from '@/components/icons'
 import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { SESSION_DETAIL_HEADER_ROW_CLASS, SESSION_DETAIL_HEADER_SAFE_AREA_CLASS } from '@/components/SessionDetailHeader'
+import { useMachineGitBranch } from '@/hooks/queries/useGitBranch'
 
 type Translator = (key: string, params?: Record<string, string | number>) => string
 
@@ -802,6 +804,17 @@ export const SessionHeader = memo(function SessionHeader(props: {
     const { session, api, onSessionDeleted, onSessionReopened } = props
     const title = useMemo(() => getSessionTitle(session), [session])
     const projectPath = useMemo(() => getSessionProjectPath(session), [session])
+    // A worktree session must act on its actual checkout, while the title
+    // details may still show the stable project base path.
+    const gitProjectPath = session.metadata?.path ?? projectPath
+    const machineId = session.metadata?.machineId ?? null
+    const { isGitRepository } = useMachineGitBranch(
+        api,
+        machineId,
+        gitProjectPath,
+        true,
+        { refetchInterval: false }
+    )
     const sessionDetails = useMemo(() => buildSessionHeaderDetails({
         title,
         sessionId: session.id,
@@ -854,6 +867,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
+    const [gitBranchesOpen, setGitBranchesOpen] = useState(false)
 
     const { archiveSession, reopenSession, renameSession, deleteSession, isPending } = useSessionActions(
         api,
@@ -947,6 +961,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
                 sessionActive={session.active}
                 onRefresh={props.onRefresh}
                 refreshPending={props.refreshPending}
+                onGitBranches={isGitRepository ? () => setGitBranchesOpen(true) : undefined}
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
@@ -960,6 +975,14 @@ export const SessionHeader = memo(function SessionHeader(props: {
                 sideSessionPending={props.sideSessionPending}
                 anchorPoint={menuAnchorPoint}
                 menuId={menuId}
+            />
+
+            <GitBranchesDrawer
+                api={api}
+                machineId={machineId}
+                cwd={gitProjectPath}
+                open={gitBranchesOpen}
+                onOpenChange={setGitBranchesOpen}
             />
 
             {reopenError ? (

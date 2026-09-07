@@ -9,13 +9,14 @@ the chat bottom drawer**. There is no extra launch confirmation or new tab.
 The drawer remains scrollable, supports drag-to-close, and stays within 70% of
 the visible viewport. Connection errors and retry stay in the drawer too.
 
-SHAPI uses the existing chat login to create or reuse a dedicated SSH reverse
-tunnel. Embedded previews receive a sandbox-only URL capability through the
+SHAPI uses the existing chat login to create or reuse a logical tunnel over
+the Runner's already authenticated Hub Socket.IO connection. No additional
+public listener or SSH endpoint is started. Embedded previews receive a sandbox-only URL capability through the
 authenticated API; no bootstrap page or third-party cookie is required.
 Rendering a message alone never contacts the service or opens a tunnel.
 
-Desktop clicks and the optional "Open in browser" action retain the separate
-tab flow, with a short-lived one-use ticket in the URL fragment. If a popup is
+Desktop clicks can retain the separate tab flow, with a short-lived one-use
+ticket in the URL fragment. The drawer offers a copy-link icon, not an external-browser button. If a popup is
 blocked, that explicitly requested action uses the authenticated launch route.
 
 ### Trusted Web origins for embedded previews
@@ -30,10 +31,13 @@ frame. Do not add arbitrary third-party sites to this allowlist.
 
 Both path and domain modes use an opaque sandbox for drawer previews:
 local pages cannot read the chat page, login storage or cookies. Assets,
-fetch/XHR, SSE and WebSocket stay scoped to that local service. Services that
-require browser cookies/localStorage, service workers, third-party CDN/API
-resources or external authentication may need the optional separate-browser
-flow. Domain-mode embedded previews use a different lease origin from normal
+fetch/XHR, SSE and WebSocket stay scoped to that local service. Preview pages
+have bounded, in-memory cookie preferences and local/session storage of their
+own; these are discarded on a full page reload and never contain SHAPI login
+data. They are not a server-side cookie jar or a persistent website login.
+Services that require server cookie authentication, service workers, third-party CDN/API
+resources or external authentication may be incompatible with the sandbox;
+failure and retry stay inside the drawer. Domain-mode embedded previews use a different lease origin from normal
 tabs, so existing tab login cookies cannot weaken the drawer sandbox.
 
 ## Choose a mode
@@ -65,18 +69,13 @@ is required outside loopback development.
 ```dotenv
 HAPI_PUBLIC_URL=https://hub.example.com
 HAPI_LOCAL_SERVICE_MODE=path
-
-# This is still a separate Runner-to-Hub SSH channel.
-HAPI_LOCAL_SERVICE_SSH_HOST=hub.example.com
-HAPI_LOCAL_SERVICE_SSH_BIND=0.0.0.0
-HAPI_LOCAL_SERVICE_SSH_PORT=8320
 ```
 
-`HAPI_LOCAL_SERVICE_SSH_HOST` must be reachable from every Runner. It defaults
-to the public Hub hostname; use a DNS-only TCP hostname when a CDN does not
-forward port `8320`. The SSH listener binds to `127.0.0.1` by default, so set
-`HAPI_LOCAL_SERVICE_SSH_BIND` deliberately when Runners are remote. Port `8320`
-is the default and should be firewalled to Runner addresses where possible.
+Keep the existing `/socket.io/` reverse proxy working. Both control and binary
+forwarding frames use that authenticated connection; nothing connects to TCP
+`8320`. Remove obsolete `HAPI_LOCAL_SERVICE_SSH_*` settings when convenient.
+Upgrade Hub and Runner together: an older SSH-only Runner cannot serve the new
+transport. Existing interactive SSH and Codex processes are unaffected.
 
 If a reverse proxy fronts the Hub, forward `/preview/` to the **same** upstream
 as the app and preserve the public Host, WebSocket Upgrade, and streaming. Do
@@ -119,16 +118,30 @@ expired tab must reopen the original SHAPI link; it cannot silently authenticate
 or fall back to a less restrictive path.
 
 Path mode supports normal HTTP, streaming/SSE, uploads, and WebSockets. It
-applies basic adaptations for HTML, CSS, root-relative `fetch`, XHR,
-`EventSource`, and WebSocket URLs so same-lease resources remain under their
-capability path. It is deliberately not a general-purpose browser-origin
-emulator. Cookies and storage, OAuth, iframes, workers, CDNs, and complex SPAs
-are not guaranteed. External redirects are denied rather than followed, and a
+adapts HTML, CSS, JavaScript browser-global references, root-relative `fetch`,
+XHR, `EventSource`, WebSocket and dynamically inserted asset URLs. Page scripts
+see the original local URL and route base (such as `/studio/`), while requests
+remain within the capability path. Native history entries retain a virtual
+route for back/forward without changing the opaque document's real URL, which
+WebKit forbids. No application route strings are replaced. This is compatibility
+support, not a security boundary or a universal browser-origin emulator.
+OAuth, nested iframes, workers, CDNs, arbitrary absolute module imports, and
+complex SPAs are not guaranteed. External redirects are denied rather than followed, and a
 failed adaptation never falls back to an unrestricted request.
 
-Path-mode HTML and CSS rewrites allow at most four bodies at once, each with a
-2 MiB buffer and a 15-second deadline. The general 128 MiB response-stream
+Path-mode rewrites allow at most four bodies at once and 32 waiting requests;
+normal SPA asset bursts queue instead of failing immediately. Waiting and
+reading share a 15-second deadline: HTML/CSS buffers are limited to 2 MiB and JavaScript to 4 MiB.
+Transformed scripts use an 8 MiB / 32-entry in-memory cache; Bun macros are
+explicitly disabled so website code is never executed on the Hub.
+The general 128 MiB response-stream
 limit still applies to API responses, SSE, and files.
+
+The drawer uses the website title and icon when available, otherwise the
+original local URL and a generic web icon. Metadata is accepted only from the
+currently embedded frame; icons must remain inside its own capability path.
+The copy icon continues to copy the reconnectable SHAPI launch link, never a
+temporary grant. No additional metadata polling is required.
 
 The sandbox is opaque and limited to resources belonging to its lease. SHAPI
 does not forward browser `Cookie` or `Authorization` headers to the local
@@ -140,7 +153,8 @@ HAPI JWT.
 
 ### Domain mode: keep an isolated preview origin
 
-Domain mode is unchanged. Use it when the local app requires a conventional
+Domain mode keeps its isolated browser origin, but also uses the existing Hub
+connection for transport. Use it when the local app requires a conventional
 isolated origin or stronger browser-origin separation. Configure a wildcard
 preview domain with its own TLS certificate; prefer a registrable domain that
 is separate from the SHAPI app. Never serve unrestricted preview HTML under the
@@ -149,24 +163,17 @@ SHAPI app origin or its `/api` path; same-origin previews require path mode's sa
 ```dotenv
 HAPI_LOCAL_SERVICE_MODE=domain
 HAPI_LOCAL_SERVICE_ORIGIN=https://{id}.preview.example.net
-HAPI_LOCAL_SERVICE_SSH_HOST=hub.example.com
-HAPI_LOCAL_SERVICE_SSH_BIND=0.0.0.0
-HAPI_LOCAL_SERVICE_SSH_PORT=8320
 HAPI_LOCAL_SERVICE_GATEWAY_PORT=8321
 ```
 
 | Setting | Meaning / default |
 | --- | --- |
 | `HAPI_LOCAL_SERVICE_ORIGIN` | Domain mode only. Exactly one `{id}` as the first hostname label; no URL path. |
-| `HAPI_LOCAL_SERVICE_SSH_HOST` | Host reachable by Runners; defaults to the Hub public URL hostname. Use a DNS-only host when a CDN does not forward TCP. |
-| `HAPI_LOCAL_SERVICE_SSH_BIND` | SSH listener address, default `127.0.0.1`. Set explicitly for remote Runners. |
-| `HAPI_LOCAL_SERVICE_SSH_PORT` | Dedicated SSH port, default `8320`; allow inbound access from Runner addresses where possible. |
 | `HAPI_LOCAL_SERVICE_GATEWAY_PORT` | Domain mode only. HTTP gateway port, default `8321`; binds to `127.0.0.1`, behind the TLS reverse proxy. |
 
-The SSH endpoint is built into SHAPI. It is **not system sshd**: no OS account,
-root password, SSH key installation, or changes to an existing interactive SSH
-session are needed. Only ephemeral, single-use forwarding credentials are
-accepted; shell, SFTP, and arbitrary forwarding requests are rejected.
+Only the source machine's authenticated Runner can carry a lease's traffic.
+There is no system sshd, SSH account/key, or shell/SFTP transport. Per-lease
+loopback adapters inside the Hub are internal only and must never be exposed.
 
 Point `*.preview.example.net` at the Hub. Configure a real certificate and
 preserve Host, WebSocket Upgrade, and streaming. Keep preview request URIs out
@@ -221,12 +228,17 @@ parameters.
   restart, or shutdown closes tunnels and active proxied connections.
 - Per Runner: 5 tunnels; per tunnel: 24 TCP connections. Hub: 100 tunnels and
   200 active proxied requests/WebSockets. Request bodies: 50 MiB; response
-  bodies and API/SSE/file streams: 128 MiB. Path-mode HTML/CSS rewrites: at
-  most four concurrent bodies, 2 MiB and 15 seconds each. WS messages from the
+  bodies and API/SSE/file streams: 128 MiB. Path-mode rewrites: at
+  most four concurrent bodies, 2 MiB for HTML/CSS or 4 MiB for JavaScript and 15 seconds each. WS messages from the
   browser: 8 MiB; queued relay data: 1 MiB. These limits do not change Shares'
   separate file-size limits.
 - Metadata stays in bounded memory. No SQLite writes, copied page bodies, or
-  transcript polling. Transfers do not travel through message RPC/Socket.IO.
+  transcript polling. Control uses machine RPC; bytes use dedicated binary
+  Socket.IO frames (not chat messages or Base64 JSON bodies), at most 64 KiB
+  in flight per direction/channel. Each frame waits for a write acknowledgment,
+  with a 30-second deadline. Disconnect drops queued work rather than replaying
+  writes after reconnect. Preview traffic shares the existing connection and
+  yields between chunks; it still consumes bandwidth while actively in use.
 
 For local development only, a loopback Hub may use HTTP; domain mode may use
 `http://{id}.localhost:<gateway-port>`. Production Hub and domain-mode preview
@@ -247,7 +259,7 @@ bun scripts/dev/check-local-services.ts --path
 bun scripts/dev/check-local-service-browser.ts
 ```
 
-The integration tests use the actual Runner SSH client, Hub SSH server, and
+The integration tests use the actual Runner, Hub Socket.IO transport, and
 both the isolated-domain gateway and same-origin path handler on temporary
 loopback ports. The browser script uses disposable Chromium and WebKit profiles
 to exercise the opaque path sandbox. Production DNS/TLS/firewall setup and a
@@ -260,3 +272,10 @@ and random loopback ports; it never launches an AI agent or sends a prompt.
 Run it once normally for domain mode and once with `--path` for same-origin
 path mode. Owned processes and temporary state are removed when the check
 finishes.
+
+With a local OpenViking instance already running at `http://127.0.0.1:1933`,
+`bun scripts/dev/check-openviking-preview.ts` checks the real Studio page,
+sidebar navigation, proxied API, title/icon and isolation in disposable
+Chromium/WebKit profiles. It blocks upstream writes and does not change
+OpenViking or production configuration. Custom browser binaries can be selected
+with `SHAPI_CHECK_CHROMIUM_EXECUTABLE` and `SHAPI_CHECK_WEBKIT_EXECUTABLE`.

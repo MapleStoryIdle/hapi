@@ -5,6 +5,8 @@ import type {
     InitializeResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
+    TurnInterruptParams,
+    TurnInterruptResponse,
     TurnStartParams,
     TurnStartResponse
 } from './appServerTypes'
@@ -298,6 +300,12 @@ export class CodexSshAppServerClient {
     async startTurn(params: TurnStartParams, options?: { signal?: AbortSignal }): Promise<TurnStartResponse> {
         return await this.request<TurnStartResponse>('turn/start', params, {
             signal: options?.signal,
+            timeoutMs: this.requestTimeoutMs
+        })
+    }
+
+    async interruptTurn(params: TurnInterruptParams): Promise<TurnInterruptResponse> {
+        return await this.request<TurnInterruptResponse>('turn/interrupt', params, {
             timeoutMs: this.requestTimeoutMs
         })
     }

@@ -3,7 +3,7 @@ import spawnChildProcess from 'cross-spawn'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { InitializeParams, ThreadResumeParams, TurnStartParams, TurnStartResponse } from './appServerTypes'
+import type { InitializeParams, ThreadResumeParams, TurnInterruptParams, TurnInterruptResponse, TurnStartParams, TurnStartResponse } from './appServerTypes'
 import {
     findLocalCodexSession,
     isHapiInitiatedCodexSession,
@@ -13,12 +13,24 @@ import {
     type CodexLocalSessionQueuedMessage,
     type CodexLocalSessionStatusRpcResponse,
     type CodexLocalSessionSummary,
+    type CodexTranscriptLifecycleEvent,
     type DiscardCodexLocalSessionMessageRpcResponse,
+    formatNativeCodexAttachmentPrompt,
+    MAX_NATIVE_CODEX_ATTACHMENTS,
     type NativeCodexDeliveryPolicy,
+    type NativeCodexResolvedAttachment,
+    type NativeCodexSessionConfiguration,
+    type NativeCodexSessionControlAction,
+    type NativeCodexSessionControlResponse,
+    type NativeCodexSessionControls,
     type NativeKanbanFeedbackReviewGuard,
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import { NATIVE_CODEX_PROCESSING_STALE_AFTER_MS } from './nativeTurnLifecycle'
+import type {
+    NativeCodexSessionControlState,
+    NativeCodexSessionControlStore
+} from './nativeCodexControlStore'
 
 type NativeCodexChildProcess = Pick<ChildProcess, 'once' | 'stderr'> & {
     kill?: ChildProcess['kill']
@@ -32,6 +44,7 @@ export type NativeCodexAppServerClient = {
     initialize: (params: InitializeParams) => Promise<unknown>
     resumeThread: (params: ThreadResumeParams, options?: { signal?: AbortSignal }) => Promise<unknown>
     startTurn: (params: TurnStartParams, options?: { signal?: AbortSignal }) => Promise<TurnStartResponse>
+    interruptTurn?: (params: TurnInterruptParams) => Promise<TurnInterruptResponse>
     /** Generic RPC surface exposed by the shared SSH app-server transport. */
     request?: (method: string, params?: unknown, options?: { signal?: AbortSignal; timeoutMs?: number }) => Promise<unknown>
     disconnect: () => Promise<void>
@@ -84,6 +97,10 @@ export type NativeCodexSessionDirectSendStoredItem = {
     terminalAt?: number
     /** Runner-private staged-file integrity capability for an untrusted review. */
     reviewGuard?: NativeKanbanFeedbackReviewGuard
+    /** HAPI-only turn settings captured when this receipt was accepted. */
+    configuration?: NativeCodexSessionConfiguration
+    /** Runner-private attachment IDs; never persist their filesystem paths. */
+    attachmentIds?: string[]
 }
 
 export type NativeKanbanFeedbackReviewGuardVerifier = (
@@ -93,6 +110,30 @@ export type NativeKanbanFeedbackReviewGuardVerifier = (
 
 /** Fresh runner-side check before a new hand-off can touch an original thread. */
 export type NativeCodexExternalControlChecker = (sessionId: string) => Promise<boolean>
+
+export type NativeCodexSessionConfigurationValidator = (
+    sessionId: string,
+    configuration: NativeCodexSessionConfiguration
+) => Promise<{ success: true } | { success: false; error: string }>
+
+export type NativeCodexAttachmentResolveResult =
+    | { success: true; attachments: NativeCodexResolvedAttachment[] }
+    | { success: false; error: string }
+
+export type NativeCodexAttachmentResolver = (
+    sessionId: string,
+    attachmentIds: readonly string[]
+) => NativeCodexAttachmentResolveResult
+
+export type NativeCodexAttachmentCleaner = (
+    sessionId: string,
+    attachmentIds: readonly string[]
+) => void
+
+export type NativeCodexSessionControlContext = {
+    controlledByCodexSsh: boolean
+    activeTurnId: string | null
+}
 
 /**
  * Transient connection to the app-server already owned by Codex Desktop over
@@ -125,6 +166,99 @@ function parseReviewGuard(value: unknown): NativeKanbanFeedbackReviewGuard | nul
     return { stagePath, sha256 }
 }
 
+const NATIVE_CODEX_ATTACHMENT_ID_RE = /^[a-f0-9]{32}$/
+
+function parseNativeCodexAttachmentIds(value: unknown): string[] | null {
+    if (value === undefined) return []
+    if (!Array.isArray(value) || value.length > MAX_NATIVE_CODEX_ATTACHMENTS) return null
+    const ids = new Set<string>()
+    for (const item of value) {
+        const id = typeof item === 'string' ? item.trim() : ''
+        if (!NATIVE_CODEX_ATTACHMENT_ID_RE.test(id) || ids.has(id)) return null
+        ids.add(id)
+    }
+    return [...ids]
+}
+
+function persistedAttachmentIds(attachmentIds: readonly string[]): { attachmentIds: string[] } | Record<string, never> {
+    return attachmentIds.length > 0 ? { attachmentIds: [...attachmentIds] } : {}
+}
+
+function parseNativeConfiguration(value: unknown): NativeCodexSessionConfiguration | undefined {
+    if (value === undefined) return undefined
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const record = value as Record<string, unknown>
+    const model = record.model
+    const modelReasoningEffort = record.modelReasoningEffort
+    const serviceTier = record.serviceTier
+    if (model !== undefined && model !== null && (typeof model !== 'string' || !model.trim())) return undefined
+    if (
+        modelReasoningEffort !== undefined
+        && modelReasoningEffort !== null
+        && (typeof modelReasoningEffort !== 'string' || !modelReasoningEffort.trim())
+    ) return undefined
+    if (serviceTier !== undefined && serviceTier !== null && serviceTier !== 'standard' && serviceTier !== 'fast') return undefined
+    return {
+        ...(model === undefined ? {} : { model: model === null ? null : model.trim() }),
+        ...(modelReasoningEffort === undefined
+            ? {}
+            : { modelReasoningEffort: modelReasoningEffort === null ? null : modelReasoningEffort.trim() }),
+        ...(serviceTier === undefined ? {} : { serviceTier })
+    }
+}
+
+function escapeNativeTomlString(value: string): string {
+    return value
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t')
+}
+
+/** Process-scoped overrides for the legacy `codex exec resume` fallback. */
+function buildNativeExecConfigurationArgs(configuration: NativeCodexSessionConfiguration): string[] {
+    const args: string[] = []
+    if (configuration.model) {
+        args.push('--model', configuration.model)
+    }
+    if (configuration.modelReasoningEffort) {
+        args.push('-c', `model_reasoning_effort="${escapeNativeTomlString(configuration.modelReasoningEffort)}"`)
+    }
+    if (configuration.serviceTier) {
+        // The legacy CLI config accepts `fast` and uses `default` as the
+        // explicit Standard sentinel. HAPI's browser-facing representation
+        // intentionally stays `fast`/`standard`.
+        const serviceTier = configuration.serviceTier === 'fast' ? 'fast' : 'default'
+        args.push('-c', `service_tier="${serviceTier}"`)
+    }
+    return args
+}
+
+function cloneNativeConfiguration(configuration: NativeCodexSessionConfiguration): NativeCodexSessionConfiguration {
+    return { ...configuration }
+}
+
+function hasNativeConfiguration(configuration: NativeCodexSessionConfiguration | undefined): boolean {
+    return Boolean(configuration && (
+        configuration.model !== undefined && configuration.model !== null
+        || configuration.modelReasoningEffort !== undefined && configuration.modelReasoningEffort !== null
+        || configuration.serviceTier !== undefined && configuration.serviceTier !== null
+    ))
+}
+
+function mergeNativeConfiguration(
+    current: NativeCodexSessionConfiguration,
+    patch: NativeCodexSessionConfiguration
+): NativeCodexSessionConfiguration {
+    return {
+        ...current,
+        ...(patch.model === undefined ? {} : { model: patch.model }),
+        ...(patch.modelReasoningEffort === undefined ? {} : { modelReasoningEffort: patch.modelReasoningEffort }),
+        ...(patch.serviceTier === undefined ? {} : { serviceTier: patch.serviceTier })
+    }
+}
+
 function parseStoredItem(value: unknown): NativeCodexSessionDirectSendStoredItem | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null
     const record = value as Record<string, unknown>
@@ -155,6 +289,8 @@ function parseStoredItem(value: unknown): NativeCodexSessionDirectSendStoredItem
     const completed = record.completed === true
     const terminalAt = typeof record.terminalAt === 'number' ? record.terminalAt : undefined
     const reviewGuard = parseReviewGuard(record.reviewGuard)
+    const configuration = parseNativeConfiguration(record.configuration)
+    const attachmentIds = parseNativeCodexAttachmentIds(record.attachmentIds)
     if (completed && !accepted) return null
     if (transcriptConfirmed && !accepted) return null
     if (
@@ -163,6 +299,8 @@ function parseStoredItem(value: unknown): NativeCodexSessionDirectSendStoredItem
     ) return null
     if (terminalAt !== undefined && (!Number.isFinite(terminalAt) || terminalAt < queuedAt || !completed)) return null
     if (record.reviewGuard !== undefined && !reviewGuard) return null
+    if (record.configuration !== undefined && !configuration) return null
+    if (record.attachmentIds !== undefined && attachmentIds === null) return null
     return {
         sessionId,
         id,
@@ -179,7 +317,9 @@ function parseStoredItem(value: unknown): NativeCodexSessionDirectSendStoredItem
             && record.transcriptEvidenceAt >= queuedAt ? { transcriptEvidenceAt: record.transcriptEvidenceAt } : {}),
         ...(completed ? { completed: true as const } : {}),
         ...(terminalAt === undefined ? {} : { terminalAt }),
-        ...(reviewGuard ? { reviewGuard } : {})
+        ...(reviewGuard ? { reviewGuard } : {}),
+        ...(configuration ? { configuration } : {}),
+        ...persistedAttachmentIds(attachmentIds ?? [])
     }
 }
 
@@ -227,6 +367,9 @@ type ActiveSendBase = {
     displayText: string
     deliveryPolicy: NativeCodexDeliveryPolicy
     reviewGuard?: NativeKanbanFeedbackReviewGuard
+    configuration: NativeCodexSessionConfiguration
+    /** Opaque staged-file references. Paths are resolved only at send time. */
+    attachmentIds: readonly string[]
 }
 
 type ActiveExecSend = ActiveSendBase & {
@@ -274,6 +417,8 @@ type QueuedSend = CodexLocalSessionQueuedMessage & {
     recoveryReason?: CodexLocalSessionDirectSendRecoveryReason
     deliveryPolicy: NativeCodexDeliveryPolicy
     reviewGuard?: NativeKanbanFeedbackReviewGuard
+    configuration: NativeCodexSessionConfiguration
+    attachmentIds: readonly string[]
 }
 
 type AcceptedReceipt = NativeCodexSessionDirectSendStoredItem & {
@@ -325,6 +470,55 @@ function trimFailureMessage(value: string): string {
     return trimmed.length > MAX_FAILURE_MESSAGE_LENGTH
         ? `${trimmed.slice(0, MAX_FAILURE_MESSAGE_LENGTH - 1)}…`
         : trimmed
+}
+
+function readString(record: Record<string, unknown> | null, ...keys: string[]): string | null {
+    if (!record) return null
+    for (const key of keys) {
+        const value = record[key]
+        if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+    return null
+}
+
+function isInProgressTurn(value: unknown): boolean {
+    const record = asRecord(value)
+    const status = readString(record, 'status', 'state', 'turnStatus')?.toLowerCase().replace(/[-_\s]/g, '')
+    return status === 'inprogress' || status === 'processing' || status === 'active' || status === 'running'
+}
+
+function readThreadWithTurns(value: unknown): { threadId: string; turns: unknown[] } | null {
+    const root = asRecord(value)
+    const data = asRecord(root?.data) ?? root
+    const thread = asRecord(data?.thread) ?? data
+    const threadId = readString(thread, 'id', 'threadId')
+    const turns = Array.isArray(thread?.turns)
+        ? thread.turns
+        : Array.isArray(data?.turns)
+            ? data.turns
+            : null
+    return threadId && turns ? { threadId, turns } : null
+}
+
+function hasExactInProgressTurn(value: unknown, sessionId: string, expectedTurnId: string): boolean {
+    const thread = readThreadWithTurns(value)
+    if (!thread || thread.threadId !== sessionId) return false
+    const activeTurns = thread.turns.filter(isInProgressTurn)
+    if (activeTurns.length !== 1) return false
+    const turn = asRecord(activeTurns[0])
+    const turnId = readString(turn, 'id', 'turnId')
+        ?? readString(asRecord(turn?.turn), 'id', 'turnId')
+    return turnId === expectedTurnId
+}
+
+function isInterruptAccepted(value: unknown): boolean {
+    const response = asRecord(value)
+    // Codex 0.153.3 returns an empty JSON object for a successful
+    // turn/interrupt. Keep explicit negative acknowledgements defensive, but
+    // do not require a non-existent `ok: true` field. A resolved adapter
+    // without a result is also an accepted RPC; transport/JSON-RPC failures
+    // arrive by rejection and are handled by the caller.
+    return response?.ok !== false
 }
 
 /**
@@ -446,6 +640,12 @@ export class NativeCodexSessionDirectSender {
     private readonly sharedQueueClients = new Set<NativeCodexAppServerClient>()
     /** Recent native user turns, retained only long enough to settle a local SSH receipt. */
     private readonly transcriptUserMessageEvidence = new Map<string, NativeCodexTranscriptUserMessageEvidence[]>()
+    private readonly controlStates = new Map<string, NativeCodexSessionControlState>()
+    /** Blocks sends/pumps while an interrupt or control persistence is in flight. */
+    private readonly controlReservations = new Set<string>()
+    private readonly controlStore: NativeCodexSessionControlStore | null
+    private readonly configurationValidator: NativeCodexSessionConfigurationValidator | null
+    private controlStoreUnavailable = false
     /**
      * A native archive must be atomic with respect to direct delivery.  This
      * is deliberately runner-local: it closes the gap between an idle check
@@ -465,8 +665,29 @@ export class NativeCodexSessionDirectSender {
         private readonly store: NativeCodexSessionDirectSendStore | null = null,
         private readonly reviewGuardVerifier: NativeKanbanFeedbackReviewGuardVerifier | null = null,
         private readonly externalControlChecker: NativeCodexExternalControlChecker | null = null,
-        private readonly createSshAppServerClient: CreateNativeCodexSshAppServerClient | null = null
+        private readonly createSshAppServerClient: CreateNativeCodexSshAppServerClient | null = null,
+        controlStore: NativeCodexSessionControlStore | null = null,
+        configurationValidator: NativeCodexSessionConfigurationValidator | null = null,
+        private readonly attachmentResolver: NativeCodexAttachmentResolver | null = null,
+        private readonly attachmentCleaner: NativeCodexAttachmentCleaner | null = null
     ) {
+        this.controlStore = controlStore
+        this.configurationValidator = configurationValidator
+        try {
+            for (const state of controlStore?.load() ?? []) {
+                this.controlStates.set(state.sessionId, {
+                    sessionId: state.sessionId,
+                    configuration: cloneNativeConfiguration(state.configuration),
+                    queuePaused: state.queuePaused,
+                    ...(state.stoppingTurnId ? { stoppingTurnId: state.stoppingTurnId } : {})
+                })
+            }
+        } catch {
+            // A corrupt/partially-read control file must fail closed. The
+            // outbox may still be loaded for diagnostics, but no native bytes
+            // may be sent until the runner can read control state safely.
+            this.controlStoreUnavailable = true
+        }
         this.restorePersistedQueues()
         for (const sessionId of this.queues.keys()) {
             // Safe queued receipts should continue without requiring a browser
@@ -515,7 +736,9 @@ export class NativeCodexSessionDirectSender {
                 recoveryRequired: item.recoveryRequired,
                 ...(item.recoveryReason ? { recoveryReason: item.recoveryReason } : {}),
                 deliveryPolicy: item.deliveryPolicy ?? 'default',
-                ...(item.reviewGuard ? { reviewGuard: item.reviewGuard } : {})
+                ...(item.reviewGuard ? { reviewGuard: item.reviewGuard } : {}),
+                configuration: cloneNativeConfiguration(item.configuration ?? {}),
+                attachmentIds: item.attachmentIds ?? []
             })
             this.queues.set(item.sessionId, queue)
         }
@@ -535,6 +758,8 @@ export class NativeCodexSessionDirectSender {
             text: active.displayText,
             deliveryText: active.deliveryText,
             queuedAt: active.startedAt,
+            configuration: cloneNativeConfiguration(active.configuration),
+            ...persistedAttachmentIds(active.attachmentIds),
             ...(active.deliveryPolicy === 'untrusted-review' ? {
                 deliveryPolicy: active.deliveryPolicy,
                 ...(active.reviewGuard ? { reviewGuard: active.reviewGuard } : {})
@@ -544,7 +769,7 @@ export class NativeCodexSessionDirectSender {
 
     private preserveFailedReceipt(
         sessionId: string,
-        receipt: Pick<NativeCodexSessionDirectSendStoredItem, 'id' | 'text' | 'deliveryText' | 'queuedAt' | 'deliveryPolicy' | 'reviewGuard'>,
+        receipt: Pick<NativeCodexSessionDirectSendStoredItem, 'id' | 'text' | 'deliveryText' | 'queuedAt' | 'deliveryPolicy' | 'reviewGuard' | 'configuration' | 'attachmentIds'>,
         recoveryReason: CodexLocalSessionDirectSendRecoveryReason
     ): void {
         const queue = this.queues.get(sessionId) ?? []
@@ -557,7 +782,9 @@ export class NativeCodexSessionDirectSender {
             recoveryRequired: true,
             recoveryReason,
             deliveryPolicy: receipt.deliveryPolicy ?? 'default',
-            ...(receipt.reviewGuard ? { reviewGuard: receipt.reviewGuard } : {})
+            ...(receipt.reviewGuard ? { reviewGuard: receipt.reviewGuard } : {}),
+            configuration: cloneNativeConfiguration(receipt.configuration ?? {}),
+            attachmentIds: receipt.attachmentIds ?? []
         })
         this.queues.set(sessionId, queue)
     }
@@ -585,10 +812,12 @@ export class NativeCodexSessionDirectSender {
                 // child received the prompt. Surface it for manual retry.
                 recoveryRequired: true,
                 recoveryReason: 'runner_restarted',
+                ...(hasNativeConfiguration(active.configuration) ? { configuration: cloneNativeConfiguration(active.configuration) } : {}),
                 ...(active.deliveryPolicy === 'untrusted-review' ? {
                     deliveryPolicy: active.deliveryPolicy,
                     ...(active.reviewGuard ? { reviewGuard: active.reviewGuard } : {})
-                } : {})
+                } : {}),
+                ...persistedAttachmentIds(active.attachmentIds)
             })
         }
         for (const [sessionId, queue] of this.queues) {
@@ -601,10 +830,12 @@ export class NativeCodexSessionDirectSender {
                     queuedAt: item.queuedAt,
                     recoveryRequired: item.recoveryRequired,
                     ...(item.recoveryReason ? { recoveryReason: item.recoveryReason } : {}),
+                    ...(hasNativeConfiguration(item.configuration) ? { configuration: cloneNativeConfiguration(item.configuration!) } : {}),
                     ...(item.deliveryPolicy === 'untrusted-review' ? {
                         deliveryPolicy: item.deliveryPolicy,
                         ...(item.reviewGuard ? { reviewGuard: item.reviewGuard } : {})
-                    } : {})
+                    } : {}),
+                    ...persistedAttachmentIds(item.attachmentIds)
                 })
             }
         }
@@ -638,8 +869,10 @@ export class NativeCodexSessionDirectSender {
             queuedAt: active.startedAt,
             recoveryRequired: false,
             accepted: true,
+            ...(hasNativeConfiguration(active.configuration) ? { configuration: cloneNativeConfiguration(active.configuration) } : {}),
             ...(active.deliveryPolicy === 'untrusted-review' ? { deliveryPolicy: 'untrusted-review' as const } : {}),
-            ...(active.reviewGuard ? { reviewGuard: active.reviewGuard } : {})
+            ...(active.reviewGuard ? { reviewGuard: active.reviewGuard } : {}),
+            ...persistedAttachmentIds(active.attachmentIds)
         })
         // If this write fails, keep the active bridge as a recovery-required
         // receipt rather than pretending the accepted turn is durable.
@@ -675,6 +908,122 @@ export class NativeCodexSessionDirectSender {
         }
     }
 
+    private getOrCreateControlState(sessionId: string): NativeCodexSessionControlState {
+        const existing = this.controlStates.get(sessionId)
+        if (existing) return existing
+        const state: NativeCodexSessionControlState = {
+            sessionId,
+            configuration: {},
+            queuePaused: false
+        }
+        this.controlStates.set(sessionId, state)
+        return state
+    }
+
+    private getConfigurationSnapshot(sessionId: string): NativeCodexSessionConfiguration {
+        return cloneNativeConfiguration(this.getOrCreateControlState(sessionId).configuration)
+    }
+
+    private persistControlStates(): boolean {
+        if (!this.controlStore) return true
+        try {
+            this.controlStore.save([...this.controlStates.values()].map((state) => ({
+                sessionId: state.sessionId,
+                configuration: cloneNativeConfiguration(state.configuration),
+                queuePaused: state.queuePaused,
+                ...(state.stoppingTurnId ? { stoppingTurnId: state.stoppingTurnId } : {})
+            })))
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private cloneControlState(state: NativeCodexSessionControlState): NativeCodexSessionControlState {
+        return {
+            sessionId: state.sessionId,
+            configuration: cloneNativeConfiguration(state.configuration),
+            queuePaused: state.queuePaused,
+            ...(state.stoppingTurnId ? { stoppingTurnId: state.stoppingTurnId } : {})
+        }
+    }
+
+    private setControlState(state: NativeCodexSessionControlState): boolean {
+        const previous = this.controlStates.get(state.sessionId)
+        this.controlStates.set(state.sessionId, state)
+        if (this.persistControlStates()) return true
+        if (previous) this.controlStates.set(state.sessionId, previous)
+        else this.controlStates.delete(state.sessionId)
+        return false
+    }
+
+    private clearStoppingTurn(sessionId: string, turnId?: string): boolean {
+        const state = this.controlStates.get(sessionId)
+        if (!state || !state.stoppingTurnId || (turnId && state.stoppingTurnId !== turnId)) return false
+        const next = this.cloneControlState(state)
+        delete next.stoppingTurnId
+        if (!this.setControlState(next)) return false
+        this.notifyStateChange(sessionId)
+        return true
+    }
+
+    /** Settle a stop only on a transcript terminal carrying the exact turn id. */
+    notifyTranscriptLifecycle(sessionId: string, events: readonly CodexTranscriptLifecycleEvent[]): void {
+        const stoppingTurnId = this.getOrCreateControlState(sessionId).stoppingTurnId
+        if (!stoppingTurnId) return
+        if (events.some((event) => (
+            event.turnId === stoppingTurnId
+            && (event.type === 'task_complete' || event.type === 'turn_aborted' || event.type === 'task_failed')
+        ))) {
+            this.clearStoppingTurn(sessionId, stoppingTurnId)
+        }
+    }
+
+    getControls(
+        sessionId: string,
+        context: { controlledByCodexSsh?: boolean; activeTurnId?: string | null } = {}
+    ): NativeCodexSessionControls {
+        if (this.controlStoreUnavailable) {
+            return {
+                canStop: false,
+                canConfigure: false,
+                configuration: {},
+                queuePaused: true,
+                unavailableReason: 'unsupported'
+            }
+        }
+        const state = this.getOrCreateControlState(sessionId)
+        const active = this.activeSends.get(sessionId)
+        const privateTurnId = active?.kind === 'app-server' ? active.turnId : null
+        const activeTurnId = context.activeTurnId ?? privateTurnId
+        const stoppingTurnId = state.stoppingTurnId
+        const hasSharedLease = this.sharedQueueDeliveries.has(sessionId)
+        const canStop = !stoppingTurnId
+            && !hasSharedLease
+            && (active?.kind === 'app-server'
+                ? Boolean(privateTurnId && privateTurnId === activeTurnId)
+                : active === undefined && context.controlledByCodexSsh === true && Boolean(activeTurnId))
+        const unavailableReason = canStop || stoppingTurnId || active
+            ? undefined
+            : context.controlledByCodexSsh === true
+                ? hasNativeConfiguration(state.configuration)
+                    ? 'shared_configuration_unsupported' as const
+                    : 'external_control_unavailable' as const
+                : 'unsupported' as const
+        return {
+            canStop,
+            // The reservation is an internal request mutex, not a capability
+            // change. Callers already receive `control_busy` while it is held;
+            // exposing it here would let an in-flight success notification
+            // overwrite the stable post-operation capability.
+            canConfigure: context.controlledByCodexSsh !== true,
+            configuration: cloneNativeConfiguration(state.configuration),
+            queuePaused: state.queuePaused,
+            ...(stoppingTurnId ? { stoppingTurnId } : {}),
+            ...(unavailableReason ? { unavailableReason } : {})
+        }
+    }
+
     private persistenceFailure(): Extract<SendCodexLocalSessionMessageRpcResponse, { success: false }> {
         return {
             success: false,
@@ -700,6 +1049,76 @@ export class NativeCodexSessionDirectSender {
         }
     }
 
+    private resolveAttachments(
+        sessionId: string,
+        attachmentIds: readonly string[]
+    ): NativeCodexAttachmentResolveResult {
+        if (attachmentIds.length === 0) return { success: true, attachments: [] }
+        if (!this.attachmentResolver) {
+            return { success: false, error: 'Native attachment support is unavailable on this runner' }
+        }
+        return this.attachmentResolver(sessionId, attachmentIds)
+    }
+
+    private buildNativeTurnInput(
+        sessionId: string,
+        deliveryText: string,
+        attachmentIds: readonly string[],
+        includeImagePaths: boolean
+    ): { success: true; input: TurnStartParams['input']; text: string } | { success: false; error: string } {
+        const resolved = this.resolveAttachments(sessionId, attachmentIds)
+        if (!resolved.success) return resolved
+        const text = formatNativeCodexAttachmentPrompt(deliveryText, resolved.attachments, { includeImagePaths })
+        return {
+            success: true,
+            input: [
+                ...(includeImagePaths
+                    ? []
+                    : resolved.attachments
+                        .filter((attachment) => attachment.kind === 'image')
+                        .map((attachment) => ({ type: 'localImage' as const, path: attachment.path }))),
+                { type: 'text', text }
+            ],
+            text
+        }
+    }
+
+    private cleanupAttachments(sessionId: string, attachmentIds: readonly string[]): void {
+        if (attachmentIds.length === 0) return
+        try {
+            this.attachmentCleaner?.(sessionId, attachmentIds)
+        } catch {
+            // A later TTL sweep removes an attachment if a terminal cleanup
+            // races a transient filesystem failure.
+        }
+    }
+
+    /** IDs that must survive the attachment vault's periodic TTL sweep. */
+    getRetainedNativeAttachmentIds(): Set<string> {
+        const retained = new Set<string>()
+        const add = (attachmentIds: readonly string[] | undefined) => {
+            for (const attachmentId of attachmentIds ?? []) retained.add(attachmentId)
+        }
+        for (const active of this.activeSends.values()) add(active.attachmentIds)
+        for (const queue of this.queues.values()) {
+            for (const item of queue) add(item.attachmentIds)
+        }
+        for (const receipt of this.acceptedReceipts.values()) {
+            if (receipt.completed !== true && receipt.transcriptConfirmed !== true) add(receipt.attachmentIds)
+        }
+        return retained
+    }
+
+    /**
+     * Terminal receipts retain their idempotency tombstone, but no longer need
+     * runner-local files. Remove only after the durable outbox no longer
+     * treats the attachment as live work.
+     */
+    private cleanupUnretainedAttachments(sessionId: string, attachmentIds: readonly string[]): void {
+        if (attachmentIds.some((attachmentId) => this.getRetainedNativeAttachmentIds().has(attachmentId))) return
+        this.cleanupAttachments(sessionId, attachmentIds)
+    }
+
     /**
      * Integrity failure happens before any native turn is launched. Keep the
      * review's durable receipt, but require an explicit recovery after the
@@ -713,7 +1132,11 @@ export class NativeCodexSessionDirectSender {
         queuedAt: number,
         reviewGuard: NativeKanbanFeedbackReviewGuard | undefined,
         error: string,
-        options: { front?: boolean } = {}
+        options: {
+            front?: boolean
+            configuration?: NativeCodexSessionConfiguration
+            attachmentIds?: readonly string[]
+        } = {}
     ): Extract<SendCodexLocalSessionMessageRpcResponse, { success: false }> {
         const id = clientMessageId ?? randomUUID()
         const queue = this.queues.get(sessionId) ?? []
@@ -730,7 +1153,9 @@ export class NativeCodexSessionDirectSender {
                 recoveryRequired: true,
                 recoveryReason: 'launch_failed',
                 deliveryPolicy: 'untrusted-review',
-                ...(reviewGuard ? { reviewGuard } : {})
+                ...(reviewGuard ? { reviewGuard } : {}),
+                configuration: cloneNativeConfiguration(options.configuration ?? this.getConfigurationSnapshot(sessionId)),
+                attachmentIds: [...(options.attachmentIds ?? [])]
             }
             // A new browser submission joins after earlier FIFO work. Only a
             // review that was already the runner-owned active delivery may
@@ -813,11 +1238,297 @@ export class NativeCodexSessionDirectSender {
         return deliveryReceipts.length ? { ...status, deliveryReceipts } : status
     }
 
+    async control(
+        sessionId: string,
+        action: NativeCodexSessionControlAction,
+        context: NativeCodexSessionControlContext
+    ): Promise<NativeCodexSessionControlResponse> {
+        if (this.controlStoreUnavailable) {
+            return { success: false, code: 'control_failed', error: 'Native control state is unavailable; repair the runner state file first' }
+        }
+        const session = this.sessionLookup.getSummary(sessionId)
+        if (!session) {
+            return { success: false, code: 'session_not_found', error: 'Codex session not found' }
+        }
+        if (isHapiInitiatedCodexSession(session)) {
+            return { success: false, code: 'not_native_session', error: 'Only original native Codex sessions support direct control' }
+        }
+        if (this.controlReservations.has(sessionId)) {
+            return { success: false, code: 'control_busy', error: 'A native control request is already in progress' }
+        }
+
+        this.controlReservations.add(sessionId)
+        let result: NativeCodexSessionControlResponse | null = null
+        try {
+            if (action.action === 'configure') {
+                result = await this.configure(sessionId, action.configuration, context)
+            } else if (action.action === 'resumeQueue') {
+                result = await this.resumeQueue(sessionId, context)
+            } else {
+                result = await this.stop(sessionId, action.expectedTurnId, context)
+            }
+            return result
+        } finally {
+            this.controlReservations.delete(sessionId)
+            // Sends accepted while a control RPC awaited ownership, catalog,
+            // or interrupt I/O are durable FIFO receipts. Once the mutex is
+            // released, give every unpaused outcome a chance to pump; the
+            // scheduler itself still gates paused/stopping/recovery lanes.
+            this.scheduleQueuePump(sessionId, 0, { replacePending: true })
+        }
+    }
+
+    private async configure(
+        sessionId: string,
+        patch: NativeCodexSessionConfiguration,
+        context: NativeCodexSessionControlContext
+    ): Promise<NativeCodexSessionControlResponse> {
+        const parsed = parseNativeConfiguration(patch)
+        if (!parsed) {
+            return { success: false, code: 'invalid_request', error: 'Native configuration is invalid' }
+        }
+        if (context.controlledByCodexSsh || await this.isExternallyControlled(sessionId)) {
+            return {
+                success: false,
+                code: 'configuration_unsupported',
+                error: 'Native configuration cannot be changed while Codex Desktop owns this thread'
+            }
+        }
+        const current = this.getOrCreateControlState(sessionId)
+        const requestedConfiguration = mergeNativeConfiguration(current.configuration, parsed)
+        if (this.configurationValidator) {
+            const result = await this.configurationValidator(sessionId, requestedConfiguration)
+            if (!result.success) {
+                // Invalid model/effort/tier selections are request errors. The
+                // shared-transport-only `configuration_unsupported` code is
+                // reserved for an SSH-owned Desktop thread.
+                return { success: false, code: 'invalid_request', error: result.error }
+            }
+        }
+        // Lifecycle terminal observation may replace the control state while
+        // catalog validation awaits. Re-read it before persisting so a stop
+        // marker cleared during that await cannot be resurrected.
+        const latest = this.getOrCreateControlState(sessionId)
+        const configuration = mergeNativeConfiguration(latest.configuration, parsed)
+        const next = this.cloneControlState(latest)
+        next.configuration = configuration
+        if (!this.setControlState(next)) {
+            return { success: false, code: 'control_failed', error: 'Could not persist native configuration' }
+        }
+        this.notifyStateChange(sessionId)
+        return { success: true, controls: this.getControls(sessionId, context) }
+    }
+
+    private async resumeQueue(
+        sessionId: string,
+        context: NativeCodexSessionControlContext
+    ): Promise<NativeCodexSessionControlResponse> {
+        const state = this.getOrCreateControlState(sessionId)
+        if (state.stoppingTurnId) {
+            return { success: false, code: 'control_busy', error: 'The native stop request is not confirmed yet' }
+        }
+        const externallyControlled = context.controlledByCodexSsh || await this.isExternallyControlled(sessionId)
+        const head = this.queues.get(sessionId)?.[0]
+        if (externallyControlled && head && hasNativeConfiguration(head.configuration)) {
+            return {
+                success: false,
+                code: 'configuration_unsupported',
+                error: 'Configured native messages cannot be sent through the Desktop queue'
+            }
+        }
+        const next = this.cloneControlState(state)
+        next.queuePaused = false
+        if (!this.setControlState(next)) {
+            return { success: false, code: 'control_failed', error: 'Could not persist native queue state' }
+        }
+        this.scheduleQueuePump(sessionId, 0, { replacePending: true })
+        this.notifyStateChange(sessionId)
+        return { success: true, controls: this.getControls(sessionId, context) }
+    }
+
+    private async stop(
+        sessionId: string,
+        expectedTurnId: string,
+        context: NativeCodexSessionControlContext
+    ): Promise<NativeCodexSessionControlResponse> {
+        const state = this.getOrCreateControlState(sessionId)
+        if (state.stoppingTurnId) {
+            return { success: false, code: 'control_busy', error: 'The native stop request is not confirmed yet' }
+        }
+        if (this.sharedQueueDeliveries.has(sessionId)) {
+            return { success: false, code: 'control_busy', error: 'A native queue submission is still being delivered' }
+        }
+
+        const active = this.activeSends.get(sessionId)
+        if (active?.kind === 'exec-resume') {
+            return { success: false, code: 'unsupported', error: 'The native exec transport cannot be interrupted safely' }
+        }
+        if (active?.kind === 'app-server') {
+            if (context.controlledByCodexSsh || await this.isExternallyControlled(sessionId)) {
+                return { success: false, code: 'control_busy', error: 'Codex Desktop now owns this native turn' }
+            }
+            if (!active.turnId || active.turnId !== expectedTurnId || (context.activeTurnId && context.activeTurnId !== expectedTurnId)) {
+                return { success: false, code: 'turn_changed', error: 'The native turn changed before it could be stopped' }
+            }
+            return await this.interruptPrivate(sessionId, active, expectedTurnId, context)
+        }
+
+        if (!context.controlledByCodexSsh || !context.activeTurnId || context.activeTurnId !== expectedTurnId) {
+            return { success: false, code: 'unsupported', error: 'No safely interruptible native turn is owned by Codex Desktop' }
+        }
+        if (this.externalControlChecker && !(await this.isExternallyControlled(sessionId))) {
+            return { success: false, code: 'unsupported', error: 'Codex Desktop no longer owns this native thread' }
+        }
+        return await this.interruptShared(sessionId, expectedTurnId, state, context)
+    }
+
+    private async interruptPrivate(
+        sessionId: string,
+        active: ActiveAppServerSend,
+        turnId: string,
+        context: NativeCodexSessionControlContext
+    ): Promise<NativeCodexSessionControlResponse> {
+        if (!active.client.interruptTurn) {
+            return { success: false, code: 'unsupported', error: 'The native app-server cannot interrupt turns' }
+        }
+        if (
+            !this.controlReservations.has(sessionId)
+            || this.activeSends.get(sessionId) !== active
+            || active.turnId !== turnId
+            || (context.activeTurnId && context.activeTurnId !== turnId)
+        ) {
+            return { success: false, code: 'turn_changed', error: 'The native turn changed before it could be stopped' }
+        }
+        const next = this.cloneControlState(this.getOrCreateControlState(sessionId))
+        next.queuePaused = true
+        next.stoppingTurnId = turnId
+        if (!this.setControlState(next)) {
+            return { success: false, code: 'control_failed', error: 'Could not persist native stop state' }
+        }
+        this.clearQueueTimer(sessionId)
+        if (
+            !this.controlReservations.has(sessionId)
+            || this.activeSends.get(sessionId) !== active
+            || active.turnId !== turnId
+        ) {
+            const reverted = this.cloneControlState(next)
+            delete reverted.stoppingTurnId
+            this.setControlState(reverted)
+            return { success: false, code: 'turn_changed', error: 'The native turn changed before interruption was sent' }
+        }
+        try {
+            const response = await active.client.interruptTurn({ threadId: sessionId, turnId })
+            if (!isInterruptAccepted(response)) {
+                const failed = this.cloneControlState(next)
+                delete failed.stoppingTurnId
+                this.setControlState(failed)
+                return { success: false, code: 'control_failed', error: 'Codex did not confirm the native stop request' }
+            }
+            this.notifyStateChange(sessionId)
+            return { success: true, controls: this.getControls(sessionId, context) }
+        } catch {
+            // The request may have reached Codex even when its ACK was lost.
+            // Keep both the stop marker and queue pause until a terminal event.
+            this.notifyStateChange(sessionId)
+            return {
+                success: false,
+                code: 'control_unconfirmed',
+                error: 'Could not confirm whether Codex accepted the native stop request'
+            }
+        }
+    }
+
+    private async interruptShared(
+        sessionId: string,
+        turnId: string,
+        state: NativeCodexSessionControlState,
+        context: NativeCodexSessionControlContext
+    ): Promise<NativeCodexSessionControlResponse> {
+        if (!this.createSshAppServerClient) {
+            return { success: false, code: 'unsupported', error: 'Codex Desktop control is unavailable' }
+        }
+        const client = this.createSshAppServerClient()
+        if (!client.interruptTurn) {
+            return { success: false, code: 'unsupported', error: 'The Desktop app-server cannot interrupt turns' }
+        }
+        let interruptAttempted = false
+        try {
+            await client.connect()
+            if (!this.controlReservations.has(sessionId)) {
+                return { success: false, code: 'control_busy', error: 'Native control request was superseded' }
+            }
+            await client.initialize({
+                clientInfo: { name: 'hapi-native-session-control', title: 'SHAPI Native Session Control', version: '1.0.0' },
+                capabilities: { experimentalApi: true }
+            })
+            if (!this.controlReservations.has(sessionId)) {
+                return { success: false, code: 'control_busy', error: 'Native control request was superseded' }
+            }
+            const read = client.request
+                ? await client.request('thread/read', { threadId: sessionId, includeTurns: true })
+                : null
+            if (!hasExactInProgressTurn(read, sessionId, turnId)) {
+                return { success: false, code: 'turn_changed', error: 'The expected native turn is no longer active' }
+            }
+            if (this.externalControlChecker && !(await this.isExternallyControlled(sessionId))) {
+                return { success: false, code: 'unsupported', error: 'Codex Desktop no longer owns this native thread' }
+            }
+            if (!this.controlReservations.has(sessionId)) {
+                return { success: false, code: 'control_busy', error: 'Native control request was superseded' }
+            }
+            const currentState = this.getOrCreateControlState(sessionId)
+            const next = this.cloneControlState(currentState)
+            next.queuePaused = true
+            next.stoppingTurnId = turnId
+            // This write is deliberately before the first interrupt bytes.
+            if (!this.setControlState(next)) {
+                return { success: false, code: 'control_failed', error: 'Could not persist native stop state' }
+            }
+            this.clearQueueTimer(sessionId)
+            interruptAttempted = true
+            const response = await client.interruptTurn({ threadId: sessionId, turnId })
+            if (!isInterruptAccepted(response)) {
+                const failed = this.cloneControlState(next)
+                delete failed.stoppingTurnId
+                this.setControlState(failed)
+                return { success: false, code: 'control_failed', error: 'Codex did not confirm the native stop request' }
+            }
+            this.notifyStateChange(sessionId)
+            return { success: true, controls: this.getControls(sessionId, context) }
+        } catch {
+            if (!interruptAttempted) {
+                return {
+                    success: false,
+                    code: 'control_failed',
+                    error: 'Could not prepare the native stop request'
+                }
+            }
+            this.notifyStateChange(sessionId)
+            return {
+                success: false,
+                code: 'control_unconfirmed',
+                error: 'Could not confirm whether Codex accepted the native stop request'
+            }
+        } finally {
+            await client.disconnect().catch(() => {})
+        }
+    }
+
     /** True only after this runner has crossed the native turn ownership edge. */
     ownsActiveDelivery(sessionId: string): boolean {
         const active = this.activeSends.get(sessionId)
         return active?.kind === 'exec-resume'
             || active?.turnStartAttempted === true
+    }
+
+    /** Exact private app-server turn id; never infer one from a stale plan. */
+    getActiveTurnId(sessionId: string): string | null {
+        const active = this.activeSends.get(sessionId)
+        return active?.kind === 'app-server' ? active.turnId : null
+    }
+
+    hasPrivateActiveDelivery(sessionId: string): boolean {
+        return this.activeSends.get(sessionId)?.kind === 'app-server'
     }
 
     /** A cold transcript must be read once when it can settle an SSH receipt. */
@@ -1028,6 +1739,7 @@ export class NativeCodexSessionDirectSender {
         this.clearSharedQueueDeliveryTimer(delivery)
         this.sharedQueueDeliveries.delete(sessionId)
         this.recentFailures.delete(sessionId)
+        this.cleanupUnretainedAttachments(sessionId, receipt.attachmentIds ?? [])
         return true
     }
 
@@ -1065,7 +1777,8 @@ export class NativeCodexSessionDirectSender {
             accepted: true,
             transcriptConfirmed: true,
             transcriptConfirmedAt: Math.max(this.now(), recovery.queuedAt),
-            transcriptEvidenceAt: evidence.createdAt
+            transcriptEvidenceAt: evidence.createdAt,
+            ...persistedAttachmentIds(recovery.attachmentIds)
         }
         queue.shift()
         if (queue.length === 0) {
@@ -1087,6 +1800,7 @@ export class NativeCodexSessionDirectSender {
         if (failure?.clientMessageId === recovery.id) {
             this.recentFailures.delete(sessionId)
         }
+        this.cleanupUnretainedAttachments(sessionId, recovery.attachmentIds)
         return true
     }
 
@@ -1174,8 +1888,12 @@ export class NativeCodexSessionDirectSender {
         rawForceRecovery?: unknown,
         rawDeliveryPolicy?: unknown,
         rawReviewGuard?: unknown,
-        sharedSsh = false
+        sharedSsh = false,
+        rawAttachmentIds?: unknown
     ): SendCodexLocalSessionMessageRpcResponse {
+        if (this.controlStoreUnavailable) {
+            return { success: false, code: 'launch_failed', error: 'Native control state is unavailable; repair the runner state file first' }
+        }
         if (this.archiveReservations.has(sessionId)) {
             return {
                 success: false,
@@ -1184,6 +1902,10 @@ export class NativeCodexSessionDirectSender {
             }
         }
         const message = typeof rawMessage === 'string' ? rawMessage.trim() : ''
+        const attachmentIds = parseNativeCodexAttachmentIds(rawAttachmentIds)
+        if (attachmentIds === null) {
+            return { success: false, code: 'invalid_message', error: 'attachmentIds are invalid' }
+        }
         const forceRecovery = rawForceRecovery === true
         const deliveryPolicy = rawDeliveryPolicy === undefined || rawDeliveryPolicy === 'default'
             ? 'default'
@@ -1211,7 +1933,7 @@ export class NativeCodexSessionDirectSender {
                 error: 'clientMessageId is invalid'
             }
         }
-        if (!forceRecovery && !message) {
+        if (!forceRecovery && !message && attachmentIds.length === 0) {
             return {
                 success: false,
                 code: 'invalid_message',
@@ -1235,6 +1957,17 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
+        const previous = clientMessageId ? this.getExistingAcceptance(sessionId, clientMessageId) : null
+        if (previous && !forceRecovery) return previous
+
+        const attachmentError = this.resolveAttachments(sessionId, attachmentIds)
+        if (!attachmentError.success) {
+            return { success: false, code: 'invalid_message', error: attachmentError.error }
+        }
+
+        const configuration = this.getConfigurationSnapshot(sessionId)
+        const controlState = this.getOrCreateControlState(sessionId)
+
         const cwd = session.cwd?.trim()
         if (!cwd || !this.isDirectory(cwd)) {
             return {
@@ -1244,12 +1977,36 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
-        const previous = clientMessageId ? this.getExistingAcceptance(sessionId, clientMessageId) : null
+        if (
+            forceRecovery
+            && (
+                controlState.queuePaused
+                || Boolean(controlState.stoppingTurnId)
+                || this.controlReservations.has(sessionId)
+            )
+        ) {
+            return {
+                success: false,
+                code: 'session_busy',
+                error: 'Resume the native queue before recovering this message'
+            }
+        }
+        // Apply the current preference only when accepting a new receipt.
+        // Recovery must use the queued item's immutable snapshot; otherwise a
+        // later configuration change could pause an older shared-safe retry.
+        if (sharedSsh && !forceRecovery && !previous && hasNativeConfiguration(configuration) && !controlState.queuePaused) {
+            const paused = this.cloneControlState(controlState)
+            paused.queuePaused = true
+            if (!this.setControlState(paused)) {
+                return { success: false, code: 'launch_failed', error: 'Could not persist native queue pause' }
+            }
+            this.clearQueueTimer(sessionId)
+        }
         if (sharedSsh && deliveryPolicy === 'untrusted-review') {
             // Do not send a review through an SSH-loaded app-server. Its
             // thread/resume overrides are deliberately reserved for a fresh,
             // private bridge after the Desktop owner releases this thread.
-            return previous ?? this.enqueue(sessionId, message, displayMessage, clientMessageId, { deliveryPolicy, reviewGuard })
+            return previous ?? this.enqueue(sessionId, message, displayMessage, clientMessageId, { deliveryPolicy, reviewGuard, configuration, attachmentIds })
         }
         if (sharedSsh && forceRecovery) {
             if (previous?.success === true && previous.status === 'processing') return previous
@@ -1259,7 +2016,9 @@ export class NativeCodexSessionDirectSender {
                 message,
                 displayMessage,
                 deliveryPolicy,
-                reviewGuard
+                reviewGuard,
+                configuration,
+                attachmentIds
             )
         }
         if (forceRecovery) {
@@ -1272,17 +2031,24 @@ export class NativeCodexSessionDirectSender {
                 message,
                 displayMessage,
                 deliveryPolicy,
-                reviewGuard
+                reviewGuard,
+                configuration,
+                attachmentIds
             )
         }
-        if (previous) {
-            return previous
-        }
-
         const guardError = this.verifyReviewGuard(sessionId, deliveryPolicy, reviewGuard)
         if (guardError) {
             return deliveryPolicy === 'untrusted-review'
-                ? this.preserveReviewGuardFailure(sessionId, message, displayMessage, clientMessageId, this.now(), reviewGuard, guardError)
+                ? this.preserveReviewGuardFailure(
+                    sessionId,
+                    message,
+                    displayMessage,
+                    clientMessageId,
+                    this.now(),
+                    reviewGuard,
+                    guardError,
+                    { configuration, attachmentIds }
+                )
                 : { success: false, code: 'launch_failed', error: guardError }
         }
 
@@ -1292,21 +2058,23 @@ export class NativeCodexSessionDirectSender {
         // until the transcript observes idle, then submit with
         // thread/queue/add instead.
         if (sharedSsh) {
-            return this.enqueue(sessionId, message, displayMessage, clientMessageId, { deliveryPolicy, reviewGuard })
+            return this.enqueue(sessionId, message, displayMessage, clientMessageId, { deliveryPolicy, reviewGuard, configuration, attachmentIds })
         }
         if (
             this.hasDeliveryLease(sessionId)
+            || controlState.queuePaused
+            || this.controlReservations.has(sessionId)
             || status.status === 'processing'
             || status.stalledSince !== undefined
             || (this.queues.get(sessionId)?.length ?? 0) > 0
         ) {
-            return this.enqueue(sessionId, message, displayMessage, clientMessageId, { deliveryPolicy, reviewGuard })
+            return this.enqueue(sessionId, message, displayMessage, clientMessageId, { deliveryPolicy, reviewGuard, configuration, attachmentIds })
         }
         if (status.status === 'unknown') {
             // Unknown is not evidence that the original thread is idle. Keep
             // a normal, durable FIFO receipt and let the queue pump start it
             // only after a later transcript observation is explicitly idle.
-            return this.enqueue(sessionId, message, displayMessage, clientMessageId, { deliveryPolicy, reviewGuard })
+            return this.enqueue(sessionId, message, displayMessage, clientMessageId, { deliveryPolicy, reviewGuard, configuration, attachmentIds })
         }
 
         return this.start(
@@ -1317,7 +2085,9 @@ export class NativeCodexSessionDirectSender {
             session.modifiedAt,
             clientMessageId,
             deliveryPolicy,
-            reviewGuard
+            reviewGuard,
+            configuration,
+            attachmentIds
         )
     }
 
@@ -1333,7 +2103,8 @@ export class NativeCodexSessionDirectSender {
         rawClientMessageId?: unknown,
         rawForceRecovery?: unknown,
         rawDeliveryPolicy?: unknown,
-        rawReviewGuard?: unknown
+        rawReviewGuard?: unknown,
+        rawAttachmentIds?: unknown
     ): Promise<SendCodexLocalSessionMessageRpcResponse> {
         const sharedSsh = await this.isExternallyControlled(sessionId)
         const result = this.send(
@@ -1344,7 +2115,8 @@ export class NativeCodexSessionDirectSender {
             rawForceRecovery,
             rawDeliveryPolicy,
             rawReviewGuard,
-            sharedSsh
+            sharedSsh,
+            rawAttachmentIds
         )
         if (sharedSsh && result.success && result.status === 'queued') {
             // Do not make the RPC wait on the Desktop socket. The receipt is
@@ -1432,6 +2204,7 @@ export class NativeCodexSessionDirectSender {
                     error: 'Could not safely discard this accepted native review'
                 }
             }
+            this.cleanupUnretainedAttachments(sessionId, accepted.attachmentIds ?? [])
             this.notifyStateChange(sessionId)
             return {
                 success: true,
@@ -1488,6 +2261,8 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
+        this.cleanupUnretainedAttachments(sessionId, discarded!.attachmentIds)
+
         const failure = this.recentFailures.get(sessionId)
         if (failure?.clientMessageId === clientMessageId) {
             this.recentFailures.delete(sessionId)
@@ -1514,7 +2289,9 @@ export class NativeCodexSessionDirectSender {
         deliveryText: string,
         displayText: string,
         deliveryPolicy: NativeCodexDeliveryPolicy,
-        reviewGuard: NativeKanbanFeedbackReviewGuard | undefined
+        reviewGuard: NativeKanbanFeedbackReviewGuard | undefined,
+        configuration: NativeCodexSessionConfiguration,
+        attachmentIds: readonly string[]
     ): SendCodexLocalSessionMessageRpcResponse {
         if (!clientMessageId) {
             return {
@@ -1527,6 +2304,14 @@ export class NativeCodexSessionDirectSender {
         // A confirmation is never permission to overlap a hand-off that this
         // runner still owns. The matching-id case was returned by `send`
         // above; any other active send must settle first.
+        const controlState = this.getOrCreateControlState(sessionId)
+        if (controlState.queuePaused || controlState.stoppingTurnId || this.controlReservations.has(sessionId)) {
+            return {
+                success: false,
+                code: 'session_busy',
+                error: 'Resume the native queue before recovering this message'
+            }
+        }
         if (this.hasDeliveryLease(sessionId)) {
             return {
                 success: false,
@@ -1590,7 +2375,8 @@ export class NativeCodexSessionDirectSender {
                     queued.id,
                     queued.queuedAt,
                     queued.reviewGuard,
-                    guardError
+                    guardError,
+                    { configuration: queued.configuration }
                 )
             }
             queue.shift()
@@ -1607,7 +2393,9 @@ export class NativeCodexSessionDirectSender {
                 session.modifiedAt,
                 queued.id,
                 queued.deliveryPolicy,
-                queued.reviewGuard
+                queued.reviewGuard,
+                queued.configuration,
+                queued.attachmentIds
             )
             if (result.success) return result
 
@@ -1638,7 +2426,9 @@ export class NativeCodexSessionDirectSender {
             session.modifiedAt,
             clientMessageId,
             deliveryPolicy,
-            reviewGuard
+            reviewGuard,
+            configuration,
+            attachmentIds
         )
     }
 
@@ -1654,13 +2444,23 @@ export class NativeCodexSessionDirectSender {
         deliveryText: string,
         displayText: string,
         deliveryPolicy: NativeCodexDeliveryPolicy,
-        reviewGuard: NativeKanbanFeedbackReviewGuard | undefined
+        reviewGuard: NativeKanbanFeedbackReviewGuard | undefined,
+        configuration: NativeCodexSessionConfiguration,
+        attachmentIds: readonly string[]
     ): SendCodexLocalSessionMessageRpcResponse {
         if (!clientMessageId) {
             return {
                 success: false,
                 code: 'invalid_client_message_id',
                 error: 'clientMessageId is required for native recovery'
+            }
+        }
+        const controlState = this.getOrCreateControlState(sessionId)
+        if (controlState.queuePaused || controlState.stoppingTurnId || this.controlReservations.has(sessionId)) {
+            return {
+                success: false,
+                code: 'session_busy',
+                error: 'Resume the native queue before recovering this message'
             }
         }
         if (this.hasDeliveryLease(sessionId)) {
@@ -1687,7 +2487,9 @@ export class NativeCodexSessionDirectSender {
             }
             const result = this.enqueue(sessionId, deliveryText, displayText || deliveryText, clientMessageId, {
                 deliveryPolicy,
-                ...(reviewGuard ? { reviewGuard } : {})
+                ...(reviewGuard ? { reviewGuard } : {}),
+                configuration,
+                attachmentIds
             })
             if (result.success) void this.pumpSharedSshQueue(sessionId)
             return result
@@ -1724,6 +2526,8 @@ export class NativeCodexSessionDirectSender {
             queuedAt?: number
             deliveryPolicy?: NativeCodexDeliveryPolicy
             reviewGuard?: NativeKanbanFeedbackReviewGuard
+            configuration?: NativeCodexSessionConfiguration
+            attachmentIds?: readonly string[]
         } = {}
     ): SendCodexLocalSessionMessageRpcResponse {
         const queue = this.queues.get(sessionId) ?? []
@@ -1743,7 +2547,9 @@ export class NativeCodexSessionDirectSender {
             queuedAt,
             recoveryRequired: false,
             deliveryPolicy: options.deliveryPolicy ?? 'default',
-            ...(options.reviewGuard ? { reviewGuard: options.reviewGuard } : {})
+            ...(options.reviewGuard ? { reviewGuard: options.reviewGuard } : {}),
+            configuration: cloneNativeConfiguration(options.configuration ?? this.getConfigurationSnapshot(sessionId)),
+            attachmentIds: [...(options.attachmentIds ?? [])]
         }
         if (options.front) {
             queue.unshift(item)
@@ -1796,7 +2602,9 @@ export class NativeCodexSessionDirectSender {
                 queuedAt: active.startedAt,
                 recoveryRequired: false,
                 deliveryPolicy: active.deliveryPolicy,
-                ...(active.reviewGuard ? { reviewGuard: active.reviewGuard } : {})
+                ...(active.reviewGuard ? { reviewGuard: active.reviewGuard } : {}),
+                configuration: cloneNativeConfiguration(active.configuration),
+                attachmentIds: [...active.attachmentIds]
             })
         }
 
@@ -1835,12 +2643,14 @@ export class NativeCodexSessionDirectSender {
         initialModifiedAt: number,
         clientMessageId: string | null = null,
         deliveryPolicy: NativeCodexDeliveryPolicy = 'default',
-        reviewGuard?: NativeKanbanFeedbackReviewGuard
+        reviewGuard?: NativeKanbanFeedbackReviewGuard,
+        configuration: NativeCodexSessionConfiguration = this.getConfigurationSnapshot(sessionId),
+        attachmentIds: readonly string[] = []
     ): SendCodexLocalSessionMessageRpcResponse {
         const guardError = this.verifyReviewGuard(sessionId, deliveryPolicy, reviewGuard)
         if (guardError) {
             return deliveryPolicy === 'untrusted-review'
-                ? this.preserveReviewGuardFailure(sessionId, deliveryText, displayText, clientMessageId, this.now(), reviewGuard, guardError)
+                ? this.preserveReviewGuardFailure(sessionId, deliveryText, displayText, clientMessageId, this.now(), reviewGuard, guardError, { configuration, attachmentIds })
                 : { success: false, code: 'launch_failed', error: guardError }
         }
         if (this.createAppServerClient) {
@@ -1852,10 +2662,12 @@ export class NativeCodexSessionDirectSender {
                 initialModifiedAt,
                 clientMessageId,
                 deliveryPolicy,
-                reviewGuard
+                reviewGuard,
+                configuration,
+                attachmentIds
             )
         }
-        return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, this.now(), 1, deliveryPolicy, reviewGuard)
+        return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, this.now(), 1, deliveryPolicy, reviewGuard, [], configuration, attachmentIds)
     }
 
     private startAppServerBridge(
@@ -1866,7 +2678,9 @@ export class NativeCodexSessionDirectSender {
         initialModifiedAt: number,
         clientMessageId: string | null,
         deliveryPolicy: NativeCodexDeliveryPolicy,
-        reviewGuard?: NativeKanbanFeedbackReviewGuard
+        reviewGuard?: NativeKanbanFeedbackReviewGuard,
+        configuration: NativeCodexSessionConfiguration = this.getConfigurationSnapshot(sessionId),
+        attachmentIds: readonly string[] = []
     ): SendCodexLocalSessionMessageRpcResponse {
         const startedAt = this.now()
         let client: NativeCodexAppServerClient
@@ -1876,7 +2690,7 @@ export class NativeCodexSessionDirectSender {
         } catch {
             // A factory failure has not touched the native thread. Use the
             // legacy exact-thread path instead of rejecting a valid message.
-            return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, startedAt, 2, deliveryPolicy, reviewGuard)
+            return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, startedAt, 2, deliveryPolicy, reviewGuard, [], configuration, attachmentIds)
         }
 
         const active: ActiveAppServerSend = {
@@ -1887,6 +2701,8 @@ export class NativeCodexSessionDirectSender {
             deliveryText,
             displayText,
             deliveryPolicy,
+            configuration,
+            attachmentIds: [...attachmentIds],
             ...(reviewGuard ? { reviewGuard } : {}),
             client,
             progress: {
@@ -1921,7 +2737,7 @@ export class NativeCodexSessionDirectSender {
             this.activeSends.delete(sessionId)
             this.disposeBridge(active)
             this.persistOutbox()
-            return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, startedAt, 2, deliveryPolicy, reviewGuard, active.progress.history)
+            return this.startExecResume(sessionId, deliveryText, displayText, cwd, clientMessageId, startedAt, 2, deliveryPolicy, reviewGuard, active.progress.history, configuration, attachmentIds)
         }
         this.scheduleBridgeLifecycleCheck(sessionId, active)
         this.notifyStateChange(sessionId)
@@ -1939,13 +2755,19 @@ export class NativeCodexSessionDirectSender {
         attempt = 1,
         deliveryPolicy: NativeCodexDeliveryPolicy = 'default',
         reviewGuard?: NativeKanbanFeedbackReviewGuard,
-        previousHistory: CodexLocalSessionDirectSendProgress['history'] = []
+        previousHistory: CodexLocalSessionDirectSendProgress['history'] = [],
+        configuration: NativeCodexSessionConfiguration = this.getConfigurationSnapshot(sessionId),
+        attachmentIds: readonly string[] = []
     ): SendCodexLocalSessionMessageRpcResponse {
         const guardError = this.verifyReviewGuard(sessionId, deliveryPolicy, reviewGuard)
         if (guardError) {
             return deliveryPolicy === 'untrusted-review'
-                ? this.preserveReviewGuardFailure(sessionId, deliveryText, displayText, clientMessageId, startedAt, reviewGuard, guardError)
+                ? this.preserveReviewGuardFailure(sessionId, deliveryText, displayText, clientMessageId, startedAt, reviewGuard, guardError, { configuration, attachmentIds })
                 : { success: false, code: 'launch_failed', error: guardError }
+        }
+        const prepared = this.buildNativeTurnInput(sessionId, deliveryText, attachmentIds, true)
+        if (!prepared.success) {
+            return { success: false, code: 'launch_failed', error: prepared.error }
         }
         // A native transcript may live outside a Git repository. We already
         // verify that its original workspace exists above, so do not let
@@ -1959,6 +2781,8 @@ export class NativeCodexSessionDirectSender {
             queuedAt: startedAt,
             recoveryRequired: true,
             recoveryReason: 'runner_restarted',
+            configuration: cloneNativeConfiguration(configuration),
+            ...persistedAttachmentIds(attachmentIds),
             ...(deliveryPolicy === 'untrusted-review' ? {
                 deliveryPolicy,
                 ...(reviewGuard ? { reviewGuard } : {})
@@ -1968,8 +2792,8 @@ export class NativeCodexSessionDirectSender {
             return this.persistenceFailure()
         }
         const args = deliveryPolicy === 'untrusted-review'
-            ? ['--sandbox', 'read-only', '--ask-for-approval', 'on-request', 'exec', 'resume', '--json', '--skip-git-repo-check', sessionId, deliveryText]
-            : ['exec', 'resume', '--json', '--skip-git-repo-check', sessionId, deliveryText]
+            ? ['--sandbox', 'read-only', '--ask-for-approval', 'on-request', 'exec', 'resume', ...buildNativeExecConfigurationArgs(configuration), '--json', '--skip-git-repo-check', sessionId, prepared.text]
+            : ['exec', 'resume', ...buildNativeExecConfigurationArgs(configuration), '--json', '--skip-git-repo-check', sessionId, prepared.text]
         let child: NativeCodexChildProcess
         try {
             child = this.spawnProcess(args, cwd)
@@ -1982,7 +2806,9 @@ export class NativeCodexSessionDirectSender {
                 front: true,
                 queuedAt: startedAt,
                 deliveryPolicy,
-                ...(reviewGuard ? { reviewGuard } : {})
+                ...(reviewGuard ? { reviewGuard } : {}),
+                configuration,
+                attachmentIds
             })
             if (queued.success) {
                 this.scheduleQueuePump(sessionId, NATIVE_QUEUE_RETRY_INTERVAL_MS, { replacePending: true })
@@ -2008,6 +2834,8 @@ export class NativeCodexSessionDirectSender {
             deliveryText,
             displayText,
             deliveryPolicy,
+            configuration,
+            attachmentIds: [...attachmentIds],
             ...(reviewGuard ? { reviewGuard } : {}),
             progress: {
                 phase,
@@ -2084,6 +2912,11 @@ export class NativeCodexSessionDirectSender {
                 this.deferReviewForInvalidGuard(sessionId, active, guardError)
                 return
             }
+            const prepared = this.buildNativeTurnInput(sessionId, active.deliveryText, active.attachmentIds, false)
+            if (!prepared.success) {
+                this.finish(sessionId, active, prepared.error, 'launch_failed')
+                return
+            }
 
             // This is the irrevocable edge. A thrown or timed-out request may
             // still have reached Codex, so any failure after this line is
@@ -2091,7 +2924,14 @@ export class NativeCodexSessionDirectSender {
             active.turnStartAttempted = true
             const response = await active.client.startTurn({
                 threadId: sessionId,
-                input: [{ type: 'text', text: active.deliveryText }]
+                input: prepared.input,
+                ...(active.configuration.model ? { model: active.configuration.model } : {}),
+                ...(active.configuration.modelReasoningEffort
+                    ? { effort: active.configuration.modelReasoningEffort as TurnStartParams['effort'] }
+                    : {}),
+                ...(active.configuration.serviceTier
+                    ? { serviceTierForTurn: active.configuration.serviceTier === 'fast' ? 'priority' as const : 'default' as const }
+                    : {})
             })
             if (!this.isCurrentActive(sessionId, active)) return
 
@@ -2155,6 +2995,7 @@ export class NativeCodexSessionDirectSender {
         if (!active.turnId || turnId !== active.turnId) return
         const status = getNotificationStatus(params)?.toLowerCase()
         const failure = getNotificationError(params)
+        const stopRequested = this.getOrCreateControlState(sessionId).stoppingTurnId === active.turnId
         if (
             status === 'failed' ||
             status === 'error' ||
@@ -2162,6 +3003,11 @@ export class NativeCodexSessionDirectSender {
             status === 'cancelled' ||
             status === 'canceled'
         ) {
+            if (stopRequested) {
+                this.clearStoppingTurn(sessionId, active.turnId)
+                this.finish(sessionId, active, null)
+                return
+            }
             // The task failed after acceptance; delivery itself is settled.
             // Keep the stricter review-file terminal policy unchanged.
             if (active.deliveryPolicy !== 'untrusted-review') this.markAcceptedCompleted(sessionId, active)
@@ -2173,6 +3019,7 @@ export class NativeCodexSessionDirectSender {
             )
             return
         }
+        if (stopRequested) this.clearStoppingTurn(sessionId, active.turnId)
         this.finish(sessionId, active, null)
     }
 
@@ -2214,7 +3061,9 @@ export class NativeCodexSessionDirectSender {
                 2,
                 active.deliveryPolicy,
                 active.reviewGuard,
-                active.progress.history
+                active.progress.history,
+                active.configuration,
+                active.attachmentIds
             )
             if (result.success) return
             this.recordBridgeFallbackFailure(sessionId, active, result)
@@ -2258,7 +3107,9 @@ export class NativeCodexSessionDirectSender {
                 2,
                 active.deliveryPolicy,
                 active.reviewGuard,
-                active.progress.history
+                active.progress.history,
+                active.configuration,
+                active.attachmentIds
             )
             if (!result.success) {
                 this.recordBridgeFallbackFailure(sessionId, active, result)
@@ -2288,7 +3139,7 @@ export class NativeCodexSessionDirectSender {
             active.startedAt,
             active.reviewGuard,
             error,
-            { front: true }
+            { front: true, configuration: active.configuration, attachmentIds: active.attachmentIds }
         )
     }
 
@@ -2476,7 +3327,9 @@ export class NativeCodexSessionDirectSender {
             // not merely after Codex accepted turn/start.
             this.markAcceptedCompleted(sessionId, active)
         }
-        this.persistOutbox()
+        if (this.persistOutbox()) {
+            this.cleanupUnretainedAttachments(sessionId, active.attachmentIds)
+        }
         if (this.queues.get(sessionId)?.length && !this.queues.get(sessionId)?.[0]?.recoveryRequired) {
             this.scheduleQueuePump(sessionId, failure ? NATIVE_QUEUE_RETRY_INTERVAL_MS : this.queuePollIntervalMs)
         }
@@ -2609,14 +3462,21 @@ export class NativeCodexSessionDirectSender {
         delay = this.queuePollIntervalMs,
         options: { replacePending?: boolean } = {}
     ): void {
-        if (this.disposed) return
+        if (this.disposed || this.controlStoreUnavailable) return
         const existing = this.queueTimers.get(sessionId)
         if (existing && options.replacePending) {
             clearTimeout(existing)
             this.queueTimers.delete(sessionId)
         }
         const queue = this.queues.get(sessionId)
-        if (this.archiveReservations.has(sessionId) || this.queueTimers.has(sessionId) || !queue?.length || queue[0]?.recoveryRequired) {
+        if (
+            this.archiveReservations.has(sessionId)
+            || this.controlReservations.has(sessionId)
+            || this.getOrCreateControlState(sessionId).queuePaused
+            || this.queueTimers.has(sessionId)
+            || !queue?.length
+            || queue[0]?.recoveryRequired
+        ) {
             return
         }
         const timer = setTimeout(() => {
@@ -2629,8 +3489,15 @@ export class NativeCodexSessionDirectSender {
         this.queueTimers.set(sessionId, timer)
     }
 
+    private clearQueueTimer(sessionId: string): void {
+        const timer = this.queueTimers.get(sessionId)
+        if (!timer) return
+        clearTimeout(timer)
+        this.queueTimers.delete(sessionId)
+    }
+
     private pumpQueue(sessionId: string): void {
-        if (this.disposed) return
+        if (this.disposed || this.controlStoreUnavailable || this.controlReservations.has(sessionId) || this.getOrCreateControlState(sessionId).queuePaused) return
         if (this.sharedQueueDeliveries.has(sessionId)) return
         if (!this.externalControlChecker) {
             this.pumpQueueUnchecked(sessionId)
@@ -2643,7 +3510,9 @@ export class NativeCodexSessionDirectSender {
 
     private async pumpQueueAfterExternalControlCheck(sessionId: string, generation: number): Promise<void> {
         try {
+            if (this.disposed || this.controlStoreUnavailable || generation !== this.ownershipCheckGeneration || this.controlReservations.has(sessionId) || this.getOrCreateControlState(sessionId).queuePaused) return
             if (await this.isExternallyControlled(sessionId)) {
+                if (this.disposed || this.controlStoreUnavailable || generation !== this.ownershipCheckGeneration || this.controlReservations.has(sessionId) || this.getOrCreateControlState(sessionId).queuePaused) return
                 // Untrusted reviews keep waiting for socket release because
                 // their resume overrides are unsafe on an SSH-loaded thread.
                 // Ordinary prompts use Codex's native FIFO queue instead of
@@ -2655,7 +3524,7 @@ export class NativeCodexSessionDirectSender {
                 }
                 return
             }
-            if (this.disposed || generation !== this.ownershipCheckGeneration) return
+            if (this.disposed || this.controlStoreUnavailable || generation !== this.ownershipCheckGeneration) return
             this.pumpQueueUnchecked(sessionId)
         } finally {
             this.queueOwnershipChecks.delete(sessionId)
@@ -2671,7 +3540,10 @@ export class NativeCodexSessionDirectSender {
     private async pumpSharedSshQueue(sessionId: string): Promise<void> {
         if (
             this.disposed
+            || this.controlStoreUnavailable
             || this.archiveReservations.has(sessionId)
+            || this.controlReservations.has(sessionId)
+            || this.getOrCreateControlState(sessionId).queuePaused
             || this.hasDeliveryLease(sessionId)
         ) {
             return
@@ -2679,6 +3551,15 @@ export class NativeCodexSessionDirectSender {
         const queue = this.queues.get(sessionId)
         const item = queue?.[0]
         if (!queue || !item || item.recoveryRequired || item.deliveryPolicy === 'untrusted-review') {
+            return
+        }
+        if (hasNativeConfiguration(item.configuration)) {
+            const state = this.getOrCreateControlState(sessionId)
+            if (!state.queuePaused) {
+                const paused = this.cloneControlState(state)
+                paused.queuePaused = true
+                if (this.setControlState(paused)) this.clearQueueTimer(sessionId)
+            }
             return
         }
         // SHAPI waits for its bounded transcript observer to see idle. It
@@ -2710,7 +3591,7 @@ export class NativeCodexSessionDirectSender {
             this.sharedQueueClients.add(client)
             this.scheduleSharedQueueSetupTimeout(sessionId, delivery, item)
             await client.connect()
-            if (this.disposed || this.sharedQueueDeliveries.get(sessionId) !== delivery || !this.isCurrentQueuedItem(sessionId, item)) return
+            if (this.disposed || this.controlStoreUnavailable || this.controlReservations.has(sessionId) || this.getOrCreateControlState(sessionId).queuePaused || this.sharedQueueDeliveries.get(sessionId) !== delivery || !this.isCurrentQueuedItem(sessionId, item)) return
 
             await client.initialize({
                 clientInfo: {
@@ -2720,7 +3601,7 @@ export class NativeCodexSessionDirectSender {
                 },
                 capabilities: { experimentalApi: true }
             })
-            if (this.disposed || this.sharedQueueDeliveries.get(sessionId) !== delivery || !this.isCurrentQueuedItem(sessionId, item)) return
+            if (this.disposed || this.controlStoreUnavailable || this.controlReservations.has(sessionId) || this.getOrCreateControlState(sessionId).queuePaused || this.sharedQueueDeliveries.get(sessionId) !== delivery || !this.isCurrentQueuedItem(sessionId, item)) return
             // Re-observe only the local transcript after socket setup. If it
             // changed, leave the local receipt untouched for the next idle
             // observation; do not issue any shared-thread state read.
@@ -2731,6 +3612,20 @@ export class NativeCodexSessionDirectSender {
             }
             if (!client.request) {
                 throw new Error('Codex SSH shared app-server does not support thread/queue/add')
+            }
+            const prepared = this.buildNativeTurnInput(sessionId, item.deliveryText, item.attachmentIds, false)
+            if (!prepared.success) {
+                item.recoveryRequired = true
+                item.recoveryReason = 'launch_failed'
+                this.persistOutbox()
+                this.recentFailures.set(sessionId, {
+                    message: prepared.error,
+                    occurredAt: this.now(),
+                    clientMessageId: item.id,
+                    code: 'launch_failed'
+                })
+                this.notifyStateChange(sessionId)
+                return
             }
 
             // Persist the ambiguity guard before the first bytes of the RPC
@@ -2756,7 +3651,7 @@ export class NativeCodexSessionDirectSender {
             const response = await client.request('thread/queue/add', {
                 threadId: sessionId,
                 clientUserMessageId: item.id,
-                input: [{ type: 'text', text: item.deliveryText }]
+                input: prepared.input
             })
             if (!isQueueAddAccepted(response, item.id)) {
                 throw new Error('Codex SSH app-server did not confirm this native queue submission')
@@ -2769,10 +3664,10 @@ export class NativeCodexSessionDirectSender {
                 && item.recoveryRequired && item.recoveryReason === 'session_status_unknown') {
                 this.sharedQueueDeliveries.set(sessionId, delivery)
             }
-            if (this.disposed || this.sharedQueueDeliveries.get(sessionId) !== delivery || !this.isCurrentQueuedItem(sessionId, item)) return
+            if (this.disposed || this.controlStoreUnavailable || this.controlReservations.has(sessionId) || this.getOrCreateControlState(sessionId).queuePaused || this.sharedQueueDeliveries.get(sessionId) !== delivery || !this.isCurrentQueuedItem(sessionId, item)) return
             this.completeSharedQueueSubmission(sessionId, item, delivery)
         } catch (error) {
-            if (this.disposed || this.sharedQueueDeliveries.get(sessionId) !== delivery || !this.isCurrentQueuedItem(sessionId, item)) return
+            if (this.disposed || this.controlStoreUnavailable || this.controlReservations.has(sessionId) || this.getOrCreateControlState(sessionId).queuePaused || this.sharedQueueDeliveries.get(sessionId) !== delivery || !this.isCurrentQueuedItem(sessionId, item)) return
             const failure = trimFailureMessage(error instanceof Error ? error.message : String(error))
             if (!queueAddAttempted) {
                 // No `thread/queue/add` bytes have been attempted. Retain a
@@ -2972,7 +3867,11 @@ export class NativeCodexSessionDirectSender {
             deliveryText: item.deliveryText,
             queuedAt: item.queuedAt,
             recoveryRequired: false,
-            accepted: true
+            accepted: true,
+            ...(hasNativeConfiguration(item.configuration) ? { configuration: cloneNativeConfiguration(item.configuration) } : {}),
+            ...(item.deliveryPolicy === 'untrusted-review' ? { deliveryPolicy: 'untrusted-review' as const } : {}),
+            ...(item.reviewGuard ? { reviewGuard: item.reviewGuard } : {}),
+            ...persistedAttachmentIds(item.attachmentIds)
         }
         queue.shift()
         if (queue.length === 0) {
@@ -3022,7 +3921,7 @@ export class NativeCodexSessionDirectSender {
     }
 
     private pumpQueueUnchecked(sessionId: string): void {
-        if (this.disposed) return
+        if (this.disposed || this.controlStoreUnavailable || this.controlReservations.has(sessionId) || this.getOrCreateControlState(sessionId).queuePaused) return
         if (this.archiveReservations.has(sessionId)) {
             return
         }
@@ -3086,7 +3985,8 @@ export class NativeCodexSessionDirectSender {
                 next.id,
                 next.queuedAt,
                 next.reviewGuard,
-                guardError
+                guardError,
+                { configuration: next.configuration }
             )
             return
         }
@@ -3103,7 +4003,9 @@ export class NativeCodexSessionDirectSender {
             session.modifiedAt,
             item.id,
             item.deliveryPolicy,
-            item.reviewGuard
+            item.reviewGuard,
+            item.configuration,
+            item.attachmentIds
         )
         if (result.success) {
             if (queue.length > 0) {

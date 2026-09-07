@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { chromium, webkit } from 'playwright'
 import { LocalServiceManager } from '../../hub/src/localServices/manager'
 import { createLocalServiceHandler, type LocalServiceHandler, type LocalServiceWebSocket } from '../../hub/src/localServices/gateway'
-import { LocalServiceTunnels } from '../../cli/src/runner/localServiceTunnels'
+import { localServiceSocketFixture } from '../../hub/src/localServices/socketTransport.fixture'
 
 let handler: LocalServiceHandler | undefined
 let outsideRequests = 0
@@ -58,9 +58,9 @@ const trustedWeb = Bun.serve({ hostname: '127.0.0.1', port: 0,
     fetch: () => new Response('<!doctype html><title>Separate trusted UI</title><link rel="icon" href="data:,">', { headers: { 'content-type': 'text/html' } })
 })
 const trustedOrigin = `http://127.0.0.1:${trustedWeb.port}`
-const runner = new LocalServiceTunnels()
-const manager = new LocalServiceManager({ mode: 'path', appUrl: origin, frameOrigins: [trustedOrigin], sshHost: '127.0.0.1', sshListenHost: '127.0.0.1', sshPort: 0,
-    canAccessMachine: () => true, openTunnel: (_machine, request) => runner.open(request)
+const transport = await localServiceSocketFixture()
+const manager = new LocalServiceManager({ mode: 'path', appUrl: origin, frameOrigins: [trustedOrigin],
+    canAccessMachine: () => true, openTunnel: (machine, request) => transport.openTunnel(machine, request, 'owner')
 })
 
 try {
@@ -79,8 +79,8 @@ try {
             await page.waitForFunction('window.fixtureResult || window.fixtureError', undefined, { timeout: 15_000 })
             const result = await page.evaluate('window.fixtureResult || window.fixtureError')
             assert.equal(typeof result, 'object', String(result))
-            assert.equal(result.storage, 'SecurityError')
-            assert.equal(result.cookie, 'SecurityError')
+            assert.equal(result.storage, null)
+            assert.equal(result.cookie, '')
             assert.equal(result.opaque, 'null')
             assert.deepEqual(result.echo, { body: 'hello', cookie: null, auth: null })
             assert.equal(result.classic, true)
@@ -123,8 +123,8 @@ try {
             const inside = await frame.evaluate('window.fixtureResult || window.fixtureError')
             assert.equal(typeof inside, 'object', String(inside))
             assert.equal(inside.opaque, 'null')
-            assert.equal(inside.storage, 'SecurityError')
-            assert.equal(inside.cookie, 'SecurityError')
+            assert.equal(inside.storage, null)
+            assert.equal(inside.cookie, '')
             assert.deepEqual(inside.echo, { body: 'hello', cookie: null, auth: null })
             assert.equal(inside.ws, 'echo')
             assert.equal(inside.sse, 'ready')
@@ -170,7 +170,7 @@ try {
 } finally {
     handler?.stop()
     await manager.stop()
-    runner.dispose()
+    await transport.close()
     upstream.stop(true)
     trustedWeb.stop(true)
     hub.stop(true)

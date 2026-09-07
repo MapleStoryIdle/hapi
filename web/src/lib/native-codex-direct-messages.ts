@@ -1,3 +1,5 @@
+import type { AttachmentMetadata } from '@/types/api'
+
 const STORAGE_KEY = 'hapi:native-codex-direct-messages:v1'
 const MAX_MESSAGES_PER_SESSION = 50
 const MAX_SESSIONS = 50
@@ -27,6 +29,8 @@ export type NativeCodexDirectMessageEcho = {
     text: string
     /** Expanded custom-prompt text expected to appear in the native transcript. */
     deliveryText?: string
+    /** Browser-safe opaque attachment handles retained for native queue recovery. */
+    attachments?: AttachmentMetadata[]
     createdAt: number
     status: 'sending' | 'queued' | 'failed'
     /** More precise than the shared message-status icon. */
@@ -103,6 +107,26 @@ function parseEcho(value: unknown, now: number): NativeCodexDirectMessageEcho | 
     const observedThroughPosition = typeof record.observedThroughPosition === 'number'
         ? record.observedThroughPosition
         : null
+    const attachments = Array.isArray(record.attachments)
+        ? record.attachments.flatMap((value): AttachmentMetadata[] => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+            const attachment = value as Record<string, unknown>
+            const id = typeof attachment.id === 'string' ? attachment.id.trim() : ''
+            const filename = typeof attachment.filename === 'string' ? attachment.filename.trim() : ''
+            const mimeType = typeof attachment.mimeType === 'string' ? attachment.mimeType.trim() : ''
+            const size = typeof attachment.size === 'number' ? attachment.size : Number.NaN
+            const path = typeof attachment.path === 'string' ? attachment.path.trim() : ''
+            if (
+                !/^[a-f0-9]{32}$/.test(id)
+                || !filename
+                || !mimeType
+                || !Number.isSafeInteger(size)
+                || size < 0
+                || !path.startsWith(`native-codex:${id}`)
+            ) return []
+            return [{ id, filename, mimeType, size, path }]
+        })
+        : []
 
     if (!id || !text.trim() || !Number.isFinite(createdAt) || createdAt < now - MAX_MESSAGE_AGE_MS) {
         return null
@@ -117,6 +141,7 @@ function parseEcho(value: unknown, now: number): NativeCodexDirectMessageEcho | 
         id,
         text,
         ...(deliveryText && deliveryText !== text.trim() ? { deliveryText } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
         createdAt,
         status: record.status,
         deliveryPhase,

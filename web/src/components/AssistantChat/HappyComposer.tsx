@@ -32,7 +32,7 @@ import { consumeQueuedMessageEdit, useQueuedMessageEdit } from '@/lib/queued-mes
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
-import { shouldShowComposerStatusBar, shouldShowThinkingIndicator, StatusBar } from '@/components/AssistantChat/StatusBar'
+import { shouldShowComposerStatusBar, StatusBar } from '@/components/AssistantChat/StatusBar'
 import { ComposerButtons, ContextUsageProgressRail, GoalModeIcon, PlanModeIcon, ToolbarMenu, UnifiedButton, type ContextUsageDetails } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
@@ -45,7 +45,6 @@ import { getPiThinkingLevelOptions, getHighestThinkingLevel, isThinkingLevelSupp
 import { groupModelsByProvider } from './piModelGroups'
 import { PiModelPanel } from './PiModelPanel'
 import { PiThinkingLevelPanel } from './PiThinkingLevelPanel'
-import { SessionThinkingIndicator } from '@/components/SessionThinkingIndicator'
 
 export interface TextInputState {
     text: string
@@ -257,6 +256,12 @@ export function HappyComposer(props: {
     disabled?: boolean
     /** Replaces the send glyph with a lock while preserving the current draft. */
     locked?: boolean
+    /** Native transports can expose interruption independently of transcript activity. */
+    canAbort?: boolean
+    abortPending?: boolean
+    onAbort?: () => Promise<void>
+    allowGoals?: boolean
+    onReadOnlyModelInfo?: () => void
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
     threadGoal?: ThreadGoal | null
@@ -435,7 +440,8 @@ export function HappyComposer(props: {
     const [settingsPanel, setSettingsPanel] = useState<SettingsPanel>('main')
     const [showPiModelPanel, setShowPiModelPanel] = useState(false)
     const [showPiThinkingPanel, setShowPiThinkingPanel] = useState(false)
-    const [isAborting, setIsAborting] = useState(false)
+    const [abortRequested, setIsAborting] = useState(false)
+    const isAborting = abortRequested || props.abortPending === true
     const [isSwitching, setIsSwitching] = useState(false)
     const [showSideSessionMenu, setShowSideSessionMenu] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
@@ -695,7 +701,7 @@ export function HappyComposer(props: {
         haptic('light')
     }, [api, suggestions, inputState, autocompletePrefixes, focusComposerInputAt, haptic, skillsByName, handleSkillSelect])
 
-    const abortDisabled = controlsDisabled || isAborting || !threadIsRunning
+    const abortDisabled = controlsDisabled || isAborting || !threadIsRunning || props.canAbort === false
     const switchDisabled = controlsDisabled || isSwitching || !controlledByUser
     const showSwitchButton = Boolean(controlledByUser && onSwitchToRemote)
     const showTerminalButton = Boolean(onTerminal || terminalUnsupported)
@@ -718,8 +724,14 @@ export function HappyComposer(props: {
         if (abortDisabled) return
         haptic('error')
         setIsAborting(true)
-        api.thread().cancelRun()
-    }, [abortDisabled, api, haptic])
+        if (props.onAbort) {
+            // The transport owns error feedback. A failed/unknown request must
+            // not leave the local button permanently spinning.
+            void props.onAbort().catch(() => {}).finally(() => setIsAborting(false))
+        } else {
+            api.thread().cancelRun()
+        }
+    }, [abortDisabled, api, haptic, props.onAbort])
 
     const handleSwitch = useCallback(async () => {
         if (switchDisabled || !onSwitchToRemote) return
@@ -1099,7 +1111,7 @@ export function HappyComposer(props: {
         && onCollaborationModeChange
         && collaborationModeOptions.some((option) => option.mode === 'plan')
     )
-    const showGoalModeTool = agentFlavor === 'codex'
+    const showGoalModeTool = agentFlavor === 'codex' && props.allowGoals !== false
     const showPermissionSettings = Boolean(onPermissionModeChange && permissionModeOptions.length > 0)
     const showModelSettings = Boolean(onModelChange && supportsModelChange(agentFlavor) && (piModels && piModels.length > 0 || modelOptions.length > 0))
     const showModelEffortSettings = Boolean(
@@ -1659,15 +1671,6 @@ export function HappyComposer(props: {
                 >
                     {!composerCompact ? overlays : null}
 
-                    {!showStatusBar || !shouldShowComposerStatusBar(agentFlavor) ? (
-                        // Keep the measured dock height stable when a turn starts or ends.
-                        <div className="flex h-6 justify-start px-2 pb-1" data-testid="composer-thinking-slot">
-                            {shouldShowThinkingIndicator({ active, thinking, agentState, voiceStatus }) ? (
-                                <SessionThinkingIndicator compact />
-                            ) : null}
-                        </div>
-                    ) : null}
-
                     {showStatusBar && shouldShowComposerStatusBar(agentFlavor) ? (
                         <StatusBar
                             active={active}
@@ -1880,6 +1883,7 @@ export function HappyComposer(props: {
                                 locked={locked}
                                 showSettingsButton={showSettingsButton || Boolean(props.readOnlyModelInfo && (model || modelReasoningEffort))}
                                 settingsReadOnly={props.readOnlyModelInfo}
+                                onSettingsReadOnlyClick={props.onReadOnlyModelInfo}
                                 onSettingsToggle={handleSettingsToggle}
                                 settingsButtonRef={settingsButtonRef}
                                 settingsLabel={props.readOnlyModelInfo ? [model, currentReasoningLabel].filter(Boolean).join(' ') : settingsLabel}

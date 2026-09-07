@@ -63,6 +63,7 @@
     --app-chat-user-border: rgba(15, 23, 42, 0.07);
     --app-chat-user-chip-bg: #e3e3e3;
     --app-chat-user-chip-fg: #202020;
+    --app-chat-user-skill-fg: #245fa8;
     --app-tool-card-bg: #f2f4f6;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #e9edf2;
@@ -200,6 +201,7 @@ html[data-app-keyboard-open="true"] {
     --app-chat-user-border: rgba(255, 255, 255, 0.10);
     --app-chat-user-chip-bg: #414141;
     --app-chat-user-chip-fg: #f5f5f5;
+    --app-chat-user-skill-fg: #8fc1ff;
     --app-tool-card-bg: #2b2f34;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #343a41;
@@ -288,6 +290,7 @@ html[data-app-keyboard-open="true"] {
     --app-chat-user-border: rgba(255, 255, 255, 0.12);
     --app-chat-user-chip-bg: #363636;
     --app-chat-user-chip-fg: #f5f5f5;
+    --app-chat-user-skill-fg: #8fc1ff;
     --app-tool-card-bg: #0e0e10;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #161618;
@@ -774,6 +777,7 @@ select {
 /* Both session presentations share the same iOS surface language. List mode
  * stays directory-first; Kanban keeps richer metadata and task actions. */
 .cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-board {
+    --kanban-heading-icon-size: 0.875rem;
     gap: 1.75rem;
     padding-top: 0.625rem;
 }
@@ -789,6 +793,32 @@ select {
     font-size: 0.9375rem;
     font-weight: 600;
     letter-spacing: -0.01em;
+    line-height: 1.5rem;
+}
+
+.cupertino-session-board :is([data-kanban-group-icon], [data-kanban-date-emoji], .cupertino-kanban-heading .session-thinking__glyph) {
+    width: var(--kanban-heading-icon-size, 0.875rem);
+    height: var(--kanban-heading-icon-size, 0.875rem);
+    flex-shrink: 0;
+}
+
+.cupertino-session-board [data-kanban-date-emoji] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--kanban-heading-icon-size, 0.875rem);
+    line-height: 1;
+}
+
+.cupertino-session-board .cupertino-kanban-heading .session-thinking {
+    min-height: 1.5rem;
+    gap: 0.5rem;
+    font-size: inherit;
+    line-height: inherit;
+}
+
+.cupertino-session-board .cupertino-kanban-heading .session-thinking__label {
+    font-weight: inherit;
 }
 
 .cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-card-column {
@@ -854,11 +884,6 @@ select {
 .cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] [data-kanban-archive],
 .cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .session-kanban-card + button {
     color: var(--cupertino-session-secondary-label);
-}
-
-.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-completed-divider h2 {
-    color: var(--cupertino-session-secondary-label);
-    font-size: 0.75rem;
 }
 
 .cupertino-session-index .cupertino-session-list[data-session-list-view="list"] .cupertino-session-row .cupertino-session-source {
@@ -1194,6 +1219,19 @@ html[data-theme="oled"] .aui-md > .aui-md-ul:not(.contains-task-list):nth-of-typ
 
 .happy-user-bubble .aui-md {
     color: inherit;
+}
+
+/* A skill is a static prompt directive, not a navigable message link. Keep
+ * its blue language distinct from .message-content-link and from command
+ * chips: no underline, surface, border, hover treatment, or pointer cursor. */
+.happy-user-skill-directive {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--app-chat-user-skill-fg);
+    font-weight: 500;
+    text-decoration: none;
 }
 
 /* One inline-link treatment across assistant/user text and message actions.

@@ -1,7 +1,15 @@
 import { execFile, type ExecFileOptions } from 'child_process'
 import { isAbsolute, resolve } from 'node:path'
 import { promisify } from 'util'
-import type { CommandResponse, GitBranchResponse } from '@hapi/protocol/apiTypes'
+import type {
+    CommandResponse,
+    GitBranchOption,
+    GitBranchResponse,
+    GitBranchesResponse,
+    MachineGitBranchCreateRequest,
+    MachineGitBranchCommitRequest,
+    MachineGitBranchSwitchRequest
+} from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { validatePath } from '../pathSecurity'
@@ -28,6 +36,9 @@ interface GitDiffFileRequest {
 }
 
 type GitCommandResponse = CommandResponse
+
+const GIT_BRANCH_FETCH_TIMEOUT_MS = 30_000
+const GIT_BRANCH_REMOTE_TIMEOUT_MS = 60_000
 
 function resolveCwd(requestedCwd: string | undefined, workingDirectory: string): { cwd: string; error?: string } {
     const cwd = requestedCwd ?? workingDirectory
@@ -148,6 +159,301 @@ export async function getGitBranchStatusForCwd(cwd: string, timeout?: number): P
             : false,
         isDirty: hasGitWorktreeChanges(status.stdout ?? '')
     }
+}
+
+function gitBranchFailure(
+    result: GitCommandResponse,
+    code?: GitBranchesResponse['code']
+): GitBranchesResponse {
+    return {
+        success: false,
+        error: result.error ?? result.stderr ?? 'Git command failed',
+        ...(code ? { code } : {})
+    }
+}
+
+function splitGitLines(output: string | undefined): string[] {
+    return (output ?? '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+}
+
+function parseGitNumstat(output: string | undefined): { additions: number; deletions: number } {
+    let additions = 0
+    let deletions = 0
+
+    for (const line of splitGitLines(output)) {
+        const [added, removed] = line.split('\t')
+        const addedCount = Number.parseInt(added ?? '', 10)
+        const removedCount = Number.parseInt(removed ?? '', 10)
+        if (Number.isFinite(addedCount)) additions += addedCount
+        if (Number.isFinite(removedCount)) deletions += removedCount
+    }
+
+    return { additions, deletions }
+}
+
+function getRemoteBranchOption(ref: string): GitBranchOption | null {
+    const separator = ref.indexOf('/')
+    if (separator <= 0 || separator === ref.length - 1) return null
+
+    const name = ref.slice(separator + 1)
+    if (name === 'HEAD') return null
+
+    // `ref` is retained for the RPC mutation. The UI intentionally only
+    // receives `name`, so a conventional `origin/` prefix never leaks into
+    // the branch list.
+    return { ref, name }
+}
+
+function countChangedFiles(statusOutput: string | undefined): number {
+    return splitGitLines(statusOutput).length
+}
+
+function getDefaultPushRemote(output: string | undefined): string | null {
+    const remotes = splitGitLines(output)
+    if (remotes.includes('origin')) return 'origin'
+    return remotes.length === 1 ? remotes[0] ?? null : null
+}
+
+function isNotGitRepository(result: GitCommandResponse): boolean {
+    return /not a git repository/i.test(`${result.error ?? ''}\n${result.stderr ?? ''}`)
+}
+
+/**
+ * Read the complete branch picker payload in a bounded number of lightweight
+ * Git calls. This is a machine-level helper so original Codex and SHAPI
+ * sessions can share exactly the same branch controls.
+ */
+export async function getGitBranchesForCwd(cwd: string): Promise<GitBranchesResponse> {
+    const repository = await runGitCommand(['rev-parse', '--is-inside-work-tree'], cwd)
+    if (!repository.success || repository.stdout?.trim() !== 'true') {
+        return gitBranchFailure(repository, isNotGitRepository(repository) ? 'not_git_repository' : undefined)
+    }
+
+    const [current, status, numstat, local, remote, remoteNames] = await Promise.all([
+        runGitCommand(['branch', '--show-current'], cwd),
+        runGitCommand(['status', '--porcelain=v1', '--untracked-files=all'], cwd),
+        // Comparing with HEAD covers staged and unstaged tracked changes in
+        // one pass. An unborn repository simply has no line totals yet.
+        runGitCommand(['diff', '--numstat', 'HEAD'], cwd),
+        runGitCommand(['for-each-ref', '--format=%(refname:short)', '--sort=refname', 'refs/heads'], cwd),
+        runGitCommand(['for-each-ref', '--format=%(refname:short)', '--sort=refname', 'refs/remotes'], cwd),
+        runGitCommand(['remote'], cwd)
+    ])
+
+    if (!status.success) return gitBranchFailure(status)
+    if (!local.success) return gitBranchFailure(local)
+    if (!remote.success) return gitBranchFailure(remote)
+
+    const { additions, deletions } = numstat.success
+        ? parseGitNumstat(numstat.stdout)
+        : { additions: 0, deletions: 0 }
+    const currentBranch = current.success && current.stdout?.trim()
+        ? current.stdout.trim()
+        : null
+
+    return {
+        success: true,
+        currentBranch,
+        pushRemote: remoteNames.success ? getDefaultPushRemote(remoteNames.stdout) : null,
+        isDirty: countChangedFiles(status.stdout) > 0,
+        changedFileCount: countChangedFiles(status.stdout),
+        additions,
+        deletions,
+        localBranches: splitGitLines(local.stdout).map((name) => ({ ref: name, name })),
+        remoteBranches: splitGitLines(remote.stdout)
+            .map(getRemoteBranchOption)
+            .filter((branch): branch is GitBranchOption => branch !== null)
+    }
+}
+
+async function validateGitBranchName(cwd: string, name: string): Promise<GitCommandResponse> {
+    return await runGitCommand(['check-ref-format', '--branch', name], cwd)
+}
+
+function branchOperationFailure(result: GitCommandResponse): GitBranchesResponse {
+    return {
+        success: false,
+        error: result.error ?? result.stderr ?? 'Git branch operation failed'
+    }
+}
+
+async function switchToLocalBranch(cwd: string, branch: GitBranchOption): Promise<GitBranchesResponse> {
+    const valid = await validateGitBranchName(cwd, branch.ref)
+    if (!valid.success) return branchOperationFailure(valid)
+
+    const switched = await runGitCommand(['switch', branch.ref], cwd)
+    if (!switched.success) return branchOperationFailure(switched)
+    return await getGitBranchesForCwd(cwd)
+}
+
+/**
+ * Switch without force, reset, or stash. A dirty worktree must be explicitly
+ * confirmed by the browser and is checked here again to prevent a race.
+ */
+export async function switchGitBranchForCwd(
+    cwd: string,
+    request: Pick<MachineGitBranchSwitchRequest, 'target' | 'confirmDirty'>
+): Promise<GitBranchesResponse> {
+    const branches = await getGitBranchesForCwd(cwd)
+    if (!branches.success) return branches
+
+    const localBranches = branches.localBranches ?? []
+    const remoteBranches = branches.remoteBranches ?? []
+    const target = request.target.kind === 'local'
+        ? localBranches.find((branch) => branch.ref === request.target.ref)
+        : remoteBranches.find((branch) => branch.ref === request.target.ref)
+    if (!target) {
+        return { ...branches, success: false, code: 'branch_not_found', error: 'Git branch was not found' }
+    }
+    const existingLocalBranch = request.target.kind === 'remote'
+        ? localBranches.find((branch) => branch.name === target.name)
+        : null
+    if (
+        (request.target.kind === 'local' && target.ref === branches.currentBranch)
+        || existingLocalBranch?.ref === branches.currentBranch
+    ) {
+        return branches
+    }
+    if (branches.isDirty && request.confirmDirty !== true) {
+        return {
+            ...branches,
+            success: false,
+            code: 'dirty_confirmation_required',
+            error: 'Working tree has uncommitted changes'
+        }
+    }
+
+    if (request.target.kind === 'local') {
+        return await switchToLocalBranch(cwd, target)
+    }
+
+    // A matching local branch is the already-pulled version requested by the
+    // UI contract. Prefer it before hitting the network.
+    if (existingLocalBranch) {
+        return await switchToLocalBranch(cwd, existingLocalBranch)
+    }
+
+    const remoteSeparator = target.ref.indexOf('/')
+    const remoteName = target.ref.slice(0, remoteSeparator)
+    const remoteBranchName = target.ref.slice(remoteSeparator + 1)
+    const fetched = await runGitCommand(['fetch', '--prune', remoteName], cwd, GIT_BRANCH_FETCH_TIMEOUT_MS)
+    if (!fetched.success) return branchOperationFailure(fetched)
+
+    const refreshed = await getGitBranchesForCwd(cwd)
+    if (!refreshed.success) return refreshed
+    const refreshedRemote = (refreshed.remoteBranches ?? []).find((branch) => branch.ref === target.ref)
+    if (!refreshedRemote) {
+        return {
+            ...refreshed,
+            success: false,
+            code: 'branch_not_found',
+            error: 'Git branch was not found after fetch'
+        }
+    }
+
+    const racedLocalBranch = (refreshed.localBranches ?? []).find((branch) => branch.name === remoteBranchName)
+    if (racedLocalBranch) {
+        return await switchToLocalBranch(cwd, racedLocalBranch)
+    }
+
+    const valid = await validateGitBranchName(cwd, remoteBranchName)
+    if (!valid.success) return branchOperationFailure(valid)
+    const switched = await runGitCommand(['switch', '--track', '-c', remoteBranchName, refreshedRemote.ref], cwd)
+    if (!switched.success) return branchOperationFailure(switched)
+    return await getGitBranchesForCwd(cwd)
+}
+
+/** Create and check out a new branch from the current HEAD without touching
+ * the worktree contents. */
+export async function createGitBranchForCwd(
+    cwd: string,
+    request: Pick<MachineGitBranchCreateRequest, 'name'>
+): Promise<GitBranchesResponse> {
+    const branches = await getGitBranchesForCwd(cwd)
+    if (!branches.success) return branches
+
+    if ((branches.localBranches ?? []).some((branch) => branch.name === request.name)) {
+        return { ...branches, success: false, code: 'branch_exists', error: 'Git branch already exists' }
+    }
+
+    const valid = await validateGitBranchName(cwd, request.name)
+    if (!valid.success) return branchOperationFailure(valid)
+    const created = await runGitCommand(['switch', '-c', request.name], cwd)
+    if (!created.success) return branchOperationFailure(created)
+    return await getGitBranchesForCwd(cwd)
+}
+
+/**
+ * Commit the full current worktree intentionally, without bypassing Git hooks.
+ * The runner receives a typed request, and every command is passed as an
+ * `execFile` argument so a commit message cannot become shell syntax.
+ */
+export async function commitGitChangesForCwd(
+    cwd: string,
+    request: Pick<MachineGitBranchCommitRequest, 'message'>
+): Promise<GitBranchesResponse> {
+    const branches = await getGitBranchesForCwd(cwd)
+    if (!branches.success) return branches
+    if (!branches.isDirty) {
+        return {
+            ...branches,
+            success: false,
+            code: 'nothing_to_commit',
+            error: 'There are no local changes to commit'
+        }
+    }
+
+    const staged = await runGitCommand(['add', '--all'], cwd)
+    if (!staged.success) return branchOperationFailure(staged)
+
+    const committed = await runGitCommand(['commit', '-m', request.message], cwd, GIT_BRANCH_REMOTE_TIMEOUT_MS)
+    if (!committed.success) return branchOperationFailure(committed)
+    return await getGitBranchesForCwd(cwd)
+}
+
+/**
+ * Push a branch only through an existing upstream. For a newly created local
+ * branch, use `origin` when it exists, otherwise use the single configured
+ * remote. Ambiguous remote configurations are left for the user to configure.
+ */
+export async function pushGitBranchForCwd(
+    cwd: string
+): Promise<GitBranchesResponse> {
+    const branches = await getGitBranchesForCwd(cwd)
+    if (!branches.success) return branches
+    if (!branches.currentBranch) {
+        return {
+            ...branches,
+            success: false,
+            code: 'detached_head',
+            error: 'Cannot push while HEAD is detached'
+        }
+    }
+
+    const upstream = await runGitCommand(
+        ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+        cwd
+    )
+    const pushArgs = upstream.success
+        ? ['push']
+        : branches.pushRemote
+            ? ['push', '--set-upstream', branches.pushRemote, branches.currentBranch]
+            : null
+    if (!pushArgs) {
+        return {
+            ...branches,
+            success: false,
+            code: 'push_remote_unavailable',
+            error: 'No default Git remote is available for this branch'
+        }
+    }
+
+    const pushed = await runGitCommand(pushArgs, cwd, GIT_BRANCH_REMOTE_TIMEOUT_MS)
+    if (!pushed.success) return branchOperationFailure(pushed)
+    return await getGitBranchesForCwd(cwd)
 }
 
 export function registerGitHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {

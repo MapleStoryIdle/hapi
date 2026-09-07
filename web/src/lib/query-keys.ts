@@ -13,6 +13,7 @@ export const queryKeys = {
     gitStatus: (sessionId: string) => ['git-status', sessionId] as const,
     gitBranch: (sessionId: string) => ['git-branch', sessionId] as const,
     machineGitBranch: (machineId: string, cwd: string) => ['machine-git-branch', machineId, cwd] as const,
+    machineGitBranches: (machineId: string, cwd: string) => ['machine-git-branches', machineId, cwd] as const,
     sessionFiles: (sessionId: string, query: string) => ['session-files', sessionId, query] as const,
     sessionDirectory: (sessionId: string, path: string) => ['session-directory', sessionId, path] as const,
     sessionFile: (sessionId: string, path: string) => ['session-file', sessionId, path] as const,

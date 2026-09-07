@@ -371,6 +371,43 @@ export const MachinePathsExistsRequestSchema = z.object({
 
 export type MachinePathsExistsRequest = z.infer<typeof MachinePathsExistsRequestSchema>
 
+/** A read-only Git branch inventory for a directory owned by a runner. */
+export const MachineGitBranchesRequestSchema = z.object({
+    cwd: z.string().trim().min(1).max(4096)
+})
+
+export type MachineGitBranchesRequest = z.infer<typeof MachineGitBranchesRequestSchema>
+
+export const MachineGitBranchSwitchRequestSchema = MachineGitBranchesRequestSchema.extend({
+    target: z.object({
+        kind: z.enum(['local', 'remote']),
+        /** Local branch name or a short remote ref such as `origin/feature/x`. */
+        ref: z.string().trim().min(1).max(512)
+    }).strict(),
+    /** Required when the runner observes uncommitted work before switching. */
+    confirmDirty: z.boolean().optional()
+}).strict()
+
+export type MachineGitBranchSwitchRequest = z.infer<typeof MachineGitBranchSwitchRequestSchema>
+
+export const MachineGitBranchCreateRequestSchema = MachineGitBranchesRequestSchema.extend({
+    name: z.string().trim().min(1).max(512)
+}).strict()
+
+export type MachineGitBranchCreateRequest = z.infer<typeof MachineGitBranchCreateRequestSchema>
+
+/** Stage every local change and create one normal Git commit. */
+export const MachineGitBranchCommitRequestSchema = MachineGitBranchesRequestSchema.extend({
+    message: z.string().trim().min(1).max(4096)
+}).strict()
+
+export type MachineGitBranchCommitRequest = z.infer<typeof MachineGitBranchCommitRequestSchema>
+
+/** Push the current branch through its configured upstream or default remote. */
+export const MachineGitBranchPushRequestSchema = MachineGitBranchesRequestSchema.strict()
+
+export type MachineGitBranchPushRequest = z.infer<typeof MachineGitBranchPushRequestSchema>
+
 export const LocalPreviewProtocolSchema = z.enum(['http', 'https'])
 export type LocalPreviewProtocol = z.infer<typeof LocalPreviewProtocolSchema>
 
@@ -520,6 +557,35 @@ export type GitBranchResponse = GitCommandResponse & {
     isWorktree?: boolean
     /** True when tracked, staged, or untracked worktree changes exist. */
     isDirty?: boolean
+}
+
+/** A branch name is deliberately separated from its Git ref. The web displays
+ * `name`, while `ref` remains available for a safe, unambiguous RPC action. */
+export type GitBranchOption = {
+    ref: string
+    name: string
+}
+
+export type GitBranchesResponse = {
+    success: boolean
+    error?: string
+    code?:
+        | 'dirty_confirmation_required'
+        | 'branch_not_found'
+        | 'branch_exists'
+        | 'not_git_repository'
+        | 'nothing_to_commit'
+        | 'detached_head'
+        | 'push_remote_unavailable'
+    currentBranch?: string | null
+    /** The runner-selected remote used when the current branch has no upstream. */
+    pushRemote?: string | null
+    isDirty?: boolean
+    changedFileCount?: number
+    additions?: number
+    deletions?: number
+    localBranches?: GitBranchOption[]
+    remoteBranches?: GitBranchOption[]
 }
 
 export type FileReadResponse = {

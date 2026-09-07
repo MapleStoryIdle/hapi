@@ -24,13 +24,10 @@ export async function startLocalServices(
         originTemplate,
         appUrl,
         frameOrigins,
-        sshHost: env.HAPI_LOCAL_SERVICE_SSH_HOST || new URL(appUrl).hostname.replace(/^\[|\]$/g, ''),
-        sshListenHost: env.HAPI_LOCAL_SERVICE_SSH_BIND || '127.0.0.1',
-        sshPort: envPort(env, 'HAPI_LOCAL_SERVICE_SSH_PORT', 8320),
-        openTunnel: async (machineId, request) => {
+        openTunnel: async (machineId, request, namespace) => {
             const engine = getSyncEngine()
-            if (!engine) return { ok: false, error: 'Hub is not connected' }
-            return await engine.openLocalServiceTunnel(machineId, request)
+            if (!engine) throw new Error('Hub is not connected')
+            return await engine.openLocalServiceTunnel(machineId, request, namespace)
         },
         canAccessMachine: (identity, machineId) => {
             const machine = getSyncEngine()?.getMachine(machineId)

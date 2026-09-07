@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { normalizeCodexUserMessageContent, normalizeCodexUserMessageText } from '@hapi/protocol/codexUserMessage';
+import { normalizeCodexUserMessageContent } from '@hapi/protocol/codexUserMessage';
+import { parseNativeCodexAttachmentPrompt } from '@hapi/protocol/nativeCodexAttachments';
 import { logger } from '@/ui/logger';
 
 const CodexSessionEventSchema = z.object({
@@ -54,6 +55,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown): string | null {
     return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * The native attachment envelope contains a Runner-private path. Scanner
+ * events are sent to the Hub, so forward only the visible user request.
+ */
+function getCodexUserMessageDisplayText(content: unknown): string | null {
+    const text = normalizeCodexUserMessageContent(content);
+    if (!text) return null;
+    return parseNativeCodexAttachmentPrompt(text)?.text ?? text;
 }
 
 function extractCodexText(value: unknown): string {
@@ -147,7 +158,7 @@ export function convertCodexEvent(rawEvent: unknown): CodexConversionResult | nu
             const rawMessage = asString(payloadRecord.message)
                 ?? asString(payloadRecord.text)
                 ?? asString(payloadRecord.content);
-            const message = rawMessage ? normalizeCodexUserMessageText(rawMessage) : null;
+            const message = rawMessage ? getCodexUserMessageDisplayText(rawMessage) : null;
             if (!message) {
                 return null;
             }
@@ -223,7 +234,7 @@ export function convertCodexEvent(rawEvent: unknown): CodexConversionResult | nu
         if (itemType === 'message') {
             const role = asString(payloadRecord.role);
             if (role === 'user') {
-                const text = normalizeCodexUserMessageContent(payloadRecord.content);
+                const text = getCodexUserMessageDisplayText(payloadRecord.content);
                 if (!text) {
                     return null;
                 }

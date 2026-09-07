@@ -14,6 +14,7 @@ import type {
     CodexLocalSessionStatusResponse,
     CodexLocalSessionSubagent,
     DecryptedMessage,
+    AttachmentMetadata,
     SessionMetadataSummary,
     SkillSummary
 } from '@/types/api'
@@ -26,6 +27,7 @@ import {
 } from '@/components/SessionHeader'
 import { AgentFlavorStatusIcon } from '@/components/AgentFlavorIcon'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { GitBranchesDrawer } from '@/components/GitBranchesDrawer'
 import { SESSION_DETAIL_HEADER_HEIGHT_PX } from '@/components/SessionDetailHeader'
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { HappyComposer, type ComposerSendError } from '@/components/AssistantChat/HappyComposer'
@@ -35,8 +37,9 @@ import { buildConversationOutline } from '@/chat/outline'
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { reduceChatBlocks } from '@/chat/reducer'
-import { buildSessionDetailTimeline } from '@/chat/sessionDetailTimeline'
+import { buildSessionDetailTimeline, hasCurrentTurnProcess } from '@/chat/sessionDetailTimeline'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
+import { createNativeCodexAttachmentAdapter } from '@/lib/nativeCodexAttachmentAdapter'
 import { makeClientSideId } from '@/lib/messages'
 import {
     getNativeCodexDirectMessageScopeKey,
@@ -68,12 +71,22 @@ import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { NATIVE_FEEDBACK_SILENCE_MS, useNativeFeedbackSilence } from '@/hooks/useNativeFeedbackSilence'
 import { useCodexSubscriptionLimits } from '@/hooks/queries/useCodexSubscriptionLimits'
 import { useNativeCodexSessionComposerCapabilities } from '@/hooks/queries/useNativeCodexSessionComposerCapabilities'
+import { useNativeCodexSessionControls } from '@/hooks/useNativeCodexSessionControls'
+import { useCodexModels } from '@/hooks/queries/useCodexModels'
+import { useMachineGitBranch } from '@/hooks/queries/useGitBranch'
+import { codexModelAdvertisesFastTier } from '@/components/AssistantChat/codexFastMode'
+import type { NativeCodexSessionConfiguration, NativeCodexSessionControls } from '@hapi/protocol/codexSessionControl'
+import {
+    parseNativeCodexAttachmentPrompt,
+    type NativeCodexAttachment
+} from '@hapi/protocol/nativeCodexAttachments'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { SessionDetailContent, SessionDetailSurface } from '@/components/SessionDetailSurface'
 import { SessionDetailStatusNotice } from '@/components/SessionDetailStatusNotice'
 import { NativeCodexFloatingStatusNotice } from '@/components/NativeCodexFloatingStatusNotice'
 import { SessionConversationLoading } from '@/components/SessionEntryLoading'
-import { NativeSendStatusMessage, type NativeSendConnectionPhase } from '@/components/NativeSendStatusMessage'
+import { type NativeSendConnectionPhase } from '@/components/NativeSendStatusMessage'
+import { ThreadThinkingMessage } from '@/components/ThreadThinkingMessage'
 import {
     SessionDetailBottomDock,
     SessionDetailBottomDockAccessory,
@@ -363,16 +376,65 @@ function formatForkError(error: unknown, t: Translator): string {
     return t('recentCodex.fork.error.generic')
 }
 
+type NativeCodexUserTextContent = {
+    type: 'text'
+    text: string
+    attachments?: NativeCodexAttachment[]
+}
+
+function getNativeCodexUserTextContent(
+    message: CodexLocalSessionContextMessage
+): NativeCodexUserTextContent | null {
+    if (message.content.role !== 'user') return null
+    const content = message.content.content
+    if (
+        !content
+        || typeof content !== 'object'
+        || !('type' in content)
+        || !('text' in content)
+        || (content as { type?: unknown }).type !== 'text'
+        || typeof (content as { text?: unknown }).text !== 'string'
+    ) return null
+    return content as NativeCodexUserTextContent
+}
+
 function buildReadOnlyCodexMessages(
     messages: readonly CodexLocalSessionContextMessage[]
 ): DecryptedMessage[] {
-    return messages.map((message) => ({
-        id: message.id,
-        seq: (message.position ?? message.createdAt) + 1,
-        localId: null,
-        content: message.content,
-        createdAt: message.createdAt
-    }))
+    return messages.map((message) => {
+        const userTextContent = getNativeCodexUserTextContent(message)
+        const content = userTextContent
+            ? (() => {
+                const parsed = parseNativeCodexAttachmentPrompt(userTextContent.text)
+                const nativeAttachments = parsed?.attachments ?? userTextContent.attachments ?? []
+                if (!parsed && nativeAttachments.length === 0) return message.content
+                const attachments: AttachmentMetadata[] = nativeAttachments.map((attachment) => ({
+                    id: attachment.id,
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size,
+                    // A browser display handle only. The local Runner path is
+                    // intentionally not present in the native transcript UI.
+                    path: `native-codex:${attachment.id}`
+                }))
+                return {
+                    ...message.content,
+                    content: {
+                        ...userTextContent,
+                        text: parsed?.text ?? userTextContent.text,
+                        ...(attachments.length > 0 ? { attachments } : {})
+                    }
+                }
+            })()
+            : message.content
+        return {
+            id: message.id,
+            seq: (message.position ?? message.createdAt) + 1,
+            localId: null,
+            content,
+            createdAt: message.createdAt
+        }
+    })
 }
 
 /**
@@ -415,20 +477,23 @@ export function mergeCodexContextMessages(
  */
 export type NativeDirectMessageEcho = NativeCodexDirectMessageEcho
 
+function getNativeCodexAttachments(attachments: readonly AttachmentMetadata[] | undefined): AttachmentMetadata[] {
+    if (!attachments) return []
+    return attachments.filter((attachment) => (
+        /^[a-f0-9]{32}$/.test(attachment.id)
+        && attachment.path === `native-codex:${attachment.id}`
+    ))
+}
+
+function nativeAttachmentFallbackText(attachments: readonly AttachmentMetadata[]): string {
+    if (attachments.length === 1) return `Attached: ${attachments[0]!.filename}`
+    return `Attached ${attachments.length} files`
+}
+
 function getNativeUserMessageText(message: CodexLocalSessionContextMessage): string | null {
-    if (message.content.role !== 'user') return null
-    const content = message.content.content
-    if (
-        content
-        && typeof content === 'object'
-        && 'type' in content
-        && 'text' in content
-        && (content as { type?: unknown }).type === 'text'
-        && typeof (content as { text?: unknown }).text === 'string'
-    ) {
-        return (content as { text: string }).text.trim()
-    }
-    return null
+    const content = getNativeCodexUserTextContent(message)
+    if (!content) return null
+    return (parseNativeCodexAttachmentPrompt(content.text)?.text ?? content.text).trim()
 }
 
 /**
@@ -468,7 +533,11 @@ function buildNativeDirectEchoMessages(
         localId: echo.id,
         content: {
             role: 'user',
-            content: { type: 'text', text: echo.text }
+            content: {
+                type: 'text',
+                text: echo.text,
+                ...(echo.attachments?.length ? { attachments: echo.attachments } : {})
+            }
         },
         createdAt: echo.createdAt,
         status: echo.deliveryState ? 'sent' : echo.status,
@@ -663,6 +732,12 @@ function NativeCodexThread(props: {
     projectPath?: string | null
     model?: string | null
     modelReasoningEffort?: string | null
+    controls?: NativeCodexSessionControls
+    controlPending: 'stop' | 'configure' | 'resumeQueue' | null
+    onStop: () => Promise<void>
+    onConfigure: (configuration: NativeCodexSessionConfiguration) => void
+    onResumeQueue: () => void
+    onReadOnlyModelInfo?: () => void
     machineId?: string
     title: string
     metadata: SessionMetadataSummary
@@ -689,15 +764,32 @@ function NativeCodexThread(props: {
     skillsLoading: boolean
     skillsError: string | null
     onClearSendError: () => void
-    onSendMessage: (text: string) => void
+    onSendMessage: (text: string, attachments?: AttachmentMetadata[]) => void
     onRefresh: () => void
     forceScrollToken: number
     connectionPhase: NativeSendConnectionPhase | null
     connectionPhaseStartedAt: number | null
     connectionStartedAt?: number
+    thinkingStartedAt?: number
     deliveryReceipt?: ReactNode
 }) {
     const { t } = useTranslation()
+    const modelsState = useCodexModels({ api: props.api, machineId: props.machineId, enabled: props.controls?.canConfigure === true })
+    const configurable = props.controls?.canConfigure === true && !modelsState.error && modelsState.models.length > 0
+    const configuration = props.controls?.canConfigure ? props.controls.configuration : undefined
+    const selectedModel = configuration?.model ?? props.model
+    const modelOptions = useMemo(() => modelsState.models.map((model) => ({ value: model.id, label: model.displayName })), [modelsState.models])
+    const modelEntry = modelsState.models.find((model) => model.id === selectedModel)
+        ?? (!selectedModel ? modelsState.models.find((model) => model.isDefault) : undefined)
+    const selectedEffort = configuration?.modelReasoningEffort
+        ?? (configuration?.model && configuration.model !== props.model ? modelEntry?.defaultReasoningEffort : props.modelReasoningEffort)
+    const effortOptions = modelEntry?.supportedReasoningEfforts?.map((value) => ({ value }))
+    const attachmentAdapter = useMemo(
+        () => props.machineId
+            ? createNativeCodexAttachmentAdapter(props.api, props.sessionId, props.machineId)
+            : undefined,
+        [props.api, props.machineId, props.sessionId]
+    )
     const composerOverlayRef = useRef<HTMLDivElement | null>(null)
     const accessoryOverlayRef = useRef<HTMLDivElement | null>(null)
     const [composerHeight, setComposerHeight] = useState(0)
@@ -706,6 +798,9 @@ function NativeCodexThread(props: {
     const [planAccessoryExpanded, setPlanAccessoryExpanded] = useState(false)
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const nativeSession = useMemo(() => ({ active: true, thinking: props.isProcessing }), [props.isProcessing])
+    const latestTranscriptUserAt = props.messages.findLast((message) => message.content.role === 'user')?.createdAt
+    const hasRunningSubagent = props.subagents.some((agent) => agent.status === 'running'
+        && (latestTranscriptUserAt === undefined || agent.startedAt >= latestTranscriptUserAt))
     const transcriptBlocks = useMemo(
         () => buildReadOnlyCodexBlocks(props.messages),
         [props.messages]
@@ -716,6 +811,7 @@ function NativeCodexThread(props: {
         }),
         [props.directMessageEchoes, props.hasMoreMessages, props.messages, props.subagents]
     )
+    const latestUserAt = ungroupedBlocks.findLast((block) => block.kind === 'user-text')?.createdAt
     const nativePlan = useMemo(
         () => getNativeCodexPlanStatus(props.plan, props.runState, props.activeTurnId),
         [props.activeTurnId, props.plan, props.runState]
@@ -735,6 +831,10 @@ function NativeCodexThread(props: {
         [props.hasMoreMessages, props.isProcessing, terminalToolDisplayMode, ungroupedBlocks]
     )
     const blocks = timeline.visible
+    const currentTurnProcessVisible = useMemo(
+        () => hasCurrentTurnProcess(timeline.grouped, { minCreatedAt: latestUserAt }),
+        [latestUserAt, timeline.grouped]
+    )
     // A local echo is useful in the thread immediately, but it must not become
     // a durable outline anchor until the runner has actually written it.
     const outlineItems = useMemo(() => buildConversationOutline(transcriptBlocks), [transcriptBlocks])
@@ -745,12 +845,12 @@ function NativeCodexThread(props: {
         // accepts the prompt into its FIFO queue. Only an unavailable or
         // unknown native session state disables sending.
         isSending: props.composerDisabled,
-        // This is a read-only transcript adapter. A native turn is owned by
-        // the external Codex process, so exposing assistant-ui's cancel/stop
-        // control would look actionable but could never abort that process.
-        isRunning: false,
+        // Activity and control capability are separate: unsupported external
+        // owners still stream normally, without an actionable stop button.
+        isRunning: props.isProcessing,
         onSendMessage: props.onSendMessage,
-        onAbort: async () => {}
+        onAbort: props.onStop,
+        attachmentAdapter
     })
 
     useLayoutEffect(() => {
@@ -800,7 +900,7 @@ function NativeCodexThread(props: {
         }
     }, [nativePlan?.sourceBlockId, props.queuedMessages.length])
 
-    const queueAccessoryVisible = props.queuedMessages.length > 0
+    const queueAccessoryVisible = props.queuedMessages.length > 0 || props.controls?.queuePaused === true
     const accessoryVisible = queueAccessoryVisible || nativePlan !== null
     const totalBottomInset = composerHeight + (accessoryHeight > 0 ? accessoryHeight + NATIVE_QUEUE_FLOATING_GAP_PX : 0)
 
@@ -844,13 +944,16 @@ function NativeCodexThread(props: {
                     onOutlineOpenChange={props.onOutlineOpenChange}
                     trailingMessage={
                         <>
-                        <NativeSendStatusMessage
+                        <ThreadThinkingMessage
                             key={props.sessionId}
-                            phase={props.connectionPhase}
-                            label={props.connectionPhase ? t(`recentCodex.direct.phase.${props.connectionPhase}.title`) : ''}
-                            startedAt={props.connectionPhaseStartedAt}
-                            waitingForOutput={props.connectionPhase === 'connected'}
-                            waitingStartedAt={props.connectionPhaseStartedAt ?? props.connectionStartedAt}
+                            running={props.isProcessing || hasRunningSubagent}
+                            waitingForUser={props.waitingForUserInput}
+                            hasProcess={currentTurnProcessVisible}
+                            // Transport phases still drive queue/recovery logic, but
+                            // they are not useful chat content. Show one ordinary
+                            // thinking row until the real Process row arrives.
+                            phase={props.connectionPhase !== 'connected' ? props.connectionPhase : null}
+                            startedAt={props.thinkingStartedAt}
                         />
                         {props.deliveryReceipt}
                         </>
@@ -867,15 +970,39 @@ function NativeCodexThread(props: {
                                 key={`codex-native-composer-${props.sessionId}`}
                                 sessionId={`codex-native-${props.sessionId}`}
                                 projectPath={props.projectPath}
-                                disabled={props.composerDisabled}
+                                disabled={props.composerDisabled || props.controlPending === 'configure'}
                                 active
-                                agentFlavor={null}
+                                agentFlavor="codex"
+                                allowGoals={false}
                                 showStatusBar={false}
-                                readOnlyModelInfo
+                                readOnlyModelInfo={!configurable}
+                                onReadOnlyModelInfo={!configurable ? props.onReadOnlyModelInfo : undefined}
+                                canAbort={props.controls?.canStop === true}
+                                abortPending={props.controlPending === 'stop' || Boolean(props.controls?.stoppingTurnId)}
+                                onAbort={props.onStop}
                                 thinking={props.runState === 'processing' && !props.waitingForUserInput && props.connectionPhase === null}
-                                model={props.model}
-                                modelReasoningEffort={props.modelReasoningEffort}
-                                allowAttachments={false}
+                                model={selectedModel}
+                                modelReasoningEffort={selectedEffort}
+                                availableModelOptions={modelOptions}
+                                availableModelReasoningEffortOptions={effortOptions}
+                                onModelChange={configurable ? (model) => {
+                                    const modelId = typeof model === 'string' ? model : model?.modelId ?? null
+                                    const nextModel = modelsState.models.find((entry) => modelId ? entry.id === modelId : entry.isDefault)
+                                    props.onConfigure({
+                                        model: modelId,
+                                        // Send the displayed default explicitly: Codex otherwise
+                                        // retains the previous turn's reasoning effort.
+                                        modelReasoningEffort: nextModel?.defaultReasoningEffort ?? null,
+                                        serviceTier: configuration?.serviceTier === 'fast' && codexModelAdvertisesFastTier(modelId, modelsState.models)
+                                            ? 'fast' : 'standard'
+                                    })
+                                } : undefined}
+                                onModelReasoningEffortChange={configurable && effortOptions?.length
+                                    ? (modelReasoningEffort) => props.onConfigure({ modelReasoningEffort }) : undefined}
+                                serviceTier={configuration?.serviceTier}
+                                onServiceTierChange={configurable && codexModelAdvertisesFastTier(selectedModel, modelsState.models)
+                                    ? (serviceTier) => props.onConfigure({ serviceTier: serviceTier === 'fast' ? 'fast' : 'standard' }) : undefined}
+                                allowAttachments={Boolean(attachmentAdapter)}
                                 inactiveNotice={props.composerNotice}
                                 autocompletePrefixes={['/', '$']}
                                 autocompleteSuggestions={props.autocompleteSuggestions}
@@ -904,6 +1031,10 @@ function NativeCodexThread(props: {
                                     <NativeQueuedMessagesBar
                                         messages={props.queuedMessages}
                                         onExpandedChange={setQueueAccessoryExpanded}
+                                        paused={props.controls?.queuePaused}
+                                        resuming={props.controlPending === 'resumeQueue'}
+                                        resumeDisabled={Boolean(props.controls?.stoppingTurnId) || props.controlPending !== null}
+                                        onResume={props.onResumeQueue}
                                     />
                                 ) : null}
                             </div>
@@ -1046,6 +1177,9 @@ export function CodexSessionContextPage(props: {
         isFetching: contextQuery.isFetching,
         refetch: contextQuery.refetch
     }
+    const nativeControls = useNativeCodexSessionControls({
+        api: props.api, sessionId: props.sessionId, machineId: props.machineId, status: statusQuery.data
+    })
     const nativeComposerCapabilities = useNativeCodexSessionComposerCapabilities(
         props.api,
         props.machineId,
@@ -1076,6 +1210,7 @@ export function CodexSessionContextPage(props: {
     const [connectionNow, setConnectionNow] = useState(() => Date.now())
     const [outlineOpen, setOutlineOpen] = useState(false)
     const [menuOpen, setMenuOpen] = useState(false)
+    const [gitBranchesOpen, setGitBranchesOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState({ x: 0, y: 0 })
     const pageScopeRef = useRef(pageScope)
     const nativeDirectMessageScopeKeyRef = useRef(nativeDirectMessageScopeKey)
@@ -1459,7 +1594,8 @@ export function CodexSessionContextPage(props: {
             candidate: {
                 id,
                 text: matchingEcho?.text ?? queued?.text ?? '',
-                deliveryText: matchingEcho?.deliveryText ?? matchingEcho?.text ?? queued?.text ?? ''
+                deliveryText: matchingEcho?.deliveryText ?? matchingEcho?.text ?? queued?.text ?? '',
+                ...(matchingEcho?.attachments?.length ? { attachments: matchingEcho.attachments } : {})
             },
             uncertain: Boolean(recoveryRequired || orphanedQueued || orphanedEcho || failedEcho),
             reason
@@ -1725,6 +1861,9 @@ export function CodexSessionContextPage(props: {
         && (nativeStalledSince !== null || nativeRecoveryCandidate.uncertain)
     const canRecoverNativeDelivery = nativeRecoveryCandidate.candidate !== null
         && directStatus === 'idle'
+        && nativeControls.controls?.queuePaused !== true
+        && !nativeControls.controls?.stoppingTurnId
+        && nativeControls.pendingAction === null
     const deliveryProgress = statusQuery.data?.success === true ? statusQuery.data.progress : null
     // Repeated polls/heartbeats are not new feedback. Track transcript and
     // delivery changes instead, scoped to this page and the latest prompt.
@@ -1846,6 +1985,14 @@ export function CodexSessionContextPage(props: {
                 : 'bg-[#34C759]'
 
     const title = context?.session.title ?? t('recentCodex.context.title')
+    const nativeGitProjectPath = context?.session.cwd ?? null
+    const { isGitRepository } = useMachineGitBranch(
+        props.api,
+        props.machineId ?? null,
+        nativeGitProjectPath,
+        true,
+        { refetchInterval: false }
+    )
     const sessionDetails = useMemo<SessionHeaderDetail[]>(() => buildSessionHeaderDetails({
         title,
         sessionId: props.sessionId,
@@ -1912,7 +2059,10 @@ export function CodexSessionContextPage(props: {
                 message: candidate.deliveryText,
                 ...(candidate.deliveryText === candidate.text ? {} : { displayMessage: candidate.text }),
                 clientMessageId: candidate.id,
-                forceRecovery: true
+                forceRecovery: true,
+                ...(candidate.attachments?.length ? {
+                    attachmentIds: candidate.attachments.map((attachment) => attachment.id)
+                } : {})
             }, { signal: abortController.signal })
             if (
                 abortController.signal.aborted
@@ -2083,19 +2233,23 @@ export function CodexSessionContextPage(props: {
         updateNativeDirectMessageEchoes
     ])
 
-    const sendDirectMessage = useCallback((text: string) => {
+    const sendDirectMessage = useCallback((text: string, rawAttachments?: AttachmentMetadata[]) => {
         if (!props.machineId || directStatus === null || directStatus === 'unknown') {
             return
         }
-        const deliveryText = expandCodexCustomPrompt(text, nativeComposerCapabilities.commands) ?? text
+        const attachments = getNativeCodexAttachments(rawAttachments)
+        const displayText = text.trim() || (attachments.length > 0 ? nativeAttachmentFallbackText(attachments) : '')
+        if (!displayText) return
+        const deliveryText = expandCodexCustomPrompt(displayText, nativeComposerCapabilities.commands) ?? displayText
         const requestScope = pageScope
         const requestNativeDirectMessageScope = nativeDirectMessageScope
         const echoId = makeClientSideId('native')
         const createdAt = Date.now()
         const echo: NativeDirectMessageEcho = {
             id: echoId,
-            text,
-            ...(deliveryText !== text ? { deliveryText } : {}),
+            text: displayText,
+            ...(deliveryText !== displayText ? { deliveryText } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
             createdAt,
             status: 'sending',
             deliveryPhase: 'launching',
@@ -2121,8 +2275,9 @@ export function CodexSessionContextPage(props: {
                 const response = await props.api.sendCodexSessionMessage(props.sessionId, {
                     machineId: props.machineId!,
                     message: deliveryText,
-                    ...(deliveryText === text ? {} : { displayMessage: text }),
-                    clientMessageId: echoId
+                    ...(deliveryText === displayText ? {} : { displayMessage: displayText }),
+                    clientMessageId: echoId,
+                    ...(attachments.length > 0 ? { attachmentIds: attachments.map((attachment) => attachment.id) } : {})
                 })
                 if (response.success !== true) {
                     throw new ApiError(response.error, 409, response.code)
@@ -2154,7 +2309,7 @@ export function CodexSessionContextPage(props: {
                 } else if (response.status === 'queued' && response.queueId && response.queuedAt !== undefined) {
                     setNativeQueuedMessages((messages) => [
                         ...messages,
-                        { id: response.queueId!, text, queuedAt: response.queuedAt! }
+                        { id: response.queueId!, text: displayText, queuedAt: response.queuedAt! }
                     ])
                 }
                 // The accepted post already tells us whether it is running or
@@ -2167,6 +2322,11 @@ export function CodexSessionContextPage(props: {
                     && error.code === 'external_writer_active'
                 const rejectedByUnknownStatus = error instanceof ApiError
                     && error.code === 'session_status_unknown'
+                if (!needsVerification && attachments.length > 0) {
+                    void Promise.all(attachments.map((attachment) => (
+                        props.api.deleteCodexSessionAttachment(props.sessionId, props.machineId!, attachment.id)
+                    ))).catch(() => {})
+                }
                 // A transport timeout is not proof that Codex rejected the
                 // prompt. Retain a pending receipt while the status stream
                 // checks it, then expose explicit recovery rather than
@@ -2196,7 +2356,7 @@ export function CodexSessionContextPage(props: {
                     setDirectSendError({
                         id: Date.now(),
                         clientMessageId: echoId,
-                        text,
+                        text: displayText,
                         message: formatDirectSendError(error, t),
                         scheduledAt: null
                     })
@@ -2273,6 +2433,7 @@ export function CodexSessionContextPage(props: {
                     onRefresh={() => void recoverNativeConnection()}
                     refreshLabel={t('recentCodex.refresh')}
                     refreshPending={isRecoveringConnection}
+                    onGitBranches={isGitRepository ? () => setGitBranchesOpen(true) : undefined}
                     onFork={() => void fork()}
                     forkLabel={t('recentCodex.fork')}
                     forkPendingLabel={t('recentCodex.forking')}
@@ -2282,6 +2443,13 @@ export function CodexSessionContextPage(props: {
                     outlineActive={outlineOpen}
                     anchorPoint={menuAnchorPoint}
                     menuId={menuId}
+                />
+                <GitBranchesDrawer
+                    api={props.api}
+                    machineId={props.machineId ?? null}
+                    cwd={nativeGitProjectPath}
+                    open={gitBranchesOpen}
+                    onOpenChange={setGitBranchesOpen}
                 />
                 <SessionConnectionRecoveryControl
                     labels={{
@@ -2406,6 +2574,12 @@ export function CodexSessionContextPage(props: {
                             projectPath={context.session.cwd}
                             model={context.session.model}
                             modelReasoningEffort={context.session.modelReasoningEffort}
+                            controls={nativeControls.controls}
+                            controlPending={nativeControls.pendingAction}
+                            onStop={nativeControls.stop}
+                            onConfigure={nativeControls.configure}
+                            onResumeQueue={nativeControls.resumeQueue}
+                            onReadOnlyModelInfo={sshControlled ? nativeControls.explainSharedConfiguration : undefined}
                             machineId={props.machineId}
                             title={title}
                             metadata={nativeMetadata}
@@ -2429,6 +2603,8 @@ export function CodexSessionContextPage(props: {
                             connectionPhase={connectionPhase}
                             connectionPhaseStartedAt={directSendPhaseStartedAt}
                             connectionStartedAt={connectionStartedAt}
+                            thinkingStartedAt={statusQuery.data?.success === true && statusQuery.data.status === 'processing'
+                                ? statusQuery.data.startedAt : undefined}
                             deliveryReceipt={showUnconfirmedReceipt ? (
                                 <details key={nativeRecoveryCandidate.candidate?.id} data-testid="codex-native-recovery" data-receipt-state="unconfirmed" className="px-3 py-2 text-sm text-[var(--app-hint)]">
                                     <summary className="cursor-pointer min-h-11 content-center">{t('recentCodex.direct.receipt.details')}</summary>

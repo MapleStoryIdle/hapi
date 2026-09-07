@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { formatNativeCodexAttachmentPrompt } from '@hapi/protocol/nativeCodexAttachments';
 import { convertCodexEvent } from './codexEventConverter';
 
 describe('convertCodexEvent', () => {
@@ -62,6 +63,30 @@ describe('convertCodexEvent', () => {
         expect(result).toEqual({
             userMessage: 'hello from response_item user'
         });
+    });
+
+    it('strips native attachment paths before forwarding a user message to the Hub', () => {
+        const privatePath = '/Users/example/.shapi/native-codex-attachments/aabbccddeeff00112233445566778899/content';
+        const prompt = formatNativeCodexAttachmentPrompt('Review the attachment.', [{
+            id: 'aabbccddeeff00112233445566778899',
+            filename: 'review.md',
+            mimeType: 'text/markdown',
+            size: 42,
+            kind: 'file',
+            path: privatePath
+        }], { includeImagePaths: true });
+
+        const result = convertCodexEvent({
+            type: 'response_item',
+            payload: {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: prompt }]
+            }
+        });
+
+        expect(result).toEqual({ userMessage: 'Review the attachment.' });
+        expect(JSON.stringify(result)).not.toContain(privatePath);
     });
 
     it('drops internal and legacy image parts from response_item user messages', () => {

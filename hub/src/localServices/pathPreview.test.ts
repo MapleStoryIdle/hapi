@@ -49,7 +49,7 @@ describe('same-origin sandbox preview policy', () => {
         expect(result).toContain(`${preview.origin}${preview.basePath}/assets/site.css`)
         expect(result).toContain(`${preview.origin}${preview.basePath}/icon.svg`)
         expect(result).toContain(`${preview.origin}${preview.basePath}/submit`)
-        expect(result).toContain('window.fetch=function')
+        expect(result).toContain('__SHAPI_PREVIEW_WINDOW__')
         expect(rewritePreviewCss('p{background:url(../img.png)} @import "/theme.css";', preview, '/css/main.css'))
             .toBe(`p{background:url("${preview.origin}${preview.basePath}/img.png")} @import "${preview.origin}${preview.basePath}/theme.css";`)
     })
@@ -59,8 +59,8 @@ describe('same-origin sandbox preview policy', () => {
         expect(await startLocalServices(() => null, 'https://hub.example.com', { HAPI_LOCAL_SERVICE_MODE: 'off', HAPI_LOCAL_SERVICE_ORIGIN: 'invalid' })).toBeNull()
         await expect(startLocalServices(() => null, 'https://hub.example.com', { HAPI_LOCAL_SERVICE_MODE: 'bad' })).rejects.toThrow('HAPI_LOCAL_SERVICE_MODE')
         const options = {
-            mode: 'path' as const, sshHost: 'localhost', sshListenHost: '127.0.0.1', sshPort: 0,
-            canAccessMachine: () => true, openTunnel: async () => ({ ok: false as const, error: 'test' })
+            mode: 'path' as const,
+            canAccessMachine: () => true, openTunnel: async () => { throw new Error('unused') }
         }
         expect(new LocalServiceManager({ ...options, appUrl: 'https://hub.example.com' }).mode).toBe('path')
         for (const appUrl of ['http://public.example.com', 'https://hub.example.com/path', 'https://user@hub.example.com']) {
@@ -69,11 +69,18 @@ describe('same-origin sandbox preview policy', () => {
     })
 })
 
+it('adapts inline JavaScript but leaves JSON data and local lexical bindings intact', async () => {
+    const html = '<html><head><script type="application/json">{"location":"/studio/"}</script><script>window.route=location.pathname;function f(window){return window.location}</script></head><body></body></html>'
+    const result = await rewritePreviewHtml(new Response(html), preview, '/studio/').text()
+    expect(result).toContain('{"location":"/studio/"}')
+    expect(result).toContain('globalThis.__SHAPI_PREVIEW_LOCATION__.pathname')
+    expect(result).toContain('return window.location')
+})
+
 it('allows explicit trusted Web origins only, not wildcard or injectable CSP sources', () => {
     const manager = new LocalServiceManager({
         mode: 'path', appUrl: 'https://hub.example', frameOrigins: ['https://web.example', '*', 'https://*', 'https://*.example.com', 'https://evil.example; sandbox allow-same-origin', 'https://web.example', 'https://u:p@example.com'],
-        sshHost: 'localhost', sshListenHost: '127.0.0.1', sshPort: 0,
-        canAccessMachine: () => true, openTunnel: async () => ({ ok: false, error: 'not needed' })
+        canAccessMachine: () => true, openTunnel: async () => { throw new Error('unused') }
     })
     expect(manager.frameOrigins).toEqual(['https://hub.example', 'https://web.example'])
     const headers = pathPreviewHeaders({ 'x-frame-options': 'DENY' }, { ...preview, frameOrigins: manager.frameOrigins })

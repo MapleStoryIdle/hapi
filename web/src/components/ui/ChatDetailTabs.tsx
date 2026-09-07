@@ -9,6 +9,7 @@ export function ChatDetailTabs<T extends string>(props: {
     label: string
 }) {
     const refs = useRef<Array<HTMLButtonElement | null>>([])
+    if (props.tabs.length <= 1) return null
     const selected = props.tabs.findIndex((tab) => tab.value === props.value)
     function onKeyDown(event: KeyboardEvent, index: number) {
         const count = props.tabs.length

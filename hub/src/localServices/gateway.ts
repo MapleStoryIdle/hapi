@@ -5,6 +5,9 @@ import { checkServerIdentity } from 'node:tls'
 import { parseLocalServiceUrl } from '@hapi/protocol/localServices'
 import { LOCAL_SERVICE_ACCESS_MS, LOCAL_SERVICE_PATH_PREFIX, type LocalServiceLease, type LocalServiceManager } from './manager'
 import { pathPreviewHeaders, rewritePreviewCss, rewritePreviewHtml, rewritePreviewUrl, type PathPreview } from './pathPreview'
+import { localServiceUnavailable } from './unavailable'
+import { rewritePreviewScript } from './previewScript'
+import { PreviewRewriteQueue } from './previewRewriteQueue'
 
 const MAX_REQUEST_BYTES = 50 * 1024 * 1024
 const MAX_RESPONSE_BYTES = 128 * 1024 * 1024
@@ -130,7 +133,7 @@ type UpgradeServer = Pick<Bun.Server<LocalServiceWebSocket>, 'upgrade' | 'timeou
 /** Shared by the Hub's path router and the optional isolated-origin listener. */
 export function createLocalServiceHandler(manager: LocalServiceManager) {
     const live = new Set<AccessLifetime>()
-    let rewriting = 0
+    const rewrites = new PreviewRewriteQueue()
     return {
         async fetch(request: Request, server: UpgradeServer): Promise<Response | undefined> {
             const url = new URL(request.url)
@@ -246,7 +249,7 @@ export function createLocalServiceHandler(manager: LocalServiceManager) {
             const timeout = setTimeout(() => lifetime.destroy(), 60_000)
             let releaseRewrite: (() => void) | undefined
             try {
-                // Streaming transfers; only path-mode HTML/CSS need bounded rewriting.
+                // APIs/files stream unchanged; preview documents/scripts are bounded.
                 // No environment proxy and never follow an upstream redirect.
                 const incoming = await fetch(destination, { method: request.method, headers,
                     body: request.body ? limitedBody(request.body, MAX_REQUEST_BYTES) : undefined,
@@ -271,18 +274,20 @@ export function createLocalServiceHandler(manager: LocalServiceManager) {
                 const response = new Response(body, { status: incoming.status, headers: toHeaders(outgoing) })
                 if (preview && body) {
                     const mime = incoming.headers.get('content-type')?.split(';')[0].trim().toLowerCase()
-                    if (mime === 'text/html' || mime === 'text/css') {
-                        if (rewriting >= 4) { await body.cancel(); return deny(429, 'Too many page rewrites; try again shortly / 页面加载较多，请稍后重试。') }
-                        rewriting++
-                        let released = false
-                        releaseRewrite = () => { if (!released) { released = true; rewriting-- } }
+                    const script = mime === 'text/javascript' || mime === 'application/javascript'
+                    if (mime === 'text/html' || mime === 'text/css' || script) {
                         // Bun 1.3's HTMLRewriter cannot pipe a guarded JS stream.
                         // Bound document buffering; API/SSE/files stay streaming.
                         const deadline = setTimeout(() => lifetime.destroy(), 15_000)
                         let text: string
-                        try { text = await new Response(limitedBody(body, 2 * 1024 * 1024)).text() }
+                        try {
+                            const release = await rewrites.acquire(AbortSignal.any([request.signal, lifetime.controller.signal]))
+                            if (!release) { await body.cancel(); return deny(429, 'Too many page rewrites; try again shortly / 页面加载较多，请稍后重试。') }
+                            releaseRewrite = release
+                            text = await new Response(limitedBody(body, (script ? 4 : 2) * 1024 * 1024)).text()
+                        }
                         finally { clearTimeout(deadline) }
-                        const rewritten = new Response(mime === 'text/css' ? rewritePreviewCss(text, preview, path) : text, {
+                        const rewritten = new Response(script ? rewritePreviewScript(text) : mime === 'text/css' ? rewritePreviewCss(text, preview, path) : text, {
                             status: incoming.status, headers: toHeaders(outgoing)
                         })
                         const result = mime === 'text/html' ? rewritePreviewHtml(rewritten, preview, path) : rewritten
@@ -292,7 +297,11 @@ export function createLocalServiceHandler(manager: LocalServiceManager) {
                     }
                 }
                 return response
-            } catch { releaseRewrite?.(); return deny(502, 'Local service is unavailable / 本地服务暂时无法访问。') }
+            } catch {
+                releaseRewrite?.()
+                lifetime.destroy()
+                return localServiceUnavailable(request, preview?.frameOrigins)
+            }
             finally { clearTimeout(timeout) }
         },
         websocket: {

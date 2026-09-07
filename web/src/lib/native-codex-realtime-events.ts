@@ -1,5 +1,6 @@
 import type { CodexLocalSessionRealtimeSnapshot, SyncEvent } from '@/types/api'
 import { isNativeSnapshotVersion } from '@/lib/native-snapshot-refresh-coordinator'
+import { NativeCodexSessionControlsSchema } from '@hapi/protocol/codexSessionControl'
 
 export type NativeCodexSessionUpdatedEvent = Extract<SyncEvent, { type: 'codex-session-updated' }>
 export type NativeCodexSessionListUpdate = NonNullable<NativeCodexSessionUpdatedEvent['summary']>
@@ -88,6 +89,7 @@ export function getNativeCodexRealtimeSnapshot(
         || !['idle', 'processing', 'unknown'].includes(status.status as string)
         || (status.waitingForUserInput !== undefined && typeof status.waitingForUserInput !== 'boolean')
         || (status.controlledByCodexSsh !== undefined && typeof status.controlledByCodexSsh !== 'boolean')
+        || (status.controls !== undefined && !NativeCodexSessionControlsSchema.safeParse(status.controls).success)
         || 'queuedMessages' in (status ?? {})
         || !validQueuedMessageRefs
         || !validDeliveryReceipts

@@ -216,6 +216,9 @@ describe('ApiMachineClient native file handler', () => {
             on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
                 listeners.set(event, listener)
             }),
+            off: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+                if (listeners.get(event) === listener) listeners.delete(event)
+            }),
             emit: vi.fn(),
             close: vi.fn()
         }
@@ -866,6 +869,9 @@ describe('ApiMachineClient runner metadata sync', () => {
         const socket = {
             on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
                 listeners.set(event, listener)
+            }),
+            off: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+                if (listeners.get(event) === listener) listeners.delete(event)
             }),
             emit: vi.fn(),
             emitWithAck: vi.fn(async (event: string, data: { runnerState?: unknown; metadata?: MachineMetadata }) => {

@@ -9,7 +9,9 @@
 
 import { AGENT_MESSAGE_PAYLOAD_TYPE, isKnownFlavor, MAX_UPLOAD_BYTES, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
-import type { LocalServiceTunnelRequest, LocalServiceTunnelResponse } from '@hapi/protocol/localServices'
+import type { NativeCodexSessionControlAction, NativeCodexSessionControlResponse } from '@hapi/protocol/codexTranscript'
+import type { LocalServiceTunnelRequest } from '@hapi/protocol/localServices'
+import type { LocalServiceTunnel } from '../localServices/socketTransport'
 import type {
     CreateSideSessionResponse,
     CursorMigrateOutcome,
@@ -18,6 +20,10 @@ import type {
     LocalPreviewHttpResponse,
     LocalPreviewProbeRequest,
     LocalPreviewProbeResponse,
+    MachineGitBranchCreateRequest,
+    MachineGitBranchCommitRequest,
+    MachineGitBranchPushRequest,
+    MachineGitBranchSwitchRequest,
     OpenVikingContextListRequest,
     OpenVikingContextReadRequest,
     SlashCommandsResponse,
@@ -53,6 +59,7 @@ import {
     type RpcGeneratedImageFileReference,
     type RpcGeneratedImageResponse,
     type RpcGitBranchResponse,
+    type RpcGitBranchesResponse,
     type RpcGetCodexSubscriptionLimitsResponse,
     type RpcListDirectoryResponse,
     type RpcListCodexModelsResponse,
@@ -70,6 +77,8 @@ import {
     type RpcDiscardCodexLocalSessionMessageResponse,
     type RpcNativeKanbanFeedbackDeleteResponse,
     type RpcNativeKanbanFeedbackStageResponse,
+    type RpcNativeCodexAttachmentDeleteResponse,
+    type RpcNativeCodexAttachmentStageResponse,
     type RpcCodexLocalSessionSnapshotResponse,
     type RpcCodexLocalSessionStatusResponse,
     type RpcArchiveCodexLocalSessionResponse,
@@ -80,7 +89,12 @@ import {
     type RpcUploadFileResponse,
     type RpcSendCodexLocalSessionMessageResponse
 } from './rpcGateway'
-import type { NativeKanbanFeedbackDeleteRequest, NativeKanbanFeedbackStageRequest } from '@hapi/protocol'
+import type {
+    NativeKanbanFeedbackDeleteRequest,
+    NativeKanbanFeedbackStageRequest,
+    NativeCodexAttachmentDeleteRequest,
+    NativeCodexAttachmentStageRequest
+} from '@hapi/protocol'
 import type {
     CodexLocalSessionSnapshotReadOptions,
     NativeCodexDeliveryPolicy,
@@ -99,6 +113,7 @@ export type {
     RpcGeneratedImageFileReference,
     RpcGeneratedImageResponse,
     RpcGitBranchResponse,
+    RpcGitBranchesResponse,
     RpcGetCodexSubscriptionLimitsResponse,
     RpcListDirectoryResponse,
     RpcListCodexModelsResponse,
@@ -116,6 +131,8 @@ export type {
     RpcDiscardCodexLocalSessionMessageResponse,
     RpcNativeKanbanFeedbackDeleteResponse,
     RpcNativeKanbanFeedbackStageResponse,
+    RpcNativeCodexAttachmentDeleteResponse,
+    RpcNativeCodexAttachmentStageResponse,
     RpcCodexLocalSessionSnapshotResponse,
     RpcCodexLocalSessionStatusResponse,
     RpcArchiveCodexLocalSessionResponse,
@@ -1819,6 +1836,38 @@ export class SyncEngine {
         return await this.rpcGateway.getMachineGitBranch(machineId, cwd)
     }
 
+    async getMachineGitBranches(machineId: string, cwd: string): Promise<RpcGitBranchesResponse> {
+        return await this.rpcGateway.getMachineGitBranches(machineId, cwd)
+    }
+
+    async switchMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchSwitchRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.rpcGateway.switchMachineGitBranch(machineId, request)
+    }
+
+    async createMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchCreateRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.rpcGateway.createMachineGitBranch(machineId, request)
+    }
+
+    async commitMachineGitChanges(
+        machineId: string,
+        request: MachineGitBranchCommitRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.rpcGateway.commitMachineGitChanges(machineId, request)
+    }
+
+    async pushMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchPushRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.rpcGateway.pushMachineGitBranch(machineId, request)
+    }
+
     async readMachineFile(machineId: string, cwd: string, path: string): Promise<RpcReadFileResponse> {
         return await this.rpcGateway.readMachineFile(machineId, cwd, path)
     }
@@ -1858,6 +1907,14 @@ export class SyncEngine {
         return await this.rpcGateway.getCodexLocalSessionStatus(machineId, sessionId)
     }
 
+    async controlCodexLocalSession(
+        machineId: string,
+        sessionId: string,
+        action: NativeCodexSessionControlAction
+    ): Promise<NativeCodexSessionControlResponse> {
+        return await this.rpcGateway.controlCodexLocalSession(machineId, sessionId, action)
+    }
+
     async getCodexLocalSessionComposerCapabilities(
         machineId: string,
         sessionId: string
@@ -1873,7 +1930,8 @@ export class SyncEngine {
         clientMessageId?: string,
         forceRecovery?: boolean,
         deliveryPolicy?: NativeCodexDeliveryPolicy,
-        reviewGuard?: NativeKanbanFeedbackReviewGuard
+        reviewGuard?: NativeKanbanFeedbackReviewGuard,
+        attachmentIds?: readonly string[]
     ): Promise<RpcSendCodexLocalSessionMessageResponse> {
         return await this.rpcGateway.sendCodexLocalSessionMessage(
             machineId,
@@ -1883,7 +1941,8 @@ export class SyncEngine {
             clientMessageId,
             forceRecovery,
             deliveryPolicy,
-            reviewGuard
+            reviewGuard,
+            attachmentIds
         )
     }
 
@@ -1914,6 +1973,20 @@ export class SyncEngine {
         request: NativeKanbanFeedbackDeleteRequest
     ): Promise<RpcNativeKanbanFeedbackDeleteResponse> {
         return await this.rpcGateway.deleteNativeKanbanFeedback(machineId, request)
+    }
+
+    async stageNativeCodexAttachment(
+        machineId: string,
+        request: NativeCodexAttachmentStageRequest
+    ): Promise<RpcNativeCodexAttachmentStageResponse> {
+        return await this.rpcGateway.stageNativeCodexAttachment(machineId, request)
+    }
+
+    async deleteNativeCodexAttachment(
+        machineId: string,
+        request: NativeCodexAttachmentDeleteRequest
+    ): Promise<RpcNativeCodexAttachmentDeleteResponse> {
+        return await this.rpcGateway.deleteNativeCodexAttachment(machineId, request)
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {
@@ -2099,8 +2172,8 @@ export class SyncEngine {
         return await this.rpcGateway.checkLocalPreview(machineId, request)
     }
 
-    async openLocalServiceTunnel(machineId: string, request: LocalServiceTunnelRequest): Promise<LocalServiceTunnelResponse> {
-        return await this.rpcGateway.openLocalServiceTunnel(machineId, request)
+    async openLocalServiceTunnel(machineId: string, request: LocalServiceTunnelRequest, namespace: string): Promise<LocalServiceTunnel> {
+        return await this.rpcGateway.openLocalServiceTunnel(machineId, request, namespace)
     }
 
     async proxyLocalPreviewRequest(machineId: string, request: LocalPreviewHttpRequest): Promise<LocalPreviewHttpResponse> {

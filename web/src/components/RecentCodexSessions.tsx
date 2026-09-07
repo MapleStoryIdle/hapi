@@ -1572,27 +1572,7 @@ export function RecentCodexSessions(props: {
                     })}
                     {completedTimelineGroups.length > 0 ? (
                         <section className="min-w-0" data-kanban-group="completed">
-                            <div
-                                className="cupertino-kanban-completed-divider flex items-center justify-center px-1"
-                                role="separator"
-                                aria-label={`${t('sessions.kanban.completed')} ${completedTimelineGroups.reduce((count, group) => count + group.shares.length, 0)}`}
-                                data-kanban-completed-divider
-                            >
-                                <h2 className="inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-[var(--app-hint)]">
-                                    <MotionIcon
-                                        icon={toMotionIcon(CircleCheck)}
-                                        className="h-3.5 w-3.5 shrink-0 text-[#34C759]"
-                                        data-motion-icon="completed"
-                                        aria-hidden="true"
-                                    />
-                                    {t('sessions.kanban.completed')}
-                                    <span aria-hidden="true">·</span>
-                                    <span className="tabular-nums">
-                                        {completedTimelineGroups.reduce((count, group) => count + group.shares.length, 0)}
-                                    </span>
-                                </h2>
-                            </div>
-                            <div className="cupertino-kanban-date-groups mt-3" data-kanban-card-column>
+                            <div className="cupertino-kanban-date-groups" data-kanban-card-column>
                                 <div className="space-y-5">
                                     {completedTimelineGroups.map((group) => (
                                         <section key={group.key} data-kanban-date-group={group.key}>

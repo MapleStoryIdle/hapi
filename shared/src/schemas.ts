@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { CODEX_COLLABORATION_MODES, PERMISSION_MODES } from './modes'
+import { NativeCodexSessionControlsSchema } from './codexSessionControl'
 
 export const PermissionModeSchema = z.enum(PERMISSION_MODES)
 export const CodexCollaborationModeSchema = z.enum(CODEX_COLLABORATION_MODES)
@@ -480,6 +481,7 @@ const CodexLocalSessionRealtimeQueuedMessageSchema = z.object({
 
 export const CodexLocalSessionRealtimeStatusSchema = z.object({
     success: z.literal(true),
+    controls: NativeCodexSessionControlsSchema.optional(),
     status: z.enum(['idle', 'processing', 'unknown']),
     activeTurnId: CodexLocalSessionActiveTurnIdSchema.optional(),
     waitingForUserInput: z.boolean().optional(),

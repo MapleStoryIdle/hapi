@@ -311,6 +311,100 @@ describe('machines routes', () => {
         })
     })
 
+    it('forwards machine-scoped Git branch actions', async () => {
+        const machine = createMachine()
+        const calls: Array<{ method: string; machineId: string; payload: unknown }> = []
+        const responsePayload = {
+            success: true,
+            currentBranch: 'feature/mobile',
+            isDirty: false,
+            changedFileCount: 0,
+            additions: 0,
+            deletions: 0,
+            localBranches: [{ ref: 'feature/mobile', name: 'feature/mobile' }],
+            remoteBranches: [{ ref: 'origin/main', name: 'main' }]
+        }
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            getMachineGitBranches: async (machineId: string, cwd: string) => {
+                calls.push({ method: 'list', machineId, payload: cwd })
+                return responsePayload
+            },
+            switchMachineGitBranch: async (machineId: string, payload: unknown) => {
+                calls.push({ method: 'switch', machineId, payload })
+                return responsePayload
+            },
+            createMachineGitBranch: async (machineId: string, payload: unknown) => {
+                calls.push({ method: 'create', machineId, payload })
+                return responsePayload
+            },
+            commitMachineGitChanges: async (machineId: string, payload: unknown) => {
+                calls.push({ method: 'commit', machineId, payload })
+                return responsePayload
+            },
+            pushMachineGitBranch: async (machineId: string, payload: unknown) => {
+                calls.push({ method: 'push', machineId, payload })
+                return responsePayload
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const list = await app.request('/api/machines/machine-1/git-branches?cwd=' + encodeURIComponent('/home/user/proj'))
+        const switchResponse = await app.request('/api/machines/machine-1/git-branches/switch', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                cwd: '/home/user/proj',
+                target: { kind: 'remote', ref: 'origin/feature/mobile' },
+                confirmDirty: true
+            })
+        })
+        const create = await app.request('/api/machines/machine-1/git-branches', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ cwd: '/home/user/proj', name: 'feature/new' })
+        })
+        const commit = await app.request('/api/machines/machine-1/git-branches/commit', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ cwd: '/home/user/proj', message: 'Add branch controls' })
+        })
+        const push = await app.request('/api/machines/machine-1/git-branches/push', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ cwd: '/home/user/proj' })
+        })
+
+        expect(list.status).toBe(200)
+        expect(switchResponse.status).toBe(200)
+        expect(create.status).toBe(200)
+        expect(commit.status).toBe(200)
+        expect(push.status).toBe(200)
+        expect(calls).toEqual([
+            { method: 'list', machineId: 'machine-1', payload: '/home/user/proj' },
+            {
+                method: 'switch',
+                machineId: 'machine-1',
+                payload: {
+                    cwd: '/home/user/proj',
+                    target: { kind: 'remote', ref: 'origin/feature/mobile' },
+                    confirmDirty: true
+                }
+            },
+            { method: 'create', machineId: 'machine-1', payload: { cwd: '/home/user/proj', name: 'feature/new' } },
+            { method: 'commit', machineId: 'machine-1', payload: { cwd: '/home/user/proj', message: 'Add branch controls' } },
+            { method: 'push', machineId: 'machine-1', payload: { cwd: '/home/user/proj' } }
+        ])
+        expect(await list.json()).toEqual(responsePayload)
+    })
+
     it('returns 503 when cursor-models is requested without a sync engine', async () => {
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => {

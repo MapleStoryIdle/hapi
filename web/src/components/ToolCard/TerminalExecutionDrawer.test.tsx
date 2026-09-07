@@ -68,7 +68,7 @@ describe('TerminalExecutionDrawer', () => {
         expect(drawer).not.toHaveClass('pt-[var(--app-safe-area-top)]')
         expect(drawer.className).not.toContain('backdrop-blur')
         expect(drawer).toHaveTextContent('bun run test:web')
-        expect(drawer).toHaveTextContent('Completed')
+        expect(screen.getByRole('img', { name: 'Completed' })).toBeInTheDocument()
         expect(drawer).toHaveTextContent('2.3s')
         expect(drawer).toHaveTextContent('/bin/zsh -lc "bun run test:web"')
         expect(drawer).toHaveTextContent('1418 tests passed')
@@ -83,51 +83,67 @@ describe('TerminalExecutionDrawer', () => {
         expect(outputPanel).not.toHaveAttribute('hidden')
         expect(outputPanel.className).not.toContain('--app-safe-area-bottom')
         expect(drawer.querySelector('[data-chat-drawer-body]')).toHaveClass('overflow-y-auto', 'overscroll-contain')
-        expect(drawer.querySelectorAll('[role="tabpanel"]')).toHaveLength(2)
-        expect(drawer.querySelector('[data-terminal-execution-panel="details"]')).toHaveAttribute('hidden')
+        expect(drawer.querySelectorAll('[role="tabpanel"], [role="tab"]')).toHaveLength(0)
         expect(drawer.querySelector('[data-terminal-execution-input]')).toBeInTheDocument()
         expect(drawer.querySelector('[data-terminal-execution-output]')).toBeInTheDocument()
         expect(screen.getByTestId('terminal-execution-close')).toHaveClass('h-11', 'w-11')
         expect(screen.getByTestId('terminal-execution-close')).toHaveAccessibleName('Close')
     })
 
-    it('shows command and output together, with accessible click and keyboard tabs', () => {
-        render(<I18nProvider><DrawerHarness /></I18nProvider>)
-        const transcript = screen.getByRole('tab', { name: 'Command & output' })
-        const details = screen.getByRole('tab', { name: 'Details' })
-        expect(screen.getAllByRole('tab')).toHaveLength(2)
-        expect(transcript).toHaveAttribute('aria-selected', 'true')
-        expect(transcript).toHaveClass('chat-segment')
-        const panel = screen.getByRole('tabpanel')
-        expect(panel).toHaveAttribute('id', transcript.getAttribute('aria-controls'))
-        expect(panel).toHaveAttribute('aria-labelledby', transcript.id)
-        expect(panel).toHaveTextContent('/bin/zsh -lc "bun run test:web"')
-        expect(panel).toHaveTextContent('1418 tests passed')
-        expect(panel).toHaveTextContent('one warning emitted')
-        expect(panel).toHaveTextContent('stdout')
-        expect(panel).toHaveTextContent('stderr')
-        expect(screen.getByText('Completed')).toBeInTheDocument() // stderr alone is not a failure.
-        expect(document.querySelector('[data-terminal-execution-command-strip]')).toBeNull()
-        fireEvent.click(details)
-        const info = screen.getByRole('tabpanel')
-        expect(info).toHaveAttribute('id', details.getAttribute('aria-controls'))
-        expect(info).toHaveAttribute('aria-labelledby', details.id)
-        expect(info).toHaveTextContent('/workspace/hapi')
-        expect(info).toHaveTextContent('exit 0')
-        expect(info).not.toHaveTextContent('Duration')
-        expect(info).not.toHaveTextContent('Status')
-        expect(info).not.toHaveTextContent('SECRET_TOKEN=must-not-render')
-        expect(info).not.toHaveTextContent('1418 tests passed')
-        expect(panel).toHaveAttribute('hidden')
-        fireEvent.keyDown(details, { key: 'ArrowRight' })
-        expect(transcript).toHaveFocus()
-        expect(transcript).toHaveAttribute('aria-selected', 'true')
-        fireEvent.keyDown(transcript, { key: 'End' })
-        expect(details).toHaveFocus()
-        fireEvent.keyDown(details, { key: 'Home' })
-        expect(transcript).toHaveFocus()
-        fireEvent.keyDown(transcript, { key: 'ArrowLeft' })
-        expect(details).toHaveFocus()
+    it('shows three header rows, no tabs, and the exit code under output', () => {
+        const view = render(<I18nProvider><DrawerHarness /></I18nProvider>)
+        expect(screen.queryByRole('tab')).toBeNull()
+        const header = view.baseElement.querySelector('.terminal-drawer-heading')!
+        expect(header.querySelector('[data-terminal-directory]')).toHaveTextContent('/workspace/hapi')
+        const status = header.querySelector('[data-terminal-status]')!
+        expect(status.textContent).toBe('2.3s')
+        expect(status).not.toHaveTextContent(';')
+        expect(screen.queryByText('Completed')).toBeNull()
+        expect(screen.getByRole('img', { name: 'Completed' })).toHaveClass('text-[var(--app-badge-success-text)]')
+        const output = view.baseElement.querySelector('[data-terminal-execution-output]')!
+        expect(output.lastElementChild).toHaveAttribute('data-terminal-execution-exit-code')
+        expect(output.lastElementChild).toHaveTextContent('Exit code0')
+        expect(view.baseElement).not.toHaveTextContent('SECRET_TOKEN')
+    })
+
+    it.each([
+        ['error', 'Failed', 'failed', 'lucide-x'],
+        ['running', 'Running', 'running', 'lucide-loader-circle'],
+        ['pending', 'Pending', 'pending', 'lucide-clock3'],
+    ] as const)('shows the %s icon with no visible state label', (state, label, status, icon) => {
+        const block = makeBlock()
+        block.tool.state = state
+        render(<I18nProvider><TerminalExecutionDrawer block={block} open onOpenChange={() => undefined} /></I18nProvider>)
+        const indicator = document.querySelector(`[data-terminal-status="${status}"]`)!
+        expect(indicator.querySelector('svg')).toHaveClass(icon)
+        expect(indicator).not.toHaveTextContent(label)
+        expect(indicator.querySelector('[role="img"]')).toHaveAttribute('aria-label')
+        if (state === 'error') expect(indicator.querySelector('[role="img"]')).toHaveClass('text-[var(--app-badge-error-text)]')
+        if (state === 'running') expect(indicator.querySelector('svg')).toHaveClass('animate-spin', 'motion-reduce:animate-none')
+    })
+
+    it('expands a long directory without exposing other metadata', () => {
+        const block = makeBlock()
+        const cwd = '/workspace/' + 'long-project-directory/'.repeat(4) + 'shapi'
+        block.tool.input = { command: 'git status', cwd }
+        render(<I18nProvider><TerminalExecutionDrawer block={block} open onOpenChange={() => undefined} /></I18nProvider>)
+        const path = screen.getByRole('button', { name: `Working directory: ${cwd}` })
+        expect(path.textContent).toContain('…')
+        fireEvent.click(path)
+        expect(path.textContent).toBe(cwd)
+        expect(path).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByRole('button', { name: 'Copy directory' })).toBeInTheDocument()
+    })
+
+    it('hides unavailable directory, exit code and duration', () => {
+        const block = makeBlock()
+        block.tool.input = { command: 'git status' }
+        block.tool.result = {}
+        block.tool.completedAt = null
+        render(<I18nProvider><TerminalExecutionDrawer block={block} open onOpenChange={() => undefined} /></I18nProvider>)
+        expect(document.querySelector('[data-terminal-directory]')).toBeNull()
+        expect(document.querySelector('[data-terminal-execution-exit-code]')).toBeNull()
+        expect(document.querySelector('[data-terminal-status]')?.textContent).toBe('')
     })
 
     it('uses the remote action and host instead of the generic execution title', () => {
@@ -147,46 +163,13 @@ describe('TerminalExecutionDrawer', () => {
         expect(screen.queryByText('Run remotely')).not.toBeInTheDocument()
     })
 
-    it('resets to command and output after closing and reopening', async () => {
-        render(
-            <I18nProvider>
-                <ResetDrawerHarness />
-            </I18nProvider>
-        )
-
-        fireEvent.click(screen.getByRole('tab', { name: 'Details' }))
-        expect(screen.getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
-
+    it('reopens command and output directly', async () => {
+        render(<I18nProvider><ResetDrawerHarness /></I18nProvider>)
         fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-        await waitFor(() => {
-            expect(screen.queryByTestId('terminal-execution-drawer')).not.toBeInTheDocument()
-        })
-
+        await waitFor(() => expect(screen.queryByTestId('terminal-execution-drawer')).not.toBeInTheDocument())
         fireEvent.click(screen.getByRole('button', { name: 'Reopen drawer' }))
-        await waitFor(() => {
-            expect(screen.getByRole('tab', { name: 'Command & output' })).toHaveAttribute('aria-selected', 'true')
-        })
-    })
-
-    it('resets to command and output when the tool block changes', async () => {
-        const view = render(
-            <I18nProvider>
-                <TerminalExecutionDrawer block={makeBlock()} open onOpenChange={() => undefined} />
-            </I18nProvider>
-        )
-
-        fireEvent.click(screen.getByRole('tab', { name: 'Details' }))
-        expect(screen.getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
-
-        view.rerender(
-            <I18nProvider>
-                <TerminalExecutionDrawer block={makeBlock('terminal-drawer-next')} open onOpenChange={() => undefined} />
-            </I18nProvider>
-        )
-
-        await waitFor(() => {
-            expect(screen.getByRole('tab', { name: 'Command & output' })).toHaveAttribute('aria-selected', 'true')
-        })
+        expect(await screen.findByText('1418 tests passed')).toBeVisible()
+        expect(screen.queryByRole('tab')).toBeNull()
     })
 
     it('closes through the modal close control', async () => {

@@ -1,6 +1,8 @@
 import { z } from 'zod'
+import type { LocalServiceTransportEvents } from './localServices'
 import type { CodexCollaborationMode, PermissionMode } from './modes'
 import type { CodexLocalSessionSnapshotVersion } from './codexSnapshot'
+import type { NativeCodexAttachment } from './nativeCodexAttachments'
 import type { CodexLocalSessionListUpdate, SessionEndReason } from './schemas'
 export { SessionEndReasonSchema, type SessionEndReason } from './schemas'
 
@@ -160,6 +162,30 @@ export type NativeKanbanFeedbackDeleteResponse =
     | { success: true; deleted: boolean }
     | { success: false; error: string }
 
+/** Runner-private staging for a browser attachment sent to an original Codex thread. */
+export type NativeCodexAttachmentStageRequest = {
+    attachmentId: string
+    codexSessionId: string
+    filename: string
+    mimeType: string
+    size: number
+    sha256: string
+    bytes: Uint8Array | ArrayBuffer
+}
+
+export type NativeCodexAttachmentStageResponse =
+    | { success: true; attachment: NativeCodexAttachment }
+    | { success: false; error: string }
+
+export type NativeCodexAttachmentDeleteRequest = {
+    attachmentId: string
+    codexSessionId: string
+}
+
+export type NativeCodexAttachmentDeleteResponse =
+    | { success: true; deleted: boolean }
+    | { success: false; error: string }
+
 /** A generated image copied from the CLI to durable hub storage. */
 export type GeneratedImageStoreRequest = {
     sid: string
@@ -296,12 +322,14 @@ export type MachineUpdateStateAck = {
     runnerState: unknown | null
 }
 
-export interface ServerToClientEvents {
+export interface ServerToClientEvents extends LocalServiceTransportEvents {
     update: (data: Update, ack?: (response: CancelQueuedMessageAck) => void) => void
     'rpc-request': (data: { method: string; params: string }, callback: (response: string) => void) => void
     'file:read-bytes': (data: BinaryFileReadRequest, callback: (response: BinaryFileReadResponse) => void) => void
     'native-kanban-feedback:stage': (data: NativeKanbanFeedbackStageRequest, callback: (response: NativeKanbanFeedbackStageResponse) => void) => void
     'native-kanban-feedback:delete': (data: NativeKanbanFeedbackDeleteRequest, callback: (response: NativeKanbanFeedbackDeleteResponse) => void) => void
+    'native-codex-attachment:stage': (data: NativeCodexAttachmentStageRequest, callback: (response: NativeCodexAttachmentStageResponse) => void) => void
+    'native-codex-attachment:delete': (data: NativeCodexAttachmentDeleteRequest, callback: (response: NativeCodexAttachmentDeleteResponse) => void) => void
     'terminal:open': (data: TerminalOpenPayload) => void
     'terminal:write': (data: TerminalWritePayload) => void
     'terminal:resize': (data: TerminalResizePayload) => void
@@ -309,7 +337,7 @@ export interface ServerToClientEvents {
     error: (data: { message: string; code?: SocketErrorReason; scope?: 'session' | 'machine'; id?: string }) => void
 }
 
-export interface ClientToServerEvents {
+export interface ClientToServerEvents extends LocalServiceTransportEvents {
     message: (data: { sid: string; message: unknown; localId?: string }) => void
     'generated-image:store': (data: GeneratedImageStoreRequest, callback: (response: GeneratedImageStoreResponse) => void) => void
     'session-alive': (data: {
