@@ -2,8 +2,10 @@ import {
     MachineGitBranchCreateRequestSchema,
     MachineGitBranchCommitRequestSchema,
     MachineGitBranchesRequestSchema,
+    MachineGitBranchFetchRequestSchema,
     MachineGitBranchPushRequestSchema,
     MachineGitBranchSwitchRequestSchema,
+    MachineGitBranchUpdateRequestSchema,
     MachineListDirectoryRequestSchema,
     MachinePathsExistsRequestSchema,
     SpawnSessionRequestSchema
@@ -366,6 +368,64 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to push Git branch'
+            }, 500)
+        }
+    })
+
+    app.post('/machines/:id/git-branches/fetch', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = MachineGitBranchFetchRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ success: false, error: 'Invalid body' }, 400)
+        }
+
+        try {
+            const result = await engine.fetchMachineGitBranches(machineId, parsed.data)
+            return c.json(result)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to fetch Git branches'
+            }, 500)
+        }
+    })
+
+    app.post('/machines/:id/git-branches/update', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = MachineGitBranchUpdateRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ success: false, error: 'Invalid body' }, 400)
+        }
+
+        try {
+            const result = await engine.updateMachineGitBranch(machineId, parsed.data)
+            return c.json(result)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to update Git branch'
             }, 500)
         }
     })

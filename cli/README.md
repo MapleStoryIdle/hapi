@@ -116,6 +116,12 @@ See `src/configuration.ts` for all options.
 
 The recent Codex transcript API is runner-scoped: the selected runner reads its own `CODEX_HOME` through Hub RPC, so a remote Hub never needs access to your local transcript files.
 
+Native sessions can be renamed from the session header menu, using the same
+dialog as managed sessions. The runner calls Codex's `thread/name/set` metadata
+API without resuming or interrupting the thread. Names are stored by Codex and
+refreshed in SHAPI's list and detail views; older Codex versions without this
+API return an error and keep the existing name.
+
 Native Codex controls use the same composer as managed sessions. A runner-owned app-server turn can be stopped without killing Codex; an existing Desktop SSH control socket can interrupt only the exact currently running turn. Non-SSH external owners, exec-resume turns, and pending Desktop queue hand-offs do not expose a stop button. Interrupt acknowledgement is not completion: SHAPI waits for the matching terminal event before allowing its paused queue to resume.
 
 Model, reasoning effort and supported Standard/Fast settings apply to new SHAPI messages. Already queued messages keep their saved settings. Preferences and queue pauses are stored in the runner's `native-codex-controls.json`; Codex global configuration is not changed. Codex may retain the model/effort in the thread's own configuration. Desktop's shared queue cannot accept per-message settings, so its model controls stay read-only; configured messages wait instead of silently losing their settings. Stopping pauses SHAPI's queue until the user explicitly resumes delivery.

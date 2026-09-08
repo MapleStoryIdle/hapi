@@ -8,6 +8,8 @@ import { GitBranchesDrawer } from './GitBranchesDrawer'
 
 afterEach(() => cleanup())
 
+const TEST_CWD = '/Users/dev/IdeaProjects/github/hapi'
+
 function response(overrides: Record<string, unknown> = {}) {
     return {
         success: true as const,
@@ -17,6 +19,8 @@ function response(overrides: Record<string, unknown> = {}) {
         additions: 26,
         deletions: 8,
         pushRemote: 'origin',
+        upstream: 'origin/feature/mobile',
+        canUpdate: true,
         localBranches: [
             { ref: 'feature/mobile', name: 'feature/mobile' },
             { ref: 'main', name: 'main' }
@@ -38,7 +42,7 @@ function renderDrawer(api: ApiClient) {
                     <GitBranchesDrawer
                         api={api}
                         machineId="machine-1"
-                        cwd="/workspace/hapi"
+                        cwd={TEST_CWD}
                         open
                         onOpenChange={vi.fn()}
                     />
@@ -49,14 +53,15 @@ function renderDrawer(api: ApiClient) {
 }
 
 describe('GitBranchesDrawer', () => {
-    it('uses the directory title and never renders the origin prefix', async () => {
+    it('uses a fixed Git Branchs title, the full directory path, and compact icon actions', async () => {
         const api = {
             getMachineGitBranches: vi.fn(async () => response())
         } as unknown as ApiClient
         renderDrawer(api)
 
         expect(await screen.findByText('feature/remote')).toBeInTheDocument()
-        expect(screen.getByTestId('git-branches-drawer')).toHaveTextContent('hapi')
+        expect(screen.getByTestId('git-branches-drawer')).toHaveTextContent('Git Branchs')
+        expect(screen.getByTestId('git-branches-drawer')).toHaveTextContent(TEST_CWD)
         expect(screen.getByTestId('git-branches-drawer')).toHaveTextContent('3 files')
         expect(screen.getByTestId('git-branches-drawer')).not.toHaveTextContent('origin/feature/remote')
         expect(screen.getByText('Local')).toBeInTheDocument()
@@ -74,6 +79,13 @@ describe('GitBranchesDrawer', () => {
             .toHaveClass('text-[var(--app-badge-success-text)]')
         expect(screen.getByTestId('git-branches-drawer').querySelector('[data-git-branch-change-deletions]'))
             .toHaveClass('text-[var(--app-badge-error-text)]')
+        expect(screen.getByTestId('git-branches-drawer').querySelector('[data-git-branch-directory-icon]')).not.toBeNull()
+        const actions = screen.getByTestId('git-branches-drawer').querySelector<HTMLElement>('[data-git-branch-actions]')
+        expect(actions).not.toBeNull()
+        expect(actions).toHaveClass('grid-cols-4')
+        expect(within(actions!).getAllByRole('button')).toHaveLength(4)
+        expect(screen.getByRole('button', { name: 'Fetch' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Update' })).toBeDisabled()
     })
 
     it('commits local changes and pushes the current branch from the drawer', async () => {
@@ -93,7 +105,7 @@ describe('GitBranchesDrawer', () => {
         fireEvent.click(within(commitDrawer).getByRole('button', { name: 'Commit' }))
 
         await waitFor(() => expect(api.commitMachineGitChanges).toHaveBeenCalledWith('machine-1', {
-            cwd: '/workspace/hapi',
+            cwd: TEST_CWD,
             message: 'Save branch work'
         }))
 
@@ -103,7 +115,28 @@ describe('GitBranchesDrawer', () => {
         fireEvent.click(pushButtons[pushButtons.length - 1]!)
 
         await waitFor(() => expect(api.pushMachineGitBranch).toHaveBeenCalledWith('machine-1', {
-            cwd: '/workspace/hapi'
+            cwd: TEST_CWD
+        }))
+    })
+
+    it('fetches remote refs and updates a clean tracked branch', async () => {
+        const cleanResponse = response({ isDirty: false, changedFileCount: 0, additions: 0, deletions: 0 })
+        const api = {
+            getMachineGitBranches: vi.fn(async () => cleanResponse),
+            fetchMachineGitBranches: vi.fn(async () => cleanResponse),
+            updateMachineGitBranch: vi.fn(async () => cleanResponse)
+        } as unknown as ApiClient
+        renderDrawer(api)
+
+        await screen.findByText('feature/remote')
+        fireEvent.click(screen.getByRole('button', { name: 'Fetch' }))
+        await waitFor(() => expect(api.fetchMachineGitBranches).toHaveBeenCalledWith('machine-1', {
+            cwd: TEST_CWD
+        }))
+
+        fireEvent.click(screen.getByRole('button', { name: 'Update' }))
+        await waitFor(() => expect(api.updateMachineGitBranch).toHaveBeenCalledWith('machine-1', {
+            cwd: TEST_CWD
         }))
     })
 
@@ -122,7 +155,7 @@ describe('GitBranchesDrawer', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Switch anyway' }))
 
         await waitFor(() => expect(api.switchMachineGitBranch).toHaveBeenLastCalledWith('machine-1', {
-            cwd: '/workspace/hapi',
+            cwd: TEST_CWD,
             target: { kind: 'local', ref: 'main' },
             confirmDirty: true
         }))

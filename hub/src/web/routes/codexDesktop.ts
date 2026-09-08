@@ -31,6 +31,7 @@ import {
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import { Hono } from 'hono'
+import { RenameNativeCodexSessionRequestSchema } from '@hapi/protocol/apiTypes'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { Store, StoredMessage } from '../../store'
 import type { WebAppEnv } from '../middleware/auth'
@@ -2177,6 +2178,35 @@ export function createCodexDesktopRoutes(options: {
         } catch {
             // A lost ACK cannot tell us whether a stop was accepted. Never retry automatically.
             return c.json({ success: false, code: 'control_unconfirmed', error: 'Could not confirm the control request. Refresh the session status before trying again.' }, 502)
+        }
+    })
+
+    app.patch('/codex/sessions/:id', async (c) => {
+        const body: unknown = await c.req.json().catch(() => null)
+        const request = RenameNativeCodexSessionRequestSchema.safeParse(body)
+        const record = asRecord(body)
+        const machineId = typeof record?.machineId === 'string' ? parseCodexRunnerMachineId(record.machineId) : null
+        if (!machineId || !request.success) {
+            return c.json({ success: false, code: 'invalid_request', error: 'A runner and a name of 1–255 characters are required' }, 400)
+        }
+        const engine = options.getSyncEngine()
+        const target = resolveDirectCodexLocalSessionTarget({ engine, namespace: c.get('namespace'), machineId })
+        if (target.type === 'error') {
+            return c.json({ success: false, error: target.message }, target.status)
+        }
+        if (findHapiManagedCodexSession(engine!, c.get('namespace'), target.machine.id, c.req.param('id'))) {
+            return c.json({ success: false, code: 'not_native_session', error: 'Rename this session from its SHAPI session page' }, 409)
+        }
+        try {
+            const result = await engine!.renameCodexLocalSession(target.machine.id, c.req.param('id'), request.data.name)
+            if (result.success) return c.json(result)
+            const status = result.code === 'session_not_found' ? 404
+                : result.code === 'invalid_request' ? 400
+                    : result.code === 'not_native_session' ? 409
+                        : result.code === 'rename_unsupported' ? 501 : 502
+            return c.json(result, status)
+        } catch {
+            return c.json({ success: false, code: 'rename_failed', error: 'Could not confirm the new name. Refresh the session and try again.' }, 502)
         }
     })
 

@@ -232,6 +232,14 @@ export const RenameSessionRequestSchema = z.object({
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
 
+export const RenameNativeCodexSessionRequestSchema = z.object({
+    name: z.string().trim().min(1).max(255)
+})
+
+export type RenameNativeCodexSessionResponse =
+    | { success: true; name: string }
+    | { success: false; code: 'invalid_request' | 'session_not_found' | 'not_native_session' | 'rename_unsupported' | 'rename_failed'; error: string }
+
 export type CreateSideSessionResponse =
     | { type: 'success'; sessionId: string; session?: Session }
     | { type: 'error'; message: string; code?: string }
@@ -408,6 +416,16 @@ export const MachineGitBranchPushRequestSchema = MachineGitBranchesRequestSchema
 
 export type MachineGitBranchPushRequest = z.infer<typeof MachineGitBranchPushRequestSchema>
 
+/** Refresh remote refs without changing the checked-out worktree. */
+export const MachineGitBranchFetchRequestSchema = MachineGitBranchesRequestSchema.strict()
+
+export type MachineGitBranchFetchRequest = z.infer<typeof MachineGitBranchFetchRequestSchema>
+
+/** Safely fast-forward the current branch through its configured upstream. */
+export const MachineGitBranchUpdateRequestSchema = MachineGitBranchesRequestSchema.strict()
+
+export type MachineGitBranchUpdateRequest = z.infer<typeof MachineGitBranchUpdateRequestSchema>
+
 export const LocalPreviewProtocolSchema = z.enum(['http', 'https'])
 export type LocalPreviewProtocol = z.infer<typeof LocalPreviewProtocolSchema>
 
@@ -577,9 +595,16 @@ export type GitBranchesResponse = {
         | 'nothing_to_commit'
         | 'detached_head'
         | 'push_remote_unavailable'
+        | 'fetch_remote_unavailable'
+        | 'upstream_unavailable'
+        | 'dirty_update_blocked'
     currentBranch?: string | null
     /** The runner-selected remote used when the current branch has no upstream. */
     pushRemote?: string | null
+    /** Short upstream ref such as `origin/main`, when the current branch tracks one. */
+    upstream?: string | null
+    /** True only when a safe fast-forward update can be attempted. */
+    canUpdate?: boolean
     isDirty?: boolean
     changedFileCount?: number
     additions?: number

@@ -1293,6 +1293,73 @@ describe('Codex Desktop import routes', () => {
         } finally { store.close() }
     })
 
+    it('renames on the selected authorized runner and rejects invalid names and inaccessible runners', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const calls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            renameCodexLocalSession: async (...args: unknown[]) => {
+                calls.push(args)
+                return { success: true, name: args[2] }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+        const rename = (name: unknown, machineId = 'mac-runner') => app.request('/api/codex/sessions/native-thread', {
+            method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ machineId, name })
+        })
+        try {
+            for (const name of ['', '  ', 'x'.repeat(256), 42, null]) expect((await rename(name)).status).toBe(400)
+            expect((await rename('Name', 'unknown-runner')).status).toBe(409)
+            expect(calls).toEqual([])
+            const result = await rename('  新任务名称  ')
+            expect(result.status).toBe(200)
+            expect(await result.json()).toEqual({ success: true, name: '新任务名称' })
+            expect(calls).toEqual([['mac-runner', 'native-thread', '新任务名称']])
+        } finally { store.close() }
+    })
+
+    it('refuses native rename across namespaces and for a managed wrapper', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        let calls = 0
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            getSessionsByNamespace: () => [{ id: 'wrapper', namespace: 'default', active: true, metadata: {
+                machineId: 'mac-runner', codexSessionId: 'native-thread', flavor: 'codex'
+            } }],
+            renameCodexLocalSession: async () => { calls++; return { success: true, name: 'New name' } }
+        } as unknown as SyncEngine
+        try {
+            for (const namespace of ['default', 'other']) {
+                const response = await createRoutesAppWithEngine(namespace, store, engine).request('/api/codex/sessions/native-thread', {
+                    method: 'PATCH', headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ machineId: 'mac-runner', name: 'New name' })
+                })
+                expect(response.status).toBe(namespace === 'default' ? 409 : 403)
+            }
+            expect(calls).toBe(0)
+        } finally { store.close() }
+    })
+
+    it('maps native rename failures without reporting success', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        try {
+            for (const [code, status] of [['session_not_found', 404], ['rename_unsupported', 501], ['rename_failed', 502]] as const) {
+                const engine = {
+                    ...createImportSyncEngine(store, [machine]),
+                    renameCodexLocalSession: async () => ({ success: false, code, error: code })
+                } as unknown as SyncEngine
+                const response = await createRoutesAppWithEngine('default', store, engine).request('/api/codex/sessions/native-thread', {
+                    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ machineId: machine.id, name: 'New name' })
+                })
+                expect(response.status).toBe(status)
+                expect(await response.json()).toMatchObject({ success: false, code })
+            }
+        } finally { store.close() }
+    })
+
     it('archives a native Codex thread on its owning runner', async () => {
         const store = new Store(':memory:')
         const sessionId = '56565656-5656-4656-8656-565656565657'

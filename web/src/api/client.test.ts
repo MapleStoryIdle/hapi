@@ -16,6 +16,15 @@ describe('ApiClient error mapping', () => {
         vi.useRealTimers()
     })
 
+    it('renames a native session using its selected runner and the native PATCH route', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ success: true, name: '原生任务' }), { status: 200 }))
+        const api = new ApiClient('test-token')
+        expect(await api.renameCodexSession('thread/1', 'runner-1', '原生任务')).toEqual({ success: true, name: '原生任务' })
+        expect(fetchMock).toHaveBeenCalledWith('/api/codex/sessions/thread%2F1', expect.objectContaining({
+            method: 'PATCH', body: JSON.stringify({ machineId: 'runner-1', name: '原生任务' })
+        }))
+    })
+
     it('prefers the stable `code` field over the human-readable `error` message in ApiError.code', async () => {
         // Match the shape /sessions/:id/reopen actually returns on a 503.
         fetchMock.mockResolvedValueOnce(
@@ -211,10 +220,14 @@ describe('ApiClient error mapping', () => {
             changedFileCount: 0,
             additions: 0,
             deletions: 0,
+            upstream: 'origin/main',
+            canUpdate: true,
             localBranches: [{ ref: 'main', name: 'main' }],
             remoteBranches: [{ ref: 'origin/main', name: 'main' }]
         }
         fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+            .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
             .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
             .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
             .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
@@ -239,6 +252,12 @@ describe('ApiClient error mapping', () => {
         await expect(api.pushMachineGitBranch('machine / one', {
             cwd: '/work/project name'
         })).resolves.toEqual(payload)
+        await expect(api.fetchMachineGitBranches('machine / one', {
+            cwd: '/work/project name'
+        })).resolves.toEqual(payload)
+        await expect(api.updateMachineGitBranch('machine / one', {
+            cwd: '/work/project name'
+        })).resolves.toEqual(payload)
 
         expect(fetchMock.mock.calls[0]?.[0]).toBe(
             '/api/machines/machine%20%2F%20one/git-branches?cwd=%2Fwork%2Fproject%20name'
@@ -258,6 +277,14 @@ describe('ApiClient error mapping', () => {
         }))
         expect(fetchMock.mock.calls[4]?.[0]).toBe('/api/machines/machine%20%2F%20one/git-branches/push')
         expect((fetchMock.mock.calls[4]?.[1] as RequestInit).body).toBe(JSON.stringify({
+            cwd: '/work/project name'
+        }))
+        expect(fetchMock.mock.calls[5]?.[0]).toBe('/api/machines/machine%20%2F%20one/git-branches/fetch')
+        expect((fetchMock.mock.calls[5]?.[1] as RequestInit).body).toBe(JSON.stringify({
+            cwd: '/work/project name'
+        }))
+        expect(fetchMock.mock.calls[6]?.[0]).toBe('/api/machines/machine%20%2F%20one/git-branches/update')
+        expect((fetchMock.mock.calls[6]?.[1] as RequestInit).body).toBe(JSON.stringify({
             cwd: '/work/project name'
         }))
     })

@@ -14,6 +14,7 @@ import type { LocalServiceTunnelRequest } from '@hapi/protocol/localServices'
 import type { LocalServiceTunnel } from '../localServices/socketTransport'
 import type {
     CreateSideSessionResponse,
+    RenameNativeCodexSessionResponse,
     CursorMigrateOutcome,
     CursorMigrateToAcpRequest,
     LocalPreviewHttpRequest,
@@ -22,8 +23,10 @@ import type {
     LocalPreviewProbeResponse,
     MachineGitBranchCreateRequest,
     MachineGitBranchCommitRequest,
+    MachineGitBranchFetchRequest,
     MachineGitBranchPushRequest,
     MachineGitBranchSwitchRequest,
+    MachineGitBranchUpdateRequest,
     OpenVikingContextListRequest,
     OpenVikingContextReadRequest,
     SlashCommandsResponse,
@@ -1868,6 +1871,20 @@ export class SyncEngine {
         return await this.rpcGateway.pushMachineGitBranch(machineId, request)
     }
 
+    async fetchMachineGitBranches(
+        machineId: string,
+        request: MachineGitBranchFetchRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.rpcGateway.fetchMachineGitBranches(machineId, request)
+    }
+
+    async updateMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchUpdateRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.rpcGateway.updateMachineGitBranch(machineId, request)
+    }
+
     async readMachineFile(machineId: string, cwd: string, path: string): Promise<RpcReadFileResponse> {
         return await this.rpcGateway.readMachineFile(machineId, cwd, path)
     }
@@ -1905,6 +1922,10 @@ export class SyncEngine {
         sessionId: string
     ): Promise<RpcCodexLocalSessionStatusResponse> {
         return await this.rpcGateway.getCodexLocalSessionStatus(machineId, sessionId)
+    }
+
+    async renameCodexLocalSession(machineId: string, sessionId: string, name: string): Promise<RenameNativeCodexSessionResponse> {
+        return await this.rpcGateway.renameCodexLocalSession(machineId, sessionId, name)
     }
 
     async controlCodexLocalSession(

@@ -1,6 +1,5 @@
-import * as Dialog from '@radix-ui/react-dialog'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, GitBranch, GitCommitHorizontal, LoaderCircle, Plus, Search, Upload } from 'lucide-react'
+import { Check, Download, Folder, GitBranch, GitCommitHorizontal, GitPullRequestArrow, LoaderCircle, Plus, Search, Upload } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { GitBranchOption, GitBranchesResponse } from '@hapi/protocol/apiTypes'
 import type { ApiClient } from '@/api/client'
@@ -14,11 +13,6 @@ type BranchTarget = {
     kind: 'local' | 'remote'
     ref: string
     name: string
-}
-
-function getDirectoryName(cwd: string | null): string {
-    const parts = (cwd ?? '').split(/[\\/]/).filter(Boolean)
-    return parts[parts.length - 1] ?? ''
 }
 
 function displayRemoteBranchName(branch: GitBranchOption): string {
@@ -161,9 +155,11 @@ export function GitBranchesDrawer(props: {
     const [committing, setCommitting] = useState(false)
     const [pushOpen, setPushOpen] = useState(false)
     const [pushing, setPushing] = useState(false)
+    const [fetching, setFetching] = useState(false)
+    const [updating, setUpdating] = useState(false)
     const machineId = props.machineId
     const cwd = props.cwd?.trim() || null
-    const directoryName = getDirectoryName(cwd) || t('gitBranches.titleFallback')
+    const directoryPath = cwd || t('gitBranches.pathFallback')
     const queryKey = queryKeys.machineGitBranches(machineId ?? 'unknown', cwd ?? 'unknown')
     const branchesQuery = useQuery({
         queryKey,
@@ -321,6 +317,62 @@ export function GitBranchesDrawer(props: {
         }
     }, [addToast, cwd, machineId, props.api, pushing, t, updateBranches])
 
+    const fetchBranches = useCallback(async () => {
+        if (!props.api || !machineId || !cwd || fetching) return
+
+        setFetching(true)
+        try {
+            const response = await props.api.fetchMachineGitBranches(machineId, { cwd })
+            if (!response.success) {
+                addToast({
+                    title: t('gitBranches.fetchFailed'),
+                    body: response.error || t('dialog.error.default'),
+                    kind: 'error'
+                })
+                return
+            }
+            updateBranches(response)
+            addToast({ title: t('gitBranches.fetchSuccess'), kind: 'success' })
+        } catch (error) {
+            addToast({
+                title: t('gitBranches.fetchFailed'),
+                body: error instanceof Error ? error.message : t('dialog.error.default'),
+                kind: 'error'
+            })
+        } finally {
+            setFetching(false)
+        }
+    }, [addToast, cwd, fetching, machineId, props.api, t, updateBranches])
+
+    const updateBranch = useCallback(async () => {
+        if (!props.api || !machineId || !cwd || updating) return
+
+        setUpdating(true)
+        try {
+            const response = await props.api.updateMachineGitBranch(machineId, { cwd })
+            if (!response.success) {
+                addToast({
+                    title: response.code === 'dirty_update_blocked'
+                        ? t('gitBranches.updateDirty')
+                        : t('gitBranches.updateFailed'),
+                    body: response.error || t('dialog.error.default'),
+                    kind: 'error'
+                })
+                return
+            }
+            updateBranches(response)
+            addToast({ title: t('gitBranches.updateSuccess'), kind: 'success' })
+        } catch (error) {
+            addToast({
+                title: t('gitBranches.updateFailed'),
+                body: error instanceof Error ? error.message : t('dialog.error.default'),
+                kind: 'error'
+            })
+        } finally {
+            setUpdating(false)
+        }
+    }, [addToast, cwd, machineId, props.api, t, updateBranches, updating])
+
     const data = branchesQuery.data
     const localBranches = useMemo(
         () => (data?.localBranches ?? []).filter((branch) => matchesBranch(branch, search.trim())),
@@ -330,25 +382,29 @@ export function GitBranchesDrawer(props: {
         () => (data?.remoteBranches ?? []).filter((branch) => matchesBranch(branch, search.trim())),
         [data?.remoteBranches, search]
     )
-    const busy = switchingTarget !== null || creating || committing || pushing
+    const busy = switchingTarget !== null || creating || committing || pushing || fetching || updating
     const canPush = Boolean(data?.currentBranch && data.pushRemote)
+    const canFetch = Boolean(data?.upstream || data?.pushRemote)
+    const canUpdate = data?.canUpdate === true && data.isDirty !== true
+    const updateUnavailableTitle = data?.isDirty
+        ? t('gitBranches.updateDirty')
+        : t('gitBranches.updateUnavailable')
 
     return (
         <>
             <BottomDrawer
                 open={props.open}
                 onOpenChange={props.onOpenChange}
-                title={directoryName}
+                title={t('gitBranches.title')}
+                subtitle={(
+                    <span className="flex min-w-0 items-start gap-1.5">
+                        <Folder className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.9} aria-hidden="true" data-git-branch-directory-icon />
+                        <span className="min-w-0 [overflow-wrap:anywhere]" data-git-branch-directory-path>{directoryPath}</span>
+                    </span>
+                )}
                 density="compact"
                 busy={busy}
                 testId="git-branches-drawer"
-                header={(
-                    <div className="flex min-h-11 min-w-0 flex-1 items-center gap-2 pr-1">
-                        <Dialog.Title className="min-w-0 flex-1 truncate text-base font-semibold text-[var(--app-fg)]" title={directoryName}>
-                            {directoryName}
-                        </Dialog.Title>
-                    </div>
-                )}
             >
                 {branchesQuery.isPending ? (
                     <div className="flex min-h-32 items-center justify-center" data-git-branches-loading>
@@ -374,25 +430,52 @@ export function GitBranchesDrawer(props: {
                                 </span>
                             </div>
                             <ChangeSummary response={data} t={t} />
-                            <div className="mt-3 grid grid-cols-2 gap-2" data-git-branch-actions>
+                            <div className="mt-3 grid grid-cols-4 gap-2" data-git-branch-actions>
+                                <button
+                                    type="button"
+                                    onClick={() => void updateBranch()}
+                                    disabled={busy || !canUpdate}
+                                    className="flex h-11 w-full items-center justify-center rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
+                                    aria-label={updating ? t('gitBranches.updating') : t('gitBranches.update')}
+                                    title={canUpdate ? t('gitBranches.update') : updateUnavailableTitle}
+                                    data-git-branch-update
+                                >
+                                    {updating
+                                        ? <LoaderCircle className="h-5 w-5 animate-spin" strokeWidth={2} aria-hidden="true" />
+                                        : <GitPullRequestArrow className="h-5 w-5" strokeWidth={2} aria-hidden="true" />}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => void fetchBranches()}
+                                    disabled={busy || !canFetch}
+                                    className="flex h-11 w-full items-center justify-center rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
+                                    aria-label={fetching ? t('gitBranches.fetching') : t('gitBranches.fetch')}
+                                    title={canFetch ? t('gitBranches.fetch') : t('gitBranches.fetchUnavailable')}
+                                    data-git-branch-fetch
+                                >
+                                    {fetching
+                                        ? <LoaderCircle className="h-5 w-5 animate-spin" strokeWidth={2} aria-hidden="true" />
+                                        : <Download className="h-5 w-5" strokeWidth={2} aria-hidden="true" />}
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => setCommitOpen(true)}
                                     disabled={busy || !data.isDirty}
-                                    className="flex h-11 min-w-0 items-center justify-center gap-2 rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-sm font-semibold text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
+                                    className="flex h-11 w-full items-center justify-center rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
+                                    aria-label={t('gitBranches.commit')}
+                                    title={t('gitBranches.commit')}
                                 >
-                                    <GitCommitHorizontal className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
-                                    <span className="truncate">{t('gitBranches.commit')}</span>
+                                    <GitCommitHorizontal className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setPushOpen(true)}
                                     disabled={busy || !canPush}
-                                    className="flex h-11 min-w-0 items-center justify-center gap-2 rounded-[12px] bg-[var(--app-link)] px-3 text-sm font-semibold text-[var(--app-button-text)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
-                                    title={!canPush ? t('gitBranches.pushUnavailable') : undefined}
+                                    className="flex h-11 w-full items-center justify-center rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-link)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
+                                    aria-label={t('gitBranches.push')}
+                                    title={canPush ? t('gitBranches.push') : t('gitBranches.pushUnavailable')}
                                 >
-                                    <Upload className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
-                                    <span className="truncate">{t('gitBranches.push')}</span>
+                                    <Upload className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
                                 </button>
                             </div>
                         </div>

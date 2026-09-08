@@ -2,6 +2,7 @@ import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/
 import { randomUUID } from 'node:crypto'
 import { MAX_UPLOAD_CHUNK_BYTES } from '@hapi/protocol'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+import type { RenameNativeCodexSessionResponse } from '@hapi/protocol/apiTypes'
 import { LOCAL_SERVICE_RPC, type LocalServiceTunnelRequest } from '@hapi/protocol/localServices'
 import { openLocalServiceSocketTunnel, type LocalServiceTunnel } from '../localServices/socketTransport'
 import type {
@@ -58,8 +59,10 @@ import type {
     ListDirectoryResponse,
     MachineGitBranchCreateRequest,
     MachineGitBranchCommitRequest,
+    MachineGitBranchFetchRequest,
     MachineGitBranchPushRequest,
     MachineGitBranchSwitchRequest,
+    MachineGitBranchUpdateRequest,
     OpencodeModelsResponse,
     OpencodeModelSummary,
     OpencodeReasoningEffortResponse,
@@ -424,6 +427,10 @@ export class RpcGateway {
         }) as RpcArchiveCodexLocalSessionResponse
     }
 
+    async renameCodexLocalSession(machineId: string, sessionId: string, name: string): Promise<RenameNativeCodexSessionResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.RenameCodexLocalSession, { sessionId, name }, 60_000) as RenameNativeCodexSessionResponse
+    }
+
     async stageNativeKanbanFeedback(
         machineId: string,
         request: NativeKanbanFeedbackStageRequest
@@ -548,6 +555,30 @@ export class RpcGateway {
         return await this.machineRpc(
             machineId,
             RPC_METHODS.PushMachineGitBranch,
+            request,
+            GIT_BRANCH_REMOTE_RPC_TIMEOUT_MS
+        ) as RpcGitBranchesResponse
+    }
+
+    async fetchMachineGitBranches(
+        machineId: string,
+        request: MachineGitBranchFetchRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.machineRpc(
+            machineId,
+            RPC_METHODS.FetchMachineGitBranches,
+            request,
+            GIT_BRANCH_REMOTE_RPC_TIMEOUT_MS
+        ) as RpcGitBranchesResponse
+    }
+
+    async updateMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchUpdateRequest
+    ): Promise<RpcGitBranchesResponse> {
+        return await this.machineRpc(
+            machineId,
+            RPC_METHODS.UpdateMachineGitBranch,
             request,
             GIT_BRANCH_REMOTE_RPC_TIMEOUT_MS
         ) as RpcGitBranchesResponse

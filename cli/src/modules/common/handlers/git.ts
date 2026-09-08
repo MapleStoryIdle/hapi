@@ -217,6 +217,12 @@ function getDefaultPushRemote(output: string | undefined): string | null {
     return remotes.length === 1 ? remotes[0] ?? null : null
 }
 
+function getRemoteNameFromUpstream(upstream: string | null | undefined): string | null {
+    if (!upstream) return null
+    const separator = upstream.indexOf('/')
+    return separator > 0 ? upstream.slice(0, separator) : null
+}
+
 function isNotGitRepository(result: GitCommandResponse): boolean {
     return /not a git repository/i.test(`${result.error ?? ''}\n${result.stderr ?? ''}`)
 }
@@ -232,7 +238,7 @@ export async function getGitBranchesForCwd(cwd: string): Promise<GitBranchesResp
         return gitBranchFailure(repository, isNotGitRepository(repository) ? 'not_git_repository' : undefined)
     }
 
-    const [current, status, numstat, local, remote, remoteNames] = await Promise.all([
+    const [current, status, numstat, local, remote, remoteNames, upstream] = await Promise.all([
         runGitCommand(['branch', '--show-current'], cwd),
         runGitCommand(['status', '--porcelain=v1', '--untracked-files=all'], cwd),
         // Comparing with HEAD covers staged and unstaged tracked changes in
@@ -240,7 +246,8 @@ export async function getGitBranchesForCwd(cwd: string): Promise<GitBranchesResp
         runGitCommand(['diff', '--numstat', 'HEAD'], cwd),
         runGitCommand(['for-each-ref', '--format=%(refname:short)', '--sort=refname', 'refs/heads'], cwd),
         runGitCommand(['for-each-ref', '--format=%(refname:short)', '--sort=refname', 'refs/remotes'], cwd),
-        runGitCommand(['remote'], cwd)
+        runGitCommand(['remote'], cwd),
+        runGitCommand(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], cwd)
     ])
 
     if (!status.success) return gitBranchFailure(status)
@@ -253,13 +260,20 @@ export async function getGitBranchesForCwd(cwd: string): Promise<GitBranchesResp
     const currentBranch = current.success && current.stdout?.trim()
         ? current.stdout.trim()
         : null
+    const upstreamBranch = upstream.success && upstream.stdout?.trim()
+        ? upstream.stdout.trim()
+        : null
+    const changedFileCount = countChangedFiles(status.stdout)
+    const isDirty = changedFileCount > 0
 
     return {
         success: true,
         currentBranch,
         pushRemote: remoteNames.success ? getDefaultPushRemote(remoteNames.stdout) : null,
-        isDirty: countChangedFiles(status.stdout) > 0,
-        changedFileCount: countChangedFiles(status.stdout),
+        upstream: upstreamBranch,
+        canUpdate: Boolean(currentBranch && upstreamBranch && !isDirty),
+        isDirty,
+        changedFileCount,
         additions,
         deletions,
         localBranches: splitGitLines(local.stdout).map((name) => ({ ref: name, name })),
@@ -453,6 +467,66 @@ export async function pushGitBranchForCwd(
 
     const pushed = await runGitCommand(pushArgs, cwd, GIT_BRANCH_REMOTE_TIMEOUT_MS)
     if (!pushed.success) return branchOperationFailure(pushed)
+    return await getGitBranchesForCwd(cwd)
+}
+
+/**
+ * Fetch only the remote that backs the checked-out branch when known. This
+ * updates remote refs but intentionally leaves the user's worktree untouched.
+ */
+export async function fetchGitBranchesForCwd(cwd: string): Promise<GitBranchesResponse> {
+    const branches = await getGitBranchesForCwd(cwd)
+    if (!branches.success) return branches
+
+    const remote = getRemoteNameFromUpstream(branches.upstream) ?? branches.pushRemote
+    if (!remote) {
+        return {
+            ...branches,
+            success: false,
+            code: 'fetch_remote_unavailable',
+            error: 'No Git remote is available to fetch'
+        }
+    }
+
+    const fetched = await runGitCommand(['fetch', '--prune', remote], cwd, GIT_BRANCH_REMOTE_TIMEOUT_MS)
+    if (!fetched.success) return branchOperationFailure(fetched)
+    return await getGitBranchesForCwd(cwd)
+}
+
+/**
+ * Update only via a fast-forward pull. Dirty worktrees and branches without
+ * an upstream are rejected before Git can modify checked-out files.
+ */
+export async function updateGitBranchForCwd(cwd: string): Promise<GitBranchesResponse> {
+    const branches = await getGitBranchesForCwd(cwd)
+    if (!branches.success) return branches
+    if (!branches.currentBranch) {
+        return {
+            ...branches,
+            success: false,
+            code: 'detached_head',
+            error: 'Cannot update while HEAD is detached'
+        }
+    }
+    if (branches.isDirty) {
+        return {
+            ...branches,
+            success: false,
+            code: 'dirty_update_blocked',
+            error: 'Commit or stash local changes before updating this branch'
+        }
+    }
+    if (!branches.upstream) {
+        return {
+            ...branches,
+            success: false,
+            code: 'upstream_unavailable',
+            error: 'The current branch does not have an upstream'
+        }
+    }
+
+    const updated = await runGitCommand(['pull', '--ff-only'], cwd, GIT_BRANCH_REMOTE_TIMEOUT_MS)
+    if (!updated.success) return branchOperationFailure(updated)
     return await getGitBranchesForCwd(cwd)
 }
 

@@ -321,6 +321,8 @@ describe('machines routes', () => {
             changedFileCount: 0,
             additions: 0,
             deletions: 0,
+            upstream: 'origin/feature/mobile',
+            canUpdate: true,
             localBranches: [{ ref: 'feature/mobile', name: 'feature/mobile' }],
             remoteBranches: [{ ref: 'origin/main', name: 'main' }]
         }
@@ -345,6 +347,14 @@ describe('machines routes', () => {
             },
             pushMachineGitBranch: async (machineId: string, payload: unknown) => {
                 calls.push({ method: 'push', machineId, payload })
+                return responsePayload
+            },
+            fetchMachineGitBranches: async (machineId: string, payload: unknown) => {
+                calls.push({ method: 'fetch', machineId, payload })
+                return responsePayload
+            },
+            updateMachineGitBranch: async (machineId: string, payload: unknown) => {
+                calls.push({ method: 'update', machineId, payload })
                 return responsePayload
             }
         } as Partial<SyncEngine>
@@ -381,12 +391,24 @@ describe('machines routes', () => {
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ cwd: '/home/user/proj' })
         })
+        const fetch = await app.request('/api/machines/machine-1/git-branches/fetch', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ cwd: '/home/user/proj' })
+        })
+        const update = await app.request('/api/machines/machine-1/git-branches/update', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ cwd: '/home/user/proj' })
+        })
 
         expect(list.status).toBe(200)
         expect(switchResponse.status).toBe(200)
         expect(create.status).toBe(200)
         expect(commit.status).toBe(200)
         expect(push.status).toBe(200)
+        expect(fetch.status).toBe(200)
+        expect(update.status).toBe(200)
         expect(calls).toEqual([
             { method: 'list', machineId: 'machine-1', payload: '/home/user/proj' },
             {
@@ -400,7 +422,9 @@ describe('machines routes', () => {
             },
             { method: 'create', machineId: 'machine-1', payload: { cwd: '/home/user/proj', name: 'feature/new' } },
             { method: 'commit', machineId: 'machine-1', payload: { cwd: '/home/user/proj', message: 'Add branch controls' } },
-            { method: 'push', machineId: 'machine-1', payload: { cwd: '/home/user/proj' } }
+            { method: 'push', machineId: 'machine-1', payload: { cwd: '/home/user/proj' } },
+            { method: 'fetch', machineId: 'machine-1', payload: { cwd: '/home/user/proj' } },
+            { method: 'update', machineId: 'machine-1', payload: { cwd: '/home/user/proj' } }
         ])
         expect(await list.json()).toEqual(responsePayload)
     })

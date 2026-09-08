@@ -59,12 +59,15 @@ import type {
     MachinePathsExistsResponse,
     MachineGitBranchCreateRequest,
     MachineGitBranchCommitRequest,
+    MachineGitBranchFetchRequest,
     MachineGitBranchPushRequest,
     MachineGitBranchSwitchRequest,
+    MachineGitBranchUpdateRequest,
     OpencodeModelsResponse,
     OpencodeReasoningEffortResponse,
     CreateSideSessionResponse,
     ReopenSessionResponse,
+    RenameNativeCodexSessionResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type {
@@ -355,6 +358,14 @@ export class ApiClient {
         const queryParams = new URLSearchParams({ machineId })
         return await this.request<CodexLocalSessionStatusResponse>(
             `/api/codex/sessions/${encodeURIComponent(sessionId)}/status?${queryParams.toString()}`
+        )
+    }
+
+    async renameCodexSession(sessionId: string, machineId: string, name: string): Promise<RenameNativeCodexSessionResponse> {
+        return await this.request<RenameNativeCodexSessionResponse>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}`,
+            { method: 'PATCH', body: JSON.stringify({ machineId, name }) },
+            0, undefined, 65_000
         )
     }
 
@@ -1111,6 +1122,32 @@ export class ApiClient {
     ): Promise<GitBranchesResponse> {
         return await this.request<GitBranchesResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/git-branches/push`,
+            { method: 'POST', body: JSON.stringify(request) },
+            0,
+            undefined,
+            75_000
+        )
+    }
+
+    async fetchMachineGitBranches(
+        machineId: string,
+        request: MachineGitBranchFetchRequest
+    ): Promise<GitBranchesResponse> {
+        return await this.request<GitBranchesResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/git-branches/fetch`,
+            { method: 'POST', body: JSON.stringify(request) },
+            0,
+            undefined,
+            75_000
+        )
+    }
+
+    async updateMachineGitBranch(
+        machineId: string,
+        request: MachineGitBranchUpdateRequest
+    ): Promise<GitBranchesResponse> {
+        return await this.request<GitBranchesResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/git-branches/update`,
             { method: 'POST', body: JSON.stringify(request) },
             0,
             undefined,

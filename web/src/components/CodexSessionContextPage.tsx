@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AssistantRuntimeProvider } from '@assistant-ui/react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, type ApiClient } from '@/api/client'
 import type {
     CodexLocalSessionContextMessage,
@@ -27,6 +27,7 @@ import {
 } from '@/components/SessionHeader'
 import { AgentFlavorStatusIcon } from '@/components/AgentFlavorIcon'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { GitBranchesDrawer } from '@/components/GitBranchesDrawer'
 import { SESSION_DETAIL_HEADER_HEIGHT_PX } from '@/components/SessionDetailHeader'
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
@@ -1073,6 +1074,21 @@ export function CodexSessionContextPage(props: {
     )
     const nativeApplySequenceRef = useRef(0)
     const [isForking, setIsForking] = useState(false)
+    const [renameOpen, setRenameOpen] = useState(false)
+    const renameMutation = useMutation({
+        mutationFn: async (request: { sessionId: string; machineId: string; name: string }) => {
+            const result = await props.api.renameCodexSession(request.sessionId, request.machineId, request.name)
+            if (!result.success) throw new Error(result.error)
+            return result
+        },
+        onSuccess: async (result, request) => {
+            const key = queryKeys.codexSessionSnapshot(request.machineId, request.sessionId)
+            await queryClient.cancelQueries({ queryKey: key })
+            queryClient.setQueryData<CodexLocalSessionSnapshotResponse>(key, (current) => current
+                ? { ...current, session: { ...current.session, title: result.name } }
+                : current)
+        }
+    })
     const [forkError, setForkError] = useState<string | null>(null)
     const contextQuery = useQuery({
         queryKey: nativeSnapshotQueryKey,
@@ -1277,6 +1293,7 @@ export function CodexSessionContextPage(props: {
         discardedNativeRecoveryIdsRef.current.clear()
         setOutlineOpen(false)
         setMenuOpen(false)
+        setRenameOpen(false)
         connectionRecoveryTokenRef.current += 1
     }, [nativeDirectMessageScope, nativeDirectMessageScopeKey, props.machineId, props.sessionId])
 
@@ -1686,6 +1703,9 @@ export function CodexSessionContextPage(props: {
                         applied = true
                         return {
                             ...current,
+                            session: event.summary?.id === current.session.id
+                                ? { ...current.session, title: event.summary.title }
+                                : current.session,
                             status: nextStatus,
                             version: snapshot.version,
                             revision: snapshot.revision,
@@ -1701,6 +1721,9 @@ export function CodexSessionContextPage(props: {
                 applied = true
                 return {
                     ...current,
+                    session: event.summary?.id === current.session.id
+                        ? { ...current.session, title: event.summary.title }
+                        : current.session,
                     status: nextStatus,
                     timing: snapshot.timing
                 }
@@ -2433,6 +2456,7 @@ export function CodexSessionContextPage(props: {
                     onRefresh={() => void recoverNativeConnection()}
                     refreshLabel={t('recentCodex.refresh')}
                     refreshPending={isRecoveringConnection}
+                    onRename={props.machineId && context ? () => setRenameOpen(true) : undefined}
                     onGitBranches={isGitRepository ? () => setGitBranchesOpen(true) : undefined}
                     onFork={() => void fork()}
                     forkLabel={t('recentCodex.fork')}
@@ -2443,6 +2467,16 @@ export function CodexSessionContextPage(props: {
                     outlineActive={outlineOpen}
                     anchorPoint={menuAnchorPoint}
                     menuId={menuId}
+                />
+                <RenameSessionDialog
+                    isOpen={renameOpen}
+                    onClose={() => setRenameOpen(false)}
+                    currentName={title}
+                    onRename={async (name) => {
+                        if (!props.machineId) throw new Error(t('recentCodex.runnerRequired'))
+                        await renameMutation.mutateAsync({ sessionId: props.sessionId, machineId: props.machineId, name })
+                    }}
+                    isPending={renameMutation.isPending}
                 />
                 <GitBranchesDrawer
                     api={props.api}

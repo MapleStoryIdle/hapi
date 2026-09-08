@@ -752,6 +752,87 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
         }
     })
 
+    it('renames a running native thread without resuming it and refreshes both cached titles and list events', async () => {
+        const machine = makeMachine('machine-codex-rename')
+        const sessionId = '52345678-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(join(transcriptDir, `rollout-${sessionId}.jsonl`), [
+            JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: codexHome } }),
+            JSON.stringify({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'task_started' } })
+        ].join('\n'))
+        let title = 'Original name'
+        const setThreadName = vi.fn(async (params: { threadId: string; name: string }) => { title = params.name })
+        const disconnect = vi.fn(async () => {})
+        const client = new ApiMachineClient('cli-token', machine, undefined, undefined, undefined, () => ({
+            connect: async () => {}, initialize: async () => ({}), setThreadName, disconnect
+        }))
+        const resolveTitles = vi.fn(() => new Map([[sessionId, title]]))
+        const emit = vi.fn()
+        const internals = client as unknown as {
+            nativeCodexSessionTitleCache: { resolve: typeof resolveTitles }
+            socket: { emit: typeof emit; close: () => void }
+        }
+        internals.nativeCodexSessionTitleCache.resolve = resolveTitles
+        internals.socket = { emit, close: () => {} }
+        try {
+            await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', { sessionId })
+            expect(await callMachineRpc(client, machine.id, 'renameCodexLocalSession', { sessionId, name: '  新名称  ' }))
+                .toEqual({ success: true, name: '新名称' })
+            expect(setThreadName).toHaveBeenCalledExactlyOnceWith({ threadId: sessionId, name: '新名称' })
+            expect(disconnect).toHaveBeenCalledTimes(1)
+            expect(resolveTitles).toHaveBeenCalledWith([sessionId], { forceRefresh: true })
+            expect(emit).toHaveBeenCalledWith('codex-session-updated', expect.objectContaining({
+                codexSessionId: sessionId, summary: expect.objectContaining({ title: '新名称' })
+            }))
+            expect(await callMachineRpc(client, machine.id, 'listCodexLocalSessions', { limit: 5 }))
+                .toMatchObject({ success: true, sessions: [expect.objectContaining({ id: sessionId, title: '新名称' })] })
+            expect(await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', { sessionId }))
+                .toMatchObject({ success: true, snapshot: { data: { session: { title: '新名称' } }, status: { status: 'processing' } } })
+        } finally { client.shutdown() }
+    })
+
+    it('rejects invalid rename input and missing native threads before starting Codex', async () => {
+        const factory = vi.fn()
+        const machine = makeMachine('machine-codex-rename-invalid')
+        const client = new ApiMachineClient('cli-token', machine, undefined, undefined, undefined, factory)
+        try {
+            for (const name of ['', '  ', 'x'.repeat(256), 123, null]) {
+                expect(await callMachineRpc(client, machine.id, 'renameCodexLocalSession', { sessionId: 'missing', name }))
+                    .toMatchObject({ success: false, code: 'invalid_request' })
+            }
+            expect(await callMachineRpc(client, machine.id, 'renameCodexLocalSession', { sessionId: 'missing', name: 'Name' }))
+                .toMatchObject({ success: false, code: 'session_not_found' })
+            expect(factory).not.toHaveBeenCalled()
+        } finally { client.shutdown() }
+    })
+
+    it.each([
+        ['Method not found: thread/name/set', 'rename_unsupported'],
+        ['Database is locked', 'rename_failed']
+    ])('reports rename errors and closes its own connection: %s', async (message, code) => {
+        const machine = makeMachine('machine-codex-rename-error')
+        const sessionId = '62345678-1234-4234-8234-123456789012'
+        const transcriptDir = join(codexHome, 'sessions', '2026', '08', '28')
+        mkdirSync(transcriptDir, { recursive: true })
+        writeFileSync(join(transcriptDir, `rollout-${sessionId}.jsonl`), JSON.stringify({
+            type: 'session_meta', payload: { id: sessionId, cwd: codexHome }
+        }))
+        const disconnect = vi.fn(async () => {})
+        const client = new ApiMachineClient('cli-token', machine, undefined, undefined, undefined, () => ({
+            connect: async () => {}, initialize: async () => ({}),
+            setThreadName: async () => { throw new Error(message) }, disconnect
+        }))
+        const emit = vi.fn()
+        ;(client as unknown as { socket: { emit: typeof emit; close: () => void } }).socket = { emit, close: () => {} }
+        try {
+            expect(await callMachineRpc(client, machine.id, 'renameCodexLocalSession', { sessionId, name: 'New name' }))
+                .toMatchObject({ success: false, code })
+            expect(disconnect).toHaveBeenCalledTimes(1)
+            expect(emit).not.toHaveBeenCalledWith('codex-session-updated', expect.anything())
+        } finally { client.shutdown() }
+    })
+
     it('archives an idle native thread through Codex, evicts caches, and emits an invalidation', async () => {
         const machine = makeMachine('machine-codex-archive')
         const sessionId = '42345678-1234-4234-8234-123456789012'

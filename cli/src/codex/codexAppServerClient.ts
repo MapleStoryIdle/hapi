@@ -226,6 +226,10 @@ export class CodexAppServerClient extends JsonLineParser {
         return response as ThreadArchiveResponse;
     }
 
+    async setThreadName(params: { threadId: string; name: string }): Promise<void> {
+        await this.sendRequest('thread/name/set', params, { timeoutMs: 15_000 });
+    }
+
     async startTurn(params: TurnStartParams, options?: { signal?: AbortSignal }): Promise<TurnStartResponse> {
         const response = await this.sendRequest('turn/start', params, {
             signal: options?.signal,

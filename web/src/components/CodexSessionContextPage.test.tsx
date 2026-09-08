@@ -115,6 +115,7 @@ function createApi() {
             discarded: true,
             queuedMessages: []
         })),
+        renameCodexSession: vi.fn(async (_sessionId: string, _machineId: string, name: string) => ({ success: true as const, name })),
         forkCodexSession: vi.fn(async () => ({
             type: 'success' as const,
             sessionId: 'new-hapi-session'
@@ -2320,7 +2321,7 @@ describe('CodexSessionContextPage', () => {
         expect(screen.getByRole('menuitem', { name: 'Refresh' })).toBeInTheDocument()
         expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeInTheDocument()
         expect(screen.getByRole('menuitem', { name: 'Conversation outline' })).toBeInTheDocument()
-        expect(screen.queryByRole('menuitem', { name: /Rename/ })).toBeNull()
+        expect(screen.getByRole('menuitem', { name: 'Rename' })).toBeInTheDocument()
         expect(screen.queryByRole('menuitem', { name: /Archive/ })).toBeNull()
         expect(screen.queryByRole('menuitem', { name: /Delete/ })).toBeNull()
 
@@ -2330,6 +2331,54 @@ describe('CodexSessionContextPage', () => {
             expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
                 .toBeGreaterThan(snapshotCallsBeforeRefresh)
         })
+    })
+
+    it('renames the native thread with the shared dialog and updates its title after confirmation', async () => {
+        const { api } = renderPage()
+        await screen.findByText('Original response')
+        openNativeSessionMenu()
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+        const dialog = screen.getByRole('dialog', { name: 'Rename Session' })
+        expect(within(dialog).getByRole('textbox')).toHaveValue('Recent Codex task')
+        fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: '  我的原生任务  ' } })
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename Session' })).toBeNull())
+        expect(api.renameCodexSession).toHaveBeenCalledWith('codex-thread-1', 'machine-1', '我的原生任务')
+        expect(screen.getByRole('button', { name: '我的原生任务' })).toBeInTheDocument()
+        expect(api.sendCodexSessionMessage).not.toHaveBeenCalled()
+    })
+
+    it('keeps the old title and the editable dialog when native rename fails', async () => {
+        const api = createApi()
+        vi.mocked(api.renameCodexSession).mockRejectedValue(new Error('Runner offline'))
+        renderPage({ api })
+        await screen.findByText('Original response')
+        openNativeSessionMenu()
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+        const dialog = screen.getByRole('dialog', { name: 'Rename Session' })
+        fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'New name' } })
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+        expect(await within(dialog).findByText('Failed to rename. Please try again.')).toBeInTheDocument()
+        expect(within(dialog).getByRole('textbox')).toHaveValue('New name')
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+        expect(screen.getByRole('button', { name: 'Recent Codex task' })).toBeInTheDocument()
+    })
+
+    it('updates a renamed title from another browser even when the transcript revision is unchanged', async () => {
+        const { api } = renderPage({ realtimeAvailable: true, realtimeConnected: true })
+        await screen.findByText('Original response')
+        await waitFor(() => expect(vi.mocked(api.getCodexSessionSnapshot).mock.calls.length).toBeGreaterThanOrEqual(2))
+        const calls = vi.mocked(api.getCodexSessionSnapshot).mock.calls.length
+        await act(async () => publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated', machineId: 'machine-1', codexSessionId: 'codex-thread-1',
+            summary: { id: 'codex-thread-1', title: '来自另一个页面', modifiedAt: 1 },
+            snapshot: {
+                version: { runnerEpoch: 'runner-a', revision: 1 }, revision: 1,
+                status: { success: true, status: 'idle' }, timing: { cache: 'hit', durationMs: 0 }
+            }
+        }))
+        expect(screen.getByRole('button', { name: '来自另一个页面' })).toBeInTheDocument()
+        expect(vi.mocked(api.getCodexSessionSnapshot)).toHaveBeenCalledTimes(calls)
     })
 
     it('opens and closes the native header menu after cancelled-touch click fallbacks', async () => {

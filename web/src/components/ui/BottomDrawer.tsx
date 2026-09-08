@@ -16,7 +16,7 @@ export function BottomDrawer(props: {
     open: boolean
     onOpenChange: (open: boolean) => void
     title: string
-    subtitle?: string
+    subtitle?: ReactNode
     trigger?: ReactElement
     /** Detail previews may be denser; approval sheets retain their spacing. */
     density?: 'compact'

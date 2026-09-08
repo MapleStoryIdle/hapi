@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { execFile } from 'node:child_process'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import {
     commitGitChangesForCwd,
     createGitBranchForCwd,
+    fetchGitBranchesForCwd,
     getGitBranchesForCwd,
     getGitBranchStatusForCwd,
     hasGitWorktreeChanges,
     isLinkedGitWorktree,
     pushGitBranchForCwd,
-    switchGitBranchForCwd
+    switchGitBranchForCwd,
+    updateGitBranchForCwd
 } from './git'
 
 const execFileAsync = promisify(execFile)
@@ -195,6 +197,62 @@ describe('machine Git branch actions', () => {
             })
             const { stdout } = await execFileAsync('git', ['--git-dir', remote, 'log', '-1', '--format=%s'])
             expect(stdout.trim()).toBe('Save local work')
+        } finally {
+            await rm(sandbox, { recursive: true, force: true })
+        }
+    })
+
+    it('fetches remote refs and fast-forwards only a clean tracked branch', async () => {
+        const sandbox = await mkdtemp(join(tmpdir(), 'hapi-git-fetch-update-'))
+        const checkout = join(sandbox, 'checkout')
+        const upstreamCheckout = join(sandbox, 'upstream-checkout')
+        const remote = join(sandbox, 'remote.git')
+
+        try {
+            await mkdir(checkout)
+            await runGit(checkout, 'init')
+            await runGit(checkout, 'config', 'user.name', 'SHAPI Test')
+            await runGit(checkout, 'config', 'user.email', 'test@example.com')
+            await writeFile(join(checkout, 'README.md'), '# initial\n')
+            await runGit(checkout, 'add', 'README.md')
+            await runGit(checkout, 'commit', '-m', 'initial')
+            await runGit(checkout, 'branch', '-M', 'main')
+            await runGit(checkout, 'init', '--bare', remote)
+            await runGit(checkout, 'remote', 'add', 'origin', remote)
+            await runGit(checkout, 'push', '-u', 'origin', 'main')
+
+            await expect(getGitBranchesForCwd(checkout)).resolves.toMatchObject({
+                success: true,
+                currentBranch: 'main',
+                upstream: 'origin/main',
+                canUpdate: true
+            })
+
+            await execFileAsync('git', ['clone', '--branch', 'main', remote, upstreamCheckout])
+            await runGit(upstreamCheckout, 'config', 'user.name', 'SHAPI Remote Test')
+            await runGit(upstreamCheckout, 'config', 'user.email', 'remote@example.com')
+            await writeFile(join(upstreamCheckout, 'README.md'), '# updated remotely\n')
+            await runGit(upstreamCheckout, 'add', 'README.md')
+            await runGit(upstreamCheckout, 'commit', '-m', 'remote update')
+            await runGit(upstreamCheckout, 'push')
+
+            await expect(fetchGitBranchesForCwd(checkout)).resolves.toMatchObject({
+                success: true,
+                currentBranch: 'main',
+                upstream: 'origin/main'
+            })
+            await expect(updateGitBranchForCwd(checkout)).resolves.toMatchObject({
+                success: true,
+                currentBranch: 'main',
+                isDirty: false
+            })
+            await expect(readFile(join(checkout, 'README.md'), 'utf8')).resolves.toBe('# updated remotely\n')
+
+            await writeFile(join(checkout, 'notes.md'), 'local work\n')
+            await expect(updateGitBranchForCwd(checkout)).resolves.toMatchObject({
+                success: false,
+                code: 'dirty_update_blocked'
+            })
         } finally {
             await rm(sandbox, { recursive: true, force: true })
         }

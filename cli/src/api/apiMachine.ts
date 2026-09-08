@@ -29,8 +29,10 @@ import {
     MachineGitBranchCreateRequestSchema,
     MachineGitBranchCommitRequestSchema,
     MachineGitBranchesRequestSchema,
+    MachineGitBranchFetchRequestSchema,
     MachineGitBranchPushRequestSchema,
-    MachineGitBranchSwitchRequestSchema
+    MachineGitBranchSwitchRequestSchema,
+    MachineGitBranchUpdateRequestSchema
 } from '@hapi/protocol/apiTypes'
 import type {
     FileReadResponse,
@@ -103,14 +105,16 @@ import { LOCAL_SERVICE_RPC, type LocalServiceTunnelRequest, type LocalServiceTun
 import { listSlashCommands } from '../modules/common/slashCommands'
 import { listSkills } from '../modules/common/skills'
 import { listCodexModels } from '../modules/common/codexModels'
-import type { CodexModelSummary } from '@hapi/protocol/apiTypes'
+import { RenameNativeCodexSessionRequestSchema, type RenameNativeCodexSessionResponse, type CodexModelSummary } from '@hapi/protocol/apiTypes'
 import {
     commitGitChangesForCwd,
     createGitBranchForCwd,
+    fetchGitBranchesForCwd,
     getGitBranchesForCwd,
     getGitBranchStatusForCwd,
     pushGitBranchForCwd,
-    switchGitBranchForCwd
+    switchGitBranchForCwd,
+    updateGitBranchForCwd
 } from '../modules/common/handlers/git'
 import {
     listOpencodeModelsForCwd,
@@ -431,7 +435,8 @@ export class ApiMachineClient {
         private readonly machine: Machine,
         private readonly workspaceRoots?: string[],
         private readonly advertisedMetadata?: MachineMetadata,
-        private readonly createNativeCodexArchiveClient: () => NativeCodexArchiveClient = () => new CodexAppServerClient()
+        private readonly createNativeCodexArchiveClient: () => NativeCodexArchiveClient = () => new CodexAppServerClient(),
+        private readonly createNativeCodexRenameClient: () => Pick<CodexAppServerClient, 'connect' | 'initialize' | 'setThreadName' | 'disconnect'> = () => new CodexAppServerClient()
     ) {
         // Realpath roots once so all subsequent comparisons are against
         // canonical, symlink-resolved locations. Falls back to lexical
@@ -795,6 +800,48 @@ export class ApiMachineClient {
             }
         )
 
+        this.rpcHandlerManager.registerHandler<{ sessionId?: unknown; name?: unknown }, RenameNativeCodexSessionResponse>(
+            RPC_METHODS.RenameCodexLocalSession,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                const request = RenameNativeCodexSessionRequestSchema.safeParse(params)
+                if (!sessionId || !request.success) {
+                    return { success: false, code: 'invalid_request', error: 'A session ID and a name of 1–255 characters are required' }
+                }
+                const summary = this.getNativeCodexSessionSummary(sessionId)
+                if (!summary) {
+                    return { success: false, code: 'session_not_found', error: 'Codex session not found' }
+                }
+                if (isHapiInitiatedCodexSession(summary)) {
+                    return { success: false, code: 'not_native_session', error: 'Rename this session from its SHAPI session page' }
+                }
+                const appServer = this.createNativeCodexRenameClient()
+                try {
+                    await appServer.connect()
+                    await appServer.initialize({
+                        clientInfo: { name: 'hapi-native-session-rename', title: 'SHAPI Native Session Rename', version: '1.0.0' },
+                        capabilities: { experimentalApi: true }
+                    })
+                    // Metadata-only API: do not resume a thread or acquire its writer.
+                    await appServer.setThreadName({ threadId: sessionId, name: request.data.name })
+                    this.nativeCodexSessionTitleCache.resolve([sessionId], { forceRefresh: true })
+                    this.nativeCodexSessionListCache.invalidate()
+                    this.reportNativeCodexSessionUpdated(sessionId, summary.modifiedAt, undefined, { ...summary, title: request.data.name })
+                    return { success: true, name: request.data.name }
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error)
+                    const unsupported = /method not found|unknown method|-32601/i.test(message)
+                    return {
+                        success: false,
+                        code: unsupported ? 'rename_unsupported' : 'rename_failed',
+                        error: unsupported ? 'This Codex version does not support renaming native sessions' : message
+                    }
+                } finally {
+                    await appServer.disconnect().catch(() => {})
+                }
+            }
+        )
+
         this.rpcHandlerManager.registerHandler<PathExistsRequest, PathExistsResponse>(RPC_METHODS.PathExists, async (params) => {
             const rawPaths = Array.isArray(params?.paths) ? params.paths : []
             const uniquePaths = Array.from(new Set(rawPaths.filter((path): path is string => typeof path === 'string')))
@@ -895,6 +942,32 @@ export class ApiMachineClient {
 
                 const cwd = await this.resolveForWorkspaceCheck(parsed.data.cwd)
                 return await pushGitBranchForCwd(cwd)
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<unknown, GitBranchesResponse>(
+            RPC_METHODS.FetchMachineGitBranches,
+            async (params) => {
+                const parsed = MachineGitBranchFetchRequestSchema.safeParse(params)
+                if (!parsed.success) {
+                    return { success: false, error: 'Invalid Git fetch request' }
+                }
+
+                const cwd = await this.resolveForWorkspaceCheck(parsed.data.cwd)
+                return await fetchGitBranchesForCwd(cwd)
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<unknown, GitBranchesResponse>(
+            RPC_METHODS.UpdateMachineGitBranch,
+            async (params) => {
+                const parsed = MachineGitBranchUpdateRequestSchema.safeParse(params)
+                if (!parsed.success) {
+                    return { success: false, error: 'Invalid Git update request' }
+                }
+
+                const cwd = await this.resolveForWorkspaceCheck(parsed.data.cwd)
+                return await updateGitBranchForCwd(cwd)
             }
         )
 
