@@ -912,7 +912,8 @@ export class SyncEngine {
         effort?: string,
         permissionMode?: PermissionMode,
         serviceTier?: string,
-        forkSessionId?: string
+        forkSessionId?: string,
+        approvedNewDirectoryCreation?: boolean
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         return await this.rpcGateway.spawnSession(
             machineId,
@@ -927,7 +928,8 @@ export class SyncEngine {
             effort,
             permissionMode,
             serviceTier,
-            forkSessionId
+            forkSessionId,
+            approvedNewDirectoryCreation
         )
     }
 
@@ -1833,6 +1835,10 @@ export class SyncEngine {
 
     async listMachineDirectory(machineId: string, path: string): Promise<RpcListDirectoryResponse> {
         return await this.rpcGateway.listMachineDirectory(machineId, path)
+    }
+
+    async browseSessionFiles(machineId: string, cwd: string, request: import('@hapi/protocol/apiTypes').SessionFileBrowserRequest): Promise<import('@hapi/protocol/apiTypes').SessionFileBrowserResponse> {
+        return this.rpcGateway.browseSessionFiles(machineId, cwd, request)
     }
 
     async getMachineGitBranch(machineId: string, cwd: string): Promise<RpcGitBranchResponse> {

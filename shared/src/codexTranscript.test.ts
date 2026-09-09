@@ -22,6 +22,38 @@ import { formatNativeCodexAttachmentPrompt } from './nativeCodexAttachments'
 
 const originalCodexHome = process.env.CODEX_HOME
 
+describe('native completion evidence', () => {
+    const lifecycle = (type: string, turnId: string) => JSON.stringify({ type: 'event_msg', payload: { type, turn_id: turnId } })
+    const assistant = (text: string) => JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] } })
+
+    it('ignores an older turn completion and preserves the current abort across incremental imports', () => {
+        const state = createCodexTranscriptImportAccumulator()
+        appendCodexTranscriptImportLines(state, [lifecycle('task_started', 'a'), assistant('A'), lifecycle('task_started', 'b'), assistant('B partial')])
+        appendCodexTranscriptImportLines(state, [lifecycle('task_complete', 'a')])
+        expect(state.messages.at(-1)?.content.data?.turnOutcome).toBeUndefined()
+        appendCodexTranscriptImportLines(state, [lifecycle('turn_aborted', 'b'), lifecycle('task_complete', 'b')])
+        expect(state.messages.at(-1)?.content.data?.turnOutcome).toBe('aborted')
+    })
+
+    it('never attaches a new empty turn completion to previous output', () => {
+        const state = createCodexTranscriptImportAccumulator()
+        appendCodexTranscriptImportLines(state, [lifecycle('task_started', 'a'), assistant('A'), lifecycle('task_started', 'b'), lifecycle('task_complete', 'b')])
+        expect(state.messages.at(-1)?.content.data?.turnOutcome).toBeUndefined()
+    })
+
+    it('records a matching completion without adding a visible message', () => {
+        const state = createCodexTranscriptImportAccumulator()
+        appendCodexTranscriptImportLines(state, [lifecycle('task_started', 'a'), assistant('Plan'), lifecycle('task_complete', 'a')])
+        expect(state.messages).toHaveLength(1)
+        expect(state.messages[0]?.content.data).toMatchObject({ final: true, turnOutcome: 'completed' })
+    })
+    it('does not treat an unscoped completion as proof for a scoped turn', () => {
+        const state = createCodexTranscriptImportAccumulator()
+        appendCodexTranscriptImportLines(state, [lifecycle('task_started', 'a'), assistant('Partial'), JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })])
+        expect(state.messages[0]?.content.data?.turnOutcome).toBeUndefined()
+    })
+})
+
 afterEach(() => {
     if (originalCodexHome === undefined) {
         delete process.env.CODEX_HOME
@@ -981,7 +1013,7 @@ describe('native request_user_input lifecycle', () => {
 
         const accumulator = createCodexTranscriptImportAccumulator()
         appendCodexTranscriptImportLines(accumulator, [request, answer])
-        expect(accumulator.messages).toEqual([])
+        expect(accumulator.messages).toHaveLength(2)
     })
 
     it('clears a pending request when its turn terminates', () => {

@@ -124,6 +124,18 @@ API return an error and keep the existing name.
 
 Native Codex controls use the same composer as managed sessions. A runner-owned app-server turn can be stopped without killing Codex; an existing Desktop SSH control socket can interrupt only the exact currently running turn. Non-SSH external owners, exec-resume turns, and pending Desktop queue hand-offs do not expose a stop button. Interrupt acknowledgement is not completion: SHAPI waits for the matching terminal event before allowing its paused queue to resume.
 
+Native input questions are not automatically canceled by the direct-send bridge.
+Its pending question is returned in session status and answered through the
+authenticated control endpoint with exact turn/item IDs. Closing the Web drawer
+does not answer the question; refreshing can reopen it while its Runner connection
+remains alive. A stopped/disconnected bridge cannot accept old answers.
+Shared Desktop observers never reply to server requests without an explicit
+handler, so checking status does not reject another UI's question or approval.
+Desktop `request_user_input_async` forms can be recovered from loaded transcript
+history. Their `accepted` tool result is not a user answer: Web sends an explicit
+selection as an idempotent, structured user-message reply (queued when busy), not
+as a permission approval. This does not recreate or control Desktop's own dialog.
+
 Model, reasoning effort and supported Standard/Fast settings apply to new SHAPI messages. Already queued messages keep their saved settings. Preferences and queue pauses are stored in the runner's `native-codex-controls.json`; Codex global configuration is not changed. Codex may retain the model/effort in the thread's own configuration. Desktop's shared queue cannot accept per-message settings, so its model controls stay read-only; configured messages wait instead of silently losing their settings. Stopping pauses SHAPI's queue until the user explicitly resumes delivery.
 
 ### Runner

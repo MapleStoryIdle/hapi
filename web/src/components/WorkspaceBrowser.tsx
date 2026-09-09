@@ -4,6 +4,7 @@ import type { ApiClient } from '@/api/client'
 import type { Machine, MachineDirectoryEntry } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { useTranslation } from '@/lib/use-translation'
+import { ChevronRight, Folder, Search } from 'lucide-react'
 
 function FolderIcon(props: { className?: string }) {
     return (
@@ -147,8 +148,10 @@ export function WorkspaceBrowser(props: {
     machinesLoading: boolean
     onStartSession: (machineId: string, directory: string) => void
     initialMachineId?: string
+    actionLabel?: string
 }) {
     const { t } = useTranslation()
+    const [search, setSearch] = useState('')
     const { api, machines, machinesLoading, initialMachineId } = props
     const queryClient = useQueryClient()
 
@@ -265,7 +268,8 @@ export function WorkspaceBrowser(props: {
         return buildBreadcrumbs(currentPath, selectedRoot)
     }, [currentPath, selectedRoot])
 
-    const directories = useMemo(() => entries.filter(e => e.type === 'directory'), [entries])
+    const directories = useMemo(() => entries.filter(e => e.type === 'directory' && e.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())), [entries, search])
+    useEffect(() => { setSearch('') }, [currentPath, machineId])
     const atRoot = !!(currentPath && selectedRoot && normalizePathForComparison(currentPath) === normalizePathForComparison(selectedRoot))
 
     const machineSelector = (
@@ -275,7 +279,7 @@ export function WorkspaceBrowser(props: {
                 value={machineId ?? ''}
                 onChange={e => setMachineId(e.target.value || null)}
                 disabled={machinesLoading}
-                className="flex-1 bg-transparent text-sm text-[var(--app-fg)] outline-none"
+                className="min-h-11 min-w-0 flex-1 bg-transparent text-base text-[var(--app-fg)] outline-none"
             >
                 {machines.map(m => (
                     <option key={m.id} value={m.id}>
@@ -323,8 +327,8 @@ export function WorkspaceBrowser(props: {
     }
 
     return (
-        <div className="flex flex-col h-full">
-            <div className="px-3 py-2 border-b border-[var(--app-divider)]">
+        <div className="file-browser-surface flex min-h-0 flex-col h-full p-4 gap-3">
+            <div className="file-browser-group px-3 py-2">
                 {machineSelector}
 
                 {workspaceRoots.length > 1 && (
@@ -349,7 +353,7 @@ export function WorkspaceBrowser(props: {
                             type="button"
                             onClick={handleGoUp}
                             disabled={atRoot}
-                            className="shrink-0 p-0.5 rounded hover:bg-[var(--app-subtle-bg)] text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors disabled:opacity-30"
+                            className="shrink-0 size-11 flex items-center justify-center rounded text-[var(--app-link)] disabled:opacity-30"
                             title={t('browse.goUp')}
                         >
                             <ChevronLeftIcon className="h-4 w-4" />
@@ -360,7 +364,7 @@ export function WorkspaceBrowser(props: {
                                 <button
                                     type="button"
                                     onClick={() => void loadDirectory(crumb.path)}
-                                    className={`hover:underline ${i === breadcrumbs.length - 1 ? 'text-[var(--app-fg)] font-medium' : 'text-[var(--app-hint)]'}`}
+                                    className={`min-h-11 ${i === breadcrumbs.length - 1 ? 'text-[var(--app-fg)] font-medium' : 'text-[var(--app-link)]'}`}
                                 >
                                     {crumb.label}
                                 </button>
@@ -370,7 +374,7 @@ export function WorkspaceBrowser(props: {
                             type="button"
                             onClick={handleRefresh}
                             disabled={isLoading}
-                            className="ml-auto shrink-0 p-0.5 rounded hover:bg-[var(--app-subtle-bg)] text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors"
+                            className="ml-auto shrink-0 size-11 flex items-center justify-center rounded text-[var(--app-link)]"
                             title={t('browse.refresh')}
                         >
                             <RefreshIcon className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
@@ -379,33 +383,34 @@ export function WorkspaceBrowser(props: {
                 )}
             </div>
 
+            <label className="file-browser-search flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3">
+                <Search className="h-4 w-4 shrink-0 text-[var(--app-hint)]" aria-hidden="true" />
+                <input value={search} onChange={event => setSearch(event.target.value)} aria-label={t('fileBrowser.searchDirectory')} placeholder={t('fileBrowser.searchDirectory')} className="min-w-0 flex-1 bg-transparent text-base outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]" />
+            </label>
             {error && (
                 <div className="px-3 py-2 text-sm text-red-600">{error}</div>
             )}
 
-            <div className="flex-1 app-scroll-y">
+            <div className="min-h-0 flex-1 app-scroll-y">
                 {isLoading && entries.length === 0 ? (
                     <div className="flex items-center justify-center py-8 text-sm text-[var(--app-hint)]">{t('loading')}</div>
                 ) : directories.length === 0 ? (
                     <div className="flex items-center justify-center py-8 text-sm text-[var(--app-hint)]">{t('browse.empty')}</div>
                 ) : (
-                    <div className="flex flex-col px-2 py-1">
+                    <div className="file-browser-group">
                         {directories.map(entry => (
                             <button
                                 key={entry.name}
                                 type="button"
                                 onClick={() => handleEntryClick(entry)}
-                                className="flex items-center gap-2 px-2 py-2 rounded-lg text-left hover:bg-[var(--app-subtle-bg)] transition-colors w-full"
+                                className="file-browser-row"
                             >
-                                {entry.isGitRepo ? (
-                                    <GitIcon className="h-4 w-4 text-orange-500 shrink-0" />
-                                ) : (
-                                    <FolderIcon className="h-4 w-4 text-[var(--app-link)] shrink-0" />
-                                )}
-                                <span className="flex-1 text-sm text-[var(--app-fg)] truncate">{entry.name}</span>
+                                <Folder className="h-5 w-5 text-[var(--app-link)] shrink-0" aria-hidden="true" />
+                                <span className="min-w-0 flex-1 text-base text-[var(--app-fg)] truncate">{entry.name}</span>
                                 {entry.isGitRepo && (
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500 font-medium shrink-0">git</span>
                                 )}
+                                <ChevronRight className="h-4 w-4 shrink-0 text-[var(--app-hint)]" aria-hidden="true" />
                             </button>
                         ))}
                     </div>
@@ -413,7 +418,7 @@ export function WorkspaceBrowser(props: {
             </div>
 
             {currentPath && (
-                <div className="px-3 py-2 border-t border-[var(--app-divider)]">
+                <div className="shrink-0 py-2">
                     <div className="flex items-center gap-2">
                         <div className="flex-1 text-xs text-[var(--app-hint)] truncate" title={currentPath}>
                             {currentPath}
@@ -421,10 +426,10 @@ export function WorkspaceBrowser(props: {
                         <button
                             type="button"
                             onClick={handleStartSession}
-                            disabled={!machineId || !currentPath}
-                            className="px-4 py-1.5 text-sm rounded-lg bg-[var(--app-button)] text-[var(--app-button-text)] font-medium disabled:opacity-50 transition-colors hover:opacity-90"
+                            disabled={!machineId || !currentPath || isLoading || !!error}
+                            className="min-h-11 px-4 py-2 text-sm rounded-xl bg-[var(--app-button)] text-[var(--app-button-text)] font-medium disabled:opacity-50 transition-colors hover:opacity-90"
                         >
-                            {t('browse.startSession')}
+                            {props.actionLabel ?? t('browse.startSession')}
                         </button>
                     </div>
                 </div>

@@ -26,7 +26,6 @@ import {
     clearNewSessionFormDraft,
     loadNewSessionFormDraft,
     newSessionDraftMatchesMachine,
-    saveNewSessionFormDraft,
     shouldRestoreNewSessionFormDraft
 } from './newSessionFormDraft'
 import {
@@ -40,6 +39,7 @@ import {
 import { ActionButtons } from './ActionButtons'
 import { AgentSelector } from './AgentSelector'
 import { DirectorySection } from './DirectorySection'
+import { DirectoryPickerDrawer } from '@/components/DirectoryPickerDrawer'
 import { ModelSelector } from './ModelSelector'
 import { OpencodeModelSelector } from './OpencodeModelSelector'
 import { ClaudeEffortSelector } from './ClaudeEffortSelector'
@@ -63,7 +63,6 @@ export function NewSession(props: {
     isLoading?: boolean
     onSuccess: (sessionId: string) => void
     onCancel: () => void
-    onChooseFolder?: (args: { machineId: string | null; directory: string }) => void
     initialDirectory?: string
     initialMachineId?: string
 }) {
@@ -77,6 +76,7 @@ export function NewSession(props: {
 
     const [machineId, setMachineId] = useState<string | null>(props.initialMachineId ?? null)
     const [directory, setDirectory] = useState(props.initialDirectory ?? '')
+    const [directoryBrowserOpen, setDirectoryBrowserOpen] = useState(false)
     const [suppressSuggestions, setSuppressSuggestions] = useState(false)
     const [isDirectoryFocused, setIsDirectoryFocused] = useState(false)
     const [agent, setAgent] = useState<AgentType>(initialAgent)
@@ -477,34 +477,9 @@ export function NewSession(props: {
     }, [cursorPicker.catalog, cursorPicker.baseKey, cursorSelectedBase])
 
     const handleChooseFolderClick = useCallback(() => {
-        if (!props.onChooseFolder) {
-            return
-        }
-        saveNewSessionFormDraft({
-            agent,
-            model,
-            cursorSelectedBase,
-            machineId,
-            effort,
-            modelReasoningEffort,
-            yoloMode,
-            sessionType,
-            worktreeName
-        })
-        props.onChooseFolder({ machineId, directory: trimmedDirectory })
-    }, [
-        props.onChooseFolder,
-        agent,
-        model,
-        cursorSelectedBase,
-        machineId,
-        effort,
-        modelReasoningEffort,
-        yoloMode,
-        sessionType,
-        worktreeName,
-        trimmedDirectory
-    ])
+        setSuppressSuggestions(true)
+        setDirectoryBrowserOpen(true)
+    }, [])
 
     const handlePathClick = useCallback((path: string) => {
         setDirectory(path)
@@ -757,7 +732,20 @@ export function NewSession(props: {
                 onPathClick={handlePathClick}
                 onSessionTypeChange={setSessionType}
                 onWorktreeNameChange={setWorktreeName}
-                onChooseFolder={props.onChooseFolder ? handleChooseFolderClick : undefined}
+                onChooseFolder={handleChooseFolderClick}
+            />
+            <DirectoryPickerDrawer
+                open={directoryBrowserOpen}
+                onOpenChange={setDirectoryBrowserOpen}
+                api={props.api}
+                machines={props.machines}
+                machinesLoading={Boolean(props.isLoading)}
+                initialMachineId={machineId ?? undefined}
+                onSelect={(selectedMachineId, path) => {
+                    setMachineId(selectedMachineId)
+                    setDirectory(path)
+                    setSuppressSuggestions(true)
+                }}
             />
 
             {(error ?? spawnError) ? (

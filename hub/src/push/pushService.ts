@@ -1,6 +1,7 @@
 import * as webPush from 'web-push'
 import type { Store } from '../store'
 import type { VapidKeys } from '../config/vapidKeys'
+import { sendBark } from './bark'
 
 export type PushPayload = {
     title: string
@@ -31,21 +32,20 @@ export class PushService {
     constructor(
         private readonly vapidKeys: VapidKeys,
         private readonly subject: string,
-        private readonly store: Store
+        private readonly store: Store,
+        private readonly publicUrl?: string
     ) {
         webPush.setVapidDetails(this.subject, this.vapidKeys.publicKey, this.vapidKeys.privateKey)
     }
 
     async sendToNamespace(namespace: string, payload: PushPayload): Promise<void> {
         const subscriptions = this.store.push.getPushSubscriptionsByNamespace(namespace)
-        if (subscriptions.length === 0) {
-            return
-        }
+        const barkKey = this.store.push.isBarkEnabled(namespace) ? this.store.push.getBarkKey(namespace) : null
 
         const body = JSON.stringify(payload)
-        await Promise.all(subscriptions.map((subscription) => {
+        await Promise.all([...subscriptions.map((subscription) => {
             return this.sendToSubscription(namespace, subscription, body)
-        }))
+        }), ...(barkKey ? [sendBark(barkKey, payload, this.publicUrl).catch(() => { console.warn('[PushService] Bark delivery failed') })] : [])])
     }
 
     private async sendToSubscription(

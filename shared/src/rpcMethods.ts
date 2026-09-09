@@ -19,6 +19,7 @@ export const RPC_METHODS = {
     ArchiveCodexLocalSession: 'archiveCodexLocalSession',
     RenameCodexLocalSession: 'renameCodexLocalSession',
     ListMachineDirectory: 'list-directory',
+    BrowseSessionFiles: 'browse-session-files',
     PathExists: 'path-exists',
     GetMachineGitBranch: 'get-machine-git-branch',
     GetMachineGitBranches: 'get-machine-git-branches',

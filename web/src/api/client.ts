@@ -1,5 +1,6 @@
 import type { OpenLocalServiceRequest, OpenLocalServiceResponse } from '@hapi/protocol/localServices'
 import type { NativeCodexSessionControlAction, NativeCodexSessionControlResponse } from '@hapi/protocol/codexSessionControl'
+import type { Monitor, MonitorConfig, MonitorDetail, MonitorRequest } from '@hapi/protocol/monitoring'
 import type {
     AttachmentMetadata,
     AuthResponse,
@@ -87,6 +88,14 @@ type ApiClientOptions = {
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000
 const UPLOAD_REQUEST_TIMEOUT_MS = 5 * 60 * 1000
 
+type MonitorsResponse = { monitors: Monitor[] }
+type MonitorResponse = { monitor: MonitorDetail }
+type CreateMonitorResponse = MonitorResponse & { token: string | null }
+type RotateMonitorTokenResponse = { token: string }
+type MonitorAcceptedResponse = { accepted: true }
+type ParseMonitorCurlResponse = { request: MonitorRequest }
+type MonitorSessionTargetResponse = { config: MonitorConfig }
+
 type ErrorPayload = {
     error?: unknown
     code?: unknown
@@ -127,6 +136,9 @@ export class ApiError extends Error {
 }
 
 export class ApiClient {
+    async readWebPage(url: string): Promise<import('@hapi/protocol/webReader').WebReaderResponse> {
+        return this.request('/api/web-reader', { method: 'POST', body: JSON.stringify({ url }) })
+    }
     async openLocalService(request: OpenLocalServiceRequest): Promise<OpenLocalServiceResponse> {
         return await this.request('/api/local-services/open', {
             method: 'POST', body: JSON.stringify(request)
@@ -280,6 +292,18 @@ export class ApiClient {
         return await this.request<PushVapidPublicKeyResponse>('/api/push/vapid-public-key')
     }
 
+    async getBarkSettings(): Promise<{ configured: boolean; enabled: boolean }> {
+        return this.request('/api/push/bark')
+    }
+
+    async testBarkPush(): Promise<{ ok: boolean }> {
+        return this.request('/api/push/bark/test', { method: 'POST' })
+    }
+
+    async saveBarkSettings(url?: string, enabled?: boolean): Promise<{ configured: boolean; enabled: boolean }> {
+        return this.request('/api/push/bark', { method: 'PUT', body: JSON.stringify({ url, enabled }) })
+    }
+
     async subscribePushNotifications(payload: PushSubscriptionPayload): Promise<void> {
         await this.request('/api/push/subscribe', {
             method: 'POST',
@@ -328,6 +352,12 @@ export class ApiClient {
         return await this.request<FileReadResponse>(
             `/api/codex/sessions/${encodeURIComponent(sessionId)}/file?${queryParams.toString()}`
         )
+    }
+
+    async browseCodexSessionFiles(sessionId: string, machineId: string, request: import('@hapi/protocol/apiTypes').SessionFileBrowserRequest): Promise<import('@hapi/protocol/apiTypes').SessionFileBrowserResponse> {
+        return this.request(`/api/codex/sessions/${encodeURIComponent(sessionId)}/files?machineId=${encodeURIComponent(machineId)}`, {
+            method: 'POST', body: JSON.stringify(request)
+        })
     }
 
     async getCodexSessionSnapshot(
@@ -733,6 +763,88 @@ export class ApiClient {
             `/api/sessions/${encodeURIComponent(sessionId)}/side-session`,
             { method: 'POST', body: JSON.stringify({}) }
         )
+    }
+
+    async getMonitors(): Promise<MonitorsResponse> {
+        return await this.request<MonitorsResponse>('/api/monitors')
+    }
+
+    async getMonitor(monitorId: string): Promise<MonitorResponse> {
+        return await this.request<MonitorResponse>(`/api/monitors/${encodeURIComponent(monitorId)}`)
+    }
+
+    async getMonitorSessionTarget(target: {
+        type: 'managed' | 'native-codex'
+        sessionId: string
+        machineId?: string
+    }): Promise<MonitorSessionTargetResponse> {
+        const query = new URLSearchParams({
+            type: target.type,
+            sessionId: target.sessionId,
+        })
+        if (target.machineId) query.set('machineId', target.machineId)
+        return await this.request<MonitorSessionTargetResponse>(`/api/monitors/session-target?${query.toString()}`)
+    }
+
+    async createMonitor(config: MonitorConfig): Promise<CreateMonitorResponse> {
+        return await this.request<CreateMonitorResponse>('/api/monitors', {
+            method: 'POST',
+            body: JSON.stringify(config)
+        })
+    }
+
+    async updateMonitor(monitorId: string, config: MonitorConfig): Promise<MonitorResponse> {
+        return await this.request<MonitorResponse>(`/api/monitors/${encodeURIComponent(monitorId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify(config)
+        })
+    }
+
+    async getMonitorToken(monitorId: string): Promise<{ token: string | null }> {
+        return await this.request(`/api/monitors/${encodeURIComponent(monitorId)}/token`)
+    }
+
+    async deleteMonitor(monitorId: string): Promise<{ success: boolean }> {
+        return await this.request(`/api/monitors/${encodeURIComponent(monitorId)}`, { method: 'DELETE' })
+    }
+
+    async rotateMonitorToken(monitorId: string): Promise<RotateMonitorTokenResponse> {
+        return await this.request<RotateMonitorTokenResponse>(`/api/monitors/${encodeURIComponent(monitorId)}/token`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        })
+    }
+
+    async checkMonitor(monitorId: string): Promise<MonitorAcceptedResponse> {
+        return await this.request<MonitorAcceptedResponse>(`/api/monitors/${encodeURIComponent(monitorId)}/check`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        })
+    }
+
+    async approveMonitorIncident(
+        monitorId: string,
+        incidentId: string,
+        planHash: string
+    ): Promise<MonitorAcceptedResponse> {
+        return await this.request<MonitorAcceptedResponse>(
+            `/api/monitors/${encodeURIComponent(monitorId)}/incidents/${encodeURIComponent(incidentId)}/approve`,
+            { method: 'POST', body: JSON.stringify({ planHash }) }
+        )
+    }
+
+    async closeMonitorIncident(monitorId: string, incidentId: string): Promise<MonitorAcceptedResponse> {
+        return await this.request<MonitorAcceptedResponse>(
+            `/api/monitors/${encodeURIComponent(monitorId)}/incidents/${encodeURIComponent(incidentId)}/close`,
+            { method: 'POST', body: JSON.stringify({}) }
+        )
+    }
+
+    async parseMonitorCurl(curl: string): Promise<ParseMonitorCurlResponse> {
+        return await this.request<ParseMonitorCurlResponse>('/api/monitors/parse-curl', {
+            method: 'POST',
+            body: JSON.stringify({ curl })
+        })
     }
 
     async getShares(): Promise<SharesResponse> {

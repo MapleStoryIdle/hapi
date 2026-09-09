@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
-import { BottomDrawer, shouldDismissDrawer } from './BottomDrawer'
+import { BottomDrawer, drawerDragSize, shouldDismissDrawer } from './BottomDrawer'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
@@ -12,6 +12,75 @@ function Harness() {
 }
 
 describe('BottomDrawer', () => {
+    it('keeps keyboard detents on the handle without extra expand/collapse buttons', () => {
+        const view = render(<Harness />)
+        fireEvent.click(screen.getByText('Open'))
+        expect(screen.queryByRole('button', { name: 'Expand drawer' })).toBeNull()
+        fireEvent.keyDown(screen.getByRole('separator'), { key: 'ArrowUp' })
+        expect(screen.getByRole('dialog')).toHaveAttribute('data-expanded', 'true')
+        expect(screen.queryByRole('button', { name: 'Collapse drawer' })).toBeNull()
+        view.rerender(<Harness />)
+        expect(screen.getByRole('dialog')).toHaveAttribute('data-expanded', 'true')
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+        fireEvent.click(screen.getByText('Open'))
+        expect(screen.getByRole('dialog')).not.toHaveAttribute('data-expanded')
+    })
+
+    it('bounds upward resistance and never grows past the safe-area limit', () => {
+        expect(drawerDragSize(500, -50, 750)).toEqual({ height: 550, offset: -0 })
+        expect(drawerDragSize(700, -250, 750)).toEqual({ height: 750, offset: -12 })
+        expect(drawerDragSize(700, 40, 750)).toEqual({ height: 660, offset: -0 })
+    })
+
+    it('uses header drags for detents and ignores body drags', () => {
+        class TestPointerEvent extends MouseEvent {
+            pointerId: number
+            constructor(type: string, init: PointerEventInit) { super(type, init); this.pointerId = init.pointerId ?? 1 }
+        }
+        vi.stubGlobal('PointerEvent', TestPointerEvent)
+        render(<Harness />)
+        fireEvent.click(screen.getByText('Open'))
+        const dialog = screen.getByRole('dialog')
+        const handle = dialog.querySelector('[data-question-drawer-handle]')!
+        const body = dialog.querySelector('[data-chat-drawer-body]')!
+        const drag = (target: Element, from: number, to: number, cancel = false) => {
+            fireEvent.pointerDown(target, { button: 0, pointerId: 1, clientY: from })
+            fireEvent.pointerMove(target, { pointerId: 1, clientY: to })
+            if (cancel) fireEvent.pointerCancel(target, { pointerId: 1, clientY: to })
+            else fireEvent.pointerUp(target, { pointerId: 1, clientY: to })
+        }
+        drag(body, 200, 0)
+        expect(dialog).not.toHaveAttribute('data-expanded')
+        drag(handle, 200, 0, true)
+        expect(dialog).not.toHaveAttribute('data-expanded')
+        drag(handle, 200, 0)
+        expect(dialog).toHaveAttribute('data-expanded', 'true')
+        drag(handle, 0, 200)
+        expect(dialog).not.toHaveAttribute('data-expanded')
+        expect(dialog).toBeInTheDocument()
+        drag(handle, 0, 200)
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('expanded sheets follow keyboard height without losing their detent', () => {
+        const viewport = Object.assign(new EventTarget(), { height: 800, offsetTop: 0 })
+        vi.stubGlobal('visualViewport', viewport)
+        render(<Harness />)
+        fireEvent.click(screen.getByText('Open'))
+        fireEvent.keyDown(screen.getByRole('separator'), { key: 'ArrowUp' })
+        act(() => { viewport.height = 360; viewport.dispatchEvent(new Event('resize')) })
+        expect(screen.getByRole('dialog').style.getPropertyValue('--drawer-viewport-height')).toBe('360px')
+        expect(screen.getByRole('dialog')).toHaveAttribute('data-expanded', 'true')
+    })
+    it('can fill 70% of the visible viewport without changing other drawers', () => {
+        const viewport = Object.assign(new EventTarget(), { height: 400, offsetTop: 0 })
+        vi.stubGlobal('visualViewport', viewport)
+        render(<I18nProvider><BottomDrawer open fixedHeight onOpenChange={() => {}} title="Directory">Files</BottomDrawer></I18nProvider>)
+        const dialog = screen.getByRole('dialog')
+        expect(dialog.style.height).toBe('calc(var(--drawer-viewport-height, 100dvh) * 0.7)')
+        expect(dialog.style.getPropertyValue('--drawer-viewport-height')).toBe('400px')
+        expect(dialog).not.toHaveAttribute('aria-describedby')
+    })
     it('springs back after short/upward drags; closes on long downward drags or flicks', () => {
         expect(shouldDismissDrawer(30, 0.1, 400)).toBe(false)
         expect(shouldDismissDrawer(-150, -1, 400)).toBe(false)

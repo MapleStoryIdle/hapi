@@ -182,6 +182,8 @@ describe('RecentCodexSessions', () => {
     it('assigns completed cards a stable color from their directory', () => {
         const projectColor = getCompletedSessionDirectoryColor('/workspace/project/')
         expect(projectColor).toBe(getCompletedSessionDirectoryColor('/workspace/project'))
+        expect(projectColor).toBe(getCompletedSessionDirectoryColor('/other/project'))
+        expect(projectColor).toBe(getCompletedSessionDirectoryColor('C:\\work\\project\\'))
         expect(COMPLETED_SESSION_DIRECTORY_COLORS).toContain(projectColor)
         expect(getCompletedSessionDirectoryColor(null)).toBeNull()
         expect(getCompletedSessionDirectoryColor('   ')).toBeNull()
@@ -192,7 +194,8 @@ describe('RecentCodexSessions', () => {
             '/workspace/project/'
         ])
         expect(assignments.size).toBe(2)
-        expect(assignments.get('/workspace/project')).not.toBe(assignments.get('/workspace/other'))
+        expect(assignments.get('project')).toBe(projectColor)
+        expect(assignments.get('project')).toBe(assignCompletedSessionDirectoryColors(['/other/project']).get('project'))
     })
 
     it('uses localized relative labels for today and clock time for earlier dates', () => {
@@ -1057,7 +1060,10 @@ describe('RecentCodexSessions', () => {
         expect(card?.querySelector('.text-\\[17px\\]')).toHaveTextContent('Recent Codex task')
         expect(screen.getByRole('button', { name: 'Pin session' })).toBeInTheDocument()
         const archiveButton = board.querySelector('[data-kanban-archive]') as HTMLButtonElement
-        expect(archiveButton).toHaveClass('bottom-1', 'right-1', 'h-11', 'w-11')
+        expect(archiveButton).toBeDisabled()
+        expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull()
+        fireEvent.keyDown(card!, { key: 'ArrowLeft' })
+        expect(archiveButton).toBeEnabled()
 
         fireEvent.click(archiveButton)
         expect(onOpen).not.toHaveBeenCalled()
@@ -1116,6 +1122,7 @@ describe('RecentCodexSessions', () => {
         expect(board.querySelector('.cupertino-kanban-card-time')).not.toBeNull()
         expect(screen.getByText('Recent')).toBeInTheDocument()
         const card = screen.getByText('SHAPI idle task').closest('li')!
+        fireEvent.keyDown(card.querySelector('.session-kanban-card')!, { key: 'ArrowLeft' })
         fireEvent.click(card.querySelector('[data-kanban-archive]')!)
         const archiveButtons = screen.getAllByRole('button', { name: 'Archive' })
         fireEvent.click(archiveButtons.at(-1)!)

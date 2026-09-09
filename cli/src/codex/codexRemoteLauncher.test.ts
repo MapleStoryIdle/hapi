@@ -1189,6 +1189,7 @@ describe('codexRemoteLauncher', () => {
             itemId: 'parent-msg-1',
             final: true
         });
+        expect(codexMessages).toContainEqual(expect.objectContaining({ type: 'turn-outcome', outcome: 'completed', turnId: 'turn-1' }));
     });
 
     it('forwards rate updates as normal messages and session events as structured data', async () => {
@@ -2525,7 +2526,7 @@ describe('codexRemoteLauncher', () => {
         harness.suppressTurnCompletion = true;
         harness.emitRunningChildTurnBeforeSuppressedParent = true;
         harness.emitTurnAbortedOnInterrupt = true;
-        const { session, rpcHandlers } = createSessionStub(['first message']);
+        const { session, rpcHandlers, codexMessages } = createSessionStub(['first message']);
 
         const running = codexRemoteLauncher(session as never);
         await vi.waitFor(() => {
@@ -2542,6 +2543,8 @@ describe('codexRemoteLauncher', () => {
             { threadId: 'child-thread', turnId: 'child-turn' }
         ]);
         expect(session.thinking).toBe(false);
+        expect(codexMessages).toContainEqual(expect.objectContaining({ type: 'turn-outcome', outcome: 'aborted', turnId: 'turn-1' }));
+        expect(codexMessages).not.toContainEqual(expect.objectContaining({ type: 'turn-outcome', turnId: 'child-turn' }));
     });
 
     it('does not interrupt completed child agent turns when clearing codex thread state', async () => {

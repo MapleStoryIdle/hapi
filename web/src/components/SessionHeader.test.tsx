@@ -374,7 +374,7 @@ describe('SessionHeader back action', () => {
         expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     })
 
-    it('exposes the same refresh action when the detail page supplies one', () => {
+    it('omits refresh, outline and export from the detail menu', () => {
         const queryClient = new QueryClient({
             defaultOptions: {
                 queries: { retry: false },
@@ -400,9 +400,10 @@ describe('SessionHeader back action', () => {
         )
 
         fireEvent.click(screen.getByTitle('More actions'))
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh' }))
-
-        expect(onRefresh).toHaveBeenCalledTimes(1)
+        expect(screen.queryByRole('menuitem', { name: 'Refresh' })).toBeNull()
+        expect(screen.queryByRole('menuitem', { name: /outline/i })).toBeNull()
+        expect(screen.queryByRole('menuitem', { name: /export/i })).toBeNull()
+        expect(onRefresh).not.toHaveBeenCalled()
     })
 
     it('uses the selected locale for session detail labels', () => {

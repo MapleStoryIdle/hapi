@@ -95,6 +95,18 @@ bun run dev:hub
 
 ## HTTP API
 
+### Events and service checks
+
+See [Events and service checks](../docs/guide/monitoring.md) for mobile setup,
+webhook authentication, probe safety, repair approval and retention limits.
+
+- `/api/monitors` — namespace-authenticated configuration and seven-day metrics.
+- `/api/monitors/:id` — detail, incidents and original-session links.
+- `POST /hooks/events?token=YOUR_RULE_TOKEN` with JSON `{"prompt":"..."}` — bounded webhook ingestion; disable query-string logging for this credential-bearing endpoint. GET/HEAD cannot trigger work.
+
+The Hub starts a bounded monitoring scheduler; with no rules it sends no probes
+and creates no sessions. HTTP checks originate from the Hub network.
+
 See `src/web/routes/` for all endpoints.
 
 ### Authentication (`src/web/routes/auth.ts`)

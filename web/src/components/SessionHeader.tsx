@@ -797,6 +797,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
     onSessionReopened?: (newSessionId: string) => void
     onCreateSideSession?: () => void
     sideSessionPending?: boolean
+    onCreateMonitor?: () => void
     status?: SessionHeaderStatus
     floating?: boolean
 }) {
@@ -959,20 +960,16 @@ export const SessionHeader = memo(function SessionHeader(props: {
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionActive={session.active}
-                onRefresh={props.onRefresh}
-                refreshPending={props.refreshPending}
                 onGitBranches={isGitRepository ? () => setGitBranchesOpen(true) : undefined}
                 onRename={() => setRenameOpen(true)}
-                onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={handleReopen}
                 onDelete={() => setDeleteOpen(true)}
                 onToggleFiles={props.onToggleFiles}
                 filesActive={props.filesActive}
-                onToggleOutline={props.onToggleOutline}
-                outlineActive={props.outlineActive}
                 onCreateSideSession={props.onCreateSideSession}
                 sideSessionPending={props.sideSessionPending}
+                onCreateMonitor={props.onCreateMonitor}
                 anchorPoint={menuAnchorPoint}
                 menuId={menuId}
             />

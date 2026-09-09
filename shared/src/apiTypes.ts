@@ -653,6 +653,21 @@ export type ListDirectoryResponse = {
 
 export type RpcListDirectoryResponse = ListDirectoryResponse
 
+export const SessionFileBrowserRequestSchema = z.object({
+    action: z.enum(['directory', 'changes', 'diff']),
+    path: z.string().max(4096).default(''),
+    staged: z.boolean().optional()
+}).strict()
+export type SessionFileBrowserRequest = z.infer<typeof SessionFileBrowserRequestSchema>
+export type SessionFileBrowserResponse = ListDirectoryResponse & {
+    isGitRepository?: boolean
+    status?: string
+    unstaged?: string
+    staged?: string
+    stdout?: string
+    truncated?: boolean
+}
+
 export type MachineDirectoryEntry = DirectoryEntry & {
     isGitRepo?: boolean
 }

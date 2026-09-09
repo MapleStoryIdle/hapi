@@ -7,6 +7,7 @@ import type { ChatPreview } from './ChatPreviewContext'
 import { I18nProvider } from '@/lib/i18n-context'
 import { localServiceLaunchHref, parseLocalServiceLaunchHash } from '@/lib/local-service-links'
 import ChatPreviewDrawer from './ChatPreviewDrawer'
+import { AppContextProvider } from '@/lib/app-context'
 
 const copyPath = vi.hoisted(() => vi.fn(async () => true))
 vi.mock('@/hooks/useCopyToClipboard', () => ({ useCopyToClipboard: () => ({ copy: copyPath, copied: false }) }))
@@ -15,9 +16,10 @@ vi.mock('@/components/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }
 vi.mock('@/components/CodeBlock', () => ({ CodeBlock: ({ code }: { code: string }) => <pre>{code}</pre> }))
 afterEach(() => { cleanup(); copyPath.mockClear(); vi.useRealTimers(); vi.restoreAllMocks() })
 
-function show(preview: ChatPreview, strict = false) {
+function show(preview: ChatPreview, strict = false, api?: ApiClient) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-    const content = <QueryClientProvider client={client}><I18nProvider><ChatPreviewDrawer preview={preview} open onOpenChange={() => {}} /></I18nProvider></QueryClientProvider>
+    const drawer = <ChatPreviewDrawer preview={preview} open onOpenChange={() => {}} />
+    const content = <QueryClientProvider client={client}><I18nProvider>{api ? <AppContextProvider value={{ api, token: 'test', baseUrl: '' }}>{drawer}</AppContextProvider> : drawer}</I18nProvider></QueryClientProvider>
     return render(strict ? <StrictMode>{content}</StrictMode> : content)
 }
 
@@ -28,6 +30,7 @@ it('loads a native file from its source machine without managed-session APIs', a
     expect(read).toHaveBeenCalledWith('n1', 'm1', 'test.ts')
     expect(screen.queryByRole('button', { name: 'Source' })).not.toBeInTheDocument()
     expect(document.querySelector('.chat-detail-tabs')).toBeNull()
+    expect(document.querySelector('.chat-web-preview-body')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Changes' })).not.toBeInTheDocument()
 })
 
@@ -84,6 +87,17 @@ it('keeps multiple native Markdown views available', async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Source' }))
     expect(screen.getByRole('button', { name: 'Source' })).toHaveAttribute('aria-pressed', 'true')
     expect(document.querySelectorAll('.chat-detail-tabs button')).toHaveLength(2)
+})
+
+it('loads native changes on the owning machine without reading source until requested', async () => {
+    const browse = vi.fn().mockResolvedValue({ success: true, stdout: '' })
+    const read = vi.fn().mockResolvedValue({ success: true, content: btoa('source text') })
+    show({ type: 'file', api: { browseCodexSessionFiles: browse, readCodexSessionFile: read } as unknown as ApiClient,
+        source: { type: 'native-codex', sessionId: 'n1', machineId: 'm1' }, path: 'src/test.ts', diff: true, staged: true })
+    await waitFor(() => expect(browse).toHaveBeenCalledWith('n1', 'm1', { action: 'diff', path: 'src/test.ts', staged: true }))
+    expect(read).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Source' }))
+    await screen.findByText('source text')
 })
 
 it.each([
@@ -148,6 +162,10 @@ it('shows web content with a copy icon instead of a permanent browser fallback p
     show({ type: 'url', url: 'https://example.com/' })
     expect(screen.getByRole('heading', { name: 'https://example.com/' })).toBeInTheDocument()
     const frame = screen.getByTitle('Web preview')
+    expect(frame).toHaveAttribute('src', 'https://example.com/')
+    expect(frame).toHaveClass('h-full', 'w-full', 'border-0')
+    expect(frame.className).not.toContain('rounded')
+    expect(frame.closest('[data-chat-drawer-body]')).toHaveClass('chat-web-preview-body')
     expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer')
     expect(frame.getAttribute('sandbox')).not.toMatch(/allow-same-origin|allow-top-navigation/)
     expect(screen.queryByRole('link', { name: 'Open in browser' })).toBeNull()
@@ -160,6 +178,36 @@ it('shows web content with a copy icon instead of a permanent browser fallback p
     expect(copyPath).toHaveBeenCalledWith('https://example.com/')
     fireEvent.load(frame)
     expect(screen.queryByRole('alert')).toBeNull()
+})
+
+it.each(['blocked', 'readonly'])('shows unavailable for %s pages without replacement content', async (mode) => {
+    const readWebPage = vi.fn().mockResolvedValue({ mode, title: 'Documentation', content: [{ tag: 'p', children: ['Readable document'] }] })
+    const openLocalService = vi.fn()
+    show({ type: 'url', url: 'https://example.com/' }, false, { readWebPage, openLocalService } as unknown as ApiClient)
+    expect(await screen.findByText('This page cannot be previewed')).toBeInTheDocument()
+    expect(screen.queryByText('Readable document')).toBeNull()
+    expect(screen.queryByText('readonly')).toBeNull()
+    expect(document.querySelector('iframe')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy link' })).toBeInTheDocument()
+    expect(openLocalService).not.toHaveBeenCalled()
+    expect(readWebPage).toHaveBeenCalledExactlyOnceWith('https://example.com/')
+})
+
+it('keeps allowed public sites on their original URL after checking headers', async () => {
+    const readWebPage = vi.fn().mockResolvedValue({ mode: 'embed' })
+    show({ type: 'url', url: 'https://example.com/' }, false, { readWebPage } as unknown as ApiClient)
+    expect(await screen.findByTitle('Web preview')).toHaveAttribute('src', 'https://example.com/')
+    expect(screen.queryByText('readonly')).toBeNull()
+})
+
+
+it('does not use the public reader for local services', async () => {
+    const readWebPage = vi.fn()
+    const openLocalService = vi.fn().mockResolvedValue({ url: 'https://hapi.test/preview/' + 'a'.repeat(32) + '/__shapi_local/embed/' + 'b'.repeat(64) + '/' })
+    const api = { readWebPage, openLocalService } as unknown as ApiClient
+    show({ type: 'url', url: '/local-service#test', localService: { api, request: { source: { type: 'session', sessionId: 's1' }, url: 'http://localhost:8317' } } }, false, api)
+    await waitFor(() => expect(openLocalService).toHaveBeenCalledTimes(1))
+    expect(readWebPage).not.toHaveBeenCalled()
 })
 
 it('uses metadata from its own opaque local frame, with safe icon and URL fallbacks', async () => {

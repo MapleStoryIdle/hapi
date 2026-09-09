@@ -2,6 +2,7 @@ import { createConfiguration, type ConfigSource } from './configuration'
 import { Store } from './store'
 import { SyncEngine, type SyncEvent } from './sync/syncEngine'
 import { NotificationHub } from './notifications/notificationHub'
+import { MonitoringService } from './monitoring/service'
 import type { NotificationChannel } from './notifications/notificationTypes'
 import { HappyBot } from './telegram/bot'
 import { startWebServer } from './web/server'
@@ -191,7 +192,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     const jwtSecret = await getOrCreateJwtSecret()
     const vapidKeys = await getOrCreateVapidKeys(config.dataDir)
     const vapidSubject = process.env.VAPID_SUBJECT ?? 'https://github.com/MapleStoryIdle/shapi'
-    const pushService = new PushService(vapidKeys, vapidSubject, store)
+    const pushService = new PushService(vapidKeys, vapidSubject, store, config.publicUrl)
     const externalCodexPushNotifier = new ExternalCodexPushNotifier(pushService)
 
     visibilityTracker = new VisibilityTracker()
@@ -257,12 +258,14 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     }
 
     notificationHub = new NotificationHub(syncEngine, notificationChannels)
+    const monitoring = new MonitoringService(store, () => syncEngine, pushService)
 
     // Start HTTP service first (before tunnel, so tunnel has something to forward to)
     localServices = await startLocalServices(() => syncEngine, config.publicUrl, process.env, [
         ...config.corsOrigins.map(normalizeOrigin).filter(Boolean), ...(relayFlag.enabled && relayCorsOrigin ? [relayCorsOrigin] : [])
     ])
     webServer = await startWebServer({
+        getMonitoring: () => monitoring,
         getSyncEngine: () => syncEngine,
         getSseManager: () => sseManager,
         getVisibilityTracker: () => visibilityTracker,
@@ -277,6 +280,8 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         getLocalServices: () => localServices?.manager ?? null,
         getLocalServiceHandler: () => localServices?.pathHandler ?? null
     })
+
+    monitoring.start()
 
     // Start the bot if configured
     if (happyBot) {
@@ -352,6 +357,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
     return {
         stop: async () => {
+            await monitoring.stop()
             await localServices?.stop()
             await tunnelManager?.stop()
             await happyBot?.stop()

@@ -47,4 +47,42 @@ describe('recent Codex session route', () => {
         expect(router.state.matches.at(-1)?.routeId).toBe('/share')
         expect(router.state.location.search).toEqual({ id: 'transfer-1' })
     })
+
+    it('resolves an individual monitor deep link beneath the monitor list route', async () => {
+        const router = createAppRouter(createMemoryHistory({
+            initialEntries: ['/monitors/monitor-1']
+        }))
+
+        await router.load()
+
+        expect(router.state.matches.at(-1)?.routeId).toBe('/monitors/$monitorId')
+        expect(router.state.matches.at(-1)?.params).toEqual({ monitorId: 'monitor-1' })
+    })
+
+    it('resolves source-session monitor creation before the dynamic monitor detail route', async () => {
+        const router = createAppRouter(createMemoryHistory({
+            initialEntries: ['/monitors/new?type=managed&sessionId=session-1']
+        }))
+
+        await router.load()
+
+        expect(router.state.matches.at(-1)?.routeId).toBe('/monitors/new')
+        expect(router.state.location.search).toEqual({ type: 'managed', sessionId: 'session-1' })
+
+        await router.navigate({
+            to: '/monitors/new',
+            search: {
+                type: 'native-codex',
+                sessionId: 'native-session-1',
+                machineId: 'machine-1'
+            }
+        })
+
+        expect(router.state.matches.at(-1)?.routeId).toBe('/monitors/new')
+        expect(router.state.location.search).toEqual({
+            type: 'native-codex',
+            sessionId: 'native-session-1',
+            machineId: 'machine-1'
+        })
+    })
 })

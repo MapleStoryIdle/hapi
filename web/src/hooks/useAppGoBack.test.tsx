@@ -26,4 +26,16 @@ describe('useAppGoBack', () => {
         expect(navigate).toHaveBeenCalledWith({ to: '/sessions' })
         expect(historyBack).not.toHaveBeenCalled()
     })
+
+    it('returns from a direct monitor link to the monitor list before leaving the feature', () => {
+        navigate.mockClear()
+        historyBack.mockClear()
+        state.pathname = '/monitors/monitor-1'
+        const { result } = renderHook(() => useAppGoBack())
+
+        act(() => result.current())
+
+        expect(navigate).toHaveBeenCalledWith({ to: '/monitors' })
+        expect(historyBack).not.toHaveBeenCalled()
+    })
 })

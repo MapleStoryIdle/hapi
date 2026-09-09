@@ -891,6 +891,32 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('scopes native file browsing to the transcript cwd and owning namespace', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '15151515-1515-4515-8515-151515151515'
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const calls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            readCodexLocalSession: async () => ({ success: true, data: createRunnerLocalSessionData(sessionId) }),
+            browseSessionFiles: async (...args: unknown[]) => { calls.push(args); return { success: true, entries: [] } }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+        const request = (body: unknown) => app.request(`/api/codex/sessions/${sessionId}/files?machineId=mac-runner`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        })
+        try {
+            expect((await request({ action: 'directory', path: 'src' })).status).toBe(200)
+            expect(calls).toEqual([['mac-runner', '/runner/workspace/project', { action: 'directory', path: 'src' }]])
+            expect((await request({ action: 'directory', cwd: '/private' })).status).toBe(400)
+            const other = createRoutesAppWithEngine('other', store, engine)
+            expect((await other.request(`/api/codex/sessions/${sessionId}/files?machineId=mac-runner`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'directory' })
+            })).status).not.toBe(200)
+            expect(calls).toHaveLength(1)
+        } finally { store.close() }
+    })
+
     it('reads a native transcript file through its owning runner', async () => {
         const store = new Store(':memory:')
         const sessionId = '15151515-1515-4515-8515-151515151515'
@@ -1226,6 +1252,7 @@ describe('Codex Desktop import routes', () => {
         try {
             for (const action of [
                 { action: 'stop', expectedTurnId: 'active-turn' },
+                { action: 'answerUserInput', expectedTurnId: 'active-turn', requestId: 'question-1', answers: { choice: { answers: ['Continue'] } } },
                 { action: 'configure', configuration: { model: 'gpt-5.6-terra', modelReasoningEffort: 'high', serviceTier: 'fast' } },
                 { action: 'resumeQueue' }
             ]) {

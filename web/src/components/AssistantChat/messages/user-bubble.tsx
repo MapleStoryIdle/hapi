@@ -3,7 +3,10 @@ import { LazyRainbowText } from '@/components/LazyRainbowText'
 import { PuzzleIcon, SparklesIcon } from '@/components/ToolCard/icons'
 import { cn } from '@/lib/utils'
 
-const LEADING_DIRECTIVE_REGEX = /^([$\/][a-z0-9][\w-]*)(?=\s|$)/i
+const LEADING_DIRECTIVE_REGEX = /^([$\/][a-z0-9][\w:-]*)(?=\s|$)/i
+// Desktop skill mentions are Markdown links, unlike composer $skill tokens.
+// Restrict this to explicit skill labels and SKILL.md targets, not file links.
+const LEADING_SKILL_LINK_REGEX = /^\[(\$[a-z0-9][\w:-]*)\]\((?:<[^>\r\n]*\/SKILL\.md>|[^\s)]+\/SKILL\.md)\)(?=\s|$)/i
 
 export function getUserBubbleClassName(status?: MessageStatus) {
     return cn(
@@ -25,7 +28,7 @@ export function extractLeadingDirectives(text: string): { directives: string[]; 
     const directives: string[] = []
 
     while (rest.length > 0) {
-        const match = rest.match(LEADING_DIRECTIVE_REGEX)
+        const match = rest.match(LEADING_SKILL_LINK_REGEX) ?? rest.match(LEADING_DIRECTIVE_REGEX)
         if (!match) break
 
         directives.push(match[1])

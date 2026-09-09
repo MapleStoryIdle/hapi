@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import {
     Dialog,
     DialogContent,
@@ -13,12 +13,14 @@ type ConfirmDialogProps = {
     isOpen: boolean
     onClose: () => void
     title: string
-    description: string
+    description: ReactNode
     confirmLabel: string
     confirmingLabel: string
     onConfirm: () => Promise<void>
     isPending: boolean
     destructive?: boolean
+    /** Scoped escape hatch for content-heavy confirmations, such as repair review. */
+    contentClassName?: string
 }
 
 export function ConfirmDialog(props: ConfirmDialogProps) {
@@ -32,7 +34,8 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         confirmingLabel,
         onConfirm,
         isPending,
-        destructive = false
+        destructive = false,
+        contentClassName
     } = props
 
     const [error, setError] = useState<string | null>(null)
@@ -60,12 +63,12 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="max-w-sm">
+            <DialogContent className={`max-w-sm ${contentClassName ?? ''}`}>
                 <DialogHeader>
                     <DialogTitle>{title}</DialogTitle>
-                    <DialogDescription className="mt-2 whitespace-pre-line">
-                        {description}
-                    </DialogDescription>
+                    {typeof description === 'string'
+                        ? <DialogDescription className="mt-2 whitespace-pre-line">{description}</DialogDescription>
+                        : <DialogDescription asChild><div className="mt-2">{description}</div></DialogDescription>}
                 </DialogHeader>
 
                 {error ? (

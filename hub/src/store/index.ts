@@ -4,11 +4,12 @@ import { dirname } from 'node:path'
 
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
-import { PushStore } from './pushStore'
+import { PushStore, BARK_SCHEMA } from './pushStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { ArtifactStore } from './artifacts'
 import { KanbanTaskStore } from './kanbanTasks'
+import { MonitorStore, MONITOR_SCHEMA } from './monitors'
 
 export type {
     FeedbackMetadata,
@@ -31,7 +32,7 @@ export { UserStore } from './userStore'
 export { ArtifactStore } from './artifacts'
 export { KanbanTaskStore } from './kanbanTasks'
 
-const SCHEMA_VERSION: number = 18
+const SCHEMA_VERSION: number = 22
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -39,7 +40,8 @@ const REQUIRED_TABLES = [
     'users',
     'push_subscriptions',
     'artifacts',
-    'kanban_tasks'
+    'kanban_tasks',
+    'monitors', 'monitor_buckets', 'monitor_incidents', 'monitor_receipts', 'bark_settings'
 ] as const
 
 export class Store {
@@ -54,6 +56,7 @@ export class Store {
     readonly push: PushStore
     readonly artifacts: ArtifactStore
     readonly kanbanTasks: KanbanTaskStore
+    readonly monitors: MonitorStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -106,6 +109,7 @@ export class Store {
         this.push = new PushStore(this.db)
         this.artifacts = new ArtifactStore(this.db)
         this.kanbanTasks = new KanbanTaskStore(this.db)
+        this.monitors = new MonitorStore(this.db, dbPath)
     }
 
     close(): void {
@@ -146,6 +150,13 @@ export class Store {
             15: () => this.migrateFromV15ToV16(),
             16: () => this.migrateFromV16ToV17(),
             17: () => this.migrateFromV17ToV18(),
+            18: () => this.db.exec(MONITOR_SCHEMA),
+            19: () => this.db.exec(BARK_SCHEMA),
+            20: () => this.db.exec(MONITOR_SCHEMA),
+            21: () => {
+                const columns = this.db.query('PRAGMA table_info(bark_settings)').all() as { name: string }[]
+                if (!columns.some(column => column.name === 'enabled')) this.db.exec('ALTER TABLE bark_settings ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1')
+            },
         })
 
         if (currentVersion === 0) {
@@ -192,6 +203,8 @@ export class Store {
     }
 
     private createSchema(): void {
+        this.db.exec(BARK_SCHEMA)
+        this.db.exec(MONITOR_SCHEMA)
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,

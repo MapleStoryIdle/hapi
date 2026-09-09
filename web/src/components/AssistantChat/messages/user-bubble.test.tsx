@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+
+afterEach(cleanup)
 
 vi.mock('@/components/LazyRainbowText', () => ({
     LazyRainbowText: ({ text, inline, preserveSingleLineBreaks }: { text: string; inline?: boolean; preserveSingleLineBreaks?: boolean }) => (
@@ -22,6 +24,16 @@ import {
 } from '@/components/AssistantChat/messages/user-bubble'
 
 describe('extractLeadingDirectives', () => {
+    it('recognizes desktop skill links and namespaced skills', () => {
+        expect(extractLeadingDirectives('[$hapi-upgrade](/Users/dev/.codex/skills/hapi-upgrade/SKILL.md) 发布')).toEqual({ directives: ['$hapi-upgrade'], body: '发布' })
+        expect(extractLeadingDirectives('[$product-design:index](</Users/dev/My Skills/index/SKILL.md>) $review 继续')).toEqual({ directives: ['$product-design:index', '$review'], body: '继续' })
+    })
+
+    it('does not consume normal file links or non-skill targets', () => {
+        for (const text of ['[文档](/project/SKILL.md)', '[$review](/project/README.md)', '说明 [$review](/skills/review/SKILL.md)']) {
+            expect(extractLeadingDirectives(text)).toEqual({ directives: [], body: text })
+        }
+    })
     it('extracts leading skill and command directives', () => {
         expect(extractLeadingDirectives('$deep-interview /model keep going')).toEqual({
             directives: ['$deep-interview', '/model'],
@@ -45,6 +57,15 @@ describe('extractLeadingDirectives', () => {
 })
 
 describe('UserBubbleContent', () => {
+    it('renders a desktop skill mention with the same non-link label as a plain token', () => {
+        const { container } = render(<UserBubbleContent text="[$hapi-upgrade](/Users/dev/.codex/skills/hapi-upgrade/SKILL.md) 发布" />)
+        const skill = container.querySelector('[data-user-directive-kind="skill"]')
+        expect(skill).toHaveClass('happy-user-skill-directive')
+        expect(skill?.tagName).toBe('SPAN')
+        expect(skill?.querySelector('svg')).toBeInTheDocument()
+        expect(container.querySelector('a')).toBeNull()
+        expect(container.textContent).not.toContain('SKILL.md')
+    })
     it('renders directive chips inline with the remaining single-line message body', () => {
         const { container } = render(<UserBubbleContent text="$ralplan polish the user bubble" />)
 

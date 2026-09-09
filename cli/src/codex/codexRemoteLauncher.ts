@@ -2703,6 +2703,15 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 wakeLoop();
             }
 
+            if (isTerminalEvent && !shouldRetrySameThread && !shouldCompactAndRetrySameThread) {
+                // Persist an explicit outcome for monitoring workflows. A ready
+                // notification alone cannot distinguish completion from abort.
+                session.sendAgentMessage({
+                    type: 'turn-outcome',
+                    turnId: eventTurnId ?? undefined,
+                    outcome: msgType === 'task_complete' ? 'completed' : msgType === 'turn_aborted' ? 'aborted' : 'failed'
+                });
+            }
             if (isTerminalEvent && !turnInFlight && !suppressReadyForThisTerminalEvent) {
                 scheduleReadyAfterTurn?.();
             } else if (readyAfterTurnTimer && msgType !== 'task_started' && !suppressReadyForThisTerminalEvent) {

@@ -20,6 +20,7 @@ import { createPermissionsRoutes } from './routes/permissions'
 import { createMachinesRoutes } from './routes/machines'
 import { createGitRoutes } from './routes/git'
 import { createLocalServiceRoutes } from './routes/localServices'
+import { createWebReaderRoutes } from './routes/webReader'
 import type { LocalServiceManager } from '../localServices/manager'
 import type { LocalServiceHandler, LocalServiceWebSocket } from '../localServices/gateway'
 import { createOpenVikingRoutes } from './routes/openViking'
@@ -30,6 +31,8 @@ import { createVoiceRoutes } from './routes/voice'
 import { createLegacyPublicShareTombstoneRoutes, createPublicShareRoutes } from './routes/shares'
 import { createShareManagementRoutes } from './routes/shareManagement'
 import { createPublicFeedbackRoutes } from './routes/feedback'
+import { createMonitorRoutes, createMonitorWebhookRoutes } from './routes/monitors'
+import type { MonitoringService } from '../monitoring/service'
 import type { PushService } from '../push/pushService'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
@@ -243,6 +246,7 @@ function serveEmbeddedAsset(asset: EmbeddedWebAsset): Response {
 }
 
 export function createWebApp(options: {
+    getMonitoring?: () => MonitoringService | null
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
     getVisibilityTracker: () => VisibilityTracker | null
@@ -260,7 +264,7 @@ export function createWebApp(options: {
     const app = new Hono<WebAppEnv>()
 
     app.use('*', async (c, next) => {
-        if (c.req.path.startsWith('/s/') || c.req.path.startsWith('/a/') || c.req.path.startsWith('/f/')) return await next()
+        if (c.req.path.startsWith('/s/') || c.req.path.startsWith('/a/') || c.req.path.startsWith('/f/') || c.req.path.startsWith('/hooks/')) return await next()
         return await logger()(c, next)
     })
 
@@ -272,7 +276,7 @@ export function createWebApp(options: {
     const corsOriginOption = corsOrigins.includes('*') ? '*' : corsOrigins
     const corsMiddleware = cors({
         origin: corsOriginOption,
-        allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowHeaders: ['authorization', 'content-type']
     })
     app.use('/api/*', corsMiddleware)
@@ -282,11 +286,14 @@ export function createWebApp(options: {
     app.route('/s', createPublicShareRoutes(options.store))
     app.route('/f', createPublicFeedbackRoutes(options.store, undefined, options.pushService))
     app.route('/a', createLegacyPublicShareTombstoneRoutes())
+    app.route('/hooks', createMonitorWebhookRoutes(options.getMonitoring ?? (() => null), options.store))
 
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
     app.route('/api', createBindRoutes(options.jwtSecret, options.store))
 
     app.use('/api/*', createAuthMiddleware(options.jwtSecret))
+    app.route('/api', createWebReaderRoutes())
+    app.route('/api', createMonitorRoutes(options.store, options.getSyncEngine, options.getMonitoring ?? (() => null)))
     app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker))
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
@@ -423,6 +430,7 @@ from GitHub Pages instead of through the relay tunnel.
 }
 
 export async function startWebServer(options: {
+    getMonitoring?: () => MonitoringService | null
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
     getVisibilityTracker: () => VisibilityTracker | null
@@ -440,6 +448,7 @@ export async function startWebServer(options: {
     const isCompiled = isBunCompiled()
     const embeddedAssetMap = isCompiled ? await loadEmbeddedAssetMap() : null
     const app = createWebApp({
+        getMonitoring: options.getMonitoring,
         getSyncEngine: options.getSyncEngine,
         getSseManager: options.getSseManager,
         getVisibilityTracker: options.getVisibilityTracker,

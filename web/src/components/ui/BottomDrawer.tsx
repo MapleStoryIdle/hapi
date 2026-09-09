@@ -11,6 +11,11 @@ export function shouldDismissDrawer(distance: number, velocity: number, height: 
     return distance > Math.min(120, height * 0.3) || (distance > 24 && velocity > 0.65)
 }
 
+export function drawerDragSize(height: number, distance: number, limit: number) {
+    const requested = Math.max(120, height - distance)
+    return { height: Math.min(limit, requested), offset: -Math.min(12, Math.max(0, requested - limit) * 0.15) }
+}
+
 /** Portal-only: opening a question must never move the chat composer. */
 export function BottomDrawer(props: {
     open: boolean
@@ -23,6 +28,8 @@ export function BottomDrawer(props: {
     /** Keep the original centered layout on desktop for detail previews. */
     desktopDialog?: boolean
     desktopClassName?: string
+    /** Fill 70% of the visible viewport, including header and safe-area padding. */
+    fixedHeight?: boolean
     header?: ReactNode
     accessory?: ReactNode
     bodyClassName?: string
@@ -36,16 +43,43 @@ export function BottomDrawer(props: {
     const { t } = useTranslation()
     const descriptionId = useId()
     const [layer, setLayer] = useState(60)
+    const [nested, setNested] = useState(false)
     const contentRef = useRef<HTMLDivElement>(null)
     const returnFocus = useRef<HTMLElement | null>(null)
     const mobile = useMobileSheet()
     const backgroundId = useRef(Symbol('drawer')).current
     const heightRef = useRef(400)
+    const resizeFrom = useRef<number | null>(null)
+    const resizeAnimation = useRef<Animation | null>(null)
+    const expandedLimit = useRef(800)
     const gesture = useRef<{ id: number; start: number; last: number; at: number; velocity: number } | null>(null)
     const [offset, setOffset] = useState(0)
     const [dragging, setDragging] = useState(false)
     const [entered, setEntered] = useState(false)
+    const [expanded, setExpanded] = useState(false)
+    const [dragHeight, setDragHeight] = useState<number | null>(null)
+    // Keep the last visible content while Radix runs its exit animation.
+    const lastContent = useRef({ children: props.children, header: props.header, accessory: props.accessory, footer: props.footer })
+    useLayoutEffect(() => {
+        if (props.open) lastContent.current = { children: props.children, header: props.header, accessory: props.accessory, footer: props.footer }
+    })
+    const content = props.open ? props : lastContent.current
     const [viewport, setViewport] = useState<{ height: number; bottom: number } | null>(null)
+
+    useLayoutEffect(() => {
+        if (dragging || resizeFrom.current === null || !props.open) return
+        const element = contentRef.current
+        const from = resizeFrom.current
+        resizeFrom.current = null
+        resizeAnimation.current?.cancel()
+        if (!element?.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+        // Height changes are confined to the portal; page/composer layout is untouched.
+        const maxHeight = `${expandedLimit.current}px`
+        resizeAnimation.current = element.animate([{ height: `${from}px`, maxHeight }, { height: `${element.offsetHeight}px`, maxHeight }], {
+            duration: 300, easing: 'cubic-bezier(0.32, 0.72, 0, 1)'
+        })
+    }, [expanded, dragging, dragHeight, props.open])
+    useEffect(() => () => resizeAnimation.current?.cancel(), [])
 
     // Previews can be siblings in React (global providers), not just nested children.
     // Stack above the currently visible sheets, on desktop as well as mobile.
@@ -53,6 +87,7 @@ export function BottomDrawer(props: {
         if (!props.open) return
         const others = [...document.querySelectorAll<HTMLElement>('[data-chat-overlay][data-state="open"]')]
             .filter((element) => element !== contentRef.current)
+        setNested(others.length > 0)
         setLayer(others.reduce((top, element) => Math.max(top, Number(element.style.zIndex) + 1), 60))
     }, [props.open, mobile])
 
@@ -62,8 +97,12 @@ export function BottomDrawer(props: {
         setDragging(false)
         setOffset(0)
         setEntered(false)
+        setExpanded(false)
+        setDragHeight(null)
         const measure = () => {
             const visual = window.visualViewport
+            const topInset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-safe-area-top')) || 0
+            expandedLimit.current = Math.max(0, (visual?.height ?? window.innerHeight) - topInset - 12)
             setViewport({
                 height: visual?.height ?? window.innerHeight,
                 bottom: visual ? Math.max(0, window.innerHeight - visual.offsetTop - visual.height) : 0
@@ -82,7 +121,7 @@ export function BottomDrawer(props: {
 
     useEffect(() => {
         if (!props.open || !mobile) return
-        updateDrawerBackground(backgroundId, { progress: Math.max(0, 1 - offset / heightRef.current), dragging })
+        updateDrawerBackground(backgroundId, { progress: Math.min(1, Math.max(0, 1 - offset / heightRef.current)), dragging })
     }, [backgroundId, props.open, mobile, offset, dragging])
 
     useEffect(() => {
@@ -98,15 +137,21 @@ export function BottomDrawer(props: {
         const current = gesture.current
         if (!current || current.id !== event.pointerId) return
         gesture.current = null
+        resizeFrom.current = contentRef.current?.getBoundingClientRect().height ?? null
         setDragging(false)
-        const distance = Math.max(0, event.clientY - current.start)
+        const distance = event.clientY - current.start
         // A flick counts only while it is still moving, not after a long hold.
         const velocity = performance.now() - current.at < 100 ? current.velocity : 0
-        if (!cancelled && !props.busy && shouldDismissDrawer(distance, velocity, contentRef.current?.offsetHeight ?? 400)) {
-            changeOpen(false)
-        } else {
-            setOffset(0)
+        const dismissing = !cancelled && !props.busy && !expanded && shouldDismissDrawer(distance, velocity, heightRef.current)
+        if (!cancelled && !props.busy) {
+            if (distance < -48 || (distance < -24 && velocity < -0.65)) setExpanded(true)
+            else if (shouldDismissDrawer(distance, velocity, heightRef.current)) {
+                if (expanded) setExpanded(false)
+                else changeOpen(false)
+            }
         }
+        if (!dismissing) setOffset(0)
+        setDragHeight(null)
         if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId)
         }
@@ -126,7 +171,7 @@ export function BottomDrawer(props: {
 
     const style = {
         '--drawer-drag': `${offset}px`,
-        '--drawer-overlay-opacity': Math.max(0, 1 - offset / heightRef.current),
+        '--drawer-overlay-opacity': Math.min(1, Math.max(0, 1 - offset / heightRef.current)),
         ...(viewport ? { '--drawer-viewport-height': `${viewport.height}px`, '--drawer-bottom': `${viewport.bottom}px` } : {})
     } as CSSProperties
 
@@ -153,12 +198,12 @@ export function BottomDrawer(props: {
                     hideClose
                 >
                     <header className={cn('chat-overlay-header mb-4 min-w-0 shrink-0', !props.header && 'pr-11')}>
-                        {props.header ?? <Dialog.Title className="text-base font-semibold">{props.title}</Dialog.Title>}
+                        {content.header ?? <Dialog.Title className="text-base font-semibold">{props.title}</Dialog.Title>}
                         {props.subtitle ? <Dialog.Description id={descriptionId} className="mt-1 text-sm text-[var(--app-hint)]">{props.subtitle}</Dialog.Description> : null}
                     </header>
-                    {props.accessory}
-                    <div className={cn('min-h-0 flex-1 overflow-auto overscroll-contain', props.bodyClassName)} data-chat-drawer-body>{props.children}</div>
-                    {props.footer ? <div className="chat-sheet-footer shrink-0 mt-4 border-t border-[var(--app-divider)] pt-4">{props.footer}</div> : null}
+                    {content.accessory}
+                    <div className={cn('min-h-0 flex-1 overflow-auto overscroll-contain', props.bodyClassName)} data-chat-drawer-body>{content.children}</div>
+                    {content.footer ? <div className="chat-sheet-footer shrink-0 mt-4 border-t border-[var(--app-divider)] pt-4">{content.footer}</div> : null}
                     <Dialog.Close type="button" data-testid={props.closeTestId} disabled={props.busy} aria-label={t('button.close')} className="chat-sheet-close absolute right-3 top-3 flex h-11 w-11 items-center justify-center"><CloseIcon className="h-4 w-4" /></Dialog.Close>
                 </DialogContent>
             </Dialog.Root>
@@ -172,8 +217,8 @@ export function BottomDrawer(props: {
                 <Dialog.Overlay
                     data-testid={props.overlayTestId}
                     data-dragging={dragging || undefined}
-                    className="chat-overlay-scrim question-drawer-overlay fixed inset-0 z-[60] bg-slate-950/35"
-                    style={{ ...style, zIndex: layer }}
+                    className={cn('chat-overlay-scrim question-drawer-overlay fixed inset-0 z-[60]', nested ? 'bg-transparent' : 'bg-slate-950/35')}
+                    style={{ ...style, zIndex: layer, ...(nested ? { background: 'transparent' } : {}) }}
                 />
                 <Dialog.Content
                     ref={contentRef}
@@ -185,11 +230,15 @@ export function BottomDrawer(props: {
                     data-testid={props.testId}
                     data-dragging={dragging || undefined}
                     data-entered={entered || undefined}
+                    data-expanded={expanded || undefined}
                     onAnimationEnd={(event) => {
                         if (event.target === event.currentTarget && props.open) setEntered(true)
                     }}
                     className="chat-overlay question-drawer fixed inset-x-0 z-[61] mx-auto flex w-full max-w-2xl flex-col overflow-hidden rounded-t-[28px] border-x border-t border-[var(--app-border)] bg-[var(--app-dialog-bg)] text-[var(--app-fg)] shadow-[0_-16px_60px_rgba(15,23,42,0.18)] outline-none"
-                    style={{ ...style, zIndex: layer + 1 }}
+                    style={{ ...style, zIndex: layer + 1,
+                        ...(expanded ? { height: 'var(--drawer-expanded-height)' } : props.fixedHeight ? { height: 'calc(var(--drawer-viewport-height, 100dvh) * 0.7)' } : {}),
+                        ...(dragHeight !== null ? { height: `${dragHeight}px`, maxHeight: 'var(--drawer-expanded-height)' } : {})
+                    }}
                     onOpenAutoFocus={focusContent}
                     onCloseAutoFocus={restoreFocus}
                     onEscapeKeyDown={(event) => { if (props.busy) event.preventDefault() }}
@@ -201,6 +250,7 @@ export function BottomDrawer(props: {
                         onPointerDown={(event) => {
                             if (props.busy || event.button !== 0 || (event.target as HTMLElement).closest('button, a, input, textarea, select')) return
                             heightRef.current = contentRef.current?.offsetHeight || 400
+                            resizeAnimation.current?.cancel()
                             gesture.current = { id: event.pointerId, start: event.clientY, last: event.clientY, at: performance.now(), velocity: 0 }
                             setDragging(true)
                             setEntered(true)
@@ -213,18 +263,32 @@ export function BottomDrawer(props: {
                             current.velocity = (event.clientY - current.last) / Math.max(1, now - current.at)
                             current.last = event.clientY
                             current.at = now
-                            setOffset(Math.max(0, event.clientY - current.start))
+                            const distance = event.clientY - current.start
+                            if (expanded || distance < 0) {
+                                // Resize only the portal, never the underlying composer/page.
+                                const next = drawerDragSize(heightRef.current, distance, expandedLimit.current)
+                                setDragHeight(next.height)
+                                setOffset(next.offset)
+                            } else setOffset(distance)
                         }}
                         onPointerUp={finishDrag}
                         onPointerCancel={(event) => finishDrag(event, true)}
                         onLostPointerCapture={(event) => finishDrag(event, true)}
                     >
-                        <div className="flex h-6 items-center justify-center" aria-hidden="true">
+                        <div className="flex h-6 items-center justify-center" role="separator" tabIndex={0}
+                            aria-label={t(expanded ? 'drawer.collapse' : 'drawer.expand')} aria-orientation="horizontal" aria-valuenow={expanded ? 100 : 70}
+                            onKeyDown={(event) => {
+                                if (props.busy || !['ArrowUp', 'ArrowDown', 'Enter', ' '].includes(event.key)) return
+                                event.preventDefault()
+                                resizeFrom.current = contentRef.current?.getBoundingClientRect().height ?? null
+                                setExpanded(event.key === 'ArrowUp' || (event.key !== 'ArrowDown' && !expanded))
+                                setEntered(true)
+                            }}>
                             <span className="h-1 w-9 rounded-full bg-[var(--app-border)]" />
                         </div>
                         <header className="chat-overlay-header flex min-h-12 items-start gap-3 pb-4">
                             <div className="min-w-0 flex-1 pt-2">
-                                {props.header ?? <Dialog.Title className="[overflow-wrap:anywhere] text-base font-semibold">{props.title}</Dialog.Title>}
+                                {content.header ?? <Dialog.Title className="[overflow-wrap:anywhere] text-base font-semibold">{props.title}</Dialog.Title>}
                                 {props.subtitle ? <Dialog.Description id={descriptionId} className="mt-1 text-sm text-[var(--app-hint)]">{props.subtitle}</Dialog.Description> : null}
                             </div>
                             <Dialog.Close data-testid={props.closeTestId} type="button" disabled={props.busy} aria-label={t('button.close')} className="chat-sheet-close flex h-11 w-11 shrink-0 items-center justify-center">
@@ -232,11 +296,11 @@ export function BottomDrawer(props: {
                             </Dialog.Close>
                         </header>
                     </div>
-                    {props.accessory}
+                    {content.accessory}
                     <div className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4', props.bodyClassName)} data-question-drawer-body data-chat-drawer-body>
-                        {props.children}
+                        {content.children}
                     </div>
-                    {props.footer ? <div className="chat-sheet-footer shrink-0 border-t border-[var(--app-divider)] px-5 py-3">{props.footer}</div> : null}
+                    {content.footer ? <div className="chat-sheet-footer shrink-0 border-t border-[var(--app-divider)] px-5 py-3">{content.footer}</div> : null}
                 </Dialog.Content>
             </Dialog.Portal>
         </Dialog.Root>

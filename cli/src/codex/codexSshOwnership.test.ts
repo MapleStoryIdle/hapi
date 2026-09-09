@@ -294,6 +294,66 @@ describe('CodexSshSessionOwnershipProbe', () => {
 })
 
 describe('CodexSshAppServerClient', () => {
+    it.runIf(process.platform !== 'win32')('suppresses a late answer after another client resolves the exact request', async () => {
+        const socketPath = makeSocketPath()
+        const received: Array<Record<string, unknown>> = []
+        let send: ((text: string) => void) | undefined
+        let answer: ((value: unknown) => void) | undefined
+        const server = createRawWebSocketServer((text, sendText) => {
+            send = sendText
+            const message = JSON.parse(text) as Record<string, unknown>
+            received.push(message)
+            if (message.method) sendText(JSON.stringify({ id: message.id, result: {} }))
+        })
+        await listenOnSocket(server, socketPath)
+        const client = new CodexSshAppServerClient({ socketPath, connectTimeoutMs: 1_000 })
+        const contexts: unknown[] = []
+        const notifications = vi.fn()
+        client.setNotificationHandler(notifications)
+        client.registerRequestHandler('item/tool/requestUserInput', (_params, context) => {
+            contexts.push(context)
+            return new Promise(resolve => { answer = resolve })
+        })
+        try {
+            await client.connect()
+            await client.initialize({ clientInfo: { name: 'test', version: '1' }, capabilities: { experimentalApi: true } })
+            send!(JSON.stringify({ id: 'rpc-1', method: 'item/tool/requestUserInput', params: { threadId: 'thread-a', itemId: 'item-1' } }))
+            await vi.waitFor(() => expect(contexts).toEqual([{ requestId: 'rpc-1' }]))
+            send!(JSON.stringify({ method: 'serverRequest/resolved', params: { threadId: 'thread-a', requestId: 'rpc-1' } }))
+            await vi.waitFor(() => expect(notifications).toHaveBeenCalled())
+            answer!({ answers: { choice: { answers: ['Yes'] } } })
+            await client.request('thread/loaded/list')
+            expect(received.filter(message => message.id === 'rpc-1')).toEqual([])
+        } finally { await client.disconnect(); await closeServer(server) }
+    })
+    it.runIf(process.platform !== 'win32')('does not answer desktop questions or approvals while observing a shared connection', async () => {
+        const socketPath = makeSocketPath()
+        const received: Array<Record<string, unknown>> = []
+        const server = createRawWebSocketServer((text, sendText) => {
+            const message = JSON.parse(text) as Record<string, unknown>
+            received.push(message)
+            if (message.method === 'initialize') {
+                for (const method of ['item/tool/requestUserInput', 'mcpServer/elicitation/request', 'item/commandExecution/requestApproval']) {
+                    sendText(JSON.stringify({ id: `desktop:${method}`, method, params: { threadId: 'desktop-thread' } }))
+                }
+                sendText(JSON.stringify({ id: message.id, result: {} }))
+            } else if (message.method === 'thread/loaded/list') {
+                sendText(JSON.stringify({ id: message.id, result: { data: ['desktop-thread'] } }))
+            }
+        })
+        await listenOnSocket(server, socketPath)
+        const client = new CodexSshAppServerClient({ socketPath, connectTimeoutMs: 1_000 })
+        try {
+            await client.connect()
+            await client.initialize({ clientInfo: { name: 'hapi-observer-test', version: '1' }, capabilities: { experimentalApi: true } })
+            await expect(client.request('thread/loaded/list')).resolves.toEqual({ data: ['desktop-thread'] })
+            expect(received.filter((message) => String(message.id).startsWith('desktop:'))).toEqual([])
+        } finally {
+            await client.disconnect()
+            await closeServer(server)
+        }
+    })
+
     it.runIf(process.platform !== 'win32')('uses the existing app-server connection for resume, turn notifications, and server requests', async () => {
         const socketPath = makeSocketPath()
         const received: Array<Record<string, unknown>> = []

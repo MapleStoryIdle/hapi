@@ -63,6 +63,9 @@ const OpenVikingPage = lazy(() => import('@/routes/memory'))
 const SettingsPage = lazy(() => import('@/routes/settings'))
 const SharePage = lazy(() => import('@/routes/share'))
 const SharesPage = lazy(() => import('@/routes/shares'))
+const MonitorsPage = lazy(() => import('@/routes/monitors'))
+const MonitorCreatePage = lazy(() => import('@/routes/monitors').then((module) => ({ default: module.MonitorCreatePage })))
+const MonitorPage = lazy(() => import('@/routes/monitor'))
 const KanbanTaskPage = lazy(() => import('@/routes/kanban-task'))
 const LocalServicePage = lazy(() => import('@/routes/local-service'))
 
@@ -598,6 +601,9 @@ function SessionsPage() {
             case 'shares':
                 navigate({ to: '/shares' })
                 return
+            case 'monitors':
+                navigate({ to: '/monitors' })
+                return
             case 'settings':
                 navigate({ to: '/settings' })
                 return
@@ -904,6 +910,7 @@ function SessionsPage() {
                                 <option value="browse">{t('browse.nav')}</option>
                                 <option value="memory">{t('openViking.nav')}</option>
                                 <option value="shares">{t('shares.nav')}</option>
+                                <option value="monitors">{t('monitors.nav')}</option>
                                 <option value="settings">{t('settings.title')}</option>
                             </select>
                         </div>
@@ -1441,6 +1448,14 @@ function CodexSessionContextRoute() {
                 to: '/sessions/$sessionId',
                 params: { sessionId }
             })}
+            onCreateMonitor={machineId ? () => navigate({
+                to: '/monitors/new',
+                search: {
+                    type: 'native-codex',
+                    sessionId: codexSessionId,
+                    machineId
+                }
+            }) : undefined}
         />
     )
 }
@@ -1511,18 +1526,6 @@ function NewSessionPage() {
         })
     }, [navigate, queryClient, shareTransferId])
 
-    const handleChooseFolder = useCallback((args: { machineId: string | null; directory: string }) => {
-        // Forward the currently-selected machine so /browse opens scoped to
-        // it rather than falling back to `hapi:lastMachineId`, which can
-        // disagree if the user changed machines without yet creating a
-        // session. Preserve shareTransferId so a share-target spawn that
-        // detours through /browse still seeds the composer after success.
-        const search: { machineId?: string; shareTransferId?: string } = {}
-        if (args.machineId) search.machineId = args.machineId
-        if (shareTransferId) search.shareTransferId = shareTransferId
-        navigate({ to: '/browse', search })
-    }, [navigate, shareTransferId])
-
     return (
         <div className="flex h-full min-h-0 flex-col">
             <div className="bg-[var(--app-bg)] pt-[var(--app-safe-area-top)]">
@@ -1556,7 +1559,6 @@ function NewSessionPage() {
                     isLoading={machinesLoading}
                     onCancel={handleCancel}
                     onSuccess={handleSuccess}
-                    onChooseFolder={handleChooseFolder}
                     initialDirectory={initialDirectory}
                     initialMachineId={initialMachineId}
                 />
@@ -1857,6 +1859,47 @@ const sharesRoute = createRoute({
     component: Outlet,
 })
 
+const monitorsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/monitors',
+    component: Outlet,
+})
+
+const monitorsIndexRoute = createRoute({
+    getParentRoute: () => monitorsRoute,
+    path: '/',
+    component: MonitorsPage,
+})
+
+const monitorCreateRoute = createRoute({
+    getParentRoute: () => monitorsRoute,
+    path: 'new',
+    validateSearch: (search: Record<string, unknown>): {
+        type?: 'managed' | 'native-codex'
+        sessionId?: string
+        machineId?: string
+    } => {
+        const type = search.type === 'managed' || search.type === 'native-codex'
+            ? search.type
+            : undefined
+        const sessionId = typeof search.sessionId === 'string' && search.sessionId.trim().length > 0
+            ? search.sessionId.trim()
+            : undefined
+        const machineId = typeof search.machineId === 'string' && search.machineId.trim().length > 0
+            ? search.machineId.trim()
+            : undefined
+        if (!type || !sessionId || type === 'native-codex' && !machineId) return {}
+        return { type, sessionId, ...(machineId ? { machineId } : {}) }
+    },
+    component: MonitorCreatePage,
+})
+
+const monitorDetailRoute = createRoute({
+    getParentRoute: () => monitorsRoute,
+    path: '$monitorId',
+    component: MonitorPage,
+})
+
 const sharesIndexRoute = createRoute({
     getParentRoute: () => sharesRoute,
     path: '/',
@@ -1906,6 +1949,11 @@ export const routeTree = rootRoute.addChildren([
     sharesRoute.addChildren([
         sharesIndexRoute,
         kanbanTaskRoute,
+    ]),
+    monitorsRoute.addChildren([
+        monitorsIndexRoute,
+        monitorCreateRoute,
+        monitorDetailRoute,
     ]),
     settingsRoute,
     shareRoute,

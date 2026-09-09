@@ -1,4 +1,4 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import { BottomDrawer } from '@/components/ui/BottomDrawer'
 import { useAssistantApi } from '@assistant-ui/react'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ApiClient } from '@/api/client'
@@ -13,7 +13,7 @@ import { useToast } from '@/lib/toast-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { formatScheduledTime } from '@/lib/scheduledTime'
 import { CloseIcon, ScheduleIcon } from '@/components/icons'
-import { QueueIcon, SessionDetailQueueTrigger } from '@/components/SessionDetailQueueTrigger'
+import { SessionDetailQueueTrigger } from '@/components/SessionDetailQueueTrigger'
 
 function EditIcon(props: { className?: string }) {
     return (
@@ -185,13 +185,9 @@ export function QueuedMessagesBar({
         }
     }, [queuedMessages.length])
 
-    if (queuedMessages.length === 0) {
-        return null
-    }
-
     const now = Date.now()
     const summary = getQueuedMessageSummary(queuedMessages, now)
-    const firstPreview = getQueuedMessagePreview(queuedMessages[0]!)
+    const firstPreview = queuedMessages[0] ? getQueuedMessagePreview(queuedMessages[0]) : { text: '', attachmentNames: [] }
     const firstPreviewLabel = getPreviewLabel(firstPreview, t('queuedMessages.emptyPreview'))
     const drawerDescription = summary.immediateCount > 0 && summary.scheduledCount > 0
         ? t('queuedMessages.drawerDescriptionMixed')
@@ -200,12 +196,12 @@ export function QueuedMessagesBar({
             : t('queuedMessages.drawerDescriptionScheduled')
 
     return (
-        <Dialog.Root open={open} onOpenChange={setOpen}>
-            <div
+        <>
+            {queuedMessages.length > 0 ? <div
                 className="pointer-events-none mx-auto flex w-full max-w-content justify-center px-3"
                 data-testid="queued-messages-accessory"
             >
-                <Dialog.Trigger asChild>
+
                     <SessionDetailQueueTrigger
                         testId="queued-messages-trigger"
                         label={t('queuedMessages.open', { count: queuedMessages.length })}
@@ -213,44 +209,17 @@ export function QueuedMessagesBar({
                         preview={firstPreviewLabel}
                         count={queuedMessages.length}
                         open={open}
+                        onClick={() => setOpen(true)}
                     />
-                </Dialog.Trigger>
-            </div>
 
-            <Dialog.Portal>
-                <Dialog.Overlay className="fixed inset-0 z-[60] bg-slate-950/25" />
-                <Dialog.Content
-                    data-testid="queued-messages-drawer"
-                    className="fixed inset-x-0 bottom-0 z-[61] flex max-h-[min(72dvh,38rem)] flex-col overflow-hidden rounded-t-[28px] border-x border-t border-[var(--app-border)] bg-[var(--app-bg)] pb-[max(var(--app-safe-area-bottom),0.75rem)] shadow-[0_-18px_48px_rgba(15,23,42,0.2)] animate-slide-up outline-none motion-reduce:animate-none"
-                >
-                    <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-[var(--app-border)]" aria-hidden="true" />
-                    <div className="flex shrink-0 items-start gap-3 px-5 pb-3 pt-4">
-                        <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                                <QueueIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)]" />
-                                <Dialog.Title className="text-base font-bold text-[var(--app-fg)]">
-                                    {t('queuedMessages.drawerTitle')}
-                                </Dialog.Title>
-                                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--app-subtle-bg)] px-1.5 text-[11px] font-bold tabular-nums text-[var(--app-hint)]">
-                                    {queuedMessages.length}
-                                </span>
-                            </div>
-                            <Dialog.Description
-                                className="mt-0.5 text-xs leading-5 text-[var(--app-hint)]"
-                            >
-                                {drawerDescription}
-                            </Dialog.Description>
-                        </div>
-                        <Dialog.Close
-                            type="button"
-                            aria-label={t('button.close')}
-                            className="touch-manipulation -mr-2 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                        >
-                            <CloseIcon className="h-4 w-4" />
-                        </Dialog.Close>
-                    </div>
+            </div> : null}
 
-                    <ul className="min-h-0 flex-1 divide-y divide-[var(--app-divider)] overflow-y-auto overscroll-contain px-5 pb-2 [scrollbar-width:thin]" aria-label={t('queuedMessages.drawerTitle')}>
+            <BottomDrawer open={open && queuedMessages.length > 0} onOpenChange={setOpen}
+                title={t('queuedMessages.drawerTitle')}
+                subtitle={drawerDescription}
+                testId="queued-messages-drawer"
+            >
+                    <ul className="divide-y divide-[var(--app-divider)] pb-2" aria-label={t('queuedMessages.drawerTitle')}>
                         {queuedMessages.map((message, index) => {
                             const preview = getQueuedMessagePreview(message)
                             const { text, attachmentNames } = preview
@@ -400,8 +369,7 @@ export function QueuedMessagesBar({
                             )
                         })}
                     </ul>
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+            </BottomDrawer>
+        </>
     )
 }

@@ -762,7 +762,7 @@ function AppInner() {
                         <PwaUpdateBanner />
                         <VoiceErrorBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
                         <OfflineBanner offsetFromTitleBar={Boolean(selectedSessionId)} />
-                        <div className="h-full min-h-0 flex flex-col">
+                        <div className="h-full min-h-0 flex flex-col" data-drawer-page-background>
                             <Suspense fallback={
                                 <div className="flex flex-1 items-center justify-center p-4">
                                     <LoadingState label={t('loading.session')} className="text-sm" />

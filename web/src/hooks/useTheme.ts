@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { getTelegramWebApp } from './useTelegram'
+import { setBrowserThemeColor } from '@/lib/browser-theme-color'
 
 type ColorScheme = 'light' | 'dark' | 'oled'
 
@@ -86,15 +87,7 @@ function isIOS(): boolean {
 function applyBrowserThemeColor(scheme: ColorScheme): void {
     if (!isBrowser()) return
 
-    let meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-    if (!meta) {
-        meta = document.createElement('meta')
-        meta.name = 'theme-color'
-        document.head.appendChild(meta)
-    }
-
-    meta.content = THEME_COLORS[scheme]
-    meta.removeAttribute('media')
+    setBrowserThemeColor(THEME_COLORS[scheme])
 }
 
 export function getThemeColor(scheme: ColorScheme): string {

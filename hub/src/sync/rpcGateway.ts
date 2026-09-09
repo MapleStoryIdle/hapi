@@ -273,13 +273,14 @@ export class RpcGateway {
         effort?: string,
         permissionMode?: PermissionMode,
         serviceTier?: string,
-        forkSessionId?: string
+        forkSessionId?: string,
+        approvedNewDirectoryCreation?: boolean
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         try {
             const result = await this.machineRpc(
                 machineId,
                 RPC_METHODS.SpawnHappySession,
-                { type: 'spawn-in-directory', directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, resumeSessionId, effort, permissionMode, serviceTier, forkSessionId }
+                { type: 'spawn-in-directory', directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, resumeSessionId, effort, permissionMode, serviceTier, forkSessionId, approvedNewDirectoryCreation }
             )
             if (result && typeof result === 'object') {
                 const obj = result as Record<string, unknown>
@@ -320,6 +321,10 @@ export class RpcGateway {
             return { success: false, error: 'Unexpected list-directory result' }
         }
         return result as RpcListDirectoryResponse
+    }
+
+    async browseSessionFiles(machineId: string, cwd: string, request: import('@hapi/protocol/apiTypes').SessionFileBrowserRequest): Promise<import('@hapi/protocol/apiTypes').SessionFileBrowserResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.BrowseSessionFiles, { cwd, request }) as import('@hapi/protocol/apiTypes').SessionFileBrowserResponse
     }
 
     async listCodexLocalSessions(

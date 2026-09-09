@@ -73,6 +73,13 @@ function createStaticApp(mode: StaticMode) {
 
 for (const mode of ['embedded', 'filesystem'] as const) {
     describe(`${mode} static delivery`, () => {
+        test('allows cross-origin Bark settings PUT preflight', async () => {
+            const response = await createStaticApp(mode).request('/api/push/bark', {
+                method: 'OPTIONS', headers: { origin: 'https://pwa.example', 'access-control-request-method': 'PUT', 'access-control-request-headers': 'authorization,content-type' }
+            })
+            expect(response.status).toBe(204)
+            expect(response.headers.get('access-control-allow-methods')?.split(',')).toContain('PUT')
+        })
         test('serves an existing hashed asset with immutable caching', async () => {
             const response = await createStaticApp(mode).request('/assets/app-abc123.js')
 

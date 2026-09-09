@@ -405,3 +405,37 @@
 @media (prefers-reduced-motion: reduce) {
     .chat-detail-tabs::before { transition: none; }
 }
+
+/* Web pages own their scrolling; only the drawer header and safe area stay outside. */
+.chat-overlay[data-density="compact"] [data-chat-drawer-body].chat-web-preview-body {
+    padding: 0;
+    overflow: hidden;
+}
+
+.chat-reader { font-size: 16px; line-height: 1.75; overflow-wrap: anywhere; color: var(--app-fg); }
+.chat-reader p, .chat-reader ul, .chat-reader ol, .chat-reader pre, .chat-reader blockquote, .chat-reader table { margin-block: 1em; }
+.chat-reader h1, .chat-reader h2, .chat-reader h3, .chat-reader h4, .chat-reader h5, .chat-reader h6 { font-weight: 600; line-height: 1.4; margin-block: 1.2em .5em; }
+.chat-reader h1 { font-size: 1.5em; }
+.chat-reader h2 { font-size: 1.25em; }
+.chat-reader ul { list-style: disc; padding-inline-start: 1.5em; }
+.chat-reader ol { list-style: decimal; padding-inline-start: 1.5em; }
+.chat-reader pre { overflow-x: auto; padding: 12px; border-radius: 12px; background: var(--app-subtle-bg); white-space: pre; font-size: 13px; }
+.chat-reader code { font-family: ui-monospace, monospace; }
+.chat-reader a { color: var(--chat-sheet-accent); text-decoration: none; }
+.chat-reader table { display: block; overflow-x: auto; }
+.chat-reader th, .chat-reader td { padding: 8px; border: 1px solid var(--app-border); }
+.chat-reader blockquote { border-inline-start: 3px solid var(--app-border); padding-inline-start: 12px; }
+.chat-reader img { display: block; max-width: 100%; height: auto; margin-inline: auto; }
+.chat-reader figure { margin-block: 1em; }
+.chat-reader figcaption, .chat-reader-image-fallback { color: var(--app-hint); font-size: 14px; }
+.chat-reader figcaption { margin-top: 8px; text-align: center; }
+.chat-reader-image-fallback { display: inline-block; padding-block: 12px; }
+
+/* File browser only: eliminate stacked header/body spacing, keep 44px controls. */
+.chat-overlay[data-testid="session-files-drawer"] .chat-overlay-header {
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+.chat-overlay[data-testid="session-files-drawer"] .chat-overlay-header > div:first-child {
+    padding-top: 0;
+}

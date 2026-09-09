@@ -828,7 +828,7 @@ describe('CodexSessionContextPage', () => {
         const composer = screen.getByRole('textbox')
         expect(composer).toBeInTheDocument()
         openNativeSessionMenu()
-        expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeDisabled()
+        expect(screen.getByRole('menuitem', { name: 'Fork' })).toBeDisabled()
     })
 
     it('shows a confirmed local-input wait instead of claiming the session is stuck', async () => {
@@ -1108,9 +1108,9 @@ describe('CodexSessionContextPage', () => {
         expect(screen.getByRole('textbox')).toBeInTheDocument()
         // Fork is deliberately kept in the single right-hand action menu,
         // leaving header room for the live Codex quota badge.
-        expect(screen.queryByRole('button', { name: 'Fork to new session' })).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Fork' })).toBeNull()
         openNativeSessionMenu()
-        expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: 'Fork' })).toBeInTheDocument()
         // 正常会话也以 user-text / agent-text 线程节点渲染两端消息。
         expect(screen.getByText('Original prompt').closest('[id^="hapi-message-user-text:"]')).not.toBeNull()
         expect(screen.getByText('Original response').closest('[id^="hapi-message-agent-text:"]')).not.toBeNull()
@@ -1219,7 +1219,7 @@ describe('CodexSessionContextPage', () => {
         })
         openNativeSessionMenu()
         await waitFor(() => {
-            expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeDisabled()
+            expect(screen.getByRole('menuitem', { name: 'Fork' })).toBeDisabled()
         })
         await new Promise((resolve) => setTimeout(resolve, 120))
         expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
@@ -1290,7 +1290,7 @@ describe('CodexSessionContextPage', () => {
 
         expect(await screen.findByText('Revision two')).toBeInTheDocument()
         openNativeSessionMenu()
-        expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).not.toBeDisabled()
+        expect(screen.getByRole('menuitem', { name: 'Fork' })).not.toBeDisabled()
     })
 
     it('does not let React Query duplicate a permanent snapshot error', async () => {
@@ -1865,7 +1865,7 @@ describe('CodexSessionContextPage', () => {
         openNativeSessionMenu()
         await waitFor(() => {
         expect(screen.getByRole('textbox')).not.toBeDisabled()
-            expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeDisabled()
+            expect(screen.getByRole('menuitem', { name: 'Fork' })).toBeDisabled()
         })
         expect(screen.queryByTestId('codex-direct-send-phase-reasoning')).not.toBeInTheDocument()
     })
@@ -2018,7 +2018,7 @@ describe('CodexSessionContextPage', () => {
         expect(trigger).toBeInTheDocument()
         expect(trigger).toHaveTextContent('Wait for the current turn')
         openNativeSessionMenu()
-        expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeDisabled()
+        expect(screen.getByRole('menuitem', { name: 'Fork' })).toBeDisabled()
 
         fireEvent.click(trigger)
         const drawer = await screen.findByTestId('native-queued-messages-drawer')
@@ -2286,9 +2286,12 @@ describe('CodexSessionContextPage', () => {
     })
 
     it('updates display metadata from an unchanged conditional snapshot', async () => {
-        const { api } = renderPage()
+        const { api } = renderPage({ realtimeAvailable: true, realtimeConnected: true })
 
         await screen.findByText('Original response')
+        await waitFor(() => {
+            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2)
+        })
         ;(api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
             success: true,
             unchanged: true,
@@ -2306,8 +2309,11 @@ describe('CodexSessionContextPage', () => {
             timing: { cache: 'hit', durationMs: 0 }
         })
 
-        openNativeSessionMenu()
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh' }))
+        publishNativeCodexSessionUpdated({
+            type: 'codex-session-updated',
+            machineId: 'machine-1',
+            codexSessionId: 'codex-thread-1'
+        })
 
         expect(await screen.findByRole('button', { name: 'Renamed native task' })).toBeInTheDocument()
     })
@@ -2318,19 +2324,14 @@ describe('CodexSessionContextPage', () => {
         await screen.findByText('Original response')
         openNativeSessionMenu()
 
-        expect(screen.getByRole('menuitem', { name: 'Refresh' })).toBeInTheDocument()
-        expect(screen.getByRole('menuitem', { name: 'Fork to new session' })).toBeInTheDocument()
-        expect(screen.getByRole('menuitem', { name: 'Conversation outline' })).toBeInTheDocument()
+        expect(screen.queryByRole('menuitem', { name: 'Refresh' })).toBeNull()
+        expect(screen.getByRole('menuitem', { name: 'Fork' })).toBeInTheDocument()
+        expect(screen.queryByRole('menuitem', { name: 'Conversation outline' })).toBeNull()
+        expect(screen.queryByRole('menuitem', { name: /export/i })).toBeNull()
         expect(screen.getByRole('menuitem', { name: 'Rename' })).toBeInTheDocument()
         expect(screen.queryByRole('menuitem', { name: /Archive/ })).toBeNull()
         expect(screen.queryByRole('menuitem', { name: /Delete/ })).toBeNull()
 
-        const snapshotCallsBeforeRefresh = (api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh' }))
-        await waitFor(() => {
-            expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length)
-                .toBeGreaterThan(snapshotCallsBeforeRefresh)
-        })
     })
 
     it('renames the native thread with the shared dialog and updates its title after confirmation', async () => {
@@ -2518,7 +2519,7 @@ describe('CodexSessionContextPage', () => {
 
         await screen.findByText('Original response')
         openNativeSessionMenu()
-        const forkItem = screen.getByRole('menuitem', { name: 'Fork to new session' })
+        const forkItem = screen.getByRole('menuitem', { name: 'Fork' })
         await waitFor(() => expect(forkItem).not.toBeDisabled())
         fireEvent.click(forkItem)
 
@@ -2538,7 +2539,7 @@ describe('CodexSessionContextPage', () => {
 
         await screen.findByText('Original response')
         openNativeSessionMenu()
-        const forkItem = screen.getByRole('menuitem', { name: 'Fork to new session' })
+        const forkItem = screen.getByRole('menuitem', { name: 'Fork' })
         await waitFor(() => expect(forkItem).not.toBeDisabled())
         fireEvent.click(forkItem)
 
@@ -2559,7 +2560,7 @@ describe('CodexSessionContextPage', () => {
 
         await screen.findByText('Original response')
         openNativeSessionMenu()
-        const forkItem = screen.getByRole('menuitem', { name: 'Fork to new session' })
+        const forkItem = screen.getByRole('menuitem', { name: 'Fork' })
         await waitFor(() => expect(forkItem).not.toBeDisabled())
         fireEvent.click(forkItem)
 

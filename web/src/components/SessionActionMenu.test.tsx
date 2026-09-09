@@ -74,12 +74,28 @@ describe('SessionActionMenu - Reopen action', () => {
 })
 
 describe('SessionActionMenu - capability-scoped actions', () => {
+    it('orders compact primary actions before lifecycle actions', () => {
+        renderMenu({ onToggleFiles: vi.fn(), onGitBranches: vi.fn(), onFork: vi.fn(), onCreateMonitor: vi.fn() })
+        expect(screen.getAllByRole('menuitem').slice(0, 4).map(item => item.textContent)).toEqual(['Files', 'Git', 'Fork', 'Monitor'])
+    })
+
+    it('creates a monitor and closes the menu when the source session supports it', () => {
+        const onCreateMonitor = vi.fn()
+        const onClose = vi.fn()
+        renderMenu({ onCreateMonitor, onClose })
+
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Monitor' }))
+
+        expect(onCreateMonitor).toHaveBeenCalledTimes(1)
+        expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
     it('opens the shared Git branch picker entry when a Git project is available', () => {
         const onGitBranches = vi.fn()
         const onClose = vi.fn()
         renderMenu({ onGitBranches, onClose })
 
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Git branches' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Git' }))
 
         expect(onGitBranches).toHaveBeenCalledTimes(1)
         expect(onClose).toHaveBeenCalledTimes(1)

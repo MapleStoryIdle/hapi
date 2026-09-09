@@ -777,13 +777,16 @@ function ToolGroupDetailSurface(props: {
     metadata: SessionMetadataSummary | null
     onClose: () => void
 }) {
-    if (!props.selectedTool) return null
+    const lastTool = useRef(props.selectedTool)
+    useEffect(() => { if (props.selectedTool) lastTool.current = props.selectedTool }, [props.selectedTool])
+    const selectedTool = props.selectedTool ?? lastTool.current
+    if (!selectedTool) return null
 
-    if (isTerminalExecutionTool(props.selectedTool.tool.name)) {
+    if (isTerminalExecutionTool(selectedTool.tool.name)) {
         return (
             <TerminalExecutionDrawer
-                block={props.selectedTool}
-                open
+                block={selectedTool}
+                open={props.selectedTool !== null}
                 onOpenChange={(nextOpen) => {
                     if (!nextOpen) props.onClose()
                 }}
@@ -791,17 +794,17 @@ function ToolGroupDetailSurface(props: {
         )
     }
 
-    const useFileMutationDialog = getFileMutationDialogSummary(props.selectedTool, props.metadata) !== null
+    const useFileMutationDialog = getFileMutationDialogSummary(selectedTool, props.metadata) !== null
 
     return (
-        <ChatDetailDialog open onOpenChange={(nextOpen) => {
+        <ChatDetailDialog open={props.selectedTool !== null} onOpenChange={(nextOpen) => {
             if (!nextOpen) props.onClose()
         }}
             title={props.title}
             desktopClassName={cn('max-w-2xl', useFileMutationDialog ? FILE_MUTATION_DIALOG_CLASS_NAME : null)}
-            header={<ToolDetailDialogHeader block={props.selectedTool} metadata={props.metadata} fallbackTitle={props.title} />}
+            header={<ToolDetailDialogHeader block={selectedTool} metadata={props.metadata} fallbackTitle={props.title} />}
         >
-            <ToolDetailDialogContent block={props.selectedTool} metadata={props.metadata} />
+            <ToolDetailDialogContent block={selectedTool} metadata={props.metadata} />
         </ChatDetailDialog>
     )
 }

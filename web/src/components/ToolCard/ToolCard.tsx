@@ -1,7 +1,8 @@
 import type { ToolCallBlock } from '@/chat/types'
 import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
-import { memo, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { memo, useContext, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { NativeQuestionCards } from '@/components/NativeQuestionCards'
 import { isObject, safeStringify } from '@hapi/protocol'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { CodeBlock } from '@/components/CodeBlock'
@@ -592,4 +593,8 @@ function ToolCardInner(props: ToolCardProps) {
     )
 }
 
-export const ToolCard = memo(ToolCardInner)
+export const ToolCard = memo(function ToolCard(props: ToolCardProps) {
+    const cards = useContext(NativeQuestionCards)
+    if (cards.has(props.block.tool.id)) return cards.get(props.block.tool.id)
+    return <ToolCardInner {...props} />
+})

@@ -7,6 +7,7 @@ import { readdir, realpath, stat } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { logger } from '@/ui/logger'
+import { browseSessionFiles } from '@/modules/common/sessionFileBrowser'
 import { configuration } from '@/configuration'
 import type {
     BinaryFileReadRequest,
@@ -177,6 +178,8 @@ interface GetCodexLocalSessionStatusRequest {
 }
 
 interface ControlCodexLocalSessionRequest {
+    requestId?: unknown
+    answers?: unknown
     sessionId?: unknown
     action?: unknown
     expectedTurnId?: unknown
@@ -471,6 +474,9 @@ export class ApiMachineClient {
         this.startNativeCodexAttachmentCleanup()
 
         registerCommonHandlers(this.rpcHandlerManager, getInvokedCwd())
+        this.rpcHandlerManager.registerHandler<{ cwd: string; request: unknown }, Awaited<ReturnType<typeof browseSessionFiles>>>(
+            RPC_METHODS.BrowseSessionFiles, params => browseSessionFiles(params.cwd, params.request)
+        )
         this.rpcHandlerManager.registerHandler<LocalServiceTunnelRequest, LocalServiceTunnelResponse>(
             LOCAL_SERVICE_RPC,
             (request) => this.localServiceTunnels.open(request)
@@ -639,6 +645,8 @@ export class ApiMachineClient {
                 const action = NativeCodexSessionControlActionSchema.safeParse({
                     action: params?.action,
                     ...(params?.expectedTurnId === undefined ? {} : { expectedTurnId: params.expectedTurnId }),
+                    ...(params?.requestId === undefined ? {} : { requestId: params.requestId }),
+                    ...(params?.answers === undefined ? {} : { answers: params.answers }),
                     ...(params?.configuration === undefined ? {} : { configuration: params.configuration })
                 })
                 if (!action.success) {

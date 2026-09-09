@@ -2,13 +2,18 @@ import type { AgentType, NewSessionReasoningEffort } from './types'
 import { CODEX_REASONING_EFFORT_OPTIONS, OPENCODE_REASONING_EFFORT_OPTIONS } from './types'
 import { useTranslation } from '@/lib/use-translation'
 
-export function ReasoningEffortSelector(props: {
+type ReasoningEffortOption<TValue extends string> = {
+    value: TValue
+    label: string
+}
+
+export function ReasoningEffortSelector<TValue extends string = NewSessionReasoningEffort>(props: {
     agent: AgentType
-    value: NewSessionReasoningEffort
-    codexOptions?: { value: NewSessionReasoningEffort; label: string }[]
+    value: TValue
+    codexOptions?: ReasoningEffortOption<TValue>[]
     isDisabled: boolean
     inline?: boolean
-    onChange: (value: NewSessionReasoningEffort) => void
+    onChange: (value: TValue) => void
 }) {
     const { t } = useTranslation()
 
@@ -16,9 +21,9 @@ export function ReasoningEffortSelector(props: {
         return null
     }
 
-    const options = props.agent === 'opencode'
-        ? OPENCODE_REASONING_EFFORT_OPTIONS
-        : props.codexOptions ?? CODEX_REASONING_EFFORT_OPTIONS
+    const options: ReasoningEffortOption<TValue>[] = props.agent === 'opencode'
+        ? OPENCODE_REASONING_EFFORT_OPTIONS as ReasoningEffortOption<TValue>[]
+        : props.codexOptions ?? CODEX_REASONING_EFFORT_OPTIONS as ReasoningEffortOption<TValue>[]
 
     return (
         <div className={props.inline
@@ -32,8 +37,9 @@ export function ReasoningEffortSelector(props: {
                 ) : null}
             </label>
             <select
+                aria-label={t('newSession.reasoningEffort')}
                 value={props.value}
-                onChange={(e) => props.onChange(e.target.value as NewSessionReasoningEffort)}
+                onChange={(e) => props.onChange(e.target.value as TValue)}
                 disabled={props.isDisabled}
                 className="h-11 w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 font-sans text-sm text-[var(--app-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
             >

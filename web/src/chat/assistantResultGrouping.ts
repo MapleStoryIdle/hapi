@@ -2,6 +2,7 @@ import type { ChatBlock, ToolCallBlock } from '@/chat/types'
 import { isToolGroupBlock, summarizeToolGroup, type ToolGroupBlock, type VisibleChatBlock } from '@/chat/toolGroups'
 
 function isAssistantVisibleBlock(block: VisibleChatBlock): boolean {
+    if (block.kind === 'tool-call' && ['request_user_input', 'request_user_input_async'].includes(block.tool.name.split('.').pop() ?? '')) return false
     if (block.kind === 'user-text') return false
     if (block.kind === 'question-answer') return false
     if (block.kind === 'agent-event') return false

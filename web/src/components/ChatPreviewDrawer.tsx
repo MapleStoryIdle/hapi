@@ -2,8 +2,9 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { DetailCopyButton } from '@/components/ui/DetailCopyButton'
 import { basename, resolveFullPath } from '@/utils/path'
 import type { OpenLocalServiceResponse } from '@hapi/protocol/localServices'
-import { ApiError } from '@/api/client'
+import { ApiError, type ApiClient } from '@/api/client'
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useOptionalAppContext } from '@/lib/app-context'
 import { useQuery } from '@tanstack/react-query'
 import type { ChatFilePreview, ChatPreview, ChatUrlPreview } from './ChatPreviewContext'
 import { ChatDetailDialog } from '@/components/ui/ChatDetailDialog'
@@ -25,7 +26,21 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
     ico: 'image/x-icon', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
     svg: 'image/svg+xml', webp: 'image/webp'
 }
-type PageMetadata = { title: string; icon: string | null }
+type PageMetadata = { title: string; icon: string | null; readonly?: boolean }
+
+
+function PublicUrlPreview({ preview, api, onMetadata }: { preview: ChatUrlPreview; api: ApiClient; onMetadata: (metadata: PageMetadata | null) => void }) {
+    const { t } = useTranslation()
+    const page = useQuery({ queryKey: ['web-reader', preview.url], queryFn: () => api.readWebPage(preview.url), retry: false, staleTime: 60_000, gcTime: 60_000, refetchOnWindowFocus: false, refetchOnReconnect: false })
+    useEffect(() => {
+        onMetadata(null)
+    }, [page.data, onMetadata])
+    if (page.isPending) return <p role="status" className="chat-sheet-feedback">{t('loading')}</p>
+    if (page.error) return <div className="p-4"><ErrorMessage message={t('chatPreview.readerFailed')} retry={() => { void page.refetch() }} /></div>
+    // Also suppress previously cached reader responses during an in-place upgrade.
+    if (page.data.mode !== 'embed') return <div role="status" className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-[var(--app-hint)]">{t('chatPreview.blocked')}</div>
+    return <UrlPreview preview={preview} onMetadata={onMetadata} />
+}
 
 function ErrorMessage({ message, retry }: { message: string; retry: () => void }) {
     const { t } = useTranslation()
@@ -35,7 +50,7 @@ function ErrorMessage({ message, retry }: { message: string; retry: () => void }
     </div>
 }
 
-function FilePreview({ preview }: { preview: ChatFilePreview }) {
+export function FilePreview({ preview }: { preview: ChatFilePreview }) {
     const { t } = useTranslation()
     const [mode, setMode] = useState<'source' | 'preview' | 'diff'>(preview.diff ? 'diff' : /\.mdx?$/i.test(preview.path) && !preview.line ? 'preview' : 'source')
     const source = preview.source
@@ -46,12 +61,14 @@ function FilePreview({ preview }: { preview: ChatFilePreview }) {
     const file = useQuery({
         queryKey: native ? queryKeys.codexSessionFile(source.machineId, source.sessionId, preview.path) : queryKeys.sessionFile(source.sessionId, preview.path),
         queryFn: () => native ? preview.api.readCodexSessionFile(source.sessionId, source.machineId, preview.path) : preview.api.readSessionFile(source.sessionId, preview.path),
-        enabled: !image,
+        enabled: !image && mode !== 'diff',
     })
     const diff = useQuery({
-        queryKey: queryKeys.gitFileDiff(source.sessionId, preview.path, preview.staged),
-        queryFn: () => preview.api.getGitDiffFile(source.sessionId, preview.path, preview.staged),
-        enabled: !native && mode === 'diff' && !image,
+        queryKey: native ? ['native-file-diff', source.machineId, source.sessionId, preview.path, preview.staged] : queryKeys.gitFileDiff(source.sessionId, preview.path, preview.staged),
+        queryFn: () => native
+            ? preview.api.browseCodexSessionFiles(source.sessionId, source.machineId, { action: 'diff', path: preview.path, staged: preview.staged })
+            : preview.api.getGitDiffFile(source.sessionId, preview.path, preview.staged),
+        enabled: mode === 'diff' && !image,
     })
     const blob = useQuery({
         queryKey: native
@@ -99,7 +116,7 @@ function FilePreview({ preview }: { preview: ChatFilePreview }) {
     if (image) return imageUrl ? <img src={imageUrl} alt={preview.path} onError={() => setImageFailed(true)} className="chat-sheet-group mx-auto max-h-[50dvh] max-w-full object-contain p-3" /> : null
     const data = mode === 'diff' ? diff.data : file.data
     const failed = data && !data.success
-    const modes: Array<'source' | 'preview' | 'diff'> = ['source', ...(/\.mdx?$/i.test(preview.path) ? ['preview'] as const : []), ...(!native ? ['diff'] as const : [])]
+    const modes: Array<'source' | 'preview' | 'diff'> = ['source', ...(/\.mdx?$/i.test(preview.path) ? ['preview'] as const : []), ...(!native || preview.diff ? ['diff'] as const : [])]
     return <div className="space-y-3">
         {modes.length > 1 ? <div className="chat-segmented chat-detail-tabs" role="group" aria-label={t('chatPreview.view')}
             style={{ '--chat-tab-count': modes.length, '--chat-tab-index': modes.indexOf(mode) } as CSSProperties}>
@@ -184,25 +201,26 @@ function UrlPreview({ preview, onMetadata }: { preview: ChatUrlPreview; onMetada
         const timeout = window.setTimeout(() => setFrameState('failed'), FRAME_LOAD_TIMEOUT_MS)
         return () => window.clearTimeout(timeout)
     }, [url, frameAttempt, frameState])
-    return <div className="flex h-[60dvh] min-h-0 flex-col gap-3">
-        {error || frameState === 'failed' ? <ErrorMessage message={error ?? t(preview.localService ? 'localService.failed' : 'chatPreview.failed')} retry={() => {
+    return <div className="flex h-full min-h-0 flex-1 flex-col">
+        {error || frameState === 'failed' ? <div className="p-4"><ErrorMessage message={error ?? t(preview.localService ? 'localService.failed' : 'chatPreview.failed')} retry={() => {
             setFrameState('loading')
             setFrameAttempt((value) => value + 1)
             if (preview.localService) {
                 setLocalUrl(null)
                 setAttempt((value) => value + 1)
             }
-        }} /> : url ? <div className="relative min-h-0 flex-1">
+        }} /></div> : url ? <div className="relative min-h-0 flex-1">
             {frameState === 'loading' ? <p role="status" className="chat-sheet-feedback absolute inset-0 z-[1] m-0 flex items-center justify-center">{t('loading')}</p> : null}
             <iframe ref={frameRef} key={`${url}:${frameAttempt}`} title={t('chatPreview.web')} src={url} referrerPolicy="no-referrer"
                 sandbox="allow-scripts allow-forms" onLoad={() => setFrameState('ready')} onError={() => setFrameState('failed')}
-                className="h-full min-h-0 w-full rounded-xl border border-[var(--app-border)] bg-white" />
+                className="block h-full min-h-0 w-full border-0 bg-white" />
         </div> : <p role="status" className="chat-sheet-feedback">{t('localService.opening')}</p>}
     </div>
 }
 
 export default function ChatPreviewDrawer(props: { preview: ChatPreview; open: boolean; onOpenChange: (open: boolean) => void }) {
     const { preview } = props
+    const app = useOptionalAppContext()
     const { t } = useTranslation()
     const [page, setPage] = useState<{ preview: ChatPreview; metadata: PageMetadata } | null>(null)
     const [failedIcon, setFailedIcon] = useState<string | null>(null)
@@ -225,13 +243,18 @@ export default function ChatPreviewDrawer(props: { preview: ChatPreview; open: b
                     {pageIcon ? <img src={pageIcon} alt="" width={20} height={20} referrerPolicy="no-referrer" className="size-5 object-contain" onError={() => setFailedIcon(pageIcon)} /> : <GlobeIcon className="size-5" />}
                 </span>
                 <Dialog.Title className="min-w-0 truncate" title={pageTitle}>{pageTitle}</Dialog.Title>
+                {metadata?.readonly ? <span className="shrink-0 text-xs font-medium text-[var(--app-hint)]">readonly</span> : null}
                 {/* Copy the reconnectable launch route, never an expiring embed grant. */}
                 <DetailCopyButton value={new URL(preview.url, window.location.href).href} label={t('chatPreview.copyLink')} iconOnly />
             </div>
         )}
-        testId="chat-preview-drawer" desktopClassName="max-w-4xl">
+        fixedHeight={preview.type === 'url'}
+        bodyClassName={preview.type === 'url' ? 'chat-web-preview-body' : undefined}
+        testId="chat-preview-drawer" desktopClassName={preview.type === 'url' ? 'max-w-4xl h-[70dvh]' : 'max-w-4xl'}>
         {preview.type === 'file'
             ? <FilePreview key={JSON.stringify([preview.source, preview.path, preview.line, preview.column, preview.diff])} preview={preview} />
-            : <UrlPreview key={preview.url} preview={preview} onMetadata={onMetadata} />}
+            : !preview.localService && app?.api
+                ? <PublicUrlPreview key={preview.url} preview={preview} api={app.api} onMetadata={onMetadata} />
+                : <UrlPreview key={preview.url} preview={preview} onMetadata={onMetadata} />}
     </ChatDetailDialog>
 }

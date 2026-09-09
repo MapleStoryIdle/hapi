@@ -310,6 +310,7 @@ export type CodexLocalSessionStatusResponse =
         activeClientMessageId?: string
         deliveryReceipts?: Array<{ id: string; state: 'accepted' | 'delivered' }>
         waitingForUserInput?: boolean
+        pendingUserInput?: import('@hapi/protocol/codexSessionControl').NativeCodexUserInput
         /** Current runners always include true or false. */
         controlledByCodexSsh?: boolean
         stalledSince?: number

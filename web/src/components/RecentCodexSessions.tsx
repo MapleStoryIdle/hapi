@@ -13,7 +13,6 @@ import {
 } from 'lucide'
 import {
     Activity,
-    Archive as ArchiveIconNode,
     Bot as BotIcon,
     ChevronDown,
     ChevronRight,
@@ -37,6 +36,7 @@ import { SessionThinkingIndicator } from '@/components/SessionThinkingIndicator'
 import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { useNativeCodexRealtime } from '@/lib/native-codex-realtime-context'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { SwipeArchiveRow } from '@/components/SwipeArchiveRow'
 import { useLocalDayKey } from '@/hooks/useLocalDayKey'
 import { formatShareTimelineTime, groupShareTimeline, localDateKey } from '@/lib/shareTimeline'
 import { queryKeys } from '@/lib/query-keys'
@@ -184,7 +184,7 @@ export const COMPLETED_SESSION_DIRECTORY_COLORS = [
 ] as const
 
 function normalizeDirectoryColorKey(directory: string | null): string | null {
-    return directory?.trim().replace(/\/+$/, '') || null
+    return directory?.trim().replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() || null
 }
 
 function getCompletedSessionDirectoryColorIndex(normalizedDirectory: string): number {
@@ -202,7 +202,7 @@ export function getCompletedSessionDirectoryColor(directory: string | null): str
     return COMPLETED_SESSION_DIRECTORY_COLORS[getCompletedSessionDirectoryColorIndex(normalized)]
 }
 
-/** Avoid color collisions among the first palette-sized set of visible directories. */
+/** Project names keep their color regardless of parent path or visible neighbors. */
 export function assignCompletedSessionDirectoryColors(
     directories: readonly (string | null)[]
 ): ReadonlyMap<string, string> {
@@ -212,25 +212,9 @@ export function assignCompletedSessionDirectoryColors(
             .filter((directory): directory is string => directory !== null)
     )].sort()
     const assignments = new Map<string, string>()
-    const usedColors = new Set<string>()
 
     for (const directory of normalizedDirectories) {
-        const preferredIndex = getCompletedSessionDirectoryColorIndex(directory)
-        const preferredColor = COMPLETED_SESSION_DIRECTORY_COLORS[preferredIndex]
-        let color = preferredColor
-        if (usedColors.size < COMPLETED_SESSION_DIRECTORY_COLORS.length) {
-            for (let offset = 0; offset < COMPLETED_SESSION_DIRECTORY_COLORS.length; offset += 1) {
-                const candidate = COMPLETED_SESSION_DIRECTORY_COLORS[
-                    (preferredIndex + offset) % COMPLETED_SESSION_DIRECTORY_COLORS.length
-                ]
-                if (!usedColors.has(candidate)) {
-                    color = candidate
-                    break
-                }
-            }
-        }
-        assignments.set(directory, color)
-        usedColors.add(color)
+        assignments.set(directory, COMPLETED_SESSION_DIRECTORY_COLORS[getCompletedSessionDirectoryColorIndex(directory)])
     }
     return assignments
 }
@@ -658,11 +642,12 @@ function KanbanSessionCard(props: {
 
     return (
         <li className="min-w-0">
+            <SwipeArchiveRow label={t('session.action.archive')} onArchive={() => setArchiveOpen(true)} disabled={isArchiving}>
             <div className="relative min-w-0">
                 <button
                     type="button"
                     onClick={onOpen}
-                    className={`cupertino-session-card session-kanban-card flex min-h-[5.625rem] w-full min-w-0 flex-col rounded-[14px] border border-l-[3px] border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5 pr-12 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[background-color,box-shadow,transform] hover:bg-[var(--app-subtle-bg)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${presentation.borderClassName} ${status === 'processing' ? 'session-kanban-card-thinking' : ''} ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
+                    className={`cupertino-session-card session-kanban-card flex min-h-[5.625rem] w-full min-w-0 flex-col rounded-[14px] border border-l-[3px] border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[background-color,box-shadow,transform] hover:bg-[var(--app-subtle-bg)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${presentation.borderClassName} ${status === 'processing' ? 'session-kanban-card-thinking' : ''} ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
                     style={completedDirectoryColor ? { borderLeftColor: completedDirectoryColor } : undefined}
                     aria-label={t('recentCodex.open', { title: session.title })}
                     aria-current={selected ? 'page' : undefined}
@@ -670,7 +655,7 @@ function KanbanSessionCard(props: {
                     data-kanban-directory-color={completedDirectoryColor ?? undefined}
                     data-kanban-subagent={isSubagent ? 'true' : undefined}
                 >
-                    <span className="flex w-full min-w-0 items-center gap-2 pr-2" data-kanban-card-top-row>
+                    <span className="flex w-full min-w-0 items-center gap-2 pr-8" data-kanban-card-top-row>
                         <CodexSourceIcon
                             source={session.source}
                             active={status === 'processing'}
@@ -766,20 +751,8 @@ function KanbanSessionCard(props: {
                         <Pin className="h-4 w-4" fill={pinned ? 'currentColor' : 'none'} aria-hidden="true" />
                     </button>
                 ) : null}
-                <button
-                    type="button"
-                    onClick={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        setArchiveOpen(true)
-                    }}
-                    className="absolute bottom-1 right-1 flex h-11 w-11 items-center justify-center rounded-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                    aria-label={t('session.action.archive')}
-                    title={t('session.action.archive')}
-                    data-kanban-archive
-                >
-                    <ArchiveIconNode className="h-4 w-4" aria-hidden="true" />
-                </button>
+            </div>
+            </SwipeArchiveRow>
                 <ConfirmDialog
                     isOpen={archiveOpen}
                     onClose={() => setArchiveOpen(false)}
@@ -791,7 +764,6 @@ function KanbanSessionCard(props: {
                     isPending={isArchiving}
                     destructive
                 />
-            </div>
         </li>
     )
 }

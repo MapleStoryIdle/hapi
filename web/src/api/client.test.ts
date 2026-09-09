@@ -189,6 +189,92 @@ describe('ApiClient error mapping', () => {
         expect((fetchMock.mock.calls[3]?.[1] as RequestInit).method).toBe('DELETE')
     })
 
+    it('uses monitor endpoints without ever fetching a raw webhook token', async () => {
+        const config = {
+            name: 'API health',
+            kind: 'http' as const,
+            machineId: 'machine / one',
+            directory: '/work/project',
+            agent: 'codex' as const,
+            model: '',
+            reasoningEffort: '' as const,
+            permissionMode: 'read-only' as const,
+            prompt: 'Investigate safely and propose a repair.',
+            expiresAt: null,
+            enabled: true,
+            request: {
+                url: 'https://example.test/health',
+                method: 'POST' as const,
+                headers: { accept: 'application/json' },
+                body: '{"probe":true}',
+                intervalSeconds: 60,
+                timeoutSeconds: 10,
+                expectedStatus: 200,
+                bodyIncludes: 'ok',
+                allowPrivateNetwork: false,
+                allowPost: true
+            }
+        }
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify({ monitors: [] })))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ monitor: { id: 'm / 1' } })))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ monitor: { id: 'm / 1' }, token: 'new-token' })))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ monitor: { id: 'm / 1' } })))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'rotated-token' })))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ accepted: true })))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ accepted: true })))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ accepted: true })))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ request: config.request })))
+
+        const api = new ApiClient('test-token')
+        await api.getMonitors()
+        await api.getMonitor('m / 1')
+        await api.createMonitor(config)
+        await api.updateMonitor('m / 1', config)
+        await api.rotateMonitorToken('m / 1')
+        await api.checkMonitor('m / 1')
+        await api.approveMonitorIncident('m / 1', 'incident / 1', 'immutable-plan-hash')
+        await api.closeMonitorIncident('m / 1', 'incident / 1')
+        await api.parseMonitorCurl('curl -X POST https://example.test/health')
+
+        expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+            '/api/monitors',
+            '/api/monitors/m%20%2F%201',
+            '/api/monitors',
+            '/api/monitors/m%20%2F%201',
+            '/api/monitors/m%20%2F%201/token',
+            '/api/monitors/m%20%2F%201/check',
+            '/api/monitors/m%20%2F%201/incidents/incident%20%2F%201/approve',
+            '/api/monitors/m%20%2F%201/incidents/incident%20%2F%201/close',
+            '/api/monitors/parse-curl'
+        ])
+        expect((fetchMock.mock.calls[2]?.[1] as RequestInit).body).toBe(JSON.stringify(config))
+        expect((fetchMock.mock.calls[4]?.[1] as RequestInit).method).toBe('POST')
+        expect((fetchMock.mock.calls[6]?.[1] as RequestInit).body).toBe(JSON.stringify({ planHash: 'immutable-plan-hash' }))
+        expect((fetchMock.mock.calls[7]?.[1] as RequestInit).body).toBe(JSON.stringify({}))
+        expect((fetchMock.mock.calls[8]?.[1] as RequestInit).body).toBe(JSON.stringify({ curl: 'curl -X POST https://example.test/health' }))
+    })
+
+    it('loads a server-resolved monitor target with encoded session identifiers', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+            config: { targetSession: { type: 'native-codex', sessionId: 'thread / one' } }
+        })))
+
+        const api = new ApiClient('test-token')
+        await expect(api.getMonitorSessionTarget({
+            type: 'native-codex',
+            sessionId: 'thread / one',
+            machineId: 'machine / one'
+        })).resolves.toEqual({
+            config: { targetSession: { type: 'native-codex', sessionId: 'thread / one' } }
+        })
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe(
+            '/api/monitors/session-target?type=native-codex&sessionId=thread+%2F+one&machineId=machine+%2F+one'
+        )
+        expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method ?? 'GET').toBe('GET')
+    })
+
     it('requests a runner directory Git branch with encoded identifiers', async () => {
         fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
             success: true,

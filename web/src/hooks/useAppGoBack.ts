@@ -26,6 +26,18 @@ export function useAppGoBack(): () => void {
             return
         }
 
+        // Monitor list is a secondary top-level screen; a direct link should
+        // still have a dependable way back to the session home.
+        if (pathname === '/monitors') {
+            navigate({ to: '/sessions' })
+            return
+        }
+
+        if (pathname.startsWith('/monitors/')) {
+            navigate({ to: '/monitors' })
+            return
+        }
+
         // For single file view, go back to the source surface when it is explicit.
         if (pathname.match(/^\/sessions\/[^/]+\/file$/)) {
             const from = (search && typeof search === 'object' && 'from' in search)

@@ -27,6 +27,7 @@ import {
     type SendCodexLocalSessionMessageRpcResponse
 } from '@hapi/protocol/codexTranscript'
 import { NATIVE_CODEX_PROCESSING_STALE_AFTER_MS } from './nativeTurnLifecycle'
+import { NativeCodexUserInputSchema, type NativeCodexUserInput } from '@hapi/protocol/codexSessionControl'
 import type {
     NativeCodexSessionControlState,
     NativeCodexSessionControlStore
@@ -49,7 +50,7 @@ export type NativeCodexAppServerClient = {
     request?: (method: string, params?: unknown, options?: { signal?: AbortSignal; timeoutMs?: number }) => Promise<unknown>
     disconnect: () => Promise<void>
     setNotificationHandler: (handler: ((method: string, params: unknown) => void) | null) => void
-    registerRequestHandler?: (method: string, handler: (params: unknown) => unknown) => void
+    registerRequestHandler?: (method: string, handler: (params: unknown, context?: { requestId: string | number | null }) => unknown) => void
 }
 
 export type CreateNativeCodexAppServerClient = () => NativeCodexAppServerClient
@@ -380,6 +381,12 @@ type ActiveExecSend = ActiveSendBase & {
 }
 
 type ActiveAppServerSend = ActiveSendBase & {
+    pendingUserInputs?: Array<{
+        input: NativeCodexUserInput
+        requestId: string | number | null
+        resolve: (value: { answers: Record<string, { answers: string[] }> }) => void
+        reject: (error: Error) => void
+    }>
     kind: 'app-server'
     cwd: string
     client: NativeCodexAppServerClient
@@ -1260,7 +1267,23 @@ export class NativeCodexSessionDirectSender {
         this.controlReservations.add(sessionId)
         let result: NativeCodexSessionControlResponse | null = null
         try {
-            if (action.action === 'configure') {
+            if (action.action === 'answerUserInput') {
+                const active = this.activeSends.get(sessionId)
+                const pending = active?.kind === 'app-server'
+                    ? active.pendingUserInputs?.find((entry) => entry.input.itemId === action.requestId && entry.input.turnId === action.expectedTurnId)
+                    : undefined
+                if (!pending || pending.input.itemId !== action.requestId || pending.input.turnId !== action.expectedTurnId) {
+                    return { success: false, code: 'turn_changed', error: 'This question is no longer pending. Refresh before answering.' }
+                }
+                const ids = pending.input.questions.map((question) => question.id)
+                if (Object.keys(action.answers).length !== ids.length || ids.some((id) => !action.answers[id]?.answers.some((answer) => answer.trim()))) {
+                    return { success: false, code: 'invalid_request', error: 'Answer every question before submitting.' }
+                }
+                if (active?.kind === 'app-server') active.pendingUserInputs = active.pendingUserInputs?.filter((entry) => entry !== pending)
+                pending.resolve({ answers: action.answers })
+                this.notifyStateChange(sessionId)
+                result = { success: true, controls: this.getControls(sessionId, context) }
+            } else if (action.action === 'configure') {
                 result = await this.configure(sessionId, action.configuration, context)
             } else if (action.action === 'resumeQueue') {
                 result = await this.resumeQueue(sessionId, context)
@@ -1822,6 +1845,10 @@ export class NativeCodexSessionDirectSender {
                 startedAt: active.startedAt,
                 ...(active.clientMessageId ? { activeClientMessageId: active.clientMessageId } : {}),
                 progress: { ...active.progress },
+                ...(active.kind === 'app-server' && active.pendingUserInputs?.[0] ? {
+                    waitingForUserInput: true,
+                    pendingUserInput: active.pendingUserInputs[0].input
+                } : {}),
                 ...(stalledSince === null ? {} : { stalledSince }),
                 queuedMessages
             }
@@ -2730,9 +2757,20 @@ export class NativeCodexSessionDirectSender {
             client.setNotificationHandler((method, params) => {
                 this.handleBridgeNotification(sessionId, active, method, params)
             })
-            // A short-lived SHAPI bridge has no local choice UI. Cancel this
-            // primitive so it cannot become a fake local wait.
-            client.registerRequestHandler?.('item/tool/requestUserInput', () => ({ decision: 'cancel' }))
+            client.registerRequestHandler?.('item/tool/requestUserInput', (params, context) => {
+                const parsed = NativeCodexUserInputSchema.safeParse(params)
+                if (!parsed.success || parsed.data.threadId !== sessionId || !this.isCurrentActive(sessionId, active)
+                    || (active.turnId && parsed.data.turnId !== active.turnId)
+                    || (active.pendingUserInputs?.length ?? 0) >= 10
+                    || active.pendingUserInputs?.some((entry) => entry.input.itemId === parsed.data.itemId)) {
+                    throw new Error('Cannot route this native question to its owning turn')
+                }
+                return new Promise<{ answers: Record<string, { answers: string[] }> }>((resolve, reject) => {
+                    active.pendingUserInputs ??= []
+                    active.pendingUserInputs.push({ input: parsed.data, requestId: context?.requestId ?? null, resolve, reject })
+                    this.notifyStateChange(sessionId)
+                })
+            })
         } catch {
             this.activeSends.delete(sessionId)
             this.disposeBridge(active)
@@ -2966,6 +3004,18 @@ export class NativeCodexSessionDirectSender {
         const turnId = getNotificationTurnId(params)
         if (threadId && threadId !== sessionId) return
         if (active.turnId && turnId && turnId !== active.turnId) return
+
+        if (method === 'serverRequest/resolved') {
+            if (threadId !== sessionId || !params || typeof params !== 'object' || !('requestId' in params)) return
+            const pending = active.pendingUserInputs?.find(entry => entry.requestId !== null && entry.requestId === params.requestId)
+            if (!pending) return
+            active.pendingUserInputs = active.pendingUserInputs?.filter(entry => entry !== pending)
+            // Release the local waiter only. The shared transport has already
+            // consumed the resolution and must not send a second RPC response.
+            pending.resolve({ answers: {} })
+            this.notifyStateChange(sessionId)
+            return
+        }
 
         if (
             method === 'thread/status/changed'
@@ -3344,6 +3394,10 @@ export class NativeCodexSessionDirectSender {
     }
 
     private disposeBridge(active: ActiveAppServerSend): void {
+        // A terminal/disconnected bridge cannot accept stale answers. Never
+        // manufacture an answer or an approval when its transport is gone.
+        const pending = active.pendingUserInputs ?? []
+        delete active.pendingUserInputs
         if (active.lifecycleTimer) {
             clearTimeout(active.lifecycleTimer)
             active.lifecycleTimer = null
@@ -3354,6 +3408,7 @@ export class NativeCodexSessionDirectSender {
             // Disconnection is best effort; the client has no more state owner.
         }
         void active.client.disconnect().catch(() => {})
+        for (const entry of pending) entry.reject(new Error('The native question connection has closed'))
     }
 
     private disposeExec(active: ActiveExecSend): void {

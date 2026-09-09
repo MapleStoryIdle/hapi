@@ -2072,6 +2072,26 @@ export function createCodexDesktopRoutes(options: {
         }
     })
 
+    app.post('/codex/sessions/:id/files', async (c) => {
+        const { SessionFileBrowserRequestSchema } = await import('@hapi/protocol/apiTypes')
+        const parsed = SessionFileBrowserRequestSchema.safeParse(await c.req.json().catch(() => null))
+        if (!parsed.success) return c.json({ success: false, error: 'Invalid file browser request' }, 400)
+        const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
+        if (!machineId) return c.json({ success: false, error: 'machineId is required' }, 400)
+        const engine = options.getSyncEngine()
+        const target = resolveDirectCodexLocalSessionTarget({ engine, namespace: c.get('namespace'), machineId })
+        if (target.type === 'error') return c.json({ success: false, error: target.message }, target.status)
+        try {
+            const session = await engine!.readCodexLocalSession(target.machine.id, c.req.param('id'), { limit: 1 })
+            if (!session.success) return c.json({ success: false, error: 'Codex session not found' }, 404)
+            const cwd = session.data.session.cwd?.trim()
+            if (!cwd) return c.json({ success: false, error: 'Codex session path is unavailable' }, 400)
+            return c.json(await engine!.browseSessionFiles(target.machine.id, cwd, parsed.data))
+        } catch {
+            return c.json({ success: false, error: 'File browser unavailable' }, 502)
+        }
+    })
+
     app.get('/codex/sessions/:id/file', async (c) => {
         const filePath = c.req.query('path')?.trim()
         if (!filePath) {

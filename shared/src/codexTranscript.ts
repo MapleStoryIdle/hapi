@@ -272,6 +272,7 @@ export type CodexLocalSessionDirectSendRecoveryReason =
 
 export type CodexLocalSessionStatusRpcResponse = {
     success: true
+    pendingUserInput?: import('./codexSessionControl').NativeCodexUserInput
     status: CodexLocalSessionRunState
     controls?: NativeCodexSessionControls
     /** Current native turn identity only; plan contents stay in snapshot RPC. */
@@ -1717,14 +1718,15 @@ export type CodexTranscriptImportAccumulator = {
     messages: CodexImportedMessageContent[]
     canonicalChatMessageIndexByRolloutKey: Map<string, number>
     userMessageMirrorDeduper: ReturnType<typeof createCodexUserMessageMirrorDeduper>
-    /** Tool calls whose questions and answers must remain on the native client. */
-    localOnlyCallIds: Set<string>
     startedAtByCallId: Map<string, number>
     toolResultIndexesByCallId: Map<string, number[]>
     pendingHeartbeatTimestamp?: number
     pendingReasoningIndex?: number
     pendingReasoningParts: string[]
     reasoningFingerprintsInCurrentTurn: Set<string>
+    completionTurnId: string | null
+    completionTurnStartIndex: number
+    completionTurnSeen: boolean
     /** The transcript-owned current native turn. Never inferred from reasoning. */
     activePlanTurnId: string | null
     /** Valid update_plan calls await their matching successful tool output. */
@@ -1738,11 +1740,13 @@ export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportA
         messages: [],
         canonicalChatMessageIndexByRolloutKey: new Map(),
         userMessageMirrorDeduper: createCodexUserMessageMirrorDeduper(),
-        localOnlyCallIds: new Set(),
         startedAtByCallId: new Map(),
         toolResultIndexesByCallId: new Map(),
         pendingReasoningParts: [],
         reasoningFingerprintsInCurrentTurn: new Set(),
+        completionTurnId: null,
+        completionTurnStartIndex: 0,
+        completionTurnSeen: false,
         activePlanTurnId: null,
         pendingPlansByCallId: new Map(),
         plan: null
@@ -2030,31 +2034,43 @@ export function appendCodexTranscriptImportLines(
             if (!record) continue
             const { recordType, payloadType, payload } = getCodexRecordKinds(record)
 
+            if (recordType === 'event_msg' && payloadType === 'task_started') {
+                accumulator.completionTurnId = extractCodexTurnId(record, payload ?? {})
+                accumulator.completionTurnStartIndex = accumulator.messages.length
+                accumulator.completionTurnSeen = true
+            }
+
+            if (recordType === 'event_msg' && ['task_complete', 'task_failed', 'turn_aborted'].includes(payloadType ?? '')) {
+                const terminalTurnId = extractCodexTurnId(record, payload ?? {})
+                const matchesTurn = accumulator.completionTurnSeen
+                    && terminalTurnId === accumulator.completionTurnId
+                // Attach terminal evidence to the final text already in history;
+                // no extra visible lifecycle messages or child-trace noise.
+                for (let index = accumulator.messages.length - 1; matchesTurn && index >= accumulator.completionTurnStartIndex; index--) {
+                    const message = accumulator.messages[index]!
+                    if (message.role === 'user') break
+                    const data = asRecord(message.content.data)
+                    if (data?.type !== 'message') continue
+                    // A failure/abort is authoritative even after an earlier
+                    // completion for this same turn. Never resurrect a failure.
+                    const outcome = payloadType === 'turn_aborted' ? 'aborted' : payloadType === 'task_failed' || payload?.error ? 'failed' : 'completed'
+                    if (outcome === 'completed' && (data.turnOutcome === 'failed' || data.turnOutcome === 'aborted')) break
+                    accumulator.messages[index] = { ...message, content: { ...message.content, data: { ...data, final: true,
+                        turnOutcome: outcome
+                    } } }
+                    break
+                }
+            }
+
             if (applyCodexTranscriptPlanRecord(accumulator, record)) {
                 finalizePendingReasoning(accumulator)
                 continue
             }
 
-            if (
-                recordType === 'response_item'
-                && (payloadType === 'function_call' || payloadType === 'custom_tool_call')
-                && payload?.name === 'request_user_input'
-            ) {
-                const callId = extractCodexToolCallId(payload)
-                if (callId) accumulator.localOnlyCallIds.add(callId)
-                finalizePendingReasoning(accumulator)
-                continue
-            }
-            if (
-                recordType === 'response_item'
-                && (payloadType === 'function_call_output' || payloadType === 'custom_tool_call_output')
-            ) {
-                const callId = payload ? extractCodexToolCallId(payload) : null
-                if (callId && accumulator.localOnlyCallIds.has(callId)) {
-                    finalizePendingReasoning(accumulator)
-                    continue
-                }
-            }
+            // Question/answer records are chat history, not permission RPCs.
+            // Import both so another client's answer replaces the message card
+            // and survives refreshing the page. Control still requires an
+            // exact, live pending request on the native channel.
 
             if (recordType === 'event_msg' && payloadType === 'agent_reasoning_delta') {
                 continue

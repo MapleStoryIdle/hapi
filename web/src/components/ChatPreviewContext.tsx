@@ -48,7 +48,7 @@ function PreviewRoot({ children }: { children: ReactNode }) {
     )
 }
 
-const APP_ROUTE = /^\/(?:sessions(?:\/|$)|browse(?:\/|$)|memory(?:\/|$)|settings(?:\/|$)|local-service(?:\/|$)|shares?(?:\/|$))/
+const APP_ROUTE = /^\/(?:sessions(?:\/|$)|browse(?:\/|$)|memory(?:\/|$)|settings(?:\/|$)|local-service(?:\/|$)|shares?(?:\/|$)|monitors(?:\/|$))/
 
 function appRoutePath(pathname: string): string | null {
     const base = import.meta.env.BASE_URL.replace(/\/$/, '')

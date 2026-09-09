@@ -369,6 +369,10 @@ export default function FilesPage() {
                         replace: true,
                     })
                 }}
+                onCreateMonitor={() => navigate({
+                    to: '/monitors/new',
+                    search: { type: 'managed', sessionId: session.id }
+                })}
             />
 
             <div className="bg-[var(--app-bg)]">

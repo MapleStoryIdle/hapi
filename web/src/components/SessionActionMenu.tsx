@@ -8,7 +8,7 @@ import {
     type CSSProperties,
     type ReactNode
 } from 'react'
-import { GitBranch, GitFork, LoaderCircle } from 'lucide-react'
+import { Activity, GitBranch, GitFork, LoaderCircle } from 'lucide-react'
 import { useTranslation } from '@/lib/use-translation'
 
 type SessionActionMenuProps = {
@@ -35,6 +35,7 @@ type SessionActionMenuProps = {
     outlineActive?: boolean
     onCreateSideSession?: () => void
     sideSessionPending?: boolean
+    onCreateMonitor?: () => void
     anchorPoint: { x: number; y: number }
     menuId?: string
 }
@@ -212,6 +213,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         outlineActive,
         onCreateSideSession,
         sideSessionPending,
+        onCreateMonitor,
         anchorPoint,
         menuId
     } = props
@@ -274,6 +276,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleCreateSideSession = () => {
         onClose()
         onCreateSideSession?.()
+    }
+
+    const handleCreateMonitor = () => {
+        onClose()
+        onCreateMonitor?.()
     }
 
     const updatePosition = useCallback(() => {
@@ -363,7 +370,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
 
     const baseItemClassName =
         'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
-    const hasTopActions = Boolean(onRefresh || onGitBranches || onFork || onToggleFiles || onToggleOutline || onCreateSideSession)
+    const hasTopActions = Boolean(onRefresh || onGitBranches || onFork || onToggleFiles || onToggleOutline || onCreateSideSession || onCreateMonitor)
     const hasLifecycleActions = Boolean(onRename || onExport || onArchive || onReopen || onDelete)
 
     return (
@@ -398,6 +405,18 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     </button>
                 ) : null}
 
+                {onToggleFiles ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleToggleFiles}
+                    >
+                        <FilesIcon className={filesActive ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)]'} />
+                        {filesActive ? t('session.view.returnToChat') : t('session.title')}
+                    </button>
+                ) : null}
+
                 {onGitBranches ? (
                     <button
                         type="button"
@@ -422,19 +441,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                         <ForkIcon className="text-[var(--app-hint)]" pending={forkPending} />
                         {forkPending
                             ? (forkPendingLabel ?? forkLabel ?? t('recentCodex.forking'))
-                            : (forkLabel ?? t('recentCodex.fork'))}
-                    </button>
-                ) : null}
-
-                {onToggleFiles ? (
-                    <button
-                        type="button"
-                        role="menuitem"
-                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
-                        onClick={handleToggleFiles}
-                    >
-                        <FilesIcon className={filesActive ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)]'} />
-                        {filesActive ? t('session.view.returnToChat') : t('session.title')}
+                            : (forkLabel ?? t('session.action.fork'))}
                     </button>
                 ) : null}
 
@@ -460,6 +467,18 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     >
                         <SideSessionIcon className="text-[var(--app-hint)]" />
                         {sideSessionPending ? t('session.action.sideSession.creating') : t('session.action.sideSession')}
+                    </button>
+                ) : null}
+
+                {onCreateMonitor ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleCreateMonitor}
+                    >
+                        <Activity className="h-[18px] w-[18px] shrink-0 text-[var(--app-hint)]" strokeWidth={1.8} aria-hidden="true" />
+                        {t('session.action.createMonitor')}
                     </button>
                 ) : null}
 

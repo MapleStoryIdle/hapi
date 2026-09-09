@@ -34,6 +34,10 @@ class FakeChildProcess extends EventEmitter {
 }
 
 class FakeAppServerClient implements NativeCodexAppServerClient {
+    readonly handlers = new Map<string, (params: unknown, context?: { requestId: string | number | null }) => unknown>()
+    registerRequestHandler(method: string, handler: (params: unknown, context?: { requestId: string | number | null }) => unknown): void {
+        this.handlers.set(method, handler)
+    }
     notificationHandler: ((method: string, params: unknown) => void) | null = null
     connectCalls = 0
     initializeCalls: InitializeParams[] = []
@@ -2812,6 +2816,56 @@ describe('NativeCodexSessionDirectSender', () => {
                 recoveryReason: 'launch_failed'
             })])
             expect(stored.map((item) => item.id)).toEqual([reviewId])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('keeps native questions pending until an exact user answer, not a status read', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-input-'))
+        const sessionId = '80345678-1234-4234-8234-123456789012'
+        const client = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(), () => 123, 1_000,
+            { getSummary: () => ({ id: sessionId, title: 'Native', cwd, file: '/not-read', modifiedAt: 100, runState: 'idle' }) },
+            () => client
+        )
+        try {
+            sender.send(sessionId, 'Start', undefined, 'input-receipt')
+            await flushMicrotasks()
+            const input = { threadId: sessionId, turnId: 'native-turn-1', itemId: 'question-1', questions: [
+                { id: 'choice', question: 'Continue?', options: [{ label: 'Yes', description: 'Proceed' }] }
+            ] }
+            const settled = vi.fn()
+            const answer = Promise.resolve(client.handlers.get('item/tool/requestUserInput')!(input)).then((value) => { settled(value); return value })
+            await flushMicrotasks()
+            expect(settled).not.toHaveBeenCalled()
+            expect(sender.getStatus(sessionId)).toMatchObject({ success: true, waitingForUserInput: true, pendingUserInput: input })
+            const second = { ...input, itemId: 'question-2' }
+            const secondAnswer = Promise.resolve(client.handlers.get('item/tool/requestUserInput')!(second))
+            const context = { controlledByCodexSsh: false, activeTurnId: 'native-turn-1' }
+            await expect(sender.control(sessionId, { action: 'answerUserInput', expectedTurnId: 'old-turn', requestId: 'question-1', answers: { choice: { answers: ['Yes'] } } }, context)).resolves.toMatchObject({ success: false, code: 'turn_changed' })
+            expect(settled).not.toHaveBeenCalled()
+            const action = { action: 'answerUserInput' as const, expectedTurnId: 'native-turn-1', requestId: 'question-1', answers: { choice: { answers: ['Yes'] } } }
+            await expect(sender.control(sessionId, action, context)).resolves.toMatchObject({ success: true })
+            await expect(answer).resolves.toEqual({ answers: { choice: { answers: ['Yes'] } } })
+            await expect(sender.control(sessionId, action, context)).resolves.toMatchObject({ success: false, code: 'turn_changed' })
+            expect(settled).toHaveBeenCalledTimes(1)
+            expect(sender.getStatus(sessionId)).toMatchObject({ pendingUserInput: second })
+            await expect(sender.control(sessionId, { ...action, requestId: 'question-2' }, context)).resolves.toMatchObject({ success: true })
+            await expect(secondAnswer).resolves.toEqual({ answers: { choice: { answers: ['Yes'] } } })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('pendingUserInput')
+            const third = { ...input, itemId: 'question-3' }
+            const thirdAnswer = Promise.resolve(client.handlers.get('item/tool/requestUserInput')!(third, { requestId: 123 }))
+            client.notificationHandler?.('serverRequest/resolved', { threadId: 'other-thread', requestId: 123 })
+            expect(sender.getStatus(sessionId)).toMatchObject({ pendingUserInput: third })
+            client.notificationHandler?.('serverRequest/resolved', { threadId: sessionId, requestId: 'question-3' })
+            expect(sender.getStatus(sessionId)).toMatchObject({ pendingUserInput: third })
+            client.notificationHandler?.('serverRequest/resolved', { threadId: sessionId, requestId: 123 })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('pendingUserInput')
+            await thirdAnswer
+            await expect(sender.control(sessionId, { ...action, requestId: 'question-3' }, context)).resolves.toMatchObject({ success: false, code: 'turn_changed' })
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })

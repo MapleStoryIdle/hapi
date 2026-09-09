@@ -5,6 +5,7 @@ import {
     Sun as SunIconNode,
 } from 'lucide'
 import { RefreshCw } from 'lucide-react'
+import { BarkSettings } from '@/components/settings/BarkSettings'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { usePwaUpdateContext } from '@/lib/pwa-update-context'
@@ -706,6 +707,7 @@ export default function SettingsPage() {
 
             <div className="app-scroll-y flex-1 min-h-0">
                 <div className="mx-auto w-full max-w-content space-y-4 px-3 py-4">
+                    <BarkSettings />
                     {/* Language section */}
                     <div className="relative rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">

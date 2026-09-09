@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AssistantRuntimeProvider } from '@assistant-ui/react'
+import { useDrawerExitPresence } from '@/hooks/useDrawerExitPresence'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, type ApiClient } from '@/api/client'
 import type {
@@ -27,6 +28,7 @@ import {
 } from '@/components/SessionHeader'
 import { AgentFlavorStatusIcon } from '@/components/AgentFlavorIcon'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { SessionFilesDrawer } from '@/components/SessionFiles/SessionFilesDrawer'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { GitBranchesDrawer } from '@/components/GitBranchesDrawer'
 import { SESSION_DETAIL_HEADER_HEIGHT_PX } from '@/components/SessionDetailHeader'
@@ -34,6 +36,11 @@ import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { HappyComposer, type ComposerSendError } from '@/components/AssistantChat/HappyComposer'
 import { PlanStatusSummary, type PlanStatusSummaryData } from '@/components/AssistantChat/PlanStatusSummary'
 import { NativeQueuedMessagesBar } from '@/components/NativeQueuedMessagesBar'
+import { NativeCodexUserInput } from '@/components/NativeCodexUserInput'
+import { NativeAsyncUserInput } from '@/components/NativeAsyncUserInput'
+import { getNativeAsyncInputs, getPendingNativeAsyncInput } from '@/chat/nativeAsyncInput'
+import { NativeQuestionCards, NativeQuestionSummary } from '@/components/NativeQuestionCards'
+import { parseRequestUserInputInput } from '@/components/ToolCard/requestUserInput'
 import { buildConversationOutline } from '@/chat/outline'
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
@@ -76,7 +83,7 @@ import { useNativeCodexSessionControls } from '@/hooks/useNativeCodexSessionCont
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
 import { useMachineGitBranch } from '@/hooks/queries/useGitBranch'
 import { codexModelAdvertisesFastTier } from '@/components/AssistantChat/codexFastMode'
-import type { NativeCodexSessionConfiguration, NativeCodexSessionControls } from '@hapi/protocol/codexSessionControl'
+import type { NativeCodexSessionConfiguration, NativeCodexSessionControls, NativeCodexUserInput as PendingNativeInput } from '@hapi/protocol/codexSessionControl'
 import {
     parseNativeCodexAttachmentPrompt,
     type NativeCodexAttachment
@@ -773,8 +780,34 @@ function NativeCodexThread(props: {
     connectionStartedAt?: number
     thinkingStartedAt?: number
     deliveryReceipt?: ReactNode
+    pendingInput?: PendingNativeInput | null
+    savedAnswerIds: readonly string[]
 }) {
     const { t } = useTranslation()
+    const asyncInputs = useMemo(() => getNativeAsyncInputs(
+        buildReadOnlyCodexMessages(props.messages).map(normalizeDecryptedMessage)
+            .filter((message): message is NormalizedMessage => message !== null)
+    ), [props.messages])
+    const [observedInputs, setObservedInputs] = useState<PendingNativeInput[]>([])
+    useEffect(() => {
+        if (!props.pendingInput) return
+        const input = props.pendingInput
+        setObservedInputs((current) => current.some((item) => item.itemId === input.itemId && item.turnId === input.turnId)
+            ? current : [...current, input])
+    }, [props.pendingInput])
+    const questionCards = new Map<string, ReactNode>()
+    if (props.machineId) {
+        for (const input of asyncInputs) questionCards.set(input.callId, <NativeAsyncUserInput
+            key={input.callId} api={props.api} machineId={props.machineId} sessionId={props.sessionId}
+            input={input} alreadySaved={props.savedAnswerIds.includes(`native-answer:${input.callId}`)} onRefresh={props.onRefresh}
+            autoOpen={!props.pendingInput && input.callId === asyncInputs.at(-1)?.callId}
+            queuedReply={props.queuedMessages.find((message) => message.id === `native-answer:${input.callId}`)?.text}
+        />)
+        for (const input of observedInputs) questionCards.set(input.itemId, <NativeCodexUserInput
+            key={`${input.turnId}:${input.itemId}`} api={props.api} machineId={props.machineId} sessionId={props.sessionId}
+            input={input} resolved={props.pendingInput === null || Boolean(props.pendingInput && props.pendingInput.itemId !== input.itemId)} onRefresh={props.onRefresh}
+        />)
+    }
     const modelsState = useCodexModels({ api: props.api, machineId: props.machineId, enabled: props.controls?.canConfigure === true })
     const configurable = props.controls?.canConfigure === true && !modelsState.error && modelsState.models.length > 0
     const configuration = props.controls?.canConfigure ? props.controls.configuration : undefined
@@ -812,6 +845,14 @@ function NativeCodexThread(props: {
         }),
         [props.directMessageEchoes, props.hasMoreMessages, props.messages, props.subagents]
     )
+    // Transcript-only questions are read-only. Never create a second native
+    // request/approval merely because a historical tool call is visible.
+    for (const block of ungroupedBlocks) {
+        if (block.kind !== 'tool-call' || block.tool.name !== 'request_user_input' || questionCards.has(block.tool.id)) continue
+        const questions = parseRequestUserInputInput(block.tool.input).questions
+        if (questions.length) questionCards.set(block.tool.id, <NativeQuestionSummary questions={questions}
+            status={t(block.tool.state === 'completed' || block.tool.state === 'error' ? 'recentCodex.input.resolved' : 'recentCodex.status.waitingForLocalInput')} />)
+    }
     const latestUserAt = ungroupedBlocks.findLast((block) => block.kind === 'user-text')?.createdAt
     const nativePlan = useMemo(
         () => getNativeCodexPlanStatus(props.plan, props.runState, props.activeTurnId),
@@ -901,11 +942,12 @@ function NativeCodexThread(props: {
         }
     }, [nativePlan?.sourceBlockId, props.queuedMessages.length])
 
-    const queueAccessoryVisible = props.queuedMessages.length > 0 || props.controls?.queuePaused === true
+    const queueAccessoryVisible = useDrawerExitPresence(props.queuedMessages.length > 0 || props.controls?.queuePaused === true)
     const accessoryVisible = queueAccessoryVisible || nativePlan !== null
     const totalBottomInset = composerHeight + (accessoryHeight > 0 ? accessoryHeight + NATIVE_QUEUE_FLOATING_GAP_PX : 0)
 
     return (
+        <NativeQuestionCards.Provider value={questionCards}>
         <AssistantRuntimeProvider runtime={runtime}>
             <div className="relative flex min-h-0 flex-1 flex-col">
                 <HappyThread
@@ -945,6 +987,8 @@ function NativeCodexThread(props: {
                     onOutlineOpenChange={props.onOutlineOpenChange}
                     trailingMessage={
                         <>
+                        {observedInputs.filter((input) => !ungroupedBlocks.some((block) => block.kind === 'tool-call' && block.tool.id === input.itemId))
+                            .map((input) => <div key={input.itemId} className="my-3">{questionCards.get(input.itemId)}</div>)}
                         <ThreadThinkingMessage
                             key={props.sessionId}
                             running={props.isProcessing || hasRunningSubagent}
@@ -1044,6 +1088,7 @@ function NativeCodexThread(props: {
                 </SessionDetailBottomDock>
             </div>
         </AssistantRuntimeProvider>
+        </NativeQuestionCards.Provider>
     )
 }
 
@@ -1063,6 +1108,7 @@ export function CodexSessionContextPage(props: {
     realtimeAvailable?: boolean
     onBack: () => void
     onForked: (sessionId: string) => void
+    onCreateMonitor?: () => void
 }) {
     const { t } = useTranslation()
     const queryClient = useQueryClient()
@@ -1227,6 +1273,7 @@ export function CodexSessionContextPage(props: {
     const [outlineOpen, setOutlineOpen] = useState(false)
     const [menuOpen, setMenuOpen] = useState(false)
     const [gitBranchesOpen, setGitBranchesOpen] = useState(false)
+    const [filesOpen, setFilesOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState({ x: 0, y: 0 })
     const pageScopeRef = useRef(pageScope)
     const nativeDirectMessageScopeKeyRef = useRef(nativeDirectMessageScopeKey)
@@ -1422,6 +1469,10 @@ export function CodexSessionContextPage(props: {
     const currentNativeDirectMessageEchoes = nativeDirectMessageEchoScopeKey === nativeDirectMessageScopeKey
         ? nativeDirectMessageEchoes
         : []
+    const pendingAsyncInput = useMemo(() => getPendingNativeAsyncInput(
+        buildReadOnlyCodexMessages(messages).map(normalizeDecryptedMessage)
+            .filter((message): message is NormalizedMessage => message !== null)
+    ), [messages])
     const visibleNativeDirectMessageEchoes = useMemo(
         () => getVisibleNativeDirectMessageEchoes(currentNativeDirectMessageEchoes, messages),
         [currentNativeDirectMessageEchoes, messages]
@@ -2453,18 +2504,15 @@ export function CodexSessionContextPage(props: {
                     isOpen={menuOpen}
                     onClose={() => setMenuOpen(false)}
                     sessionActive={directStatus === 'processing'}
-                    onRefresh={() => void recoverNativeConnection()}
-                    refreshLabel={t('recentCodex.refresh')}
-                    refreshPending={isRecoveringConnection}
                     onRename={props.machineId && context ? () => setRenameOpen(true) : undefined}
                     onGitBranches={isGitRepository ? () => setGitBranchesOpen(true) : undefined}
+                    onToggleFiles={props.machineId && nativeGitProjectPath ? () => setFilesOpen(true) : undefined}
                     onFork={() => void fork()}
-                    forkLabel={t('recentCodex.fork')}
+                        forkLabel={t('session.action.fork')}
                     forkPendingLabel={t('recentCodex.forking')}
                     forkPending={isForking}
                     forkDisabled={!canFork}
-                    onToggleOutline={() => setOutlineOpen((open) => !open)}
-                    outlineActive={outlineOpen}
+                    onCreateMonitor={props.onCreateMonitor}
                     anchorPoint={menuAnchorPoint}
                     menuId={menuId}
                 />
@@ -2485,6 +2533,9 @@ export function CodexSessionContextPage(props: {
                     open={gitBranchesOpen}
                     onOpenChange={setGitBranchesOpen}
                 />
+                {props.machineId && nativeGitProjectPath ? <SessionFilesDrawer key={`${props.machineId}:${props.sessionId}`} api={props.api}
+                    source={{ type: 'native-codex', sessionId: props.sessionId, machineId: props.machineId }} cwd={nativeGitProjectPath}
+                    open={filesOpen} onOpenChange={setFilesOpen} /> : null}
                 <SessionConnectionRecoveryControl
                     labels={{
                         degraded: t('session.connection.native.degraded'),
@@ -2551,7 +2602,7 @@ export function CodexSessionContextPage(props: {
                         statusLabel={recoveryTitle}
                         testId="codex-native-recovery"
                     />
-                ) : nativeWaitingForUserInput ? (
+                ) : nativeWaitingForUserInput && !pendingAsyncInput && !(statusQuery.data?.success && statusQuery.data.pendingUserInput) ? (
                     <NativeCodexFloatingStatusNotice
                         tone="warning"
                         title={t('recentCodex.status.waitingForLocalInput')}
@@ -2603,13 +2654,19 @@ export function CodexSessionContextPage(props: {
                         </div>
                     ) : context ? (
                         <NativeCodexThread
+                            key={`${props.machineId}:${props.sessionId}`}
+                            pendingInput={statusQuery.data?.success ? statusQuery.data.pendingUserInput ?? null : undefined}
+                            savedAnswerIds={statusQuery.data?.success ? [
+                                ...(statusQuery.data.queuedMessages ?? []).map((message) => message.id),
+                                ...(statusQuery.data.deliveryReceipts ?? []).map((receipt) => receipt.id)
+                            ] : []}
                             api={props.api}
                             sessionId={props.sessionId}
                             projectPath={context.session.cwd}
                             model={context.session.model}
                             modelReasoningEffort={context.session.modelReasoningEffort}
                             controls={nativeControls.controls}
-                            controlPending={nativeControls.pendingAction}
+                            controlPending={nativeControls.pendingAction === 'answerUserInput' ? null : nativeControls.pendingAction}
                             onStop={nativeControls.stop}
                             onConfigure={nativeControls.configure}
                             onResumeQueue={nativeControls.resumeQueue}

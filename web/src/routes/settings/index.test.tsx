@@ -5,6 +5,9 @@ import { en } from '@/lib/locales'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 import SettingsPage from './index'
 
+// Bark's authenticated persistence/notification behavior has its own component tests.
+vi.mock('@/components/settings/BarkSettings', () => ({ BarkSettings: () => <div>Bark notifications</div> }))
+
 vi.mock('@hapi/protocol', () => ({
     PROTOCOL_VERSION: 1,
 }))

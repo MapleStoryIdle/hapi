@@ -40,7 +40,7 @@ type JsonRpcResponse = {
     error?: JsonRpcError
 }
 
-type RequestHandler = (params: unknown) => Promise<unknown> | unknown
+type RequestHandler = (params: unknown, context?: { requestId: string | number | null }) => Promise<unknown> | unknown
 
 type PendingRequest = {
     resolve: (value: unknown) => void
@@ -228,6 +228,7 @@ export class CodexSshAppServerClient {
     private fragmentedLength = 0
     private readonly pending = new Map<number, PendingRequest>()
     private readonly requestHandlers = new Map<string, RequestHandler>()
+    private readonly incomingRequests = new Map<string | number, { threadId: unknown }>()
     private notificationHandler: ((method: string, params: unknown) => void) | null = null
 
     constructor(options: CodexSshAppServerClientOptions) {
@@ -554,6 +555,14 @@ export class CodexSshAppServerClient {
                 void this.handleIncomingRequest(message.id, message.method, params)
                 return
             }
+            if (message.method === 'serverRequest/resolved') {
+                const resolved = asRecord(params)
+                const id = resolved?.requestId
+                if (typeof id === 'string' || typeof id === 'number') {
+                    const pending = this.incomingRequests.get(id)
+                    if (pending && typeof resolved?.threadId === 'string' && pending.threadId === resolved.threadId) this.incomingRequests.delete(id)
+                }
+            }
             this.notificationHandler?.(message.method, params)
             return
         }
@@ -565,24 +574,28 @@ export class CodexSshAppServerClient {
         const responseId = typeof id === 'number' || typeof id === 'string' ? id : null
         const handler = this.requestHandlers.get(method)
         if (!handler) {
-            this.tryWritePayload({
-                id: responseId,
-                error: { code: -32601, message: `Method not found: ${method}` }
-            })
+            // This is a shared Desktop connection, not a private app-server.
+            // Queries may receive requests owned by another UI. Replying with
+            // an RPC error can settle that UI's pending question/approval.
+            // Only an explicitly registered handler may answer on its behalf.
             return
         }
-
+        if (responseId === null || this.incomingRequests.has(responseId)) return
+        const pending = { threadId: asRecord(params)?.threadId }
+        this.incomingRequests.set(responseId, pending)
         try {
-            const result = await handler(params)
-            this.tryWritePayload({ id: responseId, result })
+            const result = await handler(params, { requestId: responseId })
+            if (this.incomingRequests.get(responseId) === pending) this.tryWritePayload({ id: responseId, result })
         } catch (error) {
-            this.tryWritePayload({
+            if (this.incomingRequests.get(responseId) === pending) this.tryWritePayload({
                 id: responseId,
                 error: {
                     code: -32603,
                     message: error instanceof Error ? error.message : 'Internal error'
                 }
             })
+        } finally {
+            if (this.incomingRequests.get(responseId) === pending) this.incomingRequests.delete(responseId)
         }
     }
 
@@ -625,6 +638,7 @@ export class CodexSshAppServerClient {
     }
 
     private rejectAllPending(error: Error): void {
+        this.incomingRequests.clear()
         for (const { reject, cleanup } of this.pending.values()) {
             cleanup()
             reject(error)

@@ -1,5 +1,7 @@
 import { ChatPreviewProvider, useChatPreview } from '@/components/ChatPreviewContext'
+import { useDrawerExitPresence } from '@/hooks/useDrawerExitPresence'
 import { ThreadThinkingMessage } from '@/components/ThreadThinkingMessage'
+import { SessionFilesDrawer } from '@/components/SessionFiles/SessionFilesDrawer'
 import { getThinkingStartedAt } from '@/lib/thinking-started-at'
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
@@ -848,6 +850,7 @@ function SessionChatInner(props: SessionChatProps) {
     const [dismissedCodexQuickReplyPromptId, setDismissedCodexQuickReplyPromptId] = useState<string | null>(null)
     const [codexQuickReplySending, setCodexQuickReplySending] = useState(false)
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
+    const [filesOpen, setFilesOpen] = useState(false)
     const bottomOverlayRef = useRef<HTMLDivElement | null>(null)
     const composerOverlayRef = useRef<HTMLDivElement | null>(null)
     const bottomAccessoryRef = useRef<HTMLDivElement | null>(null)
@@ -1492,7 +1495,7 @@ function SessionChatInner(props: SessionChatProps) {
     })
     const planStatusVisible = activePlanStatus !== null
     const gitDiffAccessoryVisible = !runActive && gitDiffSummaryVisible
-    const queueAccessoryVisible = queuedMessages.length > 0
+    const queueAccessoryVisible = useDrawerExitPresence(queuedMessages.length > 0)
     const bottomAccessoryVisible = queueAccessoryVisible || planStatusVisible || gitDiffAccessoryVisible
     const bottomAccessoryExpanded = statusAccessoryExpanded || queueAccessoryExpanded
     const threadBottomInset = getBottomOverlayThreadInset(
@@ -1694,20 +1697,13 @@ function SessionChatInner(props: SessionChatProps) {
 
     const handleToggleFiles = useCallback(() => {
         setOutlineOpen(false)
-        navigate({
-            to: '/sessions/$sessionId/files',
-            params: { sessionId: props.session.id }
-        })
-    }, [navigate, props.session.id])
+        setFilesOpen(true)
+    }, [])
 
     const handleViewDiff = useCallback(() => {
         setOutlineOpen(false)
-        navigate({
-            to: '/sessions/$sessionId/files',
-            params: { sessionId: props.session.id },
-            search: { tab: 'changes' }
-        })
-    }, [navigate, props.session.id])
+        setFilesOpen(true)
+    }, [])
 
     const openPreview = useChatPreview()
     const handleViewFileDiff = useCallback((file: { path: string; staged: boolean; unstaged: boolean; status?: string }) => {
@@ -1934,6 +1930,9 @@ function SessionChatInner(props: SessionChatProps) {
 
     return (
         <SessionDetailSurface source="hapi" testId="session-chat-surface">
+            {props.session.metadata?.path ? <SessionFilesDrawer key={props.session.id} api={props.api}
+                source={{ type: 'session', sessionId: props.session.id }} cwd={props.session.metadata.path}
+                open={filesOpen} onOpenChange={setFilesOpen} /> : null}
             <SessionHeader
                 session={props.session}
                 onBack={props.onBack}
@@ -1956,6 +1955,10 @@ function SessionChatInner(props: SessionChatProps) {
                         : undefined
                 }
                 sideSessionPending={sideSessionPending}
+                onCreateMonitor={() => navigate({
+                    to: '/monitors/new',
+                    search: { type: 'managed', sessionId: props.session.id }
+                })}
                 status={sessionHeaderStatus}
                 floating
             />

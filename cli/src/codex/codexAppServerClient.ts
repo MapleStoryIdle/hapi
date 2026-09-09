@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { isObject } from '@hapi/protocol';
 import { logger } from '@/ui/logger';
 import { JsonLineParser } from '@/utils/jsonLineParser';
 import { killProcessByChildProcess } from '@/utils/process';
@@ -57,7 +58,7 @@ type JsonRpcLiteResponse = {
     };
 };
 
-type RequestHandler = (params: unknown) => Promise<unknown> | unknown;
+type RequestHandler = (params: unknown, context?: { requestId: string | number | null }) => Promise<unknown> | unknown;
 
 type PendingRequest = {
     resolve: (value: unknown) => void;
@@ -88,6 +89,7 @@ export class CodexAppServerClient extends JsonLineParser {
     private nextId = 1;
     private readonly pending = new Map<number, PendingRequest>();
     private readonly requestHandlers = new Map<string, RequestHandler>();
+    private readonly incomingRequests = new Map<string | number, { threadId: unknown }>();
     private notificationHandler: ((method: string, params: unknown) => void) | null = null;
     private stderrHandler: ((text: string) => void) | null = null;
     private protocolError: Error | null = null;
@@ -439,6 +441,13 @@ export class CodexAppServerClient extends JsonLineParser {
                 return;
             }
 
+            if (method === 'serverRequest/resolved' && isObject(params)) {
+                const id = params.requestId;
+                if (typeof id === 'string' || typeof id === 'number') {
+                    const pending = this.incomingRequests.get(id);
+                    if (pending && typeof params.threadId === 'string' && pending.threadId === params.threadId) this.incomingRequests.delete(id);
+                }
+            }
             this.notificationHandler?.(method, params ?? null);
             return;
         }
@@ -465,20 +474,25 @@ export class CodexAppServerClient extends JsonLineParser {
             return;
         }
 
+        if (responseId === null || this.incomingRequests.has(responseId)) return;
+        const pending = { threadId: isObject(request.params) ? request.params.threadId : undefined };
+        this.incomingRequests.set(responseId, pending);
         try {
-            const result = await handler(request.params ?? null);
-            this.writePayload({
+            const result = await handler(request.params ?? null, { requestId: responseId });
+            if (this.incomingRequests.get(responseId) === pending) this.writePayload({
                 id: responseId,
                 result
             } satisfies JsonRpcLiteResponse);
         } catch (error) {
-            this.writePayload({
+            if (this.incomingRequests.get(responseId) === pending) this.writePayload({
                 id: responseId,
                 error: {
                     code: -32603,
                     message: error instanceof Error ? error.message : 'Internal error'
                 }
             } satisfies JsonRpcLiteResponse);
+        } finally {
+            if (this.incomingRequests.get(responseId) === pending) this.incomingRequests.delete(responseId);
         }
     }
 
@@ -520,6 +534,7 @@ export class CodexAppServerClient extends JsonLineParser {
     }
 
     private rejectAllPending(error: Error): void {
+        this.incomingRequests.clear();
         for (const { reject, cleanup } of this.pending.values()) {
             cleanup();
             reject(error);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatBlock, ToolCallBlock } from '@/chat/types'
+import { buildSessionDetailTimeline } from '@/chat/sessionDetailTimeline'
 import {
     buildVisibleChatBlocks,
     filterCodexDiffsCoveredByPatches,
@@ -52,6 +53,15 @@ function makeReasoningBlock(id: string): ChatBlock {
 }
 
 describe('reasoning activity grouping', () => {
+    it.each([true, false])('keeps native question cards outside Process and Processed (running=%s)', (runActive) => {
+        const question = makeToolBlock('question', 'request_user_input_async', { questions: [{ title: 'Continue?', options: ['Yes'] }] })
+        const timeline = buildSessionDetailTimeline([
+            { kind: 'user-text', id: 'user', localId: null, createdAt: 0, text: 'Go' },
+            makeToolBlock('before', 'Bash'), question, makeToolBlock('after', 'Bash'), makeTextBlock('final')
+        ], { hasMoreMessages: false, runActive, aggregateActiveProcess: true })
+        expect(timeline.visible.filter((block) => block.id === question.id)).toEqual([question])
+        expect(timeline.visible.filter(isToolGroupBlock).flatMap((block) => block.tools).some((block) => block.id === question.id)).toBe(false)
+    })
     it('folds leading, interleaved and trailing reasoning without requiring a final answer', () => {
         const blocks = [
             makeReasoningBlock('reasoning-1'),

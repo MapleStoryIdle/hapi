@@ -6,6 +6,7 @@ import { Spinner } from '@/components/Spinner'
 import { AskUserQuestionOptionBody, getAskUserQuestionOptionFrameClassName } from './askUserQuestionOptionCard'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useTranslation } from '@/lib/use-translation'
+import { NativeQuestionSummary } from '@/components/NativeQuestionCards'
 
 export type AnswerQuestion = {
     id: string
@@ -24,10 +25,23 @@ export function QuestionAnswerForm(props: {
     onSubmit: (answers: QuestionSelection[]) => Promise<unknown>
     onDone: () => void
     textPlaceholder: string
+    messageCard?: boolean
+    autoOpenKey?: string
 }) {
     const { t } = useTranslation()
     const { haptic } = usePlatform()
-    const [open, setOpen] = useState(true)
+    const [open, setOpen] = useState(!props.messageCard)
+    const shownKey = useRef<string | null>(null)
+    useEffect(() => {
+        if (!props.autoOpenKey || props.disabled || shownKey.current === props.autoOpenKey) return
+        shownKey.current = props.autoOpenKey
+        const key = `hapi.question.shown:${props.autoOpenKey}`
+        try {
+            if (sessionStorage.getItem(key)) return
+            sessionStorage.setItem(key, '1')
+        } catch { /* Storage can be unavailable; still open once per mounted request. */ }
+        setOpen(true)
+    }, [props.autoOpenKey, props.disabled])
     const [step, setStep] = useState(0)
     const [selections, setSelections] = useState<QuestionSelection[]>([])
     const [loading, setLoading] = useState(false)
@@ -134,15 +148,19 @@ export function QuestionAnswerForm(props: {
     }
 
     return (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
-            <span className="min-w-0 text-sm text-[var(--app-hint)]">{t('tool.waitingForAnswer')}</span>
+        <div className={props.messageCard ? '' : 'mt-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-3'}>
+            {!props.messageCard ? <span className="min-w-0 text-sm text-[var(--app-hint)]">{t('tool.waitingForAnswer')}</span> : null}
             <BottomDrawer
                 open={open}
                 onOpenChange={setOpen}
                 busy={loading}
                 title={t('tool.answerQuestion')}
                 testId="question-answer-form-drawer"
-                trigger={<Button type="button" variant="outline" size="sm" className="min-h-11" disabled={props.disabled || loading}>{t('tool.answerQuestion')}</Button>}
+                trigger={props.messageCard ? (
+                    <button type="button" className="w-full min-h-11 rounded-2xl text-left focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:opacity-50" disabled={props.disabled || loading} aria-label={t('tool.answerQuestion')}>
+                        <NativeQuestionSummary questions={props.questions} status={t('tool.waitingForAnswer')} pending />
+                    </button>
+                ) : <Button type="button" variant="outline" size="sm" className="min-h-11" disabled={props.disabled || loading}>{t('tool.answerQuestion')}</Button>}
                 footer={step > 0 || needsSend || loading ? (
                     <div className="flex min-h-11 items-center justify-between gap-3">
                         {step > 0 ? <Button type="button" variant="outline" className="chat-sheet-action chat-sheet-action-secondary" disabled={props.disabled || loading} onClick={() => { setStep(step - 1); setError(null) }}>{t('tool.prev')}</Button> : <span />}

@@ -4,6 +4,8 @@ export const queryKeys = {
     messages: (sessionId: string) => ['messages', sessionId] as const,
     machines: ['machines'] as const,
     shares: (baseUrl: string, namespace: string) => ['shares', baseUrl, namespace] as const,
+    monitors: ['monitors'] as const,
+    monitor: (monitorId: string) => ['monitor', monitorId] as const,
     machineCodexModels: (machineId: string) => ['machine-codex-models', machineId] as const,
     machineCodexSubscriptionLimits: (machineId: string, model: string | null) => [
         'machine-codex-subscription-limits',

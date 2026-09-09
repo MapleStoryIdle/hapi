@@ -31,6 +31,7 @@ export function ModelSelector(props: {
                 ) : null}
             </label>
             <select
+                aria-label={props.label ?? t('newSession.model')}
                 value={props.model}
                 onChange={(e) => props.onModelChange(e.target.value)}
                 disabled={props.isDisabled || props.isLoading}

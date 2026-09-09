@@ -9,7 +9,28 @@ export const NativeCodexSessionConfigurationSchema = z.object({
 
 export type NativeCodexSessionConfiguration = z.infer<typeof NativeCodexSessionConfigurationSchema>
 
+export const NativeCodexUserInputSchema = z.object({
+    threadId: z.string().min(1).max(512),
+    turnId: z.string().min(1).max(512),
+    itemId: z.string().min(1).max(512),
+    questions: z.array(z.object({
+        id: z.string().min(1).max(512),
+        question: z.string().min(1).max(8_000),
+        options: z.array(z.object({
+            label: z.string().min(1).max(2_000),
+            description: z.string().max(4_000).nullable().optional()
+        })).max(20).nullable().optional()
+    })).min(1).max(10)
+})
+export type NativeCodexUserInput = z.infer<typeof NativeCodexUserInputSchema>
+
 export const NativeCodexSessionControlActionSchema = z.discriminatedUnion('action', [
+    z.object({
+        action: z.literal('answerUserInput'),
+        expectedTurnId: z.string().min(1).max(512),
+        requestId: z.string().min(1).max(512),
+        answers: z.record(z.string(), z.object({ answers: z.array(z.string().max(8_000)).min(1).max(20) }))
+    }).strict(),
     z.object({ action: z.literal('stop'), expectedTurnId: z.string().trim().min(1).max(512) }).strict(),
     z.object({ action: z.literal('configure'), configuration: NativeCodexSessionConfigurationSchema }).strict(),
     z.object({ action: z.literal('resumeQueue') }).strict()

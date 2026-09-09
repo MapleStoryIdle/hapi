@@ -222,6 +222,7 @@ function isInteractiveToolBlock(block: ToolCallBlock): boolean {
 }
 
 export function isEligibleForToolGrouping(block: ToolCallBlock): boolean {
+    if (['request_user_input', 'request_user_input_async'].includes(block.tool.name.split('.').pop() ?? '')) return false
     if (isInteractiveToolBlock(block)) return false
     return true
 }
