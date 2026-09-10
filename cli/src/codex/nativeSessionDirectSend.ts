@@ -543,6 +543,7 @@ function parseRecoveryReason(value: unknown): CodexLocalSessionDirectSendRecover
         || value === 'session_status_unknown'
         || value === 'launch_failed'
         || value === 'runner_restarted'
+        || value === 'review_guard_failed'
         || value === 'external_writer_active'
         ? value
         : null
@@ -815,10 +816,13 @@ export class NativeCodexSessionDirectSender {
                 text: active.displayText,
                 deliveryText: active.deliveryText,
                 queuedAt: active.startedAt,
-                // After a process handoff we cannot prove whether a started
-                // child received the prompt. Surface it for manual retry.
-                recoveryRequired: true,
-                recoveryReason: 'runner_restarted',
+                // Bridge setup has not sent user input. Persist uncertainty
+                // only after the durable guard immediately before turn/start
+                // (or before spawning an exec child) has been crossed.
+                recoveryRequired: active.kind === 'exec-resume' || active.turnStartAttempted,
+                ...(active.kind === 'exec-resume' || active.turnStartAttempted
+                    ? { recoveryReason: 'runner_restarted' as const }
+                    : {}),
                 ...(hasNativeConfiguration(active.configuration) ? { configuration: cloneNativeConfiguration(active.configuration) } : {}),
                 ...(active.deliveryPolicy === 'untrusted-review' ? {
                     deliveryPolicy: active.deliveryPolicy,
@@ -1149,8 +1153,10 @@ export class NativeCodexSessionDirectSender {
         const queue = this.queues.get(sessionId) ?? []
         const existing = queue.find((item) => item.id === id)
         if (existing) {
+            // A new guard failure cannot prove an earlier ambiguous attempt
+            // was never delivered. Only upgrade a previously safe queued row.
+            if (!existing.recoveryRequired) existing.recoveryReason = 'review_guard_failed'
             existing.recoveryRequired = true
-            existing.recoveryReason = 'launch_failed'
         } else {
             const item: QueuedSend = {
                 id,
@@ -1158,7 +1164,7 @@ export class NativeCodexSessionDirectSender {
                 deliveryText,
                 queuedAt,
                 recoveryRequired: true,
-                recoveryReason: 'launch_failed',
+                recoveryReason: 'review_guard_failed',
                 deliveryPolicy: 'untrusted-review',
                 ...(reviewGuard ? { reviewGuard } : {}),
                 configuration: cloneNativeConfiguration(options.configuration ?? this.getConfigurationSnapshot(sessionId)),
@@ -1222,8 +1228,8 @@ export class NativeCodexSessionDirectSender {
         }
         this.sharedQueueDeliveries.clear()
         this.transcriptUserMessageEvidence.clear()
-        // Keep the already-persisted active entries as recovery-required
-        // receipts for the replacement runner. Do not silently retry them.
+        // Preserve the delivery boundary for the replacement runner: setup
+        // can resume automatically, but attempted sends must not be replayed.
         this.persistOutbox()
         this.activeSends.clear()
     }
@@ -1865,7 +1871,7 @@ export class NativeCodexSessionDirectSender {
                 success: true,
                 status: 'processing',
                 startedAt: sharedDelivery.startedAt,
-                ...(sharedDelivery.clientMessageId
+                ...(sharedDelivery.clientMessageId && sharedDelivery.phase !== 'accepted'
                     ? { activeClientMessageId: sharedDelivery.clientMessageId }
                     : {}),
                 queuedMessages
@@ -2206,7 +2212,7 @@ export class NativeCodexSessionDirectSender {
                 // stale browser retry cannot create the same turn twice.
                 return {
                     success: true,
-                    discarded: false,
+                    discarded: accepted.completed === true,
                     queuedMessages: this.getQueuedMessages(sessionId)
                 }
             }
@@ -2259,7 +2265,8 @@ export class NativeCodexSessionDirectSender {
         }
 
         const queuedReview = queue[queueIndex]!
-        if (queuedReview.deliveryPolicy === 'untrusted-review' && queuedReview.recoveryRequired) {
+        if (queuedReview.deliveryPolicy === 'untrusted-review' && queuedReview.recoveryRequired
+            && queuedReview.recoveryReason !== 'review_guard_failed') {
             // A recovery receipt exists exactly when the prior runner could
             // not prove whether Codex received the prompt. Keep both it and
             // the staged file until a separately persisted terminal outcome
@@ -2644,9 +2651,9 @@ export class NativeCodexSessionDirectSender {
             } else {
                 this.queues.delete(sessionId)
             }
-            // The original active receipt was durably written before bridge
-            // setup. Turn it into an explicit recovery state if a second
-            // write remains unavailable; never leave an empty outbox.
+            // The original safe receipt was written before bridge setup.
+            // Surface a persistence failure if queueing cannot be saved;
+            // never leave an empty outbox.
             this.finish(
                 sessionId,
                 active,
@@ -2915,12 +2922,7 @@ export class NativeCodexSessionDirectSender {
             if (!this.isCurrentActive(sessionId, active)) return
 
             if (!this.isNativeSessionStillIdle(sessionId)) {
-                this.deferBridgeBeforeTurn(
-                    sessionId,
-                    active,
-                    cwd,
-                    'Native Codex started another turn before the hand-off'
-                )
+                this.deferBridgeBeforeTurn(sessionId, active, cwd)
                 return
             }
 
@@ -2936,12 +2938,7 @@ export class NativeCodexSessionDirectSender {
 
             this.setBridgePhase(sessionId, active, 'connected')
             if (!this.isNativeSessionStillIdle(sessionId)) {
-                this.deferBridgeBeforeTurn(
-                    sessionId,
-                    active,
-                    cwd,
-                    'Native Codex started another turn while matching the Agent'
-                )
+                this.deferBridgeBeforeTurn(sessionId, active, cwd)
                 return
             }
 
@@ -2960,6 +2957,11 @@ export class NativeCodexSessionDirectSender {
             // still have reached Codex, so any failure after this line is
             // surfaced rather than retried through exec resume.
             active.turnStartAttempted = true
+            if (!this.persistOutbox()) {
+                active.turnStartAttempted = false
+                this.moveBridgeToQueue(sessionId, active, NATIVE_QUEUE_RETRY_INTERVAL_MS)
+                return
+            }
             const response = await active.client.startTurn({
                 threadId: sessionId,
                 input: prepared.input,
@@ -3123,19 +3125,12 @@ export class NativeCodexSessionDirectSender {
             this.moveBridgeToQueue(sessionId, active)
             return
         }
-        this.detachBridge(sessionId, active)
-        this.preserveFailedActive(sessionId, active, 'session_status_unknown')
-        this.persistOutbox()
-        this.recentFailures.set(sessionId, {
-            message: `Could not set up native Codex hand-off: ${setupFailure}`,
-            occurredAt: this.now(),
-            clientMessageId: active.clientMessageId,
-            code: 'session_status_unknown'
-        })
-        this.notifyStateChange(sessionId)
+        // An unavailable lifecycle snapshot says nothing about idleness,
+        // but setup still has not sent this prompt. Wait for confirmed idle.
+        this.moveBridgeToQueue(sessionId, active)
     }
 
-    private deferBridgeBeforeTurn(sessionId: string, active: ActiveAppServerSend, cwd: string, reason: string): void {
+    private deferBridgeBeforeTurn(sessionId: string, active: ActiveAppServerSend, cwd: string): void {
         if (!this.isCurrentActive(sessionId, active)) return
         const session = this.sessionLookup.getSummary(sessionId)
         if (session?.runState === 'processing') {
@@ -3166,16 +3161,7 @@ export class NativeCodexSessionDirectSender {
             }
             return
         }
-        this.detachBridge(sessionId, active)
-        this.preserveFailedActive(sessionId, active, 'session_status_unknown')
-        this.persistOutbox()
-        this.recentFailures.set(sessionId, {
-            message: reason,
-            occurredAt: this.now(),
-            clientMessageId: active.clientMessageId,
-            code: 'session_status_unknown'
-        })
-        this.notifyStateChange(sessionId)
+        this.moveBridgeToQueue(sessionId, active)
     }
 
     private deferReviewForInvalidGuard(sessionId: string, active: ActiveAppServerSend, error: string): void {
@@ -3462,13 +3448,24 @@ export class NativeCodexSessionDirectSender {
     }
 
     private getQueuedMessages(sessionId: string): CodexLocalSessionQueuedMessage[] {
-        return (this.queues.get(sessionId) ?? []).map(({ id, text, queuedAt, recoveryRequired, recoveryReason }) => ({
+        const queued = (this.queues.get(sessionId) ?? []).map(({ id, text, queuedAt, recoveryRequired, recoveryReason, deliveryPolicy }) => ({
             id,
             text,
             queuedAt,
+            ...((this.activeSends.get(sessionId)?.clientMessageId === id
+                || this.sharedQueueDeliveries.get(sessionId)?.clientMessageId === id
+                || (deliveryPolicy === 'untrusted-review' && recoveryRequired && recoveryReason !== 'review_guard_failed')) ? { cancelBlocked: true } : {}),
             ...(recoveryRequired ? { recoveryRequired: true } : {}),
             ...(recoveryReason ? { recoveryReason } : {})
         }))
+        const shared = this.sharedQueueDeliveries.get(sessionId)
+        if (shared?.phase === 'accepted' && shared.receipt && !shared.receipt.transcriptConfirmed && !shared.receipt.completed) {
+            const { id, text, queuedAt } = shared.receipt
+            // queue/add ACK is not a user turn. Show this FIFO barrier until
+            // transcript evidence arrives; it cannot be cancelled locally.
+            queued.unshift({ id, text, queuedAt, cancelBlocked: true })
+        }
+        return queued
     }
 
     /**

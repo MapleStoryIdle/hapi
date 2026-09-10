@@ -299,6 +299,7 @@ export type CodexLocalSessionDirectSendRecoveryReason =
     | 'session_status_unknown'
     | 'launch_failed'
     | 'runner_restarted'
+    | 'review_guard_failed'
     | 'external_writer_active'
 
 export type CodexLocalSessionStatusResponse =
@@ -376,7 +377,7 @@ export type CodexLocalSessionRealtimeSnapshot = {
     status: Omit<Extract<CodexLocalSessionStatusResponse, { success: true }>, 'queuedMessages'> & {
         queuedMessageRefs?: Array<Pick<
             CodexLocalSessionQueuedMessage,
-            'id' | 'recoveryRequired' | 'recoveryReason'
+            'id' | 'recoveryRequired' | 'recoveryReason' | 'cancelBlocked'
         >>
     }
     timing: {
@@ -425,6 +426,7 @@ export type ArchiveCodexLocalSessionResponse =
     }
 
 export type CodexLocalSessionQueuedMessage = {
+    cancelBlocked?: boolean
     id: string
     text: string
     queuedAt: number

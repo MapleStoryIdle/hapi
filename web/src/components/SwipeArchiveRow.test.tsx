@@ -1,8 +1,33 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { SwipeArchiveRow } from './SwipeArchiveRow'
+import { createPortal } from 'react-dom'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+it('does not intercept keyboard, pointer or click events from portaled drawers', () => {
+    vi.stubGlobal('PointerEvent', MouseEvent)
+    const select = vi.fn()
+    render(<SwipeArchiveRow label="Archive" onArchive={vi.fn()}>
+        <button>Session</button>
+        {createPortal(<div><input aria-label="Search branches" /><button onClick={select}>Branch</button></div>, document.body)}
+    </SwipeArchiveRow>)
+    const card = screen.getByText('Session'), row = card.parentElement!
+    const input = screen.getByRole('textbox'), branch = screen.getByText('Branch')
+    row.setPointerCapture = vi.fn()
+    expect(fireEvent.keyDown(input, { key: 'ArrowLeft' })).toBe(true)
+    expect(fireEvent.contextMenu(input)).toBe(true)
+    expect(fireEvent.dragStart(branch)).toBe(true)
+    fireEvent.pointerDown(branch, { button: 0, clientX: 200, clientY: 50 })
+    fireEvent.pointerMove(branch, { clientX: 100, clientY: 50 })
+    fireEvent.pointerUp(branch)
+    expect(row.style.transform).toBe('translateX(0px)')
+    expect(row.setPointerCapture).not.toHaveBeenCalled()
+    fireEvent.keyDown(card, { key: 'ArrowLeft' })
+    fireEvent.click(branch)
+    expect(select).toHaveBeenCalledOnce()
+    expect(row.style.transform).toBe('translateX(-80px)')
+})
 
 it('swipes a button card without navigating or archiving until the action is clicked', () => {
     vi.stubGlobal('PointerEvent', MouseEvent)

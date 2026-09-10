@@ -8,7 +8,7 @@ import { SessionConnectionProvider } from '@/lib/session-connection-context'
 import { ToastProvider } from '@/lib/toast-context'
 import type { ApiClient } from '@/api/client'
 import type { Session } from '@/types/api'
-import { SessionConnectionRecoveryControl, SessionHeader, SessionTitleDetails } from './SessionHeader'
+import { buildSessionHeaderDetails, SessionConnectionRecoveryControl, SessionHeader, SessionTitleDetails } from './SessionHeader'
 
 afterEach(() => {
     cleanup()
@@ -43,6 +43,20 @@ function createSession(): Session {
 }
 
 describe('mobile layout contract', () => {
+    it('keeps group in title details and refreshes it without altering the title', () => {
+        const onSetGroup = vi.fn()
+        const detailsRef = { current: buildSessionHeaderDetails({ title: 'Task', sessionId: 's', group: { id: 'g', name: 'Release', emoji: '🚀' }, onSetGroup }, key => key) }
+        const { rerender } = render(<I18nProvider><SessionTitleDetails title="Task" detailsRef={detailsRef} detailsRevision="Release" /></I18nProvider>)
+        fireEvent.click(screen.getByTitle('Task'))
+        expect(screen.getByRole('button', { name: '🚀 Release' })).toBeInTheDocument()
+        detailsRef.current = buildSessionHeaderDetails({ title: 'Task', sessionId: 's', group: { id: 'g', name: 'Review', emoji: '🔎' }, onSetGroup }, key => key)
+        rerender(<I18nProvider><SessionTitleDetails title="Task" detailsRef={detailsRef} detailsRevision="Review" /></I18nProvider>)
+        fireEvent.click(screen.getByRole('button', { name: '🔎 Review' }))
+        expect(onSetGroup).toHaveBeenCalledOnce()
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(screen.getByTitle('Task')).toHaveTextContent('Task')
+    })
+
     it('keeps the full title-bar shell transparent without changing the control surface', () => {
         const queryClient = new QueryClient({
             defaultOptions: {

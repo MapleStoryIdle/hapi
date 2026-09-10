@@ -535,6 +535,7 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
                     id: 'queued-1',
                     text: 'This text must never enter global SSE',
                     queuedAt: 42,
+                    cancelBlocked: true,
                     recoveryRequired: true,
                     recoveryReason: 'codex_timeout'
                 }]
@@ -552,6 +553,7 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
                     activeClientMessageId: 'native:active-1',
                     queuedMessageRefs: [{
                         id: 'queued-1',
+                        cancelBlocked: true,
                         recoveryRequired: true,
                         recoveryReason: 'codex_timeout'
                     }]

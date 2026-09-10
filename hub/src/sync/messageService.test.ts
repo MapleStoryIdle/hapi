@@ -3,7 +3,7 @@
  *
  * Race-A: CLI ack returns { removed: true }  → DB DELETE + status='cancelled'
  * Race-B: CLI ack returns { removed: false } (already shift()-ed) → markMessagesInvoked + status='invoked'
- * Race-C: CLI ack times out (500 ms)         → markMessagesInvoked + status='invoked'
+ * Race-C: CLI ack times out (500 ms)         → retain queued row; cancellation unconfirmed
  * Race-D (CLI offline): no CLI socket in room → immediate DELETE, message-cancelled emit, no ack call
  * Race-E (partial ack): broadcast ack receives err + [{ removed: true }] → DELETE + status='cancelled'
  */
@@ -422,8 +422,8 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
         })
     })
 
-    describe('Race-C: CLI ack timeout → markMessagesInvoked + status=invoked', () => {
-        it('returns invoked with message row when CLI does not respond within timeout', async () => {
+    describe('Race-C: CLI ack timeout preserves queued state', () => {
+        it.each(['timeout', 'disconnected'] as const)('does not claim delivery when CLI acknowledgement is %s', async (result) => {
             const store = makeStore()
             const session = makeSession(store, 'race-c')
             const msg = store.messages.addMessage(
@@ -435,40 +435,15 @@ describe('MessageService.cancelQueuedMessage race scenarios', () => {
             const publisher = makePublisher()
             const io = makeIo((callback) => {
                 // Simulate timeout: socket.io passes an error as first arg
-                callback(new Error('operation has timed out'), [])
+                callback(result === 'timeout' ? new Error('operation has timed out') : null, [])
             })
 
             const service = new MessageService(store, io, publisher as any)
-            const result = await service.cancelQueuedMessage(session.id, msg.id)
-
-            expect(result.status).toBe('invoked')
-            if (result.status === 'invoked') {
-                expect(result.message.id).toBe(msg.id)
-                expect(result.message.invokedAt).not.toBeNull()
-            }
-
-            // Row must still exist with invoked_at stamped
-            const rows = store.messages.getMessages(session.id)
-            const row = rows.find(r => r.id === msg.id)
+            await expect(service.cancelQueuedMessage(session.id, msg.id)).rejects.toThrow('cancellation is not confirmed')
+            const row = store.messages.getMessages(session.id).find(r => r.id === msg.id)
             expect(row).toBeDefined()
-            expect(row!.invokedAt).not.toBeNull()
-
-            // No message-cancelled SSE
-            const cancelled = publisher.events.find(e => e.type === 'message-cancelled')
-            expect(cancelled).toBeUndefined()
-
-            // messages-consumed SSE must be broadcast so other web clients clear the queued row
-            const consumed = publisher.events.find(e => e.type === 'messages-consumed')
-            expect(consumed).toBeDefined()
-            if (consumed?.type === 'messages-consumed') {
-                expect(consumed.sessionId).toBe(session.id)
-                expect(consumed.localIds).toEqual(['local-c'])
-                expect(typeof consumed.invokedAt).toBe('number')
-            }
-
-            // messages-consumed must be emitted exactly once
-            const consumedCount = publisher.events.filter(e => e.type === 'messages-consumed').length
-            expect(consumedCount).toBe(1)
+            expect(row!.invokedAt).toBeNull()
+            expect(publisher.events.some(e => e.type === 'message-cancelled' || e.type === 'messages-consumed')).toBe(false)
         })
     })
 
@@ -1144,166 +1119,3 @@ describe('MessageService.releaseMatureScheduledMessages', () => {
 // ---------------------------------------------------------------------------
 // HAPI Bot R4: session-end sweep must not stamp mature scheduled rows
 // ---------------------------------------------------------------------------
-
-describe('MessageService.sweepImmediateQueuedOnSessionEnd — scheduled rows are preserved', () => {
-    function makeNoopIo(): Server {
-        return {
-            of: (_ns: string) => ({
-                to: (_room: string) => ({
-                    emit: () => {},
-                    timeout: (_ms: number) => ({ emit: () => {} })
-                }),
-                adapter: { rooms: { get: () => undefined } }
-            })
-        } as unknown as Server
-    }
-
-    function makeTrackingIo(): { io: Server; cliEmitted: unknown[] } {
-        const cliEmitted: unknown[] = []
-        const io = {
-            of: (ns: string) => ({
-                to: (_room: string) => ({
-                    emit: (_event: string, data: unknown) => {
-                        if (ns === '/cli') cliEmitted.push(data)
-                    },
-                    timeout: (_ms: number) => ({ emit: () => {} })
-                }),
-                adapter: { rooms: { get: () => undefined } }
-            })
-        } as unknown as Server
-        return { io, cliEmitted }
-    }
-
-    it('mature scheduled row at session-end stays uninvoked and is emitted by the next mature scan', () => {
-        // R4 race scenario A: CLI dies just after scheduled_at <= now but before
-        // the next 5s mature-scan tick — the sweep must NOT touch the scheduled row.
-        const store = makeStore()
-        const session = makeSession(store, 'r4-mature-sweep')
-        const publisher = makePublisher()
-        const now = Date.now()
-        const past = now - 1000
-
-        store.messages.addMessage(
-            session.id,
-            { role: 'user', content: { type: 'text', text: 'mature scheduled' } },
-            'local-mature',
-            past
-        )
-
-        const service = new MessageService(store, makeNoopIo(), publisher as any)
-
-        const result = service.sweepImmediateQueuedOnSessionEnd(session.id, now)
-        expect(result).toBeNull()
-        // No SSE side effect when there is nothing to sweep.
-        expect(publisher.events.filter(e => e.type === 'messages-consumed')).toHaveLength(0)
-
-        // Row is still uninvoked and still mature — the next scan picks it up.
-        const stillQueued = store.messages.getUninvokedLocalMessages(session.id)
-        expect(stillQueued.find((m) => m.localId === 'local-mature')?.invokedAt).toBeNull()
-
-        // Mature-scan tick after re-attach delivers the row.
-        const { io, cliEmitted } = makeTrackingIo()
-        const service2 = new MessageService(store, io, publisher as any)
-        service2.releaseMatureScheduledMessages(now)
-        expect(cliEmitted).toHaveLength(1)
-    })
-
-    it('mature scheduled row already emitted but not yet acked stays uninvoked across session-end and is re-emitted', () => {
-        // R4 race scenario B: mature scan emits at T+0, CLI receives but dies
-        // before sending messages-consumed.  Session-end fires while invoked_at
-        // is still NULL.  The sweep must preserve the row (scheduled_at IS NOT
-        // NULL filter) so the next mature-scan tick re-emits it — preserving the
-        // documented "re-emit until ack" contract for scheduled rows.
-        const store = makeStore()
-        const session = makeSession(store, 'r4-emit-noack-sweep')
-        const publisher = makePublisher()
-        const now = Date.now()
-        const past = now - 1000
-
-        store.messages.addMessage(
-            session.id,
-            { role: 'user', content: { type: 'text', text: 'emit-noack' } },
-            'local-noack',
-            past
-        )
-
-        // First mature-scan emit — does NOT write invoked_at (R3 contract).
-        const { io: io1, cliEmitted: emitted1 } = makeTrackingIo()
-        const service1 = new MessageService(store, io1, publisher as any)
-        service1.releaseMatureScheduledMessages(now)
-        expect(emitted1).toHaveLength(1)
-        // Confirm invoked_at is still null (the runner crashed before acking).
-        expect(
-            store.messages.getUninvokedLocalMessages(session.id)
-                .find(m => m.localId === 'local-noack')?.invokedAt
-        ).toBeNull()
-
-        // Session-end fires.  Sweep must leave the row alone.
-        const sweepResult = service1.sweepImmediateQueuedOnSessionEnd(session.id, now)
-        expect(sweepResult).toBeNull()
-        expect(publisher.events.filter(e => e.type === 'messages-consumed')).toHaveLength(0)
-        expect(
-            store.messages.getUninvokedLocalMessages(session.id)
-                .find(m => m.localId === 'local-noack')?.invokedAt
-        ).toBeNull()
-
-        // Re-attach: next mature-scan tick re-emits the same row.
-        const { io: io2, cliEmitted: emitted2 } = makeTrackingIo()
-        const service2 = new MessageService(store, io2, publisher as any)
-        service2.releaseMatureScheduledMessages(now + 5000)
-        expect(emitted2).toHaveLength(1)
-    })
-
-    it('immediate-queued (no scheduled_at) IS swept and stamped invoked at session-end', () => {
-        // Confirms the sweep still does its primary job for true immediate rows.
-        const store = makeStore()
-        const session = makeSession(store, 'r4-immediate-sweep')
-        const publisher = makePublisher()
-        const now = Date.now()
-
-        store.messages.addMessage(
-            session.id,
-            { role: 'user', content: { type: 'text', text: 'immediate' } },
-            'local-imm'
-        )
-
-        const service = new MessageService(store, makeNoopIo(), publisher as any)
-        const result = service.sweepImmediateQueuedOnSessionEnd(session.id, now)
-        expect(result).not.toBeNull()
-        expect(result?.localIds).toEqual(['local-imm'])
-
-        // SSE side effect carries the swept localIds for the floating bar.
-        const consumed = publisher.events.find(e => e.type === 'messages-consumed') as
-            | { type: 'messages-consumed'; sessionId: string; localIds: string[]; invokedAt: number }
-            | undefined
-        expect(consumed).toBeDefined()
-        expect(consumed?.localIds).toEqual(['local-imm'])
-
-        // Row is now stamped — bar can clear.
-        const stillQueued = store.messages.getUninvokedLocalMessages(session.id)
-        expect(stillQueued.find((m) => m.localId === 'local-imm')).toBeUndefined()
-    })
-
-    it('future scheduled (scheduled_at > now) is also preserved by the sweep', () => {
-        const store = makeStore()
-        const session = makeSession(store, 'r4-future-sweep')
-        const publisher = makePublisher()
-        const now = Date.now()
-        const future = now + 60_000
-
-        store.messages.addMessage(
-            session.id,
-            { role: 'user', content: { type: 'text', text: 'future' } },
-            'local-future',
-            future
-        )
-
-        const service = new MessageService(store, makeNoopIo(), publisher as any)
-        const result = service.sweepImmediateQueuedOnSessionEnd(session.id, now)
-        expect(result).toBeNull()
-        expect(publisher.events.filter(e => e.type === 'messages-consumed')).toHaveLength(0)
-
-        const stillQueued = store.messages.getUninvokedLocalMessages(session.id)
-        expect(stillQueued.find((m) => m.localId === 'local-future')?.invokedAt).toBeNull()
-    })
-})

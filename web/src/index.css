@@ -26,6 +26,7 @@
     --app-detail-sheet-exit-duration: 400ms;
     --app-detail-sheet-settle-duration: 300ms;
     --app-detail-sheet-ease: cubic-bezier(0.32, 0.72, 0, 1);
+    --app-detail-background-return-ease: cubic-bezier(0.42, 0, 0.58, 1);
 
     --app-safe-area-top: env(safe-area-inset-top, 0px);
     --app-safe-area-right: env(safe-area-inset-right, 0px);
@@ -1429,14 +1430,20 @@ html[data-drawer-chrome='true'], html[data-drawer-chrome='true'] body {
     transition: background-color var(--app-detail-sheet-duration) var(--app-detail-sheet-ease);
 }
 html[data-drawer-chrome-dragging='true'], html[data-drawer-chrome-dragging='true'] body { transition: none; }
-html[data-drawer-chrome-closing='true'], html[data-drawer-chrome-closing='true'] body { transition-duration: var(--app-detail-sheet-exit-duration); }
+html[data-drawer-chrome-closing='true'], html[data-drawer-chrome-closing='true'] body {
+    transition-duration: var(--app-detail-sheet-exit-duration);
+    transition-timing-function: var(--app-detail-background-return-ease);
+}
 @media (max-width: 639px), (max-width: 1023px) and (pointer: coarse) {
     .chat-drawer-stage {
         background: var(--app-bg);
         transition: background-color var(--app-detail-sheet-duration) var(--app-detail-sheet-ease);
     }
     .chat-drawer-stage:has([data-drawer-active='true']) { background: var(--drawer-chrome-color, var(--app-bg)); }
-    .chat-drawer-stage:has([data-drawer-closing='true']) { transition-duration: var(--app-detail-sheet-exit-duration); }
+    .chat-drawer-stage:has([data-drawer-closing='true']) {
+        transition-duration: var(--app-detail-sheet-exit-duration);
+        transition-timing-function: var(--app-detail-background-return-ease);
+    }
     :is([data-chat-drawer-background], [data-drawer-page-background]) {
         transform-origin: center top;
         transition: transform var(--app-detail-sheet-duration) var(--app-detail-sheet-ease), border-radius var(--app-detail-sheet-duration) var(--app-detail-sheet-ease);
@@ -1446,7 +1453,10 @@ html[data-drawer-chrome-closing='true'], html[data-drawer-chrome-closing='true']
         border-radius: calc(16px * var(--drawer-background-progress, 0));
     }
     :is([data-chat-drawer-background], [data-drawer-page-background])[data-drawer-dragging='true'] { transition: none; }
-    :is([data-chat-drawer-background], [data-drawer-page-background])[data-drawer-closing='true'] { transition-duration: var(--app-detail-sheet-exit-duration); }
+    :is([data-chat-drawer-background], [data-drawer-page-background])[data-drawer-closing='true'] {
+        transition-duration: var(--app-detail-sheet-exit-duration);
+        transition-timing-function: var(--app-detail-background-return-ease);
+    }
     /* The sheet body owns vertical scrolling; retain horizontal code scrolling. */
     [data-chat-detail-drawer] [data-chat-drawer-body] > div { max-height: none; }
 }

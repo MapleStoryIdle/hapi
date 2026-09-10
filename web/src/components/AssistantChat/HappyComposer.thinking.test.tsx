@@ -19,6 +19,23 @@ function tree(props: ComponentProps<typeof HappyComposer>) {
 }
 
 describe('thinking belongs to the thread, not the composer', () => {
+    it('keeps the random empty prompt stable through status rerenders', () => {
+        const view = render(tree({ active: true, thinking: false }))
+        const prompt = screen.getByTestId('composer-placeholder').textContent
+        expect(prompt?.trim()).not.toBe('')
+        view.rerender(tree({ active: true, thinking: true }))
+        expect(screen.getByTestId('composer-placeholder').textContent).toBe(prompt)
+    })
+
+    it('ellipsizes status hints without truncating editable text or intercepting taps', () => {
+        const notice = 'A long important status message that must remain accessible in full'
+        render(tree({ active: true, inactiveNotice: notice }))
+        expect(screen.getByTestId('composer-placeholder')).toHaveClass('truncate', 'pointer-events-none', 'absolute')
+        expect(screen.getByTestId('composer-placeholder')).toHaveTextContent(notice)
+        expect(screen.getByRole('textbox')).toHaveAttribute('aria-description', notice)
+        expect(screen.getByRole('textbox')).not.toHaveClass('truncate')
+    })
+
     it.each(['claude', 'codex', 'cursor'])('does not reserve thinking space for %s', (agentFlavor) => {
         render(tree({ active: true, thinking: true, showStatusBar: false, agentFlavor }))
         expect(screen.queryByTestId('session-thinking-indicator')).toBeNull()

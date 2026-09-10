@@ -28,6 +28,8 @@ import {
 } from '@/components/SessionHeader'
 import { AgentFlavorStatusIcon } from '@/components/AgentFlavorIcon'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { SessionGroupDrawer } from '@/components/SessionGroupDrawer'
+import { resolveSessionGroup, useSessionGroups } from '@/hooks/useSessionGroups'
 import { SessionFilesDrawer } from '@/components/SessionFiles/SessionFilesDrawer'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { GitBranchesDrawer } from '@/components/GitBranchesDrawer'
@@ -114,12 +116,13 @@ const NATIVE_UNCONFIRMED_RECEIPT_GRACE_MS = 15_000
 
 function areNativeQueueRefsCurrent(
     messages: readonly CodexLocalSessionQueuedMessage[],
-    refs: ReadonlyArray<Pick<CodexLocalSessionQueuedMessage, 'id' | 'recoveryRequired' | 'recoveryReason'>>
+    refs: ReadonlyArray<Pick<CodexLocalSessionQueuedMessage, 'id' | 'recoveryRequired' | 'recoveryReason' | 'cancelBlocked'>>
 ): boolean {
     return messages.length === refs.length && messages.every((message, index) => {
         const ref = refs[index]
         return ref?.id === message.id
             && Boolean(ref.recoveryRequired) === Boolean(message.recoveryRequired)
+            && Boolean(ref.cancelBlocked) === Boolean(message.cancelBlocked)
             && ref.recoveryReason === message.recoveryReason
     })
 }
@@ -535,7 +538,9 @@ export function getVisibleNativeDirectMessageEchoes(
 function buildNativeDirectEchoMessages(
     echoes: readonly NativeDirectMessageEcho[]
 ): DecryptedMessage[] {
-    return echoes.map((echo) => ({
+    // Browser/Runner acceptance is only a queue receipt, not a sent message.
+    // Keep the receipt for reconciliation; render only Codex acknowledgements.
+    return echoes.filter((echo) => echo.deliveryState).map((echo) => ({
         id: echo.id,
         seq: null,
         localId: echo.id,
@@ -671,7 +676,7 @@ function buildCodexBlocksFromDecryptedMessages(messages: readonly DecryptedMessa
     return reduceChatBlocks(normalizedMessages, null).blocks
 }
 
-/** Build the loaded native transcript window plus unconfirmed direct-send bubbles. */
+/** Build the transcript plus acknowledged sends awaiting their transcript row. */
 export function buildNativeCodexBlocks(
     messages: readonly CodexLocalSessionContextMessage[],
     echoes: readonly NativeDirectMessageEcho[] = [],
@@ -745,6 +750,12 @@ function NativeCodexThread(props: {
     onStop: () => Promise<void>
     onConfigure: (configuration: NativeCodexSessionConfiguration) => void
     onResumeQueue: () => void
+    onCancelQueuedMessage?: (message: CodexLocalSessionQueuedMessage) => void
+    cancellingQueuedMessage?: boolean
+    onRetryQueuedMessage?: () => void
+    retryQueuedMessageId?: string
+    retryQueuedMessageDisabled?: boolean
+    retryingQueuedMessage?: boolean
     onReadOnlyModelInfo?: () => void
     machineId?: string
     title: string
@@ -1080,6 +1091,12 @@ function NativeCodexThread(props: {
                                         resuming={props.controlPending === 'resumeQueue'}
                                         resumeDisabled={Boolean(props.controls?.stoppingTurnId) || props.controlPending !== null}
                                         onResume={props.onResumeQueue}
+                                        onCancel={props.onCancelQueuedMessage}
+                                        cancelling={props.cancellingQueuedMessage}
+                                        onRetry={props.onRetryQueuedMessage}
+                                        retryMessageId={props.retryQueuedMessageId}
+                                        retryDisabled={props.retryQueuedMessageDisabled}
+                                        retrying={props.retryingQueuedMessage}
                                     />
                                 ) : null}
                             </div>
@@ -1576,7 +1593,7 @@ export function CodexSessionContextPage(props: {
         const runnerQueueIds = new Set(runnerQueuedMessages?.map((message) => message.id) ?? [])
         return nativeQueuedMessages.filter((message) => (
             message.id !== activeNativeClientMessageId
-            && !acknowledgedNativeMessageIds.has(message.id)
+            && (!acknowledgedNativeMessageIds.has(message.id) || runnerQueueIds.has(message.id))
             && (!transcriptConfirmedNativeDirectMessageIds.has(message.id) || runnerQueueIds.has(message.id))
         ))
     }, [acknowledgedNativeMessageIds, activeNativeClientMessageId, nativeQueuedMessages, runnerQueuedMessages, transcriptConfirmedNativeDirectMessageIds])
@@ -1935,9 +1952,31 @@ export function CodexSessionContextPage(props: {
         && (nativeStalledSince !== null || nativeRecoveryCandidate.uncertain)
     const canRecoverNativeDelivery = nativeRecoveryCandidate.candidate !== null
         && directStatus === 'idle'
+        && (reconciledNativeQueuedMessages.length === 0
+            || reconciledNativeQueuedMessages[0]?.id === nativeRecoveryCandidate.candidate.id)
         && nativeControls.controls?.queuePaused !== true
         && !nativeControls.controls?.stoppingTurnId
         && nativeControls.pendingAction === null
+    // Browser-only receipts can outlive a Runner restart. Keep them reachable
+    // in the queue, not as apparently sent messages in the conversation.
+    const displayedNativeQueue = useMemo(() => {
+        const result = [...reconciledNativeQueuedMessages]
+        const ids = new Set(result.map((message) => message.id))
+        for (const echo of visibleNativeDirectMessageEchoes) {
+            if (ids.has(echo.id) || (echo.queueId && ids.has(echo.queueId))
+                || acknowledgedNativeMessageIds.has(echo.id) || echo.id === activeNativeClientMessageId) continue
+            const recovery = nativeRecoveryCandidate.candidate?.id === echo.id
+            if (echo.deliveryPhase !== 'queued' && !recovery) continue
+            result.push({
+                id: echo.id, text: echo.text, queuedAt: echo.createdAt,
+                ...(recovery ? { recoveryRequired: true, recoveryReason: nativeRecoveryCandidate.reason ?? undefined } : {}),
+                // A browser-only receipt is not proof that a hand-off stopped.
+                cancelBlocked: !recovery
+            })
+        }
+        return result
+    }, [reconciledNativeQueuedMessages, visibleNativeDirectMessageEchoes, acknowledgedNativeMessageIds,
+        activeNativeClientMessageId, nativeRecoveryCandidate])
     const deliveryProgress = statusQuery.data?.success === true ? statusQuery.data.progress : null
     // Repeated polls/heartbeats are not new feedback. Track transcript and
     // delivery changes instead, scoped to this page and the latest prompt.
@@ -2067,7 +2106,14 @@ export function CodexSessionContextPage(props: {
         true,
         { refetchInterval: false }
     )
+    const groupsQuery = useSessionGroups(props.api)
+    const groupSource = useMemo(() => ({ type: 'native-codex' as const, machineId: props.machineId ?? '', codexSessionId: props.sessionId }), [props.machineId, props.sessionId])
+    const sessionGroup = resolveSessionGroup(groupsQuery.data, groupSource)
+    const [groupOpen, setGroupOpen] = useState(false)
+    const openGroup = useCallback(() => setGroupOpen(true), [])
     const sessionDetails = useMemo<SessionHeaderDetail[]>(() => buildSessionHeaderDetails({
+        group: sessionGroup,
+        onSetGroup: props.machineId ? openGroup : undefined,
         title,
         sessionId: props.sessionId,
         projectPath: context?.session.cwd,
@@ -2075,7 +2121,7 @@ export function CodexSessionContextPage(props: {
         agentFlavor: 'codex',
         model: context?.session.model,
         reasoning: context?.session.modelReasoningEffort
-    }, t), [context?.session.cwd, context?.session.model, context?.session.modelReasoningEffort, context?.session.modifiedAt, props.sessionId, t, title])
+    }, t), [sessionGroup, openGroup, props.machineId, context?.session.cwd, context?.session.model, context?.session.modelReasoningEffort, context?.session.modifiedAt, props.sessionId, t, title])
 
     const fork = useCallback(async () => {
         if (!canFork || !props.machineId) {
@@ -2225,8 +2271,8 @@ export function CodexSessionContextPage(props: {
         updateNativeDirectMessageEchoes
     ])
 
-    const discardNativeRecovery = useCallback(async () => {
-        const candidate = nativeRecoveryCandidate.candidate
+    const discardNativeRecovery = useCallback(async (queuedMessage?: CodexLocalSessionQueuedMessage) => {
+        const candidate = queuedMessage ?? nativeRecoveryCandidate.candidate
         if (!props.machineId || !candidate || isDiscardingNativeRecovery) {
             return
         }
@@ -2336,9 +2382,8 @@ export function CodexSessionContextPage(props: {
                     : Math.max(latest ?? message.position, message.position)
             ), null)
         }
-        // Show the person's words before the hub/runner round trip completes.
-        // This makes a slow native process feel like an acknowledged action,
-        // rather than a button press that appears to have done nothing.
+        // Save the receipt before the round trip. Only a Codex delivery
+        // acknowledgement/transcript will promote it into the conversation.
         updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => [...current, echo])
         setNativeForceScrollToken((token) => token + 1)
         setPendingDirectSendCount((count) => count + 1)
@@ -2464,6 +2509,7 @@ export function CodexSessionContextPage(props: {
     return (
         <SessionConnectionProvider value={nativeConnectionContext}>
             <SessionDetailSurface source="codex" testId="codex-session-context-page">
+                <SessionGroupDrawer key={`group:${props.machineId}:${props.sessionId}`} api={props.api} source={groupSource} open={groupOpen} onOpenChange={setGroupOpen} />
                 <FloatingSessionHeader
                     onBack={props.onBack}
                     backLabel={t('recentCodex.back')}
@@ -2501,6 +2547,7 @@ export function CodexSessionContextPage(props: {
                     )}
                 />
                 <SessionActionMenu
+                    onSetGroup={props.machineId ? openGroup : undefined}
                     isOpen={menuOpen}
                     onClose={() => setMenuOpen(false)}
                     sessionActive={directStatus === 'processing'}
@@ -2670,12 +2717,19 @@ export function CodexSessionContextPage(props: {
                             onStop={nativeControls.stop}
                             onConfigure={nativeControls.configure}
                             onResumeQueue={nativeControls.resumeQueue}
+                            onCancelQueuedMessage={(message) => void discardNativeRecovery(message)}
+                            cancellingQueuedMessage={isDiscardingNativeRecovery}
+                            onRetryQueuedMessage={() => void recoverNativeDelivery()}
+                            retryQueuedMessageId={nativeRecoveryCandidate.candidate?.id}
+                            retryQueuedMessageDisabled={!canRecoverNativeDelivery || isDiscardingNativeRecovery}
+                            retryingQueuedMessage={isRecoveringNativeDelivery}
                             onReadOnlyModelInfo={sshControlled ? nativeControls.explainSharedConfiguration : undefined}
                             machineId={props.machineId}
                             title={title}
                             metadata={nativeMetadata}
                             messages={messages}
-                            directMessageEchoes={visibleNativeDirectMessageEchoes}
+                            directMessageEchoes={visibleNativeDirectMessageEchoes.filter((echo) =>
+                                !displayedNativeQueue.some((queued) => queued.id === echo.id || queued.id === echo.queueId))}
                             subagents={context.subagents ?? []}
                             version={contextQuery.dataUpdatedAt + olderPages.length + nativeForceScrollToken}
                             hasMoreMessages={hasMoreMessages}
@@ -2690,7 +2744,7 @@ export function CodexSessionContextPage(props: {
                                 ? statusQuery.data.activeTurnId ?? null
                                 : null}
                             plan={context?.plan ?? null}
-                            queuedMessages={reconciledNativeQueuedMessages}
+                            queuedMessages={displayedNativeQueue}
                             connectionPhase={connectionPhase}
                             connectionPhaseStartedAt={directSendPhaseStartedAt}
                             connectionStartedAt={connectionStartedAt}

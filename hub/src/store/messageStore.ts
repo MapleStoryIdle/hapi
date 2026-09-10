@@ -12,7 +12,6 @@ import {
     getMessagesByPosition,
     getUninvokedLocalMessages,
     getMatureScheduledMessages,
-    getImmediateQueuedLocalMessages,
     countFutureScheduledBySessionIds,
     countFutureScheduledLocalMessages,
     minFutureScheduledAtBySessionIds,
@@ -70,10 +69,6 @@ export class MessageStore {
 
     getMatureScheduledMessages(beforeTime: number): StoredMessage[] {
         return getMatureScheduledMessages(this.db, beforeTime)
-    }
-
-    getImmediateQueuedLocalMessages(sessionId: string): StoredMessage[] {
-        return getImmediateQueuedLocalMessages(this.db, sessionId)
     }
 
     countFutureScheduledLocalMessages(sessionId: string, now: number = Date.now()): number {

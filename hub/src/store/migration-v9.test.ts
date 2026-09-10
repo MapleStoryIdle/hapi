@@ -236,36 +236,6 @@ describe('Store V9: scheduled_at store operations', () => {
         expect(results.map(m => m.id)).toEqual([msg1.id, msg2.id])
     })
 
-    it('getImmediateQueuedLocalMessages: returns only immediate queued, excludes mature AND future scheduled (HAPI Bot R4)', () => {
-        const store = new Store(':memory:')
-        const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')
-        const now = Date.now()
-
-        // Immediate queued (no scheduledAt) — included
-        const immediate = store.messages.addMessage(session.id, 'immediate', 'local-imm')
-        // Mature scheduled — must be excluded so the mature-scan path can deliver it
-        // with the no-stamp + re-emit-until-ack contract.
-        store.messages.addMessage(session.id, 'mature', 'local-mature', now - 1000)
-        // Future scheduled — must be excluded
-        store.messages.addMessage(session.id, 'future', 'local-future', now + 60_000)
-
-        const results = store.messages.getImmediateQueuedLocalMessages(session.id)
-        const ids = results.map(m => m.id)
-        expect(ids).toEqual([immediate.id])
-    })
-
-    it('getImmediateQueuedLocalMessages excludes already-invoked messages', () => {
-        const store = new Store(':memory:')
-        const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')
-        const now = Date.now()
-
-        const msg = store.messages.addMessage(session.id, 'q', 'local-q')
-        store.messages.markMessagesInvoked(session.id, ['local-q'], now)
-
-        const results = store.messages.getImmediateQueuedLocalMessages(session.id)
-        expect(results.find(m => m.id === msg.id)).toBeUndefined()
-    })
-
     it('getUninvokedLocalMessages still includes future scheduled (for Web bar display)', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')

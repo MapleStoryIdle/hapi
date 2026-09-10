@@ -1,5 +1,5 @@
 import { createElement, type ReactNode } from 'react'
-import { act, cleanup, renderHook } from '@testing-library/react'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { markUserInteraction, resetInteractionPriorityForTests } from '@/lib/interaction-priority'
@@ -133,6 +133,20 @@ describe('useSSE skills updates', () => {
             } as MessageEvent<string>)
         })
         expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['skills', 'session-1'] })
+    })
+})
+
+describe('useSSE pin updates', () => {
+    it('invalidates Hub pins on the global connection while another session is selected', async () => {
+        Object.defineProperty(globalThis, 'EventSource', { value: MockEventSource, configurable: true, writable: true })
+        const invalidateQueries = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
+        renderHook(() => useSSE({ enabled: true, token: 'test-token', baseUrl: 'http://hub.test', subscription: { sessionId: 'other-session' }, scope: 'global', onEvent: vi.fn() }), { wrapper: createWrapper() })
+        act(() => {
+            MockEventSource.instances[0]?.onmessage?.({
+                data: JSON.stringify({ type: 'session-pins-updated', namespace: 'default' }), lastEventId: '1'
+            } as MessageEvent<string>)
+        })
+        await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['session-pins'] }))
     })
 })
 

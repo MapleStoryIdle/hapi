@@ -457,24 +457,28 @@ export const CodexLocalSessionQueuedMessageSchema = z.object({
     id: z.string(),
     text: z.string(),
     queuedAt: z.number().finite(),
+    cancelBlocked: z.boolean().optional(),
     recoveryRequired: z.boolean().optional(),
     recoveryReason: z.enum([
         'codex_timeout',
         'session_status_unknown',
         'launch_failed',
         'runner_restarted',
+        'review_guard_failed',
         'external_writer_active'
     ]).optional()
 }).strict()
 
 const CodexLocalSessionRealtimeQueuedMessageSchema = z.object({
     id: z.string().min(1).max(160),
+    cancelBlocked: z.boolean().optional(),
     recoveryRequired: z.boolean().optional(),
     recoveryReason: z.enum([
         'codex_timeout',
         'session_status_unknown',
         'launch_failed',
         'runner_restarted',
+        'review_guard_failed',
         'external_writer_active'
     ]).optional()
 }).strict()
@@ -502,9 +506,11 @@ export const CodexLocalSessionRealtimeStatusSchema = z.object({
         'session_status_unknown',
         'launch_failed',
         'runner_restarted',
+        'review_guard_failed',
         'external_writer_active'
     ]).optional(),
-    queuedMessageRefs: z.array(CodexLocalSessionRealtimeQueuedMessageSchema).max(50).optional()
+    // Up to 50 local entries plus one acknowledged Desktop queue receipt.
+    queuedMessageRefs: z.array(CodexLocalSessionRealtimeQueuedMessageSchema).max(51).optional()
 }).strict()
 
 /** Global SSE invalidation only; transcript bodies must use snapshot RPC. */
@@ -519,6 +525,12 @@ export const CodexLocalSessionRealtimeSnapshotSchema = z.object({
 }).strict()
 
 export const SyncEventSchema = z.discriminatedUnion('type', [
+    SessionEventBaseSchema.extend({
+        type: z.literal('session-pins-updated')
+    }),
+    SessionEventBaseSchema.extend({
+        type: z.literal('session-groups-updated')
+    }),
     SessionChangedSchema.extend({
         type: z.literal('session-added'),
         data: z.unknown().optional()

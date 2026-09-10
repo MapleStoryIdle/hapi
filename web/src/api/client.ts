@@ -1,6 +1,8 @@
 import type { OpenLocalServiceRequest, OpenLocalServiceResponse } from '@hapi/protocol/localServices'
 import type { NativeCodexSessionControlAction, NativeCodexSessionControlResponse } from '@hapi/protocol/codexSessionControl'
 import type { Monitor, MonitorConfig, MonitorDetail, MonitorRequest } from '@hapi/protocol/monitoring'
+import type { SessionGroup, SessionGroupInput, SessionGroupSource, SessionGroupsResponse } from '@hapi/protocol/sessionGroups'
+import type { SessionPinSource, SessionPinsResponse } from '@hapi/protocol/sessionPins'
 import type {
     AttachmentMetadata,
     AuthResponse,
@@ -763,6 +765,34 @@ export class ApiClient {
             `/api/sessions/${encodeURIComponent(sessionId)}/side-session`,
             { method: 'POST', body: JSON.stringify({}) }
         )
+    }
+
+    async getSessionGroups(): Promise<SessionGroupsResponse> {
+        return this.request('/api/session-groups')
+    }
+
+    async getSessionPins(): Promise<SessionPinsResponse> {
+        return this.request('/api/session-pins')
+    }
+
+    async setSessionPin(source: SessionPinSource, pinned: boolean): Promise<SessionPinsResponse> {
+        return this.request('/api/session-pins', { method: 'PUT', body: JSON.stringify({ source, pinned }) })
+    }
+
+    async migrateSessionPins(sources: SessionPinSource[]): Promise<SessionPinsResponse> {
+        return this.request('/api/session-pins/migrate', { method: 'POST', body: JSON.stringify({ sources }) })
+    }
+
+    async createSessionGroup(input: SessionGroupInput): Promise<{ group: SessionGroup }> {
+        return this.request('/api/session-groups', { method: 'POST', body: JSON.stringify(input) })
+    }
+
+    async updateSessionGroup(id: string, input: SessionGroupInput): Promise<{ group: SessionGroup }> {
+        return this.request(`/api/session-groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) })
+    }
+
+    async assignSessionGroup(source: SessionGroupSource, groupId: string | null): Promise<{ ok: true }> {
+        return this.request('/api/session-groups/assignment', { method: 'PUT', body: JSON.stringify({ source, groupId }) })
     }
 
     async getMonitors(): Promise<MonitorsResponse> {

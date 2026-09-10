@@ -590,6 +590,13 @@ export function useSSE(options: {
                 removeOptimisticMessage(event.sessionId, event.messageId)
             }
 
+            if (event.type === 'session-groups-updated') {
+                void queryClient.invalidateQueries({ queryKey: ['session-groups'] })
+            }
+            if (event.type === 'session-pins-updated') {
+                void queryClient.invalidateQueries({ queryKey: ['session-pins'] })
+            }
+
             if (event.type === 'message-received') {
                 enqueueIncomingMessages(event.sessionId, [event.message])
             }

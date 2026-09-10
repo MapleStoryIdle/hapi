@@ -11,6 +11,9 @@ import {
     type SessionConnectionHealth
 } from '@/lib/session-connection-context'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { SessionGroupDrawer } from '@/components/SessionGroupDrawer'
+import { resolveSessionGroup, useSessionGroups } from '@/hooks/useSessionGroups'
+import type { SessionGroup } from '@hapi/protocol/sessionGroups'
 import { GitBranchesDrawer } from '@/components/GitBranchesDrawer'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
@@ -51,6 +54,7 @@ function SessionHeaderDetailRow(props: {
     copied: boolean
     onCopy: () => void
     isAgentInfo?: boolean
+    onSelect?: () => void
 }) {
     const { t } = useTranslation()
     const agentParts = props.isAgentInfo
@@ -74,7 +78,7 @@ function SessionHeaderDetailRow(props: {
                 </button>
             </div>
 
-            {agentParts.length > 0 ? (
+            {props.onSelect ? <button type="button" onClick={props.onSelect} className="min-h-11 w-full text-left text-sm font-medium text-[var(--app-link)]">{props.value}</button> : agentParts.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
                     {agentParts.map((part, index) => {
                         const [rawKey, ...rest] = part.split(':')
@@ -109,6 +113,7 @@ export type SessionHeaderDetail = {
     label: string
     value: string
     isAgentInfo?: boolean
+    onSelect?: () => void
 }
 
 type SessionHeaderDetailsRef = {
@@ -123,6 +128,8 @@ const EMPTY_SESSION_HEADER_DETAILS: readonly SessionHeaderDetail[] = []
  * operator should see the same rows in the same order.
  */
 export function buildSessionHeaderDetails(input: {
+    group?: SessionGroup
+    onSetGroup?: () => void
     title: string
     sessionId: string
     projectPath?: string | null
@@ -151,6 +158,7 @@ export function buildSessionHeaderDetails(input: {
 
     return [
         { key: 'title', label: t('session.header.details.fullName'), value: input.title },
+        ...(input.onSetGroup ? [{ key: 'group', label: t('session.groups.title'), value: input.group ? `${input.group.emoji} ${input.group.name}` : t('session.groups.none'), onSelect: input.onSetGroup }] : []),
         { key: 'session-id', label: t('session.header.details.sessionId'), value: input.sessionId },
         {
             key: 'path',
@@ -275,6 +283,7 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
                                 copied={copiedDetailKey === row.key}
                                 onCopy={() => copyDetail(row.key, row.value)}
                                 isAgentInfo={row.isAgentInfo}
+                                onSelect={row.onSelect ? () => { setDetailsOpen(false); row.onSelect?.() } : undefined}
                             />
                         ))}
                     </div>
@@ -803,6 +812,14 @@ export const SessionHeader = memo(function SessionHeader(props: {
 }) {
     const { t } = useTranslation()
     const { session, api, onSessionDeleted, onSessionReopened } = props
+    const groupsQuery = useSessionGroups(api)
+    const groupSource = useMemo(() => ({ type: 'managed' as const, sessionId: session.id }), [session.id])
+    const nativeGroupAlias = useMemo(() => session.metadata?.machineId && session.metadata?.codexSessionId
+        ? { type: 'native-codex' as const, machineId: session.metadata.machineId, codexSessionId: session.metadata.codexSessionId }
+        : null, [session.metadata?.machineId, session.metadata?.codexSessionId])
+    const sessionGroup = resolveSessionGroup(groupsQuery.data, groupSource, nativeGroupAlias)
+    const [groupOpen, setGroupOpen] = useState(false)
+    const openGroup = useCallback(() => setGroupOpen(true), [])
     const title = useMemo(() => getSessionTitle(session), [session])
     const projectPath = useMemo(() => getSessionProjectPath(session), [session])
     // A worktree session must act on its actual checkout, while the title
@@ -817,6 +834,8 @@ export const SessionHeader = memo(function SessionHeader(props: {
         { refetchInterval: false }
     )
     const sessionDetails = useMemo(() => buildSessionHeaderDetails({
+        group: sessionGroup,
+        onSetGroup: api ? openGroup : undefined,
         title,
         sessionId: session.id,
         projectPath,
@@ -829,6 +848,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
         permissionMode: session.permissionMode,
         collaborationMode: session.collaborationMode
     }, t), [
+        sessionGroup, api, openGroup,
         projectPath,
         session.collaborationMode,
         session.effort,
@@ -849,6 +869,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
     const sessionDetailsRef = useRef<readonly SessionHeaderDetail[]>(sessionDetails)
     sessionDetailsRef.current = sessionDetails
     const sessionDetailsRevision = [
+        sessionGroup?.id ?? '', sessionGroup?.name ?? '', sessionGroup?.emoji ?? '',
         session.id,
         projectPath ?? '',
         session.metadata?.flavor ?? '',
@@ -956,7 +977,9 @@ export const SessionHeader = memo(function SessionHeader(props: {
                 )}
             />
 
+            <SessionGroupDrawer key={session.id} api={api} source={groupSource} nativeAlias={nativeGroupAlias} open={groupOpen} onOpenChange={setGroupOpen} />
             <SessionActionMenu
+                onSetGroup={api ? openGroup : undefined}
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionActive={session.active}

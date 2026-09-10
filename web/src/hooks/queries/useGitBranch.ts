@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
+import type { GitBranchResponse } from '@hapi/protocol/apiTypes'
 import { parseStatusSummaryV2 } from '@/lib/gitParsers'
 import { queryKeys } from '@/lib/query-keys'
 
@@ -67,6 +68,10 @@ export function useMachineGitBranch(
     isWorktree: boolean
     isDirty: boolean
     isGitRepository: boolean
+    repositoryState: 'git' | 'non-git' | 'loading' | 'error'
+    childRepositories: NonNullable<GitBranchResponse['childRepositories']>
+    childRepositoriesTruncated: boolean
+    childRepositoriesError: boolean
 } {
     const resolvedMachineId = machineId ?? 'unknown'
     const resolvedCwd = cwd?.trim() ?? ''
@@ -79,12 +84,16 @@ export function useMachineGitBranch(
 
             const result = await api.getMachineGitBranch(machineId, resolvedCwd)
             if (!result.success) {
-                return null
+                throw new Error('Git detection unavailable')
             }
             return {
                 branch: getGitBranchFromStatusOutput(result.stdout ?? ''),
                 isWorktree: result.isWorktree === true,
-                isDirty: result.isDirty === true
+                isDirty: result.isDirty === true,
+                repositoryState: result.repositoryState ?? 'git',
+                childRepositories: result.childRepositories ?? [],
+                childRepositoriesTruncated: result.childRepositoriesTruncated === true,
+                childRepositoriesError: Boolean(result.childRepositoriesError)
             }
         },
         enabled: Boolean(enabled && api && machineId && resolvedCwd),
@@ -101,6 +110,10 @@ export function useMachineGitBranch(
         branch: query.data?.branch ?? null,
         isWorktree: query.data?.isWorktree === true,
         isDirty: query.data?.isDirty === true,
-        isGitRepository: query.data !== null && query.data !== undefined
+        isGitRepository: query.data?.repositoryState === 'git',
+        repositoryState: query.isError ? 'error' : query.data?.repositoryState ?? (query.isFetching ? 'loading' : 'error'),
+        childRepositories: query.data?.childRepositories ?? [],
+        childRepositoriesTruncated: query.data?.childRepositoriesTruncated === true,
+        childRepositoriesError: query.data?.childRepositoriesError === true
     }
 }

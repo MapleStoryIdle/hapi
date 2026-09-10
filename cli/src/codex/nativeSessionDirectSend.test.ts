@@ -762,7 +762,7 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
                 status: 'processing',
-                activeClientMessageId: 'ssh:idle-1'
+                queuedMessages: [expect.objectContaining({ id: 'ssh:idle-1', cancelBlocked: true })]
             })
             await expect(sender.archive(sessionId, archiveAttempt)).resolves.toMatchObject({
                 success: false,
@@ -1004,10 +1004,10 @@ describe('NativeCodexSessionDirectSender', () => {
                 await expect(replacement.sendWithExternalControlCheck(sessionId, 'Persist once', undefined, 'ssh:ack-1')).resolves.toMatchObject({
                     success: true,
                     status: 'processing',
-                    queuedMessages: []
+                    queuedMessages: [expect.objectContaining({ id: 'ssh:ack-1', cancelBlocked: true })]
                 })
                 expect(replacement.getStatus(sessionId)).toMatchObject({
-                    activeClientMessageId: 'ssh:ack-1',
+                    queuedMessages: [expect.objectContaining({ id: 'ssh:ack-1', cancelBlocked: true })],
                     deliveryReceipts: [{ id: 'ssh:ack-1', state: 'accepted' }]
                 })
                 expect(replacementClient.requestCalls).toEqual([])
@@ -1070,10 +1070,11 @@ describe('NativeCodexSessionDirectSender', () => {
         try {
             const status = sender.getStatus(sessionId)
             if (!status.success) throw new Error('Expected native queue status')
-            expect(status.queuedMessages).toHaveLength(50)
-            expect(status.activeClientMessageId).toBe(acceptedId)
+            expect(status.queuedMessages).toHaveLength(51)
+            expect(status.activeClientMessageId).toBeUndefined()
+            expect(status.queuedMessages?.[0]).toMatchObject({ id: acceptedId, cancelBlocked: true })
             expect(status.deliveryReceipts).toEqual([{ id: acceptedId, state: 'accepted' }])
-            expect(status.queuedMessages?.[49]).toMatchObject({ id: lastQueuedId })
+            expect(status.queuedMessages?.[50]).toMatchObject({ id: lastQueuedId })
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
@@ -1157,6 +1158,7 @@ describe('NativeCodexSessionDirectSender', () => {
                 queuedMessages: [{
                     id: clientMessageId,
                     text: 'Keep this receipt until Codex answers',
+                    cancelBlocked: true,
                     queuedAt: 123,
                     recoveryRequired: true,
                     recoveryReason: 'runner_restarted'
@@ -1182,7 +1184,7 @@ describe('NativeCodexSessionDirectSender', () => {
                 success: true,
                 status: 'processing',
                 startedAt: 123,
-                queuedMessages: []
+                queuedMessages: [expect.objectContaining({ id: clientMessageId, cancelBlocked: true })]
             })
             expect(sharedClient.requestCalls).toHaveLength(1)
             expect(privateClient.connectCalls).toBe(0)
@@ -1696,7 +1698,10 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(sharedClient.requestCalls).toHaveLength(1)
             const finalStatus = sender.getStatus(sessionId)
             if (!finalStatus.success) throw new Error('Expected native queue status')
-            expect(finalStatus.queuedMessages).toEqual([expect.objectContaining({ id: 'ssh:submit-timeout-b' })])
+            expect(finalStatus.queuedMessages).toEqual([
+                expect.objectContaining({ id: 'ssh:submit-timeout-a', cancelBlocked: true }),
+                expect.objectContaining({ id: 'ssh:submit-timeout-b' })
+            ])
             expect(finalStatus.deliveryReceipts).toEqual([{ id: 'ssh:submit-timeout-a', state: 'accepted' }])
             expect(finalStatus.lastErrorCode).toBeUndefined()
         } finally {
@@ -1866,9 +1871,9 @@ describe('NativeCodexSessionDirectSender', () => {
 
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
-                activeClientMessageId: 'ssh:timeout-a',
                 deliveryReceipts: [{ id: 'ssh:timeout-a', state: 'accepted' }],
                 queuedMessages: [
+                    expect.objectContaining({ id: 'ssh:timeout-a', cancelBlocked: true }),
                     expect.objectContaining({ id: 'ssh:timeout-b' })
                 ]
             })
@@ -1905,7 +1910,7 @@ describe('NativeCodexSessionDirectSender', () => {
             await flushMicrotasks()
             sender.notifyTranscriptChanged(sessionId, [{ text: '1-1', createdAt: 200 }])
             expect(sender.getStatus(sessionId)).toMatchObject({
-                activeClientMessageId: 'same:second',
+                queuedMessages: [expect.objectContaining({ id: 'same:second', cancelBlocked: true })],
                 deliveryReceipts: [{ id: 'same:first', state: 'delivered' }, { id: 'same:second', state: 'accepted' }]
             })
             now = 300
@@ -2563,6 +2568,7 @@ describe('NativeCodexSessionDirectSender', () => {
         const recoveryId = 'hapi-kanban-review:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
         const completedId = 'hapi-kanban-review:ffffffffffffffffffffffffffffffff'
         const safeQueuedId = 'native:safe-queued'
+        const unsentReviewId = 'native:unsent-review'
         const persisted: Array<Record<string, unknown>> = [{
             sessionId,
             id: acceptedId,
@@ -2601,6 +2607,16 @@ describe('NativeCodexSessionDirectSender', () => {
             deliveryText: 'Safe queued message',
             queuedAt: 103,
             recoveryRequired: false
+        }, {
+            sessionId,
+            id: unsentReviewId,
+            text: 'Feedback rejected before delivery',
+            deliveryText: 'Feedback rejected before delivery',
+            queuedAt: 104,
+            recoveryRequired: true,
+            recoveryReason: 'review_guard_failed',
+            deliveryPolicy: 'untrusted-review',
+            reviewGuard
         }]
         const store = {
             load: () => persisted as never,
@@ -2629,6 +2645,7 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(sender.discard(sessionId, recoveryId)).toMatchObject({ success: true, discarded: false, active: true })
             expect(sender.discard(sessionId, completedId)).toMatchObject({ success: true, discarded: true })
             expect(sender.discard(sessionId, safeQueuedId)).toMatchObject({ success: true, discarded: true })
+            expect(sender.discard(sessionId, unsentReviewId)).toMatchObject({ success: true, discarded: true })
             expect(persisted.map((item) => item.id)).toEqual([acceptedId, recoveryId])
         } finally {
             sender.dispose()
@@ -2745,7 +2762,7 @@ describe('NativeCodexSessionDirectSender', () => {
                     expect.objectContaining({
                         id: 'hapi-kanban-review:guard-order-b',
                         recoveryRequired: true,
-                        recoveryReason: 'launch_failed'
+                        recoveryReason: 'review_guard_failed'
                     })
                 ]
             })
@@ -3031,6 +3048,109 @@ describe('NativeCodexSessionDirectSender', () => {
             })
             expect(client.disconnectCalls).toBe(1)
             child.emit('exit', 0, null)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it.each(['idle-check', 'setup-error'] as const)('keeps an unsent bridge queued when status becomes unknown during %s', async (failurePoint) => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-unsent-unknown-'))
+        const sessionId = '81845678-1234-4234-8234-123456789012'
+        let runState: 'idle' | 'unknown' = 'idle'
+        const client = new FakeAppServerClient()
+        client.initializeHook = () => {
+            runState = 'unknown'
+            if (failurePoint === 'setup-error') throw new Error('setup connection lost')
+        }
+        const nextClient = new FakeAppServerClient()
+        const createClient = vi.fn().mockReturnValueOnce(client).mockReturnValue(nextClient)
+        const spawn = vi.fn<SpawnNativeCodexProcess>()
+        const store = { load: () => [], save: vi.fn() }
+        const sender = new NativeCodexSessionDirectSender(spawn, () => 123, 10, {
+            getSummary: () => ({ id: sessionId, cwd, title: 'Native', file: '/not-read', modifiedAt: 100, runState })
+        }, createClient, store)
+
+        try {
+            sender.send(sessionId, 'Wait until idle', undefined, 'native:unsent')
+            await flushMicrotasks()
+            expect(client.startTurnCalls).toHaveLength(0)
+            expect(spawn).not.toHaveBeenCalled()
+            expect(store.save).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'native:unsent', recoveryRequired: false })])
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                status: 'unknown', queuedMessages: [{ id: 'native:unsent' }]
+            })
+            await vi.advanceTimersByTimeAsync(20)
+            expect(createClient).toHaveBeenCalledTimes(1)
+
+            runState = 'idle'
+            await vi.advanceTimersByTimeAsync(20)
+            expect(nextClient.startTurnCalls).toHaveLength(1)
+            expect(sender.getStatus(sessionId)).toMatchObject({ queuedMessages: [] })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it.each([false, true])('restores bridge setup safely while preserving an attempted=%s crash guard', async (attempted) => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-bridge-crash-edge-'))
+        const sessionId = '81845678-1234-4234-8234-123456789012'
+        const lookup = { getSummary: () => ({ id: sessionId, cwd, title: 'Native', file: '/not-read', modifiedAt: 100, runState: 'idle' as const }) }
+        let saved: NativeCodexSessionDirectSendStoredItem[] = []
+        const store = {
+            load: () => structuredClone(saved),
+            save: (items: readonly NativeCodexSessionDirectSendStoredItem[]) => { saved = structuredClone([...items]) }
+        }
+        const client = new FakeAppServerClient()
+        if (attempted) client.startTurn = () => new Promise<TurnStartResponse>(() => {})
+        else client.connect = () => new Promise<void>(() => {})
+        const sender = new NativeCodexSessionDirectSender(vi.fn(), () => 123, 10, lookup, () => client, store)
+        const replacementClient = new FakeAppServerClient()
+        let replacement: NativeCodexSessionDirectSender | null = null
+        try {
+            sender.send(sessionId, 'Only retry if unsent', undefined, 'native:crash-edge')
+            await flushMicrotasks()
+            expect(saved).toEqual([expect.objectContaining({ id: 'native:crash-edge', recoveryRequired: attempted })])
+            sender.dispose()
+            replacement = new NativeCodexSessionDirectSender(vi.fn(), () => 124, 10, lookup, () => replacementClient, store)
+            await vi.advanceTimersByTimeAsync(20)
+            expect(replacementClient.startTurnCalls).toHaveLength(attempted ? 0 : 1)
+            if (attempted) expect(replacement.getStatus(sessionId)).toMatchObject({
+                queuedMessages: [{ id: 'native:crash-edge', recoveryRequired: true, recoveryReason: 'runner_restarted' }]
+            })
+        } finally {
+            sender.dispose()
+            replacement?.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('does not attempt turn/start if its crash guard cannot be saved', async () => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-bridge-guard-write-'))
+        const sessionId = '81845678-1234-4234-8234-123456789012'
+        let rejectGuard = true
+        const store = {
+            load: () => [],
+            save: vi.fn((items: readonly NativeCodexSessionDirectSendStoredItem[]) => {
+                if (rejectGuard && items.some(item => item.recoveryRequired)) throw new Error('disk unavailable')
+            })
+        }
+        const client = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(vi.fn(), () => 123, 10, {
+            getSummary: () => ({ id: sessionId, cwd, title: 'Native', file: '/not-read', modifiedAt: 100, runState: 'idle' })
+        }, () => client, store)
+        try {
+            sender.send(sessionId, 'Save before send', undefined, 'native:guard-write')
+            await flushMicrotasks()
+            expect(client.startTurnCalls).toHaveLength(0)
+            expect(store.save).toHaveBeenLastCalledWith([expect.objectContaining({ recoveryRequired: false })])
+            rejectGuard = false
+            await vi.advanceTimersByTimeAsync(5_000)
+            expect(client.startTurnCalls).toHaveLength(1)
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })

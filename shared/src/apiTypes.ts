@@ -571,6 +571,11 @@ export type GitCommandResponse = CommandResponse
 
 /** Branch probe metadata for a directory on a runner. */
 export type GitBranchResponse = GitCommandResponse & {
+    /** Only confirmed Git not-a-repository responses produce non-git. */
+    repositoryState?: 'git' | 'non-git' | 'error'
+    childRepositories?: Array<{ name: string; cwd: string }>
+    childRepositoriesTruncated?: boolean
+    childRepositoriesError?: string
     /** True only for a linked Git worktree, not the primary checkout. */
     isWorktree?: boolean
     /** True when tracked, staged, or untracked worktree changes exist. */

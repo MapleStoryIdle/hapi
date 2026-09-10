@@ -14,6 +14,7 @@ import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { validatePath } from '../pathSecurity'
 import { rpcError } from '../rpcResponses'
+import { runnerGitChildRepositoryCache } from '../gitChildRepositories'
 
 const execFileAsync = promisify(execFile)
 
@@ -65,6 +66,7 @@ async function runGitCommand(
     try {
         const options: ExecFileOptions = {
             cwd,
+            env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
             timeout: timeout ?? 10_000
         }
         const { stdout, stderr } = await execFileAsync('git', args, options)
@@ -138,27 +140,27 @@ export function hasGitWorktreeChanges(statusOutput: string): boolean {
  * for one project share a single probe.
  */
 export async function getGitBranchStatusForCwd(cwd: string, timeout?: number): Promise<GitBranchResponse> {
-    const [status, gitDirectories] = await Promise.all([
-        runGitCommand(
-            ['status', '--porcelain=v2', '--branch', '--untracked-files=normal'],
-            cwd,
-            timeout
-        ),
-        runGitCommand(
-            ['rev-parse', '--git-dir', '--git-common-dir'],
-            cwd,
-            timeout
-        )
-    ])
-    if (!status.success) return status
+    const gitDirectories = await runGitCommand(['rev-parse', '--git-dir', '--git-common-dir'], cwd, timeout)
+    if (!gitDirectories.success) {
+        if (isConfirmedNonGitDirectory(gitDirectories)) {
+            return { success: true, repositoryState: 'non-git', ...await runnerGitChildRepositoryCache.get(cwd) }
+        }
+        return { ...gitDirectories, repositoryState: 'error' }
+    }
+    const status = await runGitCommand(['status', '--porcelain=v2', '--branch', '--untracked-files=normal'], cwd, timeout)
+    if (!status.success) return { ...status, repositoryState: 'error' }
 
     return {
         ...status,
-        isWorktree: gitDirectories.success
-            ? isLinkedGitWorktree(gitDirectories.stdout ?? '', cwd)
-            : false,
+        repositoryState: 'git',
+        isWorktree: isLinkedGitWorktree(gitDirectories.stdout ?? '', cwd),
         isDirty: hasGitWorktreeChanges(status.stdout ?? '')
     }
+}
+
+export function isConfirmedNonGitDirectory(result: GitCommandResponse): boolean {
+    return !result.success && result.exitCode === 128
+        && /^fatal: not a git repository \(or any (?:of the parent directories|parent up to mount point [^\r\n]+)\)(?:: \.git)?\r?$/m.test(result.stderr ?? '')
 }
 
 function gitBranchFailure(

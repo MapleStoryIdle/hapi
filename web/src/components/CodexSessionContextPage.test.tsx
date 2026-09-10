@@ -28,6 +28,7 @@ import {
     getNativeCodexPlanStatus,
     getNativeContextRefreshInterval,
     getVisibleNativeDirectMessageEchoes,
+    type NativeDirectMessageEcho,
     mergeCodexContextMessages
 } from './CodexSessionContextPage'
 
@@ -407,6 +408,34 @@ describe('CodexSessionContextPage', () => {
         }))
     })
 
+    it('keeps a Desktop queue acknowledgement in the drawer until the native transcript consumes it', async () => {
+        const now = Date.now()
+        localStorage.setItem('hapi:native-codex-direct-messages:v1', JSON.stringify({
+            [JSON.stringify(['machine-1', 'codex-thread-1'])]: [{
+                id: 'desktop-queued', text: 'Waiting inside Desktop', createdAt: now,
+                status: 'queued', deliveryPhase: 'queued', phaseStartedAt: now,
+                deliveryState: 'accepted', queueId: 'desktop-queued',
+                observedTranscriptMessageIds: [], observedThroughPosition: null
+            }]
+        }))
+        const api = createApi()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true, status: 'processing',
+            queuedMessages: [{ id: 'desktop-queued', text: 'Waiting inside Desktop', queuedAt: now, cancelBlocked: true }],
+            deliveryReceipts: [{ id: 'desktop-queued', state: 'accepted' }]
+        })
+        renderPage({ api })
+        await screen.findByText('Original response')
+        const trigger = await screen.findByTestId('native-queued-messages-trigger')
+        expect(document.querySelector('.happy-thread-messages')).not.toHaveTextContent('Waiting inside Desktop')
+        fireEvent.click(trigger)
+        const drawer = screen.getByTestId('native-queued-messages-drawer')
+        expect(drawer).toHaveTextContent('Waiting inside Desktop')
+        expect(within(drawer).getByRole('button', { name: /cancel/i })).toBeDisabled()
+        expect(within(drawer).queryByRole('button', { name: /Send again/ })).toBeNull()
+        expect(api.sendCodexSessionMessage).not.toHaveBeenCalled()
+    })
+
     it('removes a queued placeholder when the runner names its active receipt', async () => {
         const api = createApi()
         let clientMessageId = ''
@@ -456,7 +485,9 @@ describe('CodexSessionContextPage', () => {
             lastErrorAt: createdAt + 60_000, lastErrorClientMessageId
         })
         renderPage({ api })
-        await screen.findByText('Unrelated fresh prompt')
+        await screen.findByText('Original response')
+        expect(screen.queryByText('Unrelated fresh prompt')).toBeNull()
+        expect(localStorage.getItem('hapi:native-codex-direct-messages:v1')).toContain('Unrelated fresh prompt')
         expect(screen.queryByTestId('composer-send-error')).toBeNull()
         expect(screen.queryByRole('status', { name: 'Failed' })).toBeNull()
         expect(api.sendCodexSessionMessage).not.toHaveBeenCalled()
@@ -515,7 +546,7 @@ describe('CodexSessionContextPage', () => {
                 status: { success: true, status: 'idle' }, timing: { cache: 'hit', durationMs: 0 } }
         }))
         await waitFor(() => expect(screen.queryByRole('status', { name: 'Sending' })).toBeNull())
-        expect(screen.getAllByText('Late but delivered')).toHaveLength(1)
+        await waitFor(() => expect(screen.getAllByText('Late but delivered')).toHaveLength(1))
         expect(screen.queryByTestId('composer-send-error')).toBeNull()
         expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1)
     })
@@ -686,10 +717,7 @@ describe('CodexSessionContextPage', () => {
         const composer = screen.getByRole('textbox')
         expect(screen.queryByTestId('codex-native-ssh-controlled')).toBeNull()
         expect(composer).not.toBeDisabled()
-        expect(composer).toHaveAttribute(
-            'placeholder',
-            'Codex Desktop over SSH is busy. New messages will be queued.'
-        )
+        expect(screen.getByText('Codex Desktop over SSH is busy. New messages will be queued.')).toBeInTheDocument()
         expect(screen.getByTestId('codex-native-session-menu-trigger').querySelector('[title="Codex"]')?.parentElement)
             .toHaveClass('text-[#F5A524]')
         expect(screen.queryAllByTestId('composer-send-lock')).toHaveLength(0)
@@ -1653,7 +1681,7 @@ describe('CodexSessionContextPage', () => {
         })
     })
 
-    it('shows the native prompt immediately while the direct request is still in flight', async () => {
+    it('keeps the native prompt out of chat while the direct request is still in flight', async () => {
         const api = createApi()
         let resolveSend!: (value: { success: true; status: 'processing'; startedAt: number }) => void
         ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise((resolve) => {
@@ -1669,8 +1697,8 @@ describe('CodexSessionContextPage', () => {
         await waitFor(() => {
             expect(api.sendCodexSessionMessage).toHaveBeenCalled()
         })
-        expect(await screen.findByText('Show this right away')).toBeInTheDocument()
-        expect(screen.getByRole('status', { name: 'Sending' })).toBeInTheDocument()
+        expect(screen.queryByText('Show this right away')).toBeNull()
+        expect(localStorage.getItem('hapi:native-codex-direct-messages:v1')).toContain('Show this right away')
         expect(screen.getByTestId('codex-direct-send-phase-launching').closest('.happy-thread-messages')).not.toBeNull()
 
         await act(async () => {
@@ -1790,8 +1818,8 @@ describe('CodexSessionContextPage', () => {
 
         await waitFor(() => expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1))
         expect(screen.queryByTestId('composer-send-error')).toBeNull()
-        expect(screen.getAllByText('Verify this before retrying')).not.toHaveLength(0)
-        expect(screen.getByRole('status', { name: 'Sending' })).toBeInTheDocument()
+        expect(screen.queryByText('Verify this before retrying')).toBeNull()
+        expect(localStorage.getItem('hapi:native-codex-direct-messages:v1')).toContain('Verify this before retrying')
         await waitFor(() => {
             expect((api.getCodexSessionSnapshot as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1)
         })
@@ -1819,7 +1847,7 @@ describe('CodexSessionContextPage', () => {
         expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1)
     })
 
-    it('keeps a native prompt visible after leaving and reopening the session', async () => {
+    it('retains an unsent native receipt without displaying a chat bubble across page exits', async () => {
         const api = createApi()
         ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise(() => {}))
         const firstPage = renderPage({ api })
@@ -1828,12 +1856,15 @@ describe('CodexSessionContextPage', () => {
         fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep this after leaving' } })
         fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-        expect(await screen.findByText('Keep this after leaving')).toBeInTheDocument()
+        await waitFor(() => expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1))
+        expect(screen.queryByText('Keep this after leaving')).toBeNull()
+        expect(localStorage.getItem('hapi:native-codex-direct-messages:v1')).toContain('Keep this after leaving')
         firstPage.unmount()
 
         renderPage({ api })
-        expect(await screen.findByText('Keep this after leaving')).toBeInTheDocument()
         await screen.findByText('Original response')
+        expect(screen.queryByText('Keep this after leaving')).toBeNull()
+        expect(localStorage.getItem('hapi:native-codex-direct-messages:v1')).toContain('Keep this after leaving')
         expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1)
     })
 
@@ -2614,6 +2645,21 @@ describe('CodexSessionContextPage', () => {
             { kind: 'agent-reasoning', text: 'Inspecting the file' }
         ])
         expect(blocks).toHaveLength(3)
+    })
+
+    it('keeps unsent receipts out of chat and shows acknowledged delivery before transcript sync', () => {
+        const echo: NativeDirectMessageEcho = {
+            id: 'queued-prompt', text: 'Waiting prompt', createdAt: 1, status: 'queued',
+            deliveryPhase: 'queued', phaseStartedAt: 1, queueId: 'queued-prompt',
+            observedTranscriptMessageIds: [], observedThroughPosition: null
+        }
+        expect(buildNativeCodexBlocks([], [echo])).toEqual([])
+        expect(buildNativeCodexBlocks([], [{ ...echo, status: 'sending', deliveryPhase: 'matching' }])).toEqual([])
+        expect(buildNativeCodexBlocks([], [{ ...echo, deliveryState: 'accepted' }])).toMatchObject([
+            { kind: 'user-text', text: 'Waiting prompt' }
+        ])
+        // Hidden queue receipts must remain available for later reconciliation.
+        expect(getVisibleNativeDirectMessageEchoes([echo], [])).toEqual([echo])
     })
 
     it('maps native child transcript snapshots to the shared CodexAgent cards', () => {

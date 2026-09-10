@@ -9,10 +9,11 @@ export function SwipeArchiveRow(props: { children: ReactNode; label: string; onA
     const suppressClick = useRef(false)
     return <div className="relative overflow-hidden rounded-[14px]" data-swipe-archive
         onKeyDown={event => {
+            if (!event.currentTarget.contains(event.target as Node)) return
             if (event.key === 'Escape') setOffset(0)
             if (event.key === 'ArrowLeft' && !props.disabled) { event.preventDefault(); setOffset(-80) }
         }}
-        onContextMenu={event => { if (!props.disabled) { event.preventDefault(); setOffset(-80) } }}>
+        onContextMenu={event => { if (event.currentTarget.contains(event.target as Node) && !props.disabled) { event.preventDefault(); setOffset(-80) } }}>
         <button type="button" disabled={props.disabled || offset === 0} tabIndex={offset < 0 ? 0 : -1} aria-hidden={offset === 0} aria-label={props.label}
             data-kanban-archive
             onClick={() => { setOffset(0); props.onArchive() }}
@@ -20,13 +21,15 @@ export function SwipeArchiveRow(props: { children: ReactNode; label: string; onA
             <Archive className="h-5 w-5" aria-hidden="true" />
         </button>
         <div style={{ transform: `translateX(${offset}px)`, touchAction: 'pan-y pinch-zoom' }} className={dragging ? 'relative' : 'relative transition-transform duration-200 motion-reduce:transition-none'}
-            onDragStart={event => event.preventDefault()}
+            onDragStart={event => { if (event.currentTarget.contains(event.target as Node)) event.preventDefault() }}
             onPointerDown={event => {
+                if (!event.currentTarget.contains(event.target as Node)) return
                 suppressClick.current = false
                 if (props.disabled || event.button !== 0 || (event.target as HTMLElement).closest('[aria-pressed],input,label')) return
                 gesture.current = { x: event.clientX, y: event.clientY, initial: offset, horizontal: false }
             }}
             onPointerMove={event => {
+                if (!event.currentTarget.contains(event.target as Node)) return
                 const current = gesture.current
                 if (!current) return
                 const dx = event.clientX - current.x, dy = event.clientY - current.y
@@ -40,9 +43,10 @@ export function SwipeArchiveRow(props: { children: ReactNode; label: string; onA
                 }
                 setOffset(Math.max(-80, Math.min(0, current.initial + dx)))
             }}
-            onPointerUp={() => { gesture.current = null; setDragging(false); setOffset(value => value < -32 ? -80 : 0) }}
-            onPointerCancel={() => { gesture.current = null; setDragging(false); setOffset(0) }}
+            onPointerUp={event => { if (!event.currentTarget.contains(event.target as Node)) return; gesture.current = null; setDragging(false); setOffset(value => value < -32 ? -80 : 0) }}
+            onPointerCancel={event => { if (!event.currentTarget.contains(event.target as Node)) return; gesture.current = null; setDragging(false); setOffset(0) }}
             onClickCapture={event => {
+                if (!event.currentTarget.contains(event.target as Node)) return
                 if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; return }
                 if (offset < 0) { event.preventDefault(); event.stopPropagation(); setOffset(0) }
             }}

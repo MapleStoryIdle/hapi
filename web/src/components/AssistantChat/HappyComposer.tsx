@@ -1157,10 +1157,13 @@ export function HappyComposer(props: {
     // effect below. This prevents one compact render between the first typed
     // character and the persistent expanded state.
     const composerCompact = !composerExpanded && !requiresExpandedComposer
+    const [promptIndex] = useState(() => Math.floor(Math.random() * 6))
+    const playfulPrompts = [
+        t('composer.prompt.0'), t('composer.prompt.1'), t('composer.prompt.2'),
+        t('composer.prompt.3'), t('composer.prompt.4'), t('composer.prompt.5'),
+    ]
     const composerPlaceholder = inactiveNotice
-        ?? (composerCompact
-            ? t('misc.compactComposerPrompt')
-            : showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage'))
+        ?? (showContinueHint && !composerCompact ? t('misc.typeMessage') : playfulPrompts[promptIndex])
 
     useEffect(() => {
         if (requiresExpandedComposer) {
@@ -1831,7 +1834,9 @@ export function HappyComposer(props: {
                         >
                             <ComposerPrimitive.Input
                                 ref={textareaRef}
-                                placeholder={composerPlaceholder}
+                                placeholder=""
+                                aria-label={t('chat.placeholder')}
+                                aria-description={!hasText ? composerPlaceholder : undefined}
                                 disabled={controlsDisabled}
                                 maxRows={composerCompact ? 1 : 6}
                                 submitOnEnter={false}
@@ -1842,12 +1847,16 @@ export function HappyComposer(props: {
                                 onSelect={handleSelect}
                                 onKeyDown={handleKeyDown}
                                 onPaste={handlePaste}
-                                className={`relative z-10 flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] transition-[height,min-height,max-height] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none ${
+                                className={`relative z-10 min-w-0 flex-1 resize-none bg-transparent text-base text-[var(--app-fg)] placeholder-[var(--app-hint)] transition-[height,min-height,max-height] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none ${
                                     composerCompact
                                         ? 'h-6 max-h-6 overflow-hidden pr-12 leading-6'
                                         : 'min-h-[44px] max-h-[10rem] overflow-y-auto overscroll-contain leading-snug'
                                 }`}
                             />
+                            {!hasText ? <span aria-hidden="true" data-testid="composer-placeholder"
+                                className={`pointer-events-none absolute inset-x-4 truncate text-base text-[var(--app-hint)] ${composerCompact ? 'top-3 pr-12 leading-6' : 'top-2 leading-snug'}`}>
+                                {composerPlaceholder}
+                            </span> : null}
                             {composerCompact ? (
                                 <div className="absolute right-1 top-1/2 z-20 -translate-y-1/2">
                                     <UnifiedButton

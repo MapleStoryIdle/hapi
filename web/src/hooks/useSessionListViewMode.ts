@@ -65,14 +65,18 @@ export function getInitialPinnedSessionKeys(): Set<string> {
     return parsePinnedSessionKeys(safeGetItem(PINNED_SESSION_KEYS_STORAGE_KEY))
 }
 
+export function removeMigratedPinnedSessionKeys(keys: string[]): void {
+    const remaining = getInitialPinnedSessionKeys()
+    for (const key of keys) remaining.delete(key)
+    if (remaining.size) safeSetItem(PINNED_SESSION_KEYS_STORAGE_KEY, JSON.stringify([...remaining]))
+    else safeRemoveItem(PINNED_SESSION_KEYS_STORAGE_KEY)
+}
+
 export function useSessionListViewMode(): {
     sessionListViewMode: SessionListViewMode
     setSessionListViewMode: (mode: SessionListViewMode) => void
-    pinnedSessionKeys: ReadonlySet<string>
-    togglePinnedSessionKey: (sessionKey: string) => void
 } {
     const [sessionListViewMode, setSessionListViewModeState] = useState<SessionListViewMode>(getInitialSessionListViewMode)
-    const [pinnedSessionKeys, setPinnedSessionKeys] = useState<Set<string>>(getInitialPinnedSessionKeys)
 
     useEffect(() => {
         if (!isBrowser()) return
@@ -80,9 +84,6 @@ export function useSessionListViewMode(): {
         const onStorage = (event: StorageEvent) => {
             if (event.key === VIEW_MODE_STORAGE_KEY) {
                 setSessionListViewModeState(parseSessionListViewMode(event.newValue))
-            }
-            if (event.key === PINNED_SESSION_KEYS_STORAGE_KEY) {
-                setPinnedSessionKeys(parsePinnedSessionKeys(event.newValue))
             }
         }
 
@@ -99,28 +100,8 @@ export function useSessionListViewMode(): {
         }
     }, [])
 
-    const togglePinnedSessionKey = useCallback((sessionKey: string) => {
-        setPinnedSessionKeys((current) => {
-            const next = new Set(current)
-            if (next.has(sessionKey)) {
-                next.delete(sessionKey)
-            } else {
-                next.add(sessionKey)
-            }
-
-            if (next.size === 0) {
-                safeRemoveItem(PINNED_SESSION_KEYS_STORAGE_KEY)
-            } else {
-                safeSetItem(PINNED_SESSION_KEYS_STORAGE_KEY, JSON.stringify([...next]))
-            }
-            return next
-        })
-    }, [])
-
     return {
         sessionListViewMode,
-        setSessionListViewMode,
-        pinnedSessionKeys,
-        togglePinnedSessionKey
+        setSessionListViewMode
     }
 }

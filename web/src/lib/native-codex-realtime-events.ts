@@ -61,7 +61,7 @@ export function getNativeCodexRealtimeSnapshot(
     const queuedMessageRefs = status?.queuedMessageRefs
     const validQueuedMessageRefs = queuedMessageRefs === undefined || (
         Array.isArray(queuedMessageRefs)
-        && queuedMessageRefs.length <= 50
+        && queuedMessageRefs.length <= 51
         && queuedMessageRefs.every((entry) => {
             const record = asRecord(entry)
             return record !== null
@@ -69,11 +69,13 @@ export function getNativeCodexRealtimeSnapshot(
                 && record.id.length > 0
                 && record.id.length <= 160
                 && (record.recoveryRequired === undefined || typeof record.recoveryRequired === 'boolean')
+                && (record.cancelBlocked === undefined || typeof record.cancelBlocked === 'boolean')
                 && (record.recoveryReason === undefined || [
                     'codex_timeout',
                     'session_status_unknown',
                     'launch_failed',
                     'runner_restarted',
+                    'review_guard_failed',
                     'external_writer_active'
                 ].includes(record.recoveryReason as string))
         })

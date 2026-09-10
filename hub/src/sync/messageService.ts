@@ -333,7 +333,13 @@ export class MessageService {
 
         const ackResult = await this.requestCliCancelAck(sessionId, localId, messageId, 500)
 
-        if (ackResult === 'not-found' || ackResult === 'timeout') {
+        if (ackResult === 'timeout') {
+            // No acknowledgement is not proof of consumption. Preserve the
+            // queue row so the user can retry cancelling after reconnection.
+            throw new Error('Message cancellation is not confirmed; try again')
+        }
+
+        if (ackResult === 'not-found') {
             // CLI could not remove the item — it was already shift()-ed or CLI is
             // offline.  Stamp invoked_at immediately so the message lands in the thread
             // as 'sent' instead of disappearing.  The agent's later assistant message
@@ -423,7 +429,7 @@ export class MessageService {
                         resolve('removed')
                         return
                     }
-                    if (err) {
+                    if (err || !responses?.length) {
                         resolve('timeout')
                         return
                     }
@@ -518,37 +524,6 @@ export class MessageService {
                 scheduledAt: msg.scheduledAt
             }
         })
-    }
-
-    /**
-     * Force-invoke all immediate-queued messages for a session at session end.
-     *
-     * Called by sessionHandlers when the CLI sends 'session-end', so that
-     * the floating bar is cleared without leaving queued rows pinned forever.
-     *
-     * **All scheduled rows are intentionally skipped** (mature or future).  The
-     * mature-scan path (releaseMatureScheduledMessages) is the sole emit channel
-     * for scheduled rows and relies on the CLI ack to write invoked_at; if this
-     * sweep stamped a mature scheduled row, a subsequent re-attach would never
-     * see the row in the next mature-scan tick and the user's prompt would be
-     * silently dropped.  See HAPI Bot R4 finding.
-     *
-     * Returns the list of localIds that were stamped and the invokedAt timestamp,
-     * or null if no messages needed sweeping.
-     */
-    sweepImmediateQueuedOnSessionEnd(
-        sessionId: string,
-        invokedAt: number
-    ): { localIds: string[]; invokedAt: number } | null {
-        const queued = this.store.messages.getImmediateQueuedLocalMessages(sessionId)
-        const localIds = queued
-            .map((m) => m.localId)
-            .filter((id): id is string => typeof id === 'string')
-        if (localIds.length === 0) return null
-        this.store.messages.markMessagesInvoked(sessionId, localIds, invokedAt)
-        this.forgetScheduledMatureNotified(localIds)
-        this.publisher.emit({ type: 'messages-consumed', sessionId, localIds, invokedAt })
-        return { localIds, invokedAt }
     }
 
     /** Called by the hub 5-second tick (syncEngine.expireInactive).

@@ -454,9 +454,7 @@ function SessionsPage() {
     const { addRecentPath, setLastUsedMachineId } = useRecentPaths()
     const {
         sessionListViewMode,
-        setSessionListViewMode,
-        pinnedSessionKeys,
-        togglePinnedSessionKey
+        setSessionListViewMode
     } = useSessionListViewMode()
     const { machines } = useMachines(api, true)
     const [isSyncingCodexSession, setIsSyncingCodexSession] = useState(false)
@@ -1002,8 +1000,6 @@ function SessionsPage() {
                             onNewSessionInDirectory={selectedRunnerMachine ? createSessionInDirectory : undefined}
                             isNewSessionPending={isQuickSessionPending}
                             viewMode={sessionListViewMode}
-                            pinnedSessionKeys={pinnedSessionKeys}
-                            onTogglePin={togglePinnedSessionKey}
                             realtimeAvailable={selectedRunnerMachine?.active === true
                                 && selectedRunnerMachine.metadata?.nativeCodexRealtime === true}
                         />

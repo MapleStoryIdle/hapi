@@ -279,6 +279,10 @@ export class SSEManager {
             return true
         }
 
+        if (event.type === 'session-groups-updated' || event.type === 'session-pins-updated') {
+            return true
+        }
+
         if (connection.all) {
             return true
         }

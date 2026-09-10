@@ -7,6 +7,7 @@ import { NativeCodexRealtimeProvider } from '@/lib/native-codex-realtime-context
 import { publishNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
 import { resetInteractionPriorityForTests } from '@/lib/interaction-priority'
 import type { ApiClient } from '@/api/client'
+import type { SessionGroup, SessionGroupsResponse } from '@hapi/protocol/sessionGroups'
 import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import {
     COMPLETED_SESSION_DIRECTORY_COLORS,
@@ -17,6 +18,7 @@ import {
     formatKanbanSessionTime,
     getCompletedSessionDirectoryColor,
     getKanbanDateEmoji,
+    getSessionGroupColor,
     getMergedCodexKanbanStatus,
     groupMergedCodexCompletedTimeline,
     groupMergedCodexSessionsForKanban,
@@ -45,6 +47,7 @@ function render(ui: ReactElement) {
 
 function createApi() {
     return {
+        getSessionGroups: vi.fn(async (): Promise<SessionGroupsResponse> => ({ groups: [], assignments: [] })),
         getCodexSessions: vi.fn(async () => ({
             success: true as const,
             sessions: [{
@@ -113,6 +116,73 @@ function createManagedCodexSession(
 }
 
 describe('RecentCodexSessions', () => {
+    it('places custom groups after attention and pins but before recent dates without duplicate cards', () => {
+        const now = Date.now()
+        const native = (id: string, modifiedAt = now): CodexLocalSessionSummary => ({
+            id, title: id, file: '', modifiedAt, runState: 'idle'
+        })
+        const rows = mergeRecentCodexSessions([
+            createManagedCodexSession('thinking', now, { thinking: true }),
+            createManagedCodexSession('pending', now, { pendingRequestsCount: 1 }),
+            createManagedCodexSession('unviewed', now)
+        ], [native('pinned'), native('custom'), native('recent'), native('old', now - RECENT_COMPLETED_WINDOW_MS)], { now })
+        const group: SessionGroup = { id: 'work', name: 'Work', emoji: '🧰' }
+        const assignments = new Map(rows.filter(row => !['recent', 'old'].includes(row.id)).map(row => [row.key, group]))
+        const groups = groupMergedCodexSessionsForKanban(rows, new Set(['native:pinned']), {}, now, assignments)
+        expect(groups.map(lane => [lane.id, lane.sessions.map(row => row.id)])).toEqual([
+            ['processing', ['thinking']], ['pending', ['pending']], ['unviewed', ['unviewed']],
+            ['pinned', ['pinned']], ['custom:work', ['custom']], ['recent', ['recent']], ['completed', ['old']]
+        ])
+        expect(groups.flatMap(lane => lane.sessions)).toHaveLength(rows.length)
+        const cleared = groupMergedCodexSessionsForKanban(rows, new Set(), {}, now)
+        expect(cleared.some(lane => lane.id.startsWith('custom:'))).toBe(false)
+        expect(cleared.find(lane => lane.id === 'recent')?.sessions.map(row => row.id)).toContain('custom')
+    })
+
+    it('keeps group borders across thinking, pending and pinned lanes and allows count-free custom lane collapse', async () => {
+        const api = createApi()
+        const group: SessionGroup = { id: 'work', name: 'Work / Shared', emoji: '🧰' }
+        api.getSessionGroups = vi.fn(async () => ({
+            groups: [group],
+            assignments: [
+                { source: { type: 'native-codex' as const, machineId: 'machine-1', codexSessionId: 'thinking-thread' }, groupId: group.id },
+                { source: { type: 'managed' as const, sessionId: 'pending' }, groupId: group.id },
+                { source: { type: 'native-codex' as const, machineId: 'machine-1', codexSessionId: 'pinned' }, groupId: group.id },
+                { source: { type: 'native-codex' as const, machineId: 'machine-1', codexSessionId: 'custom' }, groupId: group.id }
+            ]
+        }))
+        api.getCodexSessions = vi.fn(async () => ({ success: true as const, sessions: ['pinned', 'custom', 'plain'].map(id => ({
+            id, title: id, cwd: '/workspace/project', file: '', modifiedAt: Date.now(), runState: 'idle' as const
+        })) }))
+        const thinking = createManagedCodexSession('thinking', Date.now(), { thinking: true })
+        thinking.metadata = { ...thinking.metadata!, machineId: 'machine-1', agentSessionId: 'thinking-thread' }
+        render(<I18nProvider><RecentCodexSessions api={api} machineId="machine-1"
+            hapiSessions={[thinking, createManagedCodexSession('pending', Date.now(), { pendingRequestsCount: 1 })]}
+            onOpen={vi.fn()} embedded hideHeader viewMode="kanban" pinnedSessionKeys={new Set(['native:pinned'])}
+        /></I18nProvider>)
+        const board = await screen.findByTestId('session-kanban-board')
+        await waitFor(() => expect(board.querySelector('[data-kanban-group="custom:work"]')).not.toBeNull())
+        const color = getSessionGroupColor(group.name)
+        for (const lane of ['processing', 'pending', 'pinned', 'custom:work']) {
+            const card = board.querySelector(`[data-kanban-group="${lane}"] .session-kanban-card`)
+            expect(card).toHaveAttribute('data-kanban-group-color', color)
+            expect(card).toHaveStyle({ borderLeftColor: color })
+        }
+        expect(board.querySelector('[data-kanban-group="recent"] .session-kanban-card'))
+            .toHaveStyle({ borderLeftColor: getCompletedSessionDirectoryColor('/workspace/project') })
+        const lane = board.querySelector('[data-kanban-group="custom:work"]')!
+        expect(lane.querySelector('[data-kanban-group-count]')).toBeNull()
+        const toggle = screen.getByRole('button', { name: group.name })
+        expect(toggle).toHaveTextContent('🧰')
+        fireEvent.click(toggle)
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(lane.querySelector('.session-kanban-card')).toBeNull()
+        fireEvent.click(toggle)
+        expect(lane.querySelector('.session-kanban-card')).not.toBeNull()
+        expect(getSessionGroupColor(group.name)).toBe(getSessionGroupColor(` ${group.name} `))
+        expect(new Set(['Alpha / Shared', 'Beta / Shared', 'Gamma / Shared'].map(getSessionGroupColor)).size).toBeGreaterThan(1)
+    })
+
     it('splits recent completions at 30 minutes, including across midnight and seconds timestamps', () => {
         const now = new Date(2026, 8, 5, 0, 10).getTime()
         const native = (id: string, modifiedAt: number): CodexLocalSessionSummary => ({
@@ -341,8 +411,8 @@ describe('RecentCodexSessions', () => {
         ]), null, now)
 
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
-            ['pending', ['hapi-pending']],
             ['processing', ['hapi-processing']],
+            ['pending', ['hapi-pending']],
             ['unviewed', []],
             ['pinned', ['native-completed']],
             ['recent', ['native-newer-completed']],
@@ -387,8 +457,8 @@ describe('RecentCodexSessions', () => {
         )
 
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
-            ['pending', []],
             ['processing', []],
+            ['pending', []],
             ['unviewed', ['hapi-unviewed-newer', 'hapi-unviewed-older']],
             ['pinned', ['hapi-seen-pinned', 'native-pinned']],
             ['recent', ['native-completed']],
@@ -948,8 +1018,8 @@ describe('RecentCodexSessions', () => {
         expect(screen.getByTestId('recent-codex-sessions')).toHaveAttribute('data-session-list-presentation', 'cupertino')
         expect(screen.getByTestId('recent-codex-sessions')).toHaveAttribute('data-session-list-view', 'kanban')
         expect([...board.querySelectorAll('[data-kanban-group]')].map((group) => group.getAttribute('data-kanban-group'))).toEqual([
-            'pending',
             'processing',
+            'pending',
             'pinned',
             'completed'
         ])
@@ -1021,6 +1091,25 @@ describe('RecentCodexSessions', () => {
         expect(unpinButton).not.toHaveClass('bg-[var(--app-link)]')
         fireEvent.click(unpinButton)
         expect(onTogglePin).toHaveBeenCalledWith('native:codex-thread-1')
+        expect(processingGroup?.querySelector('h2 button')).toBeNull()
+        expect(pendingGroup?.querySelector('h2 button')).toBeNull()
+        const pinToggle = pinnedGroup!.querySelector('h2 button')!
+        fireEvent.click(pinToggle)
+        expect(pinToggle).toHaveAttribute('aria-expanded', 'false')
+        expect(pinnedGroup?.querySelector('ul')).toBeNull()
+        expect(pendingGroup?.querySelector('ul')).not.toBeNull()
+        fireEvent.click(pinToggle)
+        expect(pinToggle).toHaveAttribute('aria-expanded', 'true')
+        expect(pinnedGroup).toHaveTextContent('Pinned Codex task')
+        for (const day of board.querySelectorAll('[data-kanban-date-group]')) {
+            const toggle = day.querySelector('h3 button')!
+            fireEvent.click(toggle)
+            expect(toggle).toHaveAttribute('aria-expanded', 'false')
+            expect(day.querySelector('ul')).toBeNull()
+            fireEvent.click(toggle)
+            expect(toggle).toHaveAttribute('aria-expanded', 'true')
+            expect(day.querySelector('ul')).not.toBeNull()
+        }
     })
 
     it('keeps card controls outside navigation, lays out the compact card, and archives a native thread after confirmation', async () => {
@@ -1160,8 +1249,8 @@ describe('RecentCodexSessions', () => {
             </I18nProvider>
         )
 
-        const childCard = await screen.findByRole('button', { name: 'Open Review helper' })
-        const parentCard = screen.getByRole('button', { name: 'Open Parent task' })
+        const childCard = (await screen.findByRole('button', { name: 'Open Review helper' })).closest('.session-kanban-card')!
+        const parentCard = screen.getByRole('button', { name: 'Open Parent task' }).closest('.session-kanban-card')!
         expect(childCard).toHaveAttribute('data-kanban-subagent', 'true')
         const badge = childCard.querySelector('[data-kanban-subagent-badge]')
         expect(badge).toHaveTextContent('Subagent')

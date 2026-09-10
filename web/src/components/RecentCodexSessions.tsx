@@ -26,10 +26,14 @@ import {
     type LucideIcon
 } from 'lucide-react'
 import type { ApiClient } from '@/api/client'
+import type { SessionGroup } from '@hapi/protocol/sessionGroups'
+import { resolveSessionGroup, useSessionGroups } from '@/hooks/useSessionGroups'
+import { useSessionPins, type SessionPinTarget } from '@/hooks/useSessionPins'
 import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { getDetachedBranchLabel } from '@/lib/files-i18n'
 import { useMachineGitBranch } from '@/hooks/queries/useGitBranch'
+import { KanbanGitControl } from '@/components/KanbanGitControl'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { SessionThinkingIndicator } from '@/components/SessionThinkingIndicator'
@@ -148,14 +152,17 @@ export type MergedCodexDirectoryGroup = {
 
 export type MergedCodexKanbanStatus = 'pending' | 'processing' | 'completed'
 
-export type MergedCodexKanbanGroupId = 'pinned' | 'unviewed' | 'recent' | MergedCodexKanbanStatus
+type BuiltInKanbanGroupId = 'pinned' | 'unviewed' | 'recent' | MergedCodexKanbanStatus
+export type MergedCodexKanbanGroupId = BuiltInKanbanGroupId | `custom:${string}`
 
 export type MergedCodexKanbanGroup = {
     id: MergedCodexKanbanGroupId
     sessions: MergedCodexSession[]
+    customGroup?: SessionGroup
 }
 
 const EMPTY_PINNED_SESSION_KEYS: ReadonlySet<string> = new Set()
+const EMPTY_SESSION_GROUPS: ReadonlyMap<string, SessionGroup> = new Map()
 const KANBAN_HEADING_CLASS_NAME = 'text-xs font-semibold tracking-[0.04em] text-[var(--app-hint)]'
 const KANBAN_DATE_EMOJIS = ['🌿', '🌤️', '🌻', '🍀', '🌙', '🌊', '🍁', '✨', '🌸', '🪴', '🪁', '🍊'] as const
 
@@ -202,6 +209,11 @@ export function getCompletedSessionDirectoryColor(directory: string | null): str
     return COMPLETED_SESSION_DIRECTORY_COLORS[getCompletedSessionDirectoryColorIndex(normalized)]
 }
 
+/** Group identity follows the full name, never its lane, emoji or neighbors. */
+export function getSessionGroupColor(name: string): string {
+    return COMPLETED_SESSION_DIRECTORY_COLORS[getCompletedSessionDirectoryColorIndex(name.trim())]
+}
+
 /** Project names keep their color regardless of parent path or visible neighbors. */
 export function assignCompletedSessionDirectoryColors(
     directories: readonly (string | null)[]
@@ -227,7 +239,7 @@ function getAssignedCompletedSessionDirectoryColor(
     return key ? assignments.get(key) ?? null : null
 }
 
-const KANBAN_GROUP_PRESENTATION: Record<MergedCodexKanbanGroupId, {
+const KANBAN_GROUP_PRESENTATION: Record<BuiltInKanbanGroupId, {
     labelKey: string
     Icon: LucideIcon
     iconClassName: string
@@ -353,13 +365,17 @@ export function groupMergedCodexSessionsForKanban(
     sessions: MergedCodexSession[],
     pinnedSessionKeys: ReadonlySet<string> = EMPTY_PINNED_SESSION_KEYS,
     lastSeenAtBySession: Readonly<Record<string, number>> | null = null,
-    now = Date.now()
+    now = Date.now(),
+    sessionGroups: ReadonlyMap<string, SessionGroup> = EMPTY_SESSION_GROUPS
 ): MergedCodexKanbanGroup[] {
+    const customGroups = [...new Map([...sessionGroups.values()].map(group => [group.id, group])).values()]
+        .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
     const groups: MergedCodexKanbanGroup[] = [
-        { id: 'pending', sessions: [] },
         { id: 'processing', sessions: [] },
+        { id: 'pending', sessions: [] },
         { id: 'unviewed', sessions: [] },
         { id: 'pinned', sessions: [] },
+        ...customGroups.map((group): MergedCodexKanbanGroup => ({ id: `custom:${group.id}`, customGroup: group, sessions: [] })),
         { id: 'recent', sessions: [] },
         { id: 'completed', sessions: [] }
     ]
@@ -367,18 +383,21 @@ export function groupMergedCodexSessionsForKanban(
 
     for (const session of sessions) {
         const status = getMergedCodexKanbanStatus(session)
+        const customGroup = sessionGroups.get(session.key)
         // List summaries expose activity time, not a separate completion time.
         const age = now - toEpochMilliseconds(session.modifiedAt)
         // User action and active thinking take precedence over a local pin.
         // An unviewed completed managed session takes precedence over a pin.
-        const groupId = status === 'completed' && lastSeenAtBySession !== null
+        const groupId: MergedCodexKanbanGroupId = status === 'completed' && lastSeenAtBySession !== null
             && isMergedCodexSessionUnviewed(session, lastSeenAtBySession)
             ? 'unviewed'
             : status === 'completed' && pinnedSessionKeys.has(session.key)
                 ? 'pinned'
-                : status === 'completed' && age >= 0 && age < RECENT_COMPLETED_WINDOW_MS
-                    ? 'recent'
-                    : status
+                : status === 'completed' && customGroup
+                    ? `custom:${customGroup.id}`
+                    : status === 'completed' && age >= 0 && age < RECENT_COMPLETED_WINDOW_MS
+                        ? 'recent'
+                        : status
         groupsById.get(groupId)!.sessions.push(session)
     }
 
@@ -602,6 +621,7 @@ function KanbanSessionCard(props: {
     dateLocale: string
     now: number
     directoryColor: string | null
+    sessionGroup?: SessionGroup
     t: (key: string, params?: Record<string, string | number>) => string
 }) {
     const { api, machineId, session, selected = false, pinned, onOpen, onTogglePin, onArchived, dateLocale, now, directoryColor, t } = props
@@ -611,9 +631,14 @@ function KanbanSessionCard(props: {
     const status = getMergedCodexKanbanStatus(session)
     const presentation = KANBAN_GROUP_PRESENTATION[status]
     const completedDirectoryColor = status === 'completed' ? directoryColor : null
+    const groupColor = props.sessionGroup ? getSessionGroupColor(props.sessionGroup.name) : null
+    const borderColor = groupColor ?? completedDirectoryColor
     const modifiedAt = toEpochMilliseconds(session.modifiedAt)
     const directoryLabel = getKanbanDirectoryLabel(session.cwd) ?? t('recentCodex.noDirectory')
-    const { branch, isWorktree, isDirty } = useMachineGitBranch(api, machineId, session.cwd)
+    const gitMachineId = session.hapiSession?.metadata?.machineId ?? machineId
+    const gitCwd = session.hapiSession?.metadata?.path ?? session.cwd
+    const git = useMachineGitBranch(api, gitMachineId, gitCwd)
+    const { branch, isWorktree, isDirty } = git
     const branchLabel = branch ? getDetachedBranchLabel(branch, t) : null
     const branchIcon = isWorktree ? TreePineIconNode : GitBranchIconNode
     const completedTime = status === 'completed'
@@ -644,18 +669,16 @@ function KanbanSessionCard(props: {
         <li className="min-w-0">
             <SwipeArchiveRow label={t('session.action.archive')} onArchive={() => setArchiveOpen(true)} disabled={isArchiving}>
             <div className="relative min-w-0">
-                <button
-                    type="button"
-                    onClick={onOpen}
+                <div
                     className={`cupertino-session-card session-kanban-card flex min-h-[5.625rem] w-full min-w-0 flex-col rounded-[14px] border border-l-[3px] border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[background-color,box-shadow,transform] hover:bg-[var(--app-subtle-bg)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${presentation.borderClassName} ${status === 'processing' ? 'session-kanban-card-thinking' : ''} ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
-                    style={completedDirectoryColor ? { borderLeftColor: completedDirectoryColor } : undefined}
-                    aria-label={t('recentCodex.open', { title: session.title })}
-                    aria-current={selected ? 'page' : undefined}
+                    style={borderColor ? { borderLeftColor: borderColor } : undefined}
                     data-kanban-card-status={status}
-                    data-kanban-directory-color={completedDirectoryColor ?? undefined}
+                    data-kanban-directory-color={!groupColor ? completedDirectoryColor ?? undefined : undefined}
+                    data-kanban-group-color={groupColor ?? undefined}
                     data-kanban-subagent={isSubagent ? 'true' : undefined}
                 >
-                    <span className="flex w-full min-w-0 items-center gap-2 pr-8" data-kanban-card-top-row>
+                    <button type="button" onClick={onOpen} aria-label={t('recentCodex.open', { title: session.title })} aria-current={selected ? 'page' : undefined} className="absolute inset-0 rounded-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]" />
+                    <span className="pointer-events-none relative flex w-full min-w-0 items-center gap-2 pr-8" data-kanban-card-top-row>
                         <CodexSourceIcon
                             source={session.source}
                             active={status === 'processing'}
@@ -672,7 +695,7 @@ function KanbanSessionCard(props: {
                         </span>
                     </span>
 
-                    <span className="mt-1.5 flex min-w-0 items-center gap-2" data-kanban-directory-row>
+                    <span className="pointer-events-none relative mt-1.5 flex min-w-0 items-center gap-2" data-kanban-directory-row>
                         <MotionIcon
                             icon={toMotionIcon(FolderIconNode)}
                             className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]"
@@ -694,13 +717,13 @@ function KanbanSessionCard(props: {
                         </span>
                     </span>
 
-                    {branchLabel ? (
                         <span
-                            className="mt-1.5 flex min-w-0 items-center gap-2 text-xs leading-4 text-[var(--app-hint)]"
+                            className="pointer-events-none relative mt-1.5 flex w-full min-w-0 items-center gap-2 text-xs leading-4 text-[var(--app-hint)]"
                             data-kanban-branch-row
-                            data-git-kind={isWorktree ? 'worktree' : 'branch'}
-                            title={isWorktree ? `${t('session.item.worktree')} · ${branchLabel}` : branchLabel}
+                            data-git-kind={git.isGitRepository ? (isWorktree ? 'worktree' : 'branch') : git.repositoryState}
+                            title={branchLabel ? (isWorktree ? `${t('session.item.worktree')} · ${branchLabel}` : branchLabel) : undefined}
                         >
+                            <KanbanGitControl api={api} machineId={gitMachineId} cwd={gitCwd} git={git}>
                             <MotionIcon
                                 icon={toMotionIcon(branchIcon)}
                                 className={`h-3.5 w-3.5 shrink-0 ${isWorktree ? 'text-[var(--app-link)]' : ''}`}
@@ -709,9 +732,10 @@ function KanbanSessionCard(props: {
                                 aria-hidden="true"
                             />
                             <span className="inline-flex min-w-0 items-center" data-git-label>
-                                <span className="truncate">{branchLabel}</span>
+                                <span className="truncate">{branchLabel ?? 'Git'}</span>
                                 {isDirty ? <GitDirtyIndicator label={t('recentCodex.gitDirty')} /> : null}
                             </span>
+                            </KanbanGitControl>
                             {completedTime ? (
                                 <time
                                     dateTime={new Date(modifiedAt).toISOString()}
@@ -723,17 +747,7 @@ function KanbanSessionCard(props: {
                                 </time>
                             ) : null}
                         </span>
-                    ) : completedTime ? (
-                        <time
-                            dateTime={new Date(modifiedAt).toISOString()}
-                            className="cupertino-kanban-card-time mt-1 ml-auto shrink-0 tabular-nums"
-                            title={formatTimestamp(session.modifiedAt)}
-                            data-kanban-card-time
-                        >
-                            {completedTime}
-                        </time>
-                    ) : null}
-                </button>
+                </div>
 
                 {onTogglePin ? (
                     <button
@@ -1023,9 +1037,9 @@ export function RecentCodexSessions(props: {
     isNewSessionPending?: boolean
     /** Switch the merged sessions index between its directory list and board. */
     viewMode?: 'list' | 'kanban'
-    /** Browser-local board pins, scoped by the merged session key. */
+    /** Optional controlled pins for embedded consumers. Hub pins take precedence. */
     pinnedSessionKeys?: ReadonlySet<string>
-    /** Toggle a browser-local board pin. */
+    /** Toggle controlled pins for embedded consumers. */
     onTogglePin?: (sessionKey: string) => void
 }) {
     const { locale, t } = useTranslation()
@@ -1046,6 +1060,9 @@ export function RecentCodexSessions(props: {
     const limit = props.limit ?? (isMerged ? 100 : 5)
     const SectionIcon = onlyProcessing ? Activity : History
     const [sessions, setSessions] = useState<CodexLocalSessionSummary[]>([])
+    const [sessionsOwner, setSessionsOwner] = useState<{ api: ApiClient; machineId: string } | null>(null)
+    const currentSourceRef = useRef({ api: props.api, machineId: props.machineId })
+    currentSourceRef.current = { api: props.api, machineId: props.machineId }
     const hasSshControlledSession = sessions.some((session) => session.controlledByCodexSsh === true)
     const [isLoading, setIsLoading] = useState(true)
     const [loadError, setLoadError] = useState<string | null>(null)
@@ -1053,6 +1070,14 @@ export function RecentCodexSessions(props: {
     // Keep directory disclosure choices local to this list.  A refresh should
     // update rows without unexpectedly reopening a directory the user closed.
     const [collapsedDirectories, setCollapsedDirectories] = useState<Set<string>>(() => new Set())
+    const [collapsedSessionGroups, setCollapsedSessionGroups] = useState<Set<string>>(() => new Set())
+    const toggleKanbanSection = (key: string) => setCollapsedSessionGroups(current => {
+        const next = new Set(current)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+        return next
+    })
+    const sessionGroupsQuery = useSessionGroups(props.api)
     const autoExpandedSelectionRef = useRef<string | null>(null)
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const realtimeListUpdateBatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1098,6 +1123,30 @@ export function RecentCodexSessions(props: {
             : [],
         [archivedSessionKeys, isMerged, props.hapiSessions, recentNativeSessions]
     )
+    const pinTargets = useMemo((): SessionPinTarget[] => mergedSessions.flatMap(session => {
+        const metadata = session.hapiSession?.metadata
+        const machineId = session.source === 'hapi' ? metadata?.machineId : props.machineId
+        const nativeId = metadata?.agentSessionId?.trim()
+        if (session.source === 'hapi') {
+            return [{
+                key: session.key,
+                source: nativeId && machineId
+                    ? { type: 'native-codex' as const, machineId, codexSessionId: nativeId }
+                    : { type: 'managed' as const, sessionId: session.id },
+                legacyKeys: [session.key]
+            }]
+        }
+        return machineId && sessionsOwner?.api === props.api && sessionsOwner.machineId === machineId ? [{
+            key: session.key,
+            source: { type: 'native-codex' as const, machineId, codexSessionId: session.id },
+            // Legacy native keys contain no machine identity. Keep those local
+            // records untouched rather than guessing which machine owns them.
+            legacyKeys: []
+        }] : []
+    }), [mergedSessions, props.api, props.machineId, sessionsOwner])
+    const sessionPins = useSessionPins(props.api, pinTargets)
+    const pinnedSessionKeys = sessionPins.enabled ? sessionPins.pinnedSessionKeys : props.pinnedSessionKeys
+    const onTogglePin = sessionPins.enabled ? sessionPins.togglePinnedSessionKey : props.onTogglePin
     const completedDirectoryColors = useMemo(
         () => assignCompletedSessionDirectoryColors(
             mergedSessions
@@ -1106,6 +1155,25 @@ export function RecentCodexSessions(props: {
         ),
         [mergedSessions]
     )
+    const sessionGroupsByKey = useMemo(() => {
+        const assignments = new Map<string, SessionGroup>()
+        for (const session of mergedSessions) {
+            const nativeId = session.hapiSession?.metadata?.agentSessionId
+            const nativeMachineId = session.hapiSession?.metadata?.machineId ?? props.machineId
+            const nativeAlias = nativeId && nativeMachineId
+                ? { type: 'native-codex' as const, machineId: nativeMachineId, codexSessionId: nativeId }
+                : undefined
+            const source = session.source === 'hapi'
+                ? { type: 'managed' as const, sessionId: session.id }
+                : props.machineId
+                    ? { type: 'native-codex' as const, machineId: props.machineId, codexSessionId: session.id }
+                    : null
+            if (!source) continue
+            const group = resolveSessionGroup(sessionGroupsQuery.data, source, nativeAlias)
+            if (group) assignments.set(session.key, group)
+        }
+        return assignments
+    }, [mergedSessions, props.machineId, sessionGroupsQuery.data])
     const completedHapiSessionsForKanbanBootstrap = useMemo(
         () => mergedSessions
             .filter((session) => session.source === 'hapi' && getMergedCodexKanbanStatus(session) === 'completed')
@@ -1119,13 +1187,14 @@ export function RecentCodexSessions(props: {
     const kanbanGroups = useMemo(
         () => groupMergedCodexSessionsForKanban(
             mergedSessions,
-            props.pinnedSessionKeys,
+            pinnedSessionKeys,
             isCodexKanbanLastSeenInitialized
                 ? sessionLastSeenState.lastSeenAtBySession
                 : null,
-            Date.now()
+            Date.now(),
+            sessionGroupsByKey
         ),
-        [isCodexKanbanLastSeenInitialized, mergedSessions, props.pinnedSessionKeys, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession]
+        [isCodexKanbanLastSeenInitialized, mergedSessions, pinnedSessionKeys, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession, sessionGroupsByKey]
     )
     const completedTimelineGroups = useMemo(() => {
         const completed = kanbanGroups.find((group) => group.id === 'completed')?.sessions ?? []
@@ -1219,6 +1288,8 @@ export function RecentCodexSessions(props: {
             const updatesWhileFetching = Array.from(realtimeListUpdatesRef.current.values())
                 .filter((entry) => entry.receivedAt >= startedAt)
                 .map((entry) => entry.update)
+            if (currentSourceRef.current.api !== props.api || currentSourceRef.current.machineId !== machineId) return false
+            setSessionsOwner({ api: props.api, machineId })
             setSessions(() => updatesWhileFetching.reduce(
                 (next, update) => applyNativeCodexSessionListUpdate(next, update, limit, {
                     excludeHapiInitiated: !isMerged
@@ -1462,6 +1533,7 @@ export function RecentCodexSessions(props: {
                 </div>
             ) : null}
 
+            {sessionPins.error ? <div className="px-3 py-2 text-sm text-red-600" role="alert">{sessionPins.error.message}</div> : null}
             {loadError ? (
                 <div className={isDefaultNamespaceUnavailable
                     ? 'cupertino-session-callout mt-2 flex items-center justify-between gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-xs text-[var(--app-hint)]'
@@ -1501,12 +1573,14 @@ export function RecentCodexSessions(props: {
                     {kanbanGroups
                         .filter((group) => group.id !== 'completed' && group.sessions.length > 0)
                         .map((group) => {
-                        const presentation = KANBAN_GROUP_PRESENTATION[group.id]
+                        const presentation = KANBAN_GROUP_PRESENTATION[group.customGroup ? 'completed' : group.id as BuiltInKanbanGroupId]
                         const GroupIcon = presentation.Icon
+                        const collapsible = group.id !== 'processing' && group.id !== 'pending'
+                        const collapsed = collapsible && collapsedSessionGroups.has(group.id)
                         return (
                             <section key={group.id} className="min-w-0" data-kanban-group={group.id}>
                                 <div className="cupertino-kanban-heading flex items-center gap-2 px-1">
-                                    {group.id !== 'processing' ? (
+                                    {!group.customGroup && group.id !== 'processing' ? (
                                         <GroupIcon
                                             className={`h-3.5 w-3.5 shrink-0 ${presentation.iconClassName}`}
                                             {...(group.id === 'pinned' ? { fill: 'currentColor' } : {})}
@@ -1515,12 +1589,23 @@ export function RecentCodexSessions(props: {
                                         />
                                     ) : null}
                                     <h2 className={KANBAN_HEADING_CLASS_NAME}>
-                                        {group.id === 'processing' ? (
+                                        {collapsible ? (
+                                            <button
+                                                type="button"
+                                                className="flex min-h-11 items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                                aria-expanded={!collapsed}
+                                                onClick={() => toggleKanbanSection(group.id)}
+                                            >
+                                                {group.customGroup ? <span aria-hidden="true">{group.customGroup.emoji}</span> : null}
+                                                <span>{group.customGroup?.name ?? t(presentation.labelKey)}</span>
+                                                {collapsed ? <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
+                                            </button>
+                                        ) : group.id === 'processing' ? (
                                             <SessionThinkingIndicator compact showElapsed={false} />
                                         ) : t(presentation.labelKey)}
                                     </h2>
                                 </div>
-                                <ul className="cupertino-kanban-card-column mt-2 flex flex-col gap-2.5" data-kanban-card-column>
+                                {!collapsed ? <ul className="cupertino-kanban-card-column mt-2 flex flex-col gap-2.5" data-kanban-card-column>
                                     {group.sessions.map((session) => (
                                         <KanbanSessionCard
                                             key={session.key}
@@ -1528,17 +1613,18 @@ export function RecentCodexSessions(props: {
                                             machineId={props.machineId}
                                             session={session}
                                             selected={session.source === 'hapi' && session.id === props.selectedSessionId}
-                                            pinned={props.pinnedSessionKeys?.has(session.key) ?? false}
+                                            pinned={pinnedSessionKeys?.has(session.key) ?? false}
                                             dateLocale={dateLocale}
                                             now={relativeTimeNow}
                                             directoryColor={getAssignedCompletedSessionDirectoryColor(completedDirectoryColors, session.cwd)}
+                                            sessionGroup={sessionGroupsByKey.get(session.key)}
                                             t={t}
-                                            onTogglePin={props.onTogglePin ? () => props.onTogglePin?.(session.key) : undefined}
+                                            onTogglePin={onTogglePin ? () => onTogglePin(session.key) : undefined}
                                             onArchived={handleArchived}
                                             onOpen={() => handleOpenMergedSession(session)}
                                         />
                                     ))}
-                                </ul>
+                                </ul> : null}
                             </section>
                         )
                     })}
@@ -1549,10 +1635,13 @@ export function RecentCodexSessions(props: {
                                     {completedTimelineGroups.map((group) => (
                                         <section key={group.key} data-kanban-date-group={group.key}>
                                             <h3 className={`cupertino-kanban-date-heading flex min-h-6 items-center gap-2 px-1 ${KANBAN_HEADING_CLASS_NAME}`}>
+                                                <button type="button" className="flex min-h-11 items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]" aria-expanded={!collapsedSessionGroups.has(`date:${group.key}`)} onClick={() => toggleKanbanSection(`date:${group.key}`)}>
                                                 <span aria-hidden="true" className="shrink-0 font-normal" data-kanban-date-emoji>{getKanbanDateEmoji(group.key)}</span>
                                                 <span>{group.label}</span>
+                                                {collapsedSessionGroups.has(`date:${group.key}`) ? <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
+                                                </button>
                                             </h3>
-                                            <ul className="cupertino-kanban-card-column mt-2 flex flex-col gap-2.5">
+                                            {!collapsedSessionGroups.has(`date:${group.key}`) ? <ul className="cupertino-kanban-card-column mt-2 flex flex-col gap-2.5">
                                                 {group.shares.map((session) => (
                                                     <KanbanSessionCard
                                                         key={session.key}
@@ -1560,17 +1649,18 @@ export function RecentCodexSessions(props: {
                                                         machineId={props.machineId}
                                                         session={session}
                                                         selected={session.source === 'hapi' && session.id === props.selectedSessionId}
-                                                        pinned={props.pinnedSessionKeys?.has(session.key) ?? false}
+                                                        pinned={pinnedSessionKeys?.has(session.key) ?? false}
                                                         dateLocale={dateLocale}
                                                         now={relativeTimeNow}
                                                         directoryColor={getAssignedCompletedSessionDirectoryColor(completedDirectoryColors, session.cwd)}
+                                                        sessionGroup={sessionGroupsByKey.get(session.key)}
                                                         t={t}
-                                                        onTogglePin={props.onTogglePin ? () => props.onTogglePin?.(session.key) : undefined}
+                                                        onTogglePin={onTogglePin ? () => onTogglePin(session.key) : undefined}
                                                         onArchived={handleArchived}
                                                         onOpen={() => handleOpenMergedSession(session)}
                                                     />
                                                 ))}
-                                            </ul>
+                                            </ul> : null}
                                         </section>
                                     ))}
                                 </div>

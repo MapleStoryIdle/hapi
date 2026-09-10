@@ -43,6 +43,32 @@ function redundantGoalStatusContent(message: string): unknown {
 }
 
 describe('cli session handlers', () => {
+    it('does not turn unconsumed immediate or scheduled input into sent messages on session end', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('unsent-session-end', {}, null, 'default')
+        const socket = new FakeSocket()
+        const events: SyncEvent[] = []
+        const now = Date.now()
+        for (const [localId, scheduledAt] of [['immediate', null], ['mature', now - 1_000], ['future', now + 60_000]] as const) {
+            store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: localId } }, localId, scheduledAt)
+        }
+        let ended = false
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => { throw new Error('unexpected access error') },
+            onWebappEvent: event => { events.push(event) },
+            onSessionEnd: () => { ended = true }
+        })
+
+        socket.trigger('session-end', { sid: session.id, time: now })
+
+        expect(ended).toBe(true)
+        expect(store.messages.getUninvokedLocalMessages(session.id)).toHaveLength(3)
+        expect(store.messages.getMatureScheduledMessages(now).map(row => row.localId)).toEqual(['mature'])
+        expect(events.some(event => event.type === 'messages-consumed')).toBe(false)
+    })
+
     it('persists generated-image bytes before the agent process exits', async () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('generated-image-store-session', {}, null, 'default')

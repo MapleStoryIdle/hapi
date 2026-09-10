@@ -167,6 +167,11 @@ requireMatch(chatDrawer, /role="separator" tabIndex=\{0\}/, 'drawer handle must 
 if (/ChevronsUp|ChevronsDown/.test(chatDrawer)) throw new Error('Drawers must not display separate expand/collapse icons')
 requireMatch(drawerCss, /--app-detail-sheet-duration:\s*500ms/, 'drawer entrance must take 500ms')
 requireMatch(drawerCss, /--app-detail-sheet-exit-duration:\s*400ms/, 'drawer exits must take 400ms')
+requireMatch(drawerCss, /--app-detail-background-return-ease:\s*cubic-bezier\(0\.42, 0, 0\.58, 1\)/, 'background return must not reuse the fast-start sheet entrance curve')
+for (const selector of ["html[data-drawer-chrome-closing='true'], html[data-drawer-chrome-closing='true'] body", ".chat-drawer-stage:has([data-drawer-closing='true'])", ":is([data-chat-drawer-background], [data-drawer-page-background])[data-drawer-closing='true']"]) {
+    const rule = drawerCss.slice(drawerCss.indexOf(selector)).split('}')[0]
+    requireMatch(rule, /transition-timing-function:\s*var\(--app-detail-background-return-ease\)/, 'all background surfaces must return with the same gentle curve')
+}
 requireMatch(drawerCss, /--app-detail-sheet-settle-duration:\s*300ms/, 'drawer settling must take 300ms')
 requireMatch(chatDrawer, /duration:\s*300,/, 'drawer detent resizing must take 300ms')
 requireMatch(drawerCss, /max-height:\s*min\(calc\(var\(--drawer-viewport-height,\s*100dvh\)\s*\*\s*var\(--app-mobile-detail-sheet-ratio\)\)/, 'detail sheet cap must follow the visual viewport')

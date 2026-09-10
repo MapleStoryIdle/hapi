@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { BottomDrawer } from '@/components/ui/BottomDrawer'
-import { Loader2, Play } from 'lucide-react'
+import { Loader2, Play, X } from 'lucide-react'
 import type { CodexLocalSessionQueuedMessage } from '@/types/api'
 import { useTranslation } from '@/lib/use-translation'
 import { SessionDetailQueueTrigger } from '@/components/SessionDetailQueueTrigger'
@@ -10,8 +10,8 @@ import { SessionDetailQueueTrigger } from '@/components/SessionDetailQueueTrigge
  *
  * Native prompts are not SHAPI messages, so they intentionally do not use the
  * SHAPI queued-message mutation (there is no SHAPI session row to cancel). The
- * runner owns delivery; this component only exposes a truthful read-only view
- * of the FIFO waiting list returned by the native status endpoint.
+ * runner owns delivery and authoritatively decides whether a queued receipt
+ * can be cancelled. The drawer forwards cancellation through its parent.
  */
 export function NativeQueuedMessagesBar(props: {
     messages: readonly CodexLocalSessionQueuedMessage[]
@@ -20,6 +20,12 @@ export function NativeQueuedMessagesBar(props: {
     resuming?: boolean
     resumeDisabled?: boolean
     onResume?: () => void
+    onCancel?: (message: CodexLocalSessionQueuedMessage) => void
+    cancelling?: boolean
+    onRetry?: () => void
+    retryMessageId?: string
+    retryDisabled?: boolean
+    retrying?: boolean
 }) {
     const { t } = useTranslation()
     const [open, setOpen] = React.useState(false)
@@ -57,7 +63,7 @@ export function NativeQueuedMessagesBar(props: {
 
             <BottomDrawer open={open && (props.messages.length > 0 || props.paused === true)} onOpenChange={setOpen}
                 title={t('queuedMessages.drawerTitle')}
-                subtitle={t(props.paused ? 'recentCodex.control.queuePaused' : 'recentCodex.queue.drawerDescription')}
+                subtitle={t(props.paused ? 'recentCodex.control.paused' : 'recentCodex.queue.drawerDescription')}
                 testId="native-queued-messages-drawer"
                 accessory={props.paused && props.onResume ? <div className="flex justify-end px-5 pb-2">
                     <button type="button" aria-label={t('recentCodex.control.resumeQueue')}
@@ -82,11 +88,33 @@ export function NativeQueuedMessagesBar(props: {
                                             {message.text}
                                         </p>
                                         {message.recoveryRequired ? (
-                                            <span className="mt-1.5 inline-flex items-center rounded-full bg-[color-mix(in_srgb,#f59e0b_12%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
-                                                {t('recentCodex.queue.recoveryRequired')}
-                                            </span>
+                                            <div className="mt-1.5 text-xs text-[var(--app-hint)]">
+                                                <p>{t(message.recoveryReason === 'review_guard_failed'
+                                                    ? 'recentCodex.queue.reviewBlocked'
+                                                    : message.recoveryReason === 'launch_failed'
+                                                        ? 'recentCodex.queue.launchFailed'
+                                                        : 'recentCodex.queue.recoveryRequired')}</p>
+                                                {props.onRetry ? <button type="button"
+                                                    disabled={props.retryDisabled || props.retrying || props.retryMessageId !== message.id}
+                                                    onClick={props.onRetry}
+                                                    className="min-h-11 text-[var(--app-link)] disabled:opacity-40">
+                                                    {t(props.retrying && props.retryMessageId === message.id
+                                                        ? 'recentCodex.direct.recovery.pending'
+                                                        : message.recoveryReason === 'review_guard_failed' || message.recoveryReason === 'launch_failed'
+                                                            ? 'recentCodex.direct.recovery.retry'
+                                                            : 'recentCodex.direct.receipt.resend')}
+                                                </button> : null}
+                                                {props.retryDisabled || props.retryMessageId !== message.id ? <p>{t('recentCodex.queue.retryWhenIdle')}</p> : null}
+                                            </div>
                                         ) : null}
                                     </div>
+                                    {props.onCancel ? <button type="button"
+                                        aria-label={t('queuedMessages.cancel')}
+                                        disabled={props.cancelling || message.cancelBlocked === true}
+                                        onClick={() => props.onCancel?.(message)}
+                                        className="flex h-11 w-11 shrink-0 items-center justify-center text-[var(--app-hint)] disabled:opacity-40">
+                                        <X className="h-5 w-5" aria-hidden="true" />
+                                    </button> : null}
                                 </div>
                             </li>
                         ))}

@@ -267,6 +267,7 @@ export type CodexLocalSessionDirectSendRecoveryReason =
     | 'session_status_unknown'
     | 'launch_failed'
     | 'runner_restarted'
+    | 'review_guard_failed'
     /** Another Codex client owns this original thread; no prompt was delivered. */
     | 'external_writer_active'
 
@@ -313,7 +314,7 @@ export type CodexLocalSessionStatusRpcResponse = {
 /** Queue identity carried by global realtime invalidations; message text stays in snapshot RPC. */
 export type CodexLocalSessionRealtimeQueuedMessage = Pick<
     CodexLocalSessionQueuedMessage,
-    'id' | 'recoveryRequired' | 'recoveryReason'
+    'id' | 'recoveryRequired' | 'recoveryReason' | 'cancelBlocked'
 >
 
 export type CodexLocalSessionRealtimeStatus = Omit<
@@ -388,6 +389,7 @@ export type CodexLocalSessionRealtimeSnapshot = {
 }
 
 export type CodexLocalSessionQueuedMessage = {
+    cancelBlocked?: boolean
     id: string
     text: string
     queuedAt: number

@@ -18,6 +18,14 @@ describe('native control realtime snapshot', () => {
         expect(getNativeCodexRealtimeSnapshot(event)?.status.controls).toEqual(event.snapshot?.status.controls)
     })
 
+    it('retains cancellation guards and review recovery reasons without message text', () => {
+        const snapshot = { ...event.snapshot!, status: { ...event.snapshot!.status,
+            queuedMessageRefs: [{ id: 'feedback', cancelBlocked: true, recoveryRequired: true,
+                recoveryReason: 'review_guard_failed' as const }] } }
+        expect(getNativeCodexRealtimeSnapshot({ ...event, snapshot })?.status.queuedMessageRefs)
+            .toEqual(snapshot.status.queuedMessageRefs)
+    })
+
     it('rejects malformed control capability data', () => {
         const malformed = { ...event, snapshot: { ...event.snapshot, status: {
             ...event.snapshot?.status, controls: { ...event.snapshot?.status.controls, canStop: 'true' }

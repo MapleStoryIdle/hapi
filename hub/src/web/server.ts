@@ -26,6 +26,8 @@ import type { LocalServiceHandler, LocalServiceWebSocket } from '../localService
 import { createOpenVikingRoutes } from './routes/openViking'
 import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
+import { createSessionGroupRoutes } from './routes/sessionGroups'
+import { createSessionPinRoutes } from './routes/sessionPins'
 import { createPushRoutes } from './routes/push'
 import { createVoiceRoutes } from './routes/voice'
 import { createLegacyPublicShareTombstoneRoutes, createPublicShareRoutes } from './routes/shares'
@@ -296,6 +298,8 @@ export function createWebApp(options: {
     app.route('/api', createMonitorRoutes(options.store, options.getSyncEngine, options.getMonitoring ?? (() => null)))
     app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker))
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
+    app.route('/api', createSessionGroupRoutes(options.store, options.getSseManager))
+    app.route('/api', createSessionPinRoutes(options.store, options.getSseManager))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine))

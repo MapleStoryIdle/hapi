@@ -10,6 +10,8 @@ import { UserStore } from './userStore'
 import { ArtifactStore } from './artifacts'
 import { KanbanTaskStore } from './kanbanTasks'
 import { MonitorStore, MONITOR_SCHEMA } from './monitors'
+import { SessionGroupStore, SESSION_GROUP_SCHEMA } from './sessionGroups'
+import { SessionPinStore, SESSION_PIN_SCHEMA } from './sessionPins'
 
 export type {
     FeedbackMetadata,
@@ -32,7 +34,7 @@ export { UserStore } from './userStore'
 export { ArtifactStore } from './artifacts'
 export { KanbanTaskStore } from './kanbanTasks'
 
-const SCHEMA_VERSION: number = 22
+const SCHEMA_VERSION: number = 24
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -41,6 +43,8 @@ const REQUIRED_TABLES = [
     'push_subscriptions',
     'artifacts',
     'kanban_tasks',
+    'session_groups', 'session_group_assignments',
+    'session_pins',
     'monitors', 'monitor_buckets', 'monitor_incidents', 'monitor_receipts', 'bark_settings'
 ] as const
 
@@ -57,6 +61,8 @@ export class Store {
     readonly artifacts: ArtifactStore
     readonly kanbanTasks: KanbanTaskStore
     readonly monitors: MonitorStore
+    readonly sessionGroups: SessionGroupStore
+    readonly sessionPins: SessionPinStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -110,6 +116,8 @@ export class Store {
         this.artifacts = new ArtifactStore(this.db)
         this.kanbanTasks = new KanbanTaskStore(this.db)
         this.monitors = new MonitorStore(this.db, dbPath)
+        this.sessionGroups = new SessionGroupStore(this.db)
+        this.sessionPins = new SessionPinStore(this.db)
     }
 
     close(): void {
@@ -133,6 +141,8 @@ export class Store {
         // safely run the full V1→V8 chain in the legacy branch where the DB
         // shape is unknown.
         const buildStepMigrations = (legacy: boolean): Record<number, () => void> => ({
+            22: () => this.db.exec(SESSION_GROUP_SCHEMA),
+            23: () => this.db.exec(SESSION_PIN_SCHEMA),
             1: () => this.migrateFromV1ToV2(legacy),
             2: () => this.migrateFromV2ToV3(),
             3: () => this.migrateFromV3ToV4(),
@@ -203,6 +213,8 @@ export class Store {
     }
 
     private createSchema(): void {
+        this.db.exec(SESSION_GROUP_SCHEMA)
+        this.db.exec(SESSION_PIN_SCHEMA)
         this.db.exec(BARK_SCHEMA)
         this.db.exec(MONITOR_SCHEMA)
         this.db.exec(`

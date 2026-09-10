@@ -46,7 +46,6 @@ export type SocketServerDeps = {
     onExternalCodexRequest?: (payload: ExternalCodexRequestPayload & { namespace: string }) => void
     onBackgroundTaskDelta?: (sessionId: string, delta: { started: number; completed: number }) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
-    onSweepImmediateQueued?: (sessionId: string, now: number) => void
     onMessagesConsumed?: (sessionId: string) => void
     generatedImageStore?: GeneratedImageStore
 }
@@ -131,7 +130,6 @@ export function createSocketServer(deps: SocketServerDeps): {
         onWebappEvent: deps.onWebappEvent,
         onBackgroundTaskDelta: deps.onBackgroundTaskDelta,
         onSessionActivity: deps.onSessionActivity,
-        onSweepImmediateQueued: deps.onSweepImmediateQueued,
         onMessagesConsumed: deps.onMessagesConsumed,
         generatedImageStore: deps.generatedImageStore
     }))

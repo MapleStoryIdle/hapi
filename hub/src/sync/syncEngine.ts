@@ -611,10 +611,6 @@ export class SyncEngine {
         return this.messageService.cancelQueuedMessage(sessionId, messageId)
     }
 
-    sweepImmediateQueuedOnSessionEnd(sessionId: string, invokedAt: number): void {
-        this.messageService.sweepImmediateQueuedOnSessionEnd(sessionId, invokedAt)
-    }
-
     async approvePermission(
         sessionId: string,
         requestId: string,

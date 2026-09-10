@@ -251,8 +251,9 @@ function buildNativeCodexRealtimeSnapshot(
     const realtimeStatus: CodexLocalSessionRealtimeStatus = {
         ...baseStatus,
         ...(queuedMessages === undefined ? {} : {
-            queuedMessageRefs: queuedMessages.map(({ id, recoveryRequired, recoveryReason }) => ({
+            queuedMessageRefs: queuedMessages.map(({ id, recoveryRequired, recoveryReason, cancelBlocked }) => ({
                 id,
+                ...(cancelBlocked === undefined ? {} : { cancelBlocked }),
                 ...(recoveryRequired ? { recoveryRequired: true } : {}),
                 ...(recoveryReason ? { recoveryReason } : {})
             }))
