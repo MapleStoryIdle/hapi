@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { useMachineGitBranch } from '@/hooks/queries/useGitBranch'
@@ -14,10 +15,11 @@ const base: ReturnType<typeof useMachineGitBranch> = {
     branch: null, isWorktree: false, isDirty: false, isGitRepository: false,
     repositoryState: 'non-git', childRepositories: [], childRepositoriesError: false, childRepositoriesTruncated: false
 }
-function mount(git: Partial<typeof base> = {}) {
+function mount(git: Partial<typeof base> = {}, api = { getMachineGitBranch: vi.fn().mockResolvedValue({ success: true, repositoryState: 'git', stdout: '# branch.head main\n', isDirty: false }) } as unknown as ApiClient) {
     localStorage.setItem('hapi-lang', 'en')
     const onOpenSession = vi.fn()
-    render(<I18nProvider><div onClick={onOpenSession}><KanbanGitControl api={{} as ApiClient} machineId="runner" cwd="/workspace" git={{ ...base, ...git }}>main</KanbanGitControl></div></I18nProvider>)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><I18nProvider><div onClick={onOpenSession}><KanbanGitControl api={api} machineId="runner" cwd="/workspace" git={{ ...base, ...git }}>main</KanbanGitControl></div></I18nProvider></QueryClientProvider>)
     return onOpenSession
 }
 describe('Kanban Git control', () => {
@@ -29,12 +31,32 @@ describe('Kanban Git control', () => {
         expect(control.querySelector('svg[data-git-repository-icon] circle')).not.toBeNull()
         fireEvent.click(control)
         expect(onOpen).not.toHaveBeenCalled()
-        fireEvent.click(screen.getByRole('button', { name: 'web' }))
+        fireEvent.click(screen.getByRole('button', { name: /^web/ }))
         expect(await screen.findByTestId('selected-repository')).toHaveTextContent('/workspace/web')
     })
     it('shows confirmed non-Git as disabled', () => {
         mount()
         expect(screen.getByRole('button', { name: 'Not a Git project' })).toBeDisabled()
+        expect(screen.getByRole('button').querySelector('[data-non-git-text-icon]')).not.toBeNull()
+    })
+    it('fetches child branches only on open and marks only dirty repositories with a star', async () => {
+        const getMachineGitBranch = vi.fn().mockImplementation((_machine: string, cwd: string) => Promise.resolve({
+            success: true, repositoryState: 'git', stdout: `# branch.head ${cwd.endsWith('api') ? 'feature/api' : 'main'}\n`, isDirty: cwd.endsWith('api')
+        }))
+        mount({ childRepositories: [{ name: 'api', cwd: '/workspace/api' }, { name: 'web', cwd: '/workspace/web' }] }, { getMachineGitBranch } as unknown as ApiClient)
+        expect(getMachineGitBranch).not.toHaveBeenCalled()
+        fireEvent.click(screen.getByRole('button', { name: '2 repositories' }))
+        expect(await screen.findByText('feature/api')).toBeInTheDocument()
+        expect(getMachineGitBranch).toHaveBeenCalledWith('runner', '/workspace/api')
+        expect(getMachineGitBranch).toHaveBeenCalledWith('runner', '/workspace/web')
+        expect(within(screen.getByRole('button', { name: /^api/ })).getByText('*')).toHaveAttribute('aria-label', 'Uncommitted changes')
+        expect(within(screen.getByRole('button', { name: /^web/ })).queryByText('*')).toBeNull()
+    })
+    it('shows unavailable instead of a false clean branch when probing fails', async () => {
+        mount({ childRepositories: [{ name: 'api', cwd: '/workspace/api' }] }, { getMachineGitBranch: vi.fn().mockRejectedValue(new Error('offline')) } as unknown as ApiClient)
+        fireEvent.click(screen.getByRole('button', { name: '1 repositories' }))
+        expect(await screen.findByText('Unable to check')).toBeInTheDocument()
+        expect(screen.queryByText('*')).toBeNull()
     })
     it('renders nothing while loading', () => {
         mount({ repositoryState: 'loading' })
