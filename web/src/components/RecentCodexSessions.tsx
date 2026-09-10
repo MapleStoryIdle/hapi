@@ -353,16 +353,25 @@ function getHapiSessionUpdatedAt(session: MergedCodexSession): number {
     return session.hapiSession?.updatedAt ?? session.modifiedAt
 }
 
-/** A completed managed Codex row is unviewed only after its seen watermark. */
+/** A completed managed Codex row stays unviewed only inside the recent completion window. */
 export function isMergedCodexSessionUnviewed(
     session: MergedCodexSession,
-    lastSeenAtBySession: Readonly<Record<string, number>>
+    lastSeenAtBySession: Readonly<Record<string, number>>,
+    now = Date.now()
 ): boolean {
     if (session.source !== 'hapi' || getMergedCodexKanbanStatus(session) !== 'completed') {
         return false
     }
 
-    return toEpochMilliseconds(getHapiSessionUpdatedAt(session)) > toEpochMilliseconds(lastSeenAtBySession[session.id] ?? 0)
+    const completedAt = toEpochMilliseconds(getHapiSessionUpdatedAt(session))
+    // A Hub timestamp can be a few milliseconds ahead of the browser clock.
+    // Treat that as a just-finished session rather than hiding its unread state.
+    const age = Math.max(0, now - completedAt)
+    if (!Number.isFinite(completedAt) || age >= RECENT_COMPLETED_WINDOW_MS) {
+        return false
+    }
+
+    return completedAt > toEpochMilliseconds(lastSeenAtBySession[session.id] ?? 0)
 }
 
 export function groupMergedCodexSessionsForKanban(
@@ -393,7 +402,7 @@ export function groupMergedCodexSessionsForKanban(
         // User action and active thinking take precedence over a local pin.
         // An unviewed completed managed session takes precedence over a pin.
         const groupId: MergedCodexKanbanGroupId = status === 'completed' && lastSeenAtBySession !== null
-            && isMergedCodexSessionUnviewed(session, lastSeenAtBySession)
+            && isMergedCodexSessionUnviewed(session, lastSeenAtBySession, now)
             ? 'unviewed'
             : status === 'completed' && pinnedSessionKeys.has(session.key)
                 ? 'pinned'

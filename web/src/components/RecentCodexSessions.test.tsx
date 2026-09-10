@@ -211,6 +211,22 @@ describe('RecentCodexSessions', () => {
         expect(ids).toHaveLength(rows.length)
     })
 
+    it('keeps only unseen SHAPI completions from the last 30 minutes in Unread', () => {
+        const now = new Date(2026, 8, 5, 12).getTime()
+        const rows = mergeRecentCodexSessions([
+            createManagedCodexSession('fresh-unread', now - RECENT_COMPLETED_WINDOW_MS + 1),
+            createManagedCodexSession('unread-at-boundary', now - RECENT_COMPLETED_WINDOW_MS),
+            createManagedCodexSession('stale-unread', now - RECENT_COMPLETED_WINDOW_MS - 1)
+        ], [], { now })
+
+        const groups = groupMergedCodexSessionsForKanban(rows, new Set(), {}, now)
+
+        expect(groups.find((group) => group.id === 'unviewed')?.sessions.map((session) => session.id)).toEqual(['fresh-unread'])
+        expect(groups.find((group) => group.id === 'completed')?.sessions.map((session) => session.id)).toEqual([
+            'unread-at-boundary', 'stale-unread'
+        ])
+    })
+
     it('assigns varied decorative emojis that remain stable for the same calendar date', () => {
         const days = ['2026-09-05', '2026-09-04', '2026-09-03']
         const emojis = days.map(getKanbanDateEmoji)
