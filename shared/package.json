@@ -6,6 +6,8 @@
     "main": "./src/index.ts",
     "types": "./src/index.ts",
     "exports": {
+        "./codexUsage": "./src/codexUsage.ts",
+        "./kanbanOrder": "./src/kanbanOrder.ts",
         "./sessionPins": "./src/sessionPins.ts",
         "./sessionGroups": "./src/sessionGroups.ts",
         "./webReader": "./src/webReader.ts",

@@ -1,4 +1,5 @@
 import { logger } from '@/ui/logger';
+import { readCodexTokenUsage, selectCodexTokenUsage } from '@hapi/protocol/codexUsage';
 import { startHookServer } from '@/claude/utils/startHookServer';
 import { codexLocal } from './codexLocal';
 import type { ReasoningEffort } from './appServerTypes';
@@ -111,10 +112,23 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                     }
                     session.onSessionFound(converted.sessionId);
                 }
+                if (event.type === 'session_meta' || event.type === 'turn_context') {
+                    const payload = event.payload && typeof event.payload === 'object' ? event.payload as Record<string, unknown> : null;
+                    const provider = payload?.model_provider ?? payload?.modelProvider;
+                    if (typeof provider === 'string') session.client.updateMetadata(metadata => ({ ...metadata, codexModelProvider: provider }));
+                }
                 if (converted?.userMessage && !suppressUserMessage) {
                     session.sendUserMessage(converted.userMessage);
                 }
                 if (converted?.message) {
+                    if (converted.message.type === 'token_count') {
+                        const info = converted.message.info;
+                        const timestamp = typeof event.timestamp === 'string' ? Date.parse(event.timestamp) : NaN;
+                        session.client.updateMetadata(metadata => ({ ...metadata,
+                            codexTokenUsage: selectCodexTokenUsage(metadata.codexTokenUsage ?? null,
+                                readCodexTokenUsage(info, Number.isFinite(timestamp) ? timestamp : Date.now()))
+                        }));
+                    }
                     session.sendAgentMessage(converted.message);
                 }
             }

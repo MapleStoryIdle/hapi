@@ -348,6 +348,7 @@ function AppInner() {
             const invalidations = [
                 queryClient.invalidateQueries({ queryKey: ['session-groups'] }),
                 queryClient.invalidateQueries({ queryKey: ['session-pins'] }),
+                queryClient.invalidateQueries({ queryKey: ['kanban-order'] }),
                 queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
                 // Invalidate ALL cached session-detail entries on reconnect, not just
                 // the selected one.  With `SESSION_DETAIL_STALE_TIME_MS` extending the

@@ -75,6 +75,7 @@ function createSessionStub(
     const sessionEvents: Array<{ type: string; message?: string }> = [];
     const userMessages: string[] = [];
     const agentMessages: unknown[] = [];
+    let usageMetadata: import('@hapi/protocol/types').Metadata = { path, host: 'test' };
     let localLaunchFailure: { message: string; exitReason: 'switch' | 'exit' } | null = null;
     let sessionId: string | null = null;
     let transcriptPath: string | null = initialTranscriptPath;
@@ -94,6 +95,7 @@ function createSessionStub(
             codexArgs,
             replayTranscriptHistoryOnStart,
             client: {
+                updateMetadata: (handler: (metadata: import('@hapi/protocol/types').Metadata) => import('@hapi/protocol/types').Metadata) => { usageMetadata = handler(usageMetadata); },
                 rpcHandlerManager: {
                     registerHandler: () => {}
                 }
@@ -138,6 +140,7 @@ function createSessionStub(
         sessionEvents,
         userMessages,
         agentMessages,
+        getUsageMetadata: () => usageMetadata,
         getLocalLaunchFailure: () => localLaunchFailure
     };
 }
@@ -356,7 +359,7 @@ describe('codexLocalLauncher', () => {
 
     it('replays existing transcript messages when importing a Codex thread into a new SHAPI session', async () => {
         const transcriptPath = join(tempDir, 'codex-import-transcript.jsonl');
-        const { session, agentMessages } = createSessionStub('default', undefined, '/tmp/worktree', null, true);
+        const { session, agentMessages, getUsageMetadata } = createSessionStub('default', undefined, '/tmp/worktree', null, true);
         let releaseRunBarrier: (() => void) | undefined;
         harness.runBarrier = new Promise((resolve) => {
             releaseRunBarrier = resolve;
@@ -365,7 +368,8 @@ describe('codexLocalLauncher', () => {
         await writeFile(
             transcriptPath,
             [
-                JSON.stringify({ type: 'session_meta', payload: { id: 'codex-thread-import' } }),
+                JSON.stringify({ type: 'session_meta', payload: { id: 'codex-thread-import', model_provider: 'local' } }),
+                JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 20, cached_input_tokens: 80 } } } }),
                 JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'old imported message' } })
             ].join('\n') + '\n'
         );
@@ -383,6 +387,7 @@ describe('codexLocalLauncher', () => {
         }
         await launcherPromise;
 
+        expect(getUsageMetadata()).toMatchObject({ codexModelProvider: 'local', codexTokenUsage: { input: 100, output: 20, cachedInput: 80, total: 120 } });
         expect(agentMessages).toContainEqual({
             type: 'message',
             message: 'old imported message',

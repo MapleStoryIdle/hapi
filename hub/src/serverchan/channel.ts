@@ -1,6 +1,6 @@
 import type { Session } from '../sync/syncEngine'
 import type { SessionEndReason } from '@hapi/protocol'
-import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
+import { isTaskNotificationFailure, type NotificationChannel, type TaskNotification } from '../notifications/notificationTypes'
 import { getAgentName, getSessionName } from '../notifications/sessionInfo'
 
 function buildSessionUrl(baseUrl: string, sessionId: string): string {
@@ -50,9 +50,7 @@ export class ServerChanChannel implements NotificationChannel {
 
         const agentName = getAgentName(session)
         const name = getSessionName(session)
-        const status = notification.status?.trim().toLowerCase()
-        const isFailure = status === 'failed' || status === 'error' || status === 'killed' || status === 'aborted'
-        if (!isFailure) {
+        if (!isTaskNotificationFailure(notification)) {
             return
         }
         const url = buildSessionUrl(this.publicUrl, session.id)

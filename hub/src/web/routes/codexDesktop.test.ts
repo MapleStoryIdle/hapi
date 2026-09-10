@@ -153,6 +153,8 @@ function createMachine(id: string, workspaceRoots: string[], namespace = 'defaul
 
 function createRunnerLocalSessionData(sessionId: string, cwd = '/runner/workspace/project') {
     return {
+        tokenUsage: { input: 100, output: 20, cachedInput: 80, reasoningOutput: 10, total: 120, scope: 'session' as const, updatedAt: 1 },
+        modelProvider: 'openai',
         session: {
             id: sessionId,
             title: 'Runner-local Codex task',
@@ -1033,6 +1035,8 @@ describe('Codex Desktop import routes', () => {
                 version: { runnerEpoch: 'runner-a', revision: 7 },
                 revision: 7,
                 timing: { cache: 'hit', durationMs: 3 },
+                tokenUsage: { input: 100, output: 20, cachedInput: 80, total: 120 },
+                modelProvider: 'openai',
                 status: {
                     success: true,
                     status: 'processing',

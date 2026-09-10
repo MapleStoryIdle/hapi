@@ -1,6 +1,6 @@
 import type { Session, SyncEngine, SyncEvent } from '../sync/syncEngine'
 import type { SessionEndReason } from '@hapi/protocol'
-import type { NotificationChannel, NotificationHubOptions, TaskNotification } from './notificationTypes'
+import { isTaskNotificationFailure, type NotificationChannel, type NotificationHubOptions, type TaskNotification } from './notificationTypes'
 import { extractMessageEventType, extractTaskNotification } from './eventParsing'
 
 export class NotificationHub {
@@ -73,7 +73,10 @@ export class NotificationHub {
             }
 
             const taskNotification = extractTaskNotification(event)
-            if (taskNotification) {
+            // `<task-notification>` is Claude's internal background/subagent
+            // completion signal. Do not interrupt the user for successful work;
+            // failures remain actionable and still notify every configured channel.
+            if (taskNotification && isTaskNotificationFailure(taskNotification)) {
                 this.sendTaskNotification(event.sessionId, taskNotification).catch((error) => {
                     console.error('[NotificationHub] Failed to send task notification:', error)
                 })

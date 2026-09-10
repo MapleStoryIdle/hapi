@@ -755,8 +755,8 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
     }
 
-    async getCodexSubscriptionLimitsForSession(sessionId: string, model?: string | null): Promise<RpcGetCodexSubscriptionLimitsResponse> {
-        const request: GetCodexSubscriptionLimitsRequest = { model: model ?? null }
+    async getCodexSubscriptionLimitsForSession(sessionId: string, model?: string | null, cwd?: string | null, provider?: string | null): Promise<RpcGetCodexSubscriptionLimitsResponse> {
+        const request: GetCodexSubscriptionLimitsRequest = { model: model ?? null, cwd, provider }
         return await this.sessionRpc(
             sessionId,
             RPC_METHODS.GetCodexSubscriptionLimits,
@@ -803,8 +803,8 @@ export class RpcGateway {
         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
     }
 
-    async getCodexSubscriptionLimitsForMachine(machineId: string, model?: string | null): Promise<RpcGetCodexSubscriptionLimitsResponse> {
-        const request: GetCodexSubscriptionLimitsRequest = { model: model ?? null }
+    async getCodexSubscriptionLimitsForMachine(machineId: string, model?: string | null, cwd?: string | null, provider?: string | null): Promise<RpcGetCodexSubscriptionLimitsResponse> {
+        const request: GetCodexSubscriptionLimitsRequest = { model: model ?? null, cwd, provider }
         return await this.machineRpc(
             machineId,
             RPC_METHODS.GetCodexSubscriptionLimits,

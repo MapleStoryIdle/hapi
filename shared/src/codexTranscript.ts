@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readCodexTokenUsage, selectCodexTokenUsage, type CodexTokenUsage } from './codexUsage'
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
@@ -119,7 +120,7 @@ export type CodexLocalSessionSubagent = {
     name?: string | null
     /** Native collaboration role / specialization, when present. */
     role?: string | null
-    /** Raw native agent path retained for diagnostics; never a card label by itself. */
+    /** Native agent path; the UI prefers it as a label after stripping the /root/ prefix. */
     agentPath?: string | null
     model?: string | null
     modelReasoningEffort?: string | null
@@ -156,6 +157,8 @@ export type CodexLocalSessionSnapshotReadOptions = CodexLocalSessionReadOptions 
 }
 
 export type CodexLocalSessionData = {
+    tokenUsage?: CodexTokenUsage | null
+    modelProvider?: string | null
     session: CodexLocalSessionSummary
     context: CodexLocalSessionContextMessage[]
     importedMessages: CodexImportedMessageContent[]
@@ -1717,6 +1720,9 @@ function getHeartbeatTimestamp(message: CodexImportedMessageContent): number | u
  * the shape of a full transcript import.
  */
 export type CodexTranscriptImportAccumulator = {
+    tokenUsage: CodexTokenUsage | null
+    modelProvider: string | null
+    usageSessionId: string | null
     messages: CodexImportedMessageContent[]
     canonicalChatMessageIndexByRolloutKey: Map<string, number>
     userMessageMirrorDeduper: ReturnType<typeof createCodexUserMessageMirrorDeduper>
@@ -1739,6 +1745,9 @@ export type CodexTranscriptImportAccumulator = {
 
 export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportAccumulator {
     return {
+        tokenUsage: null,
+        modelProvider: null,
+        usageSessionId: null,
         messages: [],
         canonicalChatMessageIndexByRolloutKey: new Map(),
         userMessageMirrorDeduper: createCodexUserMessageMirrorDeduper(),
@@ -2035,6 +2044,23 @@ export function appendCodexTranscriptImportLines(
             const record = asRecord(JSON.parse(line))
             if (!record) continue
             const { recordType, payloadType, payload } = getCodexRecordKinds(record)
+            if (recordType === 'session_meta') accumulator.usageSessionId = asString(payload?.id) ?? accumulator.usageSessionId
+
+            if (recordType === 'session_meta' || recordType === 'turn_context') {
+                const provider = asString(payload?.model_provider ?? payload?.modelProvider)
+                if (provider) accumulator.modelProvider = provider
+            }
+
+            if (recordType === 'event_msg' && payloadType === 'token_count') {
+                const scope = asRecord(payload?.scope)
+                const info = asRecord(payload?.info)
+                const threadId = asString(payload?.thread_id ?? payload?.threadId ?? info?.thread_id ?? info?.threadId ?? scope?.thread_id)
+                if (payload?.scope_role !== 'child' && scope?.role !== 'child'
+                    && (!threadId || !accumulator.usageSessionId || threadId === accumulator.usageSessionId)) {
+                    accumulator.tokenUsage = selectCodexTokenUsage(accumulator.tokenUsage,
+                        readCodexTokenUsage(info, getCodexRecordTimestamp(record) ?? 0))
+                }
+            }
 
             if (recordType === 'event_msg' && payloadType === 'task_started') {
                 accumulator.completionTurnId = extractCodexTurnId(record, payload ?? {})

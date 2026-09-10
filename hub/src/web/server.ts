@@ -28,6 +28,7 @@ import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
 import { createSessionGroupRoutes } from './routes/sessionGroups'
 import { createSessionPinRoutes } from './routes/sessionPins'
+import { createKanbanOrderRoutes } from './routes/kanbanOrder'
 import { createPushRoutes } from './routes/push'
 import { createVoiceRoutes } from './routes/voice'
 import { createLegacyPublicShareTombstoneRoutes, createPublicShareRoutes } from './routes/shares'
@@ -300,6 +301,7 @@ export function createWebApp(options: {
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
     app.route('/api', createSessionGroupRoutes(options.store, options.getSseManager))
     app.route('/api', createSessionPinRoutes(options.store, options.getSseManager))
+    app.route('/api', createKanbanOrderRoutes(options.store, options.getSseManager))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine))

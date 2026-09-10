@@ -592,6 +592,10 @@ export function useSSE(options: {
 
             if (event.type === 'session-groups-updated') {
                 void queryClient.invalidateQueries({ queryKey: ['session-groups'] })
+                void queryClient.invalidateQueries({ queryKey: ['kanban-order'] })
+            }
+            if (event.type === 'kanban-order-updated') {
+                void queryClient.invalidateQueries({ queryKey: ['kanban-order'] })
             }
             if (event.type === 'session-pins-updated') {
                 void queryClient.invalidateQueries({ queryKey: ['session-pins'] })

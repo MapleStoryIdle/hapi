@@ -114,6 +114,8 @@ type CodexLocalSessionContextMessage = {
 }
 
 type CodexLocalSessionContextResponse = {
+    modelProvider?: string | null
+    tokenUsage?: import('@hapi/protocol/codexUsage').CodexTokenUsage | null
     success: true
     session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort' | 'controlledByCodexSsh'>
     messages: CodexLocalSessionContextMessage[]
@@ -664,6 +666,8 @@ function createRunnerCodexSessionContextResponse(
     const { session, importedMessages, subagents } = data
     return {
         success: true,
+        tokenUsage: data.tokenUsage ?? null,
+        modelProvider: data.modelProvider ?? null,
         session: createRunnerCodexSessionDisplaySummary(session),
         messages: createCodexTranscriptContextMessages(session.id, importedMessages, data.startIndex, session.modifiedAt),
         subagents,

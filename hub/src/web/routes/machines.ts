@@ -162,7 +162,7 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         const model = c.req.query('model')?.trim() || null
         try {
-            const result = await engine.getCodexSubscriptionLimitsForMachine(machineId, model)
+            const result = await engine.getCodexSubscriptionLimitsForMachine(machineId, model, c.req.query('cwd') || undefined, c.req.query('provider') || undefined)
             return c.json(result)
         } catch (error) {
             return c.json({

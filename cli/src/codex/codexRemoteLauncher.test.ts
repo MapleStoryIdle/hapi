@@ -937,7 +937,9 @@ function createSessionStub(messages = ['hello from launcher test'], mode = creat
     };
 
     const rpcHandlers = new Map<string, (params: unknown) => unknown>();
+    let usageMetadata: import('@hapi/protocol/types').Metadata = { path: '/tmp/hapi-update', host: 'test' };
     const client = {
+        updateMetadata: vi.fn((handler: (metadata: import('@hapi/protocol/types').Metadata) => import('@hapi/protocol/types').Metadata) => { usageMetadata = handler(usageMetadata); }),
         rpcHandlerManager: {
             registerHandler(method: string, handler: (params: unknown) => unknown) {
                 rpcHandlers.set(method, handler);
@@ -1021,6 +1023,7 @@ function createSessionStub(messages = ['hello from launcher test'], mode = creat
 
     return {
         session,
+        getUsageMetadata: () => usageMetadata,
         sessionEvents,
         codexMessages,
         summaryMessages,
@@ -2237,9 +2240,11 @@ describe('codexRemoteLauncher', () => {
 
     it('marks parent usage and compact events with parent scope', async () => {
         harness.emitParentUsageEvents = true;
-        const { session, codexMessages } = createSessionStub();
+        const { session, codexMessages, getUsageMetadata } = createSessionStub();
 
         await codexRemoteLauncher(session as never);
+
+        expect(getUsageMetadata().codexTokenUsage).toMatchObject({ input: 100, output: 10, total: 110, scope: 'lastTurn' });
 
         expect(codexMessages).toContainEqual(expect.objectContaining({
             type: 'token_count',

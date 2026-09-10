@@ -2440,7 +2440,7 @@ describe('CodexSessionContextPage', () => {
         expect(quota).toHaveTextContent('80%')
         expect(quota).toHaveTextContent('7d')
         expect(quota).toHaveTextContent('50%')
-        expect(api.getMachineCodexSubscriptionLimits).toHaveBeenCalledWith('machine-1', 'gpt-5.6-terra')
+        expect(api.getMachineCodexSubscriptionLimits).toHaveBeenCalledWith('machine-1', 'gpt-5.6-terra', '/workspace/project', undefined)
     })
 
 

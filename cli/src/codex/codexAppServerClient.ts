@@ -188,6 +188,14 @@ export class CodexAppServerClient extends JsonLineParser {
         return response as GetAccountRateLimitsResponse;
     }
 
+    async readUsageAccount(): Promise<unknown> {
+        return await this.sendRequest('account/read', { refreshToken: false }, { timeoutMs: 10_000 });
+    }
+
+    async readUsageConfig(cwd?: string | null): Promise<unknown> {
+        return await this.sendRequest('config/read', { includeLayers: false, ...(cwd ? { cwd } : {}) }, { timeoutMs: 10_000 });
+    }
+
     async setExperimentalFeatureEnablement(
         params: ExperimentalFeatureEnablementSetParams
     ): Promise<ExperimentalFeatureEnablementSetResponse> {

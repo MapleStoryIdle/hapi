@@ -444,6 +444,13 @@ function getSafeCodexSubagentIdentityCandidate(value: string | null, internalIds
 export function getCodexSubagentCardIdentity(tool: ToolCallBlock): string {
     const input = tool.tool.input
     const internalIds = getCodexSubagentInternalIds(tool)
+    const agentPath = getTrimmedInputString(input, ['agent_path', 'agentPath'])
+    const pathName = getSafeCodexSubagentIdentityCandidate(
+        agentPath?.replace(/^\/root\//, '') ?? null,
+        internalIds
+    )
+    if (pathName) return pathName
+
     const displayName = getSafeCodexSubagentIdentityCandidate(getTrimmedInputString(input, [
         'displayName',
         'display_name',

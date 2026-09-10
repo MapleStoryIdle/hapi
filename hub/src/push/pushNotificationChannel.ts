@@ -1,5 +1,5 @@
 import type { Session } from '../sync/syncEngine'
-import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
+import { isTaskNotificationFailure, type NotificationChannel, type TaskNotification } from '../notifications/notificationTypes'
 import { getAgentName, getSessionName } from '../notifications/sessionInfo'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
@@ -95,20 +95,15 @@ export class PushNotificationChannel implements NotificationChannel {
     }
 
     async sendTaskNotification(session: Session, notification: TaskNotification): Promise<void> {
-        if (!session.active) {
+        if (!session.active || !isTaskNotificationFailure(notification)) {
             return
         }
 
         const agentName = getAgentName(session)
         const name = getSessionName(session)
-        const normalizedStatus = notification.status?.trim().toLowerCase()
-        const isFailure = normalizedStatus === 'failed'
-            || normalizedStatus === 'error'
-            || normalizedStatus === 'killed'
-            || normalizedStatus === 'aborted'
 
         const payload: PushPayload = {
-            title: isFailure ? 'Task failed' : 'Task completed',
+            title: 'Task failed',
             body: `${agentName} · ${name} · ${notification.summary}`,
             data: {
                 type: 'task-notification',
@@ -126,7 +121,7 @@ export class PushNotificationChannel implements NotificationChannel {
                     body: payload.body,
                     sessionId: session.id,
                     url,
-                    kind: isFailure ? 'error' : 'success'
+                    kind: 'error'
                 }
             })
             if (delivered > 0) {

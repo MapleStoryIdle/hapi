@@ -169,7 +169,7 @@ describe('NotificationHub', () => {
         hub.stop()
     })
 
-    it('sends task notifications for task_notification system messages', async () => {
+    it('does not notify for completed background/subagent task messages', async () => {
         const engine = new FakeSyncEngine()
         const channel = new StubChannel()
         const hub = new NotificationHub(engine as unknown as SyncEngine, [channel], {
@@ -206,10 +206,50 @@ describe('NotificationHub', () => {
         engine.emit(taskEvent)
         await sleep(5)
 
+        expect(channel.taskNotifications).toHaveLength(0)
+
+        hub.stop()
+    })
+
+    it('sends task notifications for failed background/subagent task messages', async () => {
+        const engine = new FakeSyncEngine()
+        const channel = new StubChannel()
+        const hub = new NotificationHub(engine as unknown as SyncEngine, [channel], {
+            permissionDebounceMs: 1,
+            readyCooldownMs: 20
+        })
+
+        const session = createSession()
+        engine.setSession(session)
+
+        engine.emit({
+            type: 'message-received',
+            sessionId: session.id,
+            message: {
+                id: 'message-task-failed',
+                seq: 3,
+                localId: null,
+                createdAt: 0,
+                content: {
+                    role: 'agent',
+                    content: {
+                        type: 'output',
+                        data: {
+                            type: 'system',
+                            subtype: 'task_notification',
+                            status: 'failed',
+                            summary: 'Commit T4 failed'
+                        }
+                    }
+                }
+            }
+        })
+        await sleep(5)
+
         expect(channel.taskNotifications).toHaveLength(1)
         expect(channel.taskNotifications[0]?.notification).toEqual({
-            status: 'completed',
-            summary: 'Commit T4 finished'
+            status: 'failed',
+            summary: 'Commit T4 failed'
         })
 
         hub.stop()

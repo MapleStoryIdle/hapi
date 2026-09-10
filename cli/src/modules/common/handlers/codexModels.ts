@@ -1,4 +1,5 @@
 import { logger } from '@/ui/logger';
+import { getCodexUsageAccount } from '../codexUsageAccount';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager';
 import {
@@ -32,8 +33,10 @@ export function registerCodexModelHandlers(rpcHandlerManager: RpcHandlerManager)
             logger.debug('Get Codex subscription limits request');
 
             try {
-                const limits = await getCodexSubscriptionLimits(data?.model);
-                return { success: true, limits };
+                const account = await getCodexUsageAccount(data?.cwd, data?.provider);
+                if (account.mode === 'api') return { success: true, account };
+                const limits = await getCodexSubscriptionLimits(data?.model).catch(() => undefined);
+                return { success: true, account, limits };
             } catch (error) {
                 logger.debug('Failed to read Codex subscription limits:', error);
                 return rpcError(getErrorMessage(error, 'Failed to read Codex subscription limits'));

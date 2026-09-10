@@ -8,7 +8,7 @@ import { SessionConnectionProvider } from '@/lib/session-connection-context'
 import { ToastProvider } from '@/lib/toast-context'
 import type { ApiClient } from '@/api/client'
 import type { Session } from '@/types/api'
-import { buildSessionHeaderDetails, SessionConnectionRecoveryControl, SessionHeader, SessionTitleDetails } from './SessionHeader'
+import { buildSessionHeaderDetails, CodexSubscriptionLimitsBadge, SessionConnectionRecoveryControl, SessionHeader, SessionTitleDetails } from './SessionHeader'
 
 afterEach(() => {
     cleanup()
@@ -43,6 +43,10 @@ function createSession(): Session {
 }
 
 describe('mobile layout contract', () => {
+    it('keeps the quota badge hidden until quota data is available', () => {
+        const { container } = render(<I18nProvider><CodexSubscriptionLimitsBadge limits={null} isFetching error={null} /></I18nProvider>)
+        expect(container.querySelector('button')).toBeNull()
+    })
     it('keeps group in title details and refreshes it without altering the title', () => {
         const onSetGroup = vi.fn()
         const detailsRef = { current: buildSessionHeaderDetails({ title: 'Task', sessionId: 's', group: { id: 'g', name: 'Release', emoji: '🚀' }, onSetGroup }, key => key) }

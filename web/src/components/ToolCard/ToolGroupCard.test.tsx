@@ -291,6 +291,23 @@ describe('ToolGroupCard', () => {
         expect(cards[0]).not.toHaveClass('flex-1')
     })
 
+    it.each([
+        [{ agent_path: '/root/execution_scout', displayName: 'Ada' }, 'execution_scout'],
+        [{ agentPath: ' /root/team/scout ', name: 'Ada' }, 'team/scout'],
+        [{ agent_path: '/other/root/scout', name: 'Ada' }, '/other/root/scout'],
+        [{ agent_path: '/root/', displayName: 'Ada' }, 'Ada'],
+        [{ agent_path: ' ', displayName: 'Ada' }, 'Ada'],
+    ])('prefers the agent path for card identities: %j', (input, expected) => {
+        const tool = makeToolBlock('path-agent', 'CodexAgent', input)
+        expect(getCodexSubagentCardIdentity(tool)).toBe(expected)
+        const view = renderCard(makeGroup({
+            tools: [tool],
+            forceCompact: true,
+            forceGenericCompactTitle: true,
+        }))
+        expect(view.container.querySelector('[data-codex-subagent-card]')).toHaveTextContent(expected)
+    })
+
     it('uses friendly card identities, deterministic colors, and icon-only tool states', () => {
         const named = makeToolBlock('agent-alpha', 'CodexAgent', {
             displayName: 'Ada',

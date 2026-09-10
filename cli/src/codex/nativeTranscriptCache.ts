@@ -398,6 +398,8 @@ export class NativeCodexTranscriptCache {
         return {
             data: {
                 ...data,
+                tokenUsage: entry.accumulator?.tokenUsage ?? null,
+                modelProvider: entry.accumulator?.modelProvider ?? null,
                 session: this.applyLifecycleToSummary(data.session)
             },
             plan: entry.accumulator ? getCodexTranscriptImportPlan(entry.accumulator) : null,

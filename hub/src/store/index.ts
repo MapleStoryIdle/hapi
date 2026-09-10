@@ -12,6 +12,7 @@ import { KanbanTaskStore } from './kanbanTasks'
 import { MonitorStore, MONITOR_SCHEMA } from './monitors'
 import { SessionGroupStore, SESSION_GROUP_SCHEMA } from './sessionGroups'
 import { SessionPinStore, SESSION_PIN_SCHEMA } from './sessionPins'
+import { KanbanOrderStore, KANBAN_ORDER_SCHEMA } from './kanbanOrder'
 
 export type {
     FeedbackMetadata,
@@ -34,7 +35,7 @@ export { UserStore } from './userStore'
 export { ArtifactStore } from './artifacts'
 export { KanbanTaskStore } from './kanbanTasks'
 
-const SCHEMA_VERSION: number = 24
+const SCHEMA_VERSION: number = 25
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -45,6 +46,7 @@ const REQUIRED_TABLES = [
     'kanban_tasks',
     'session_groups', 'session_group_assignments',
     'session_pins',
+    'kanban_order',
     'monitors', 'monitor_buckets', 'monitor_incidents', 'monitor_receipts', 'bark_settings'
 ] as const
 
@@ -63,6 +65,7 @@ export class Store {
     readonly monitors: MonitorStore
     readonly sessionGroups: SessionGroupStore
     readonly sessionPins: SessionPinStore
+    readonly kanbanOrder: KanbanOrderStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -118,6 +121,7 @@ export class Store {
         this.monitors = new MonitorStore(this.db, dbPath)
         this.sessionGroups = new SessionGroupStore(this.db)
         this.sessionPins = new SessionPinStore(this.db)
+        this.kanbanOrder = new KanbanOrderStore(this.db)
     }
 
     close(): void {
@@ -143,6 +147,7 @@ export class Store {
         const buildStepMigrations = (legacy: boolean): Record<number, () => void> => ({
             22: () => this.db.exec(SESSION_GROUP_SCHEMA),
             23: () => this.db.exec(SESSION_PIN_SCHEMA),
+            24: () => this.db.exec(KANBAN_ORDER_SCHEMA),
             1: () => this.migrateFromV1ToV2(legacy),
             2: () => this.migrateFromV2ToV3(),
             3: () => this.migrateFromV3ToV4(),
@@ -215,6 +220,7 @@ export class Store {
     private createSchema(): void {
         this.db.exec(SESSION_GROUP_SCHEMA)
         this.db.exec(SESSION_PIN_SCHEMA)
+        this.db.exec(KANBAN_ORDER_SCHEMA)
         this.db.exec(BARK_SCHEMA)
         this.db.exec(MONITOR_SCHEMA)
         this.db.exec(`

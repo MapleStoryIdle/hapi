@@ -1699,6 +1699,8 @@ export function CodexSessionContextPage(props: {
     const codexLimitsState = useCodexSubscriptionLimits({
         api: props.api,
         machineId: props.machineId,
+        cwd: context?.session.cwd,
+        provider: context?.modelProvider,
         model: context?.session.model ?? null,
         // Read the model from the transcript first, so a native GPT-specific
         // session renders the matching Codex quota bucket instead of a
@@ -2520,6 +2522,9 @@ export function CodexSessionContextPage(props: {
                         <div className="flex shrink-0 items-center gap-1">
                             <CodexSubscriptionLimitsBadge
                                 limits={codexLimitsState.limits}
+                                account={codexLimitsState.account}
+                                usage={context?.tokenUsage}
+                                onRefresh={() => { codexLimitsState.refresh(); void refetchNativeSnapshot() }}
                                 isFetching={codexLimitsState.isFetching}
                                 error={codexLimitsState.error}
                             />

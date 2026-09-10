@@ -3,6 +3,7 @@ import type { NativeCodexSessionControlAction, NativeCodexSessionControlResponse
 import type { Monitor, MonitorConfig, MonitorDetail, MonitorRequest } from '@hapi/protocol/monitoring'
 import type { SessionGroup, SessionGroupInput, SessionGroupSource, SessionGroupsResponse } from '@hapi/protocol/sessionGroups'
 import type { SessionPinSource, SessionPinsResponse } from '@hapi/protocol/sessionPins'
+import type { KanbanOrder, KanbanOrderInput } from '@hapi/protocol/kanbanOrder'
 import type {
     AttachmentMetadata,
     AuthResponse,
@@ -771,6 +772,14 @@ export class ApiClient {
         return this.request('/api/session-groups')
     }
 
+    async getKanbanOrder(): Promise<KanbanOrder> {
+        return this.request('/api/kanban-order')
+    }
+
+    async setKanbanOrder(input: KanbanOrderInput): Promise<KanbanOrder> {
+        return this.request('/api/kanban-order', { method: 'PUT', body: JSON.stringify(input) })
+    }
+
     async getSessionPins(): Promise<SessionPinsResponse> {
         return this.request('/api/session-pins')
     }
@@ -1154,10 +1163,16 @@ export class ApiClient {
 
     async getMachineCodexSubscriptionLimits(
         machineId: string,
-        model?: string | null
+        model?: string | null,
+        cwd?: string | null,
+        provider?: string | null
     ): Promise<CodexSubscriptionLimitsResponse> {
         const normalizedModel = model?.trim()
-        const query = normalizedModel ? `?model=${encodeURIComponent(normalizedModel)}` : ''
+        const params = new URLSearchParams()
+        if (normalizedModel) params.set('model', normalizedModel)
+        if (cwd) params.set('cwd', cwd)
+        if (provider) params.set('provider', provider)
+        const query = params.size ? `?${params}` : ''
         return await this.request<CodexSubscriptionLimitsResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/codex-subscription-limits${query}`
         )

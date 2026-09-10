@@ -57,6 +57,7 @@ export class CodexSession extends AgentSessionBase<EnhancedMode> {
             sessionIdLabel: 'Codex',
             applySessionIdToMetadata: (metadata, sessionId) => ({
                 ...metadata,
+                codexTokenUsage: metadata.codexSessionId === sessionId ? metadata.codexTokenUsage : null,
                 codexSessionId: sessionId
             }),
             permissionMode: opts.permissionMode,
@@ -114,7 +115,7 @@ export class CodexSession extends AgentSessionBase<EnhancedMode> {
             // mergeSessionMetadata. The value is `null` on the wire only;
             // MetadataSchema parses `string().optional()`, so the
             // post-merge persisted blob carries no key.
-            const updated: Record<string, unknown> = { ...metadata, codexSessionId: null };
+            const updated: Record<string, unknown> = { ...metadata, codexSessionId: null, codexTokenUsage: null };
             return updated as unknown as Metadata;
         });
     }

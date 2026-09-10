@@ -252,6 +252,8 @@ export type CodexLocalSessionSubagent = {
 }
 
 export type CodexLocalSessionContextResponse = {
+    modelProvider?: string | null
+    tokenUsage?: import('@hapi/protocol/codexUsage').CodexTokenUsage | null
     success: true
     session: Pick<CodexLocalSessionSummary, 'id' | 'title' | 'cwd' | 'modifiedAt' | 'model' | 'modelReasoningEffort' | 'controlledByCodexSsh'>
     messages: CodexLocalSessionContextMessage[]

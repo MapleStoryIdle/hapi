@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import type { CodexTokenUsage, CodexUsageAccount } from '@hapi/protocol/codexUsage'
+import { CodexUsageDrawer } from './CodexUsageDrawer'
 import { RefreshCw as RefreshIconNode, Wifi as WifiIconNode, WifiOff as WifiOffIconNode } from 'lucide'
 import type { CodexSubscriptionLimits, CodexSubscriptionLimitWindow, Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
@@ -642,34 +644,23 @@ function formatResetAt(resetsAt: number | null, locale: string): string | null {
     if (Number.isNaN(date.getTime())) {
         return null
     }
-    return date.toLocaleString(locale === 'zh-CN' ? 'zh-CN' : 'en-US')
+    return date.toLocaleString(locale === 'zh-CN' ? 'zh-CN' : 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function QuotaProgressBar(props: { remainingPercent: number | null }) {
-    const remaining = props.remainingPercent === null ? 0 : clampPercent(props.remainingPercent)
-    const fillStyle = {
-        clipPath: `inset(0 ${100 - remaining}% 0 0)`,
-        background: 'linear-gradient(90deg, #ef4444 0%, #ef4444 8%, #f97316 22%, #f97316 32%, #38bdf8 48%, #38bdf8 62%, #22c55e 78%, #22c55e 100%)'
-    } satisfies CSSProperties
-
-    return (
-        <div className="relative h-1.5 overflow-hidden rounded-full bg-[var(--app-border)]">
-            <div className="absolute inset-0" style={fillStyle} />
-        </div>
-    )
-}
 
 export function CodexSubscriptionLimitsBadge(props: {
     limits: CodexSubscriptionLimits | null
     isFetching: boolean
     error: string | null
+    account?: CodexUsageAccount | null
+    usage?: CodexTokenUsage | null
+    onRefresh?: () => void
 }) {
     const { t, locale } = useTranslation()
     const [open, setOpen] = useState(false)
     const toggleOpen = useCallback(() => {
         setOpen((value) => !value)
     }, [])
-    const rootRef = useRef<HTMLDivElement | null>(null)
     const windows = getDisplayLimitWindows(props.limits)
     const text = windows.map((window) => formatLimitWindow(window, t)).filter(Boolean).join(' · ')
     const rows = windows.map((window) => ({
@@ -694,39 +685,14 @@ export function CodexSubscriptionLimitsBadge(props: {
         .filter(Boolean)
         .join('\n')
     const title = props.error
-        ? t('session.header.codexLimits.unavailable', { error: props.error })
+        ? t('usage.refreshFailed')
         : resetDetails || t('session.header.codexLimits.title')
     const updatedAt = formatLimitUpdatedAt(props.limits?.updatedAt, locale)
 
-    useEffect(() => {
-        if (!open) return
-
-        const handlePointerDown = (event: PointerEvent) => {
-            const target = event.target as Node
-            if (rootRef.current?.contains(target)) return
-            setOpen(false)
-        }
-
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                setOpen(false)
-            }
-        }
-
-        document.addEventListener('pointerdown', handlePointerDown)
-        document.addEventListener('keydown', handleKeyDown)
-        return () => {
-            document.removeEventListener('pointerdown', handlePointerDown)
-            document.removeEventListener('keydown', handleKeyDown)
-        }
-    }, [open])
-
-    if (windows.length === 0) {
-        return null
-    }
+    if (!props.limits || rows.length === 0) return null
 
     return (
-        <div ref={rootRef} className="pointer-events-auto relative shrink-0">
+        <div className="pointer-events-auto relative shrink-0">
             <button
                 type="button"
                 onClick={toggleOpen}
@@ -739,6 +705,7 @@ export function CodexSubscriptionLimitsBadge(props: {
                 aria-haspopup="dialog"
                 aria-expanded={open}
             >
+                {rows.length === 0 ? <span>{t('session.header.codexLimits.title')}</span> : null}
                 {rows.map((row) => (
                     <span key={row.label} className="grid grid-cols-[auto_auto] items-center gap-x-1.5">
                         <span className="text-[var(--app-fg)]">{row.label}</span>
@@ -749,45 +716,9 @@ export function CodexSubscriptionLimitsBadge(props: {
                 ))}
             </button>
 
-            {open ? (
-                <div
-                    role="dialog"
-                    aria-label={t('session.header.codexLimits.title')}
-                    className="absolute right-0 top-full z-50 mt-2 w-[248px] rounded-[18px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
-                >
-                    <div className="mb-2 flex items-center justify-between gap-3 px-0.5">
-                        <div className="text-sm font-semibold text-[var(--app-fg)]">{t('session.header.codexLimits.title')}</div>
-                        <div className="text-[11px] text-[var(--app-hint)]">
-                            {props.isFetching
-                                ? t('session.header.codexLimits.updating')
-                                : updatedAt
-                                    ? t('session.header.codexLimits.updatedAt', { time: updatedAt })
-                                    : t('session.header.codexLimits.updated')}
-                        </div>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                        {rows.map((row) => (
-                            <div key={row.label} className="rounded-[13px] border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2.5">
-                                <div className="mb-2 flex items-baseline justify-between gap-3 tabular-nums">
-                                    <div className="text-sm font-semibold text-[var(--app-fg)]">
-                                        {t('session.header.codexLimits.windowLabel', { window: row.label })}
-                                    </div>
-                                    <div className={['text-lg font-bold', getLimitPercentClass(row.remaining)].join(' ')}>
-                                        {row.remaining === null ? '--' : `${row.remaining}%`}
-                                    </div>
-                                </div>
-                                <QuotaProgressBar remainingPercent={row.remaining} />
-                                <div className="mt-2 truncate text-[11px] text-[var(--app-hint)]">
-                                    {row.resetAt
-                                        ? t('session.header.codexLimits.resetAt', { time: row.resetAt })
-                                        : t('session.header.codexLimits.resetUnknown')}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            ) : null}
+            <CodexUsageDrawer open={open} onOpenChange={setOpen} account={props.account} usage={props.usage}
+                rows={rows} updatedAt={updatedAt} isFetching={props.isFetching} error={props.error}
+                onRefresh={props.onRefresh} />
         </div>
     )
 }
@@ -900,6 +831,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
         api,
         sessionId: session.id,
         model: session.model ?? null,
+        provider: session.metadata?.codexModelProvider,
         enabled: session.active && session.metadata?.flavor === 'codex',
         thinking: props.status?.thinking ?? session.thinking
     })
@@ -949,6 +881,9 @@ export const SessionHeader = memo(function SessionHeader(props: {
                         {session.metadata?.flavor === 'codex' ? (
                             <CodexSubscriptionLimitsBadge
                                 limits={codexLimitsState.limits}
+                                account={codexLimitsState.account}
+                                usage={session.metadata?.codexTokenUsage}
+                                onRefresh={() => { codexLimitsState.refresh(); props.onRefresh?.() }}
                                 isFetching={codexLimitsState.isFetching}
                                 error={codexLimitsState.error}
                             />

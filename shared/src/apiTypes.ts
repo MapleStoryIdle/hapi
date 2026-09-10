@@ -725,11 +725,14 @@ export type CodexSubscriptionLimits = {
 export type CodexSubscriptionLimitsResponse = {
     success: boolean
     limits?: CodexSubscriptionLimits
+    account?: import('./codexUsage').CodexUsageAccount
     error?: string
 }
 
 export type GetCodexSubscriptionLimitsRequest = {
     model?: string | null
+    cwd?: string | null
+    provider?: string | null
 }
 
 export type GetCodexSubscriptionLimitsResponse = CodexSubscriptionLimitsResponse

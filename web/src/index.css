@@ -781,7 +781,7 @@ select {
  * stays directory-first; Kanban keeps richer metadata and task actions. */
 .cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-board {
     --kanban-heading-icon-size: 0.875rem;
-    gap: 1.75rem;
+    gap: 1rem;
     padding-top: 0.625rem;
 }
 
@@ -822,6 +822,14 @@ select {
 
 .cupertino-session-board .cupertino-kanban-heading .session-thinking__label {
     font-weight: inherit;
+}
+
+.kanban-sort-row {
+    transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .kanban-sort-row { transition: none; }
 }
 
 .cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-kanban-card-column {

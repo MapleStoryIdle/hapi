@@ -19,6 +19,28 @@ function transcriptRecord(value: unknown): string {
 }
 
 describe('NativeCodexTranscriptCache', () => {
+    it('retains parent token counters across pagination and ignores child usage', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-usage-transcript-'))
+        const id = 'a1234567-1234-4234-8234-123456789012'
+        mkdirSync(join(root, 'sessions'))
+        const file = join(root, 'sessions', `rollout-${id}.jsonl`)
+        writeFileSync(file, [
+            transcriptRecord({ type: 'session_meta', payload: { id, cwd: '/work', model_provider: 'local' } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 20, cached_input_tokens: 80 } } } }),
+            transcriptRecord({ type: 'event_msg', payload: { type: 'token_count', thread_id: 'child', info: { total_token_usage: { input_tokens: 999, output_tokens: 999 } } } }),
+            ...Array.from({ length: 60 }, (_, index) => transcriptRecord({ type: 'event_msg', payload: { type: 'agent_message', message: `reply ${index}` } }))
+        ].join(''))
+        process.env.CODEX_HOME = root
+        try {
+            const cache = new NativeCodexTranscriptCache()
+            const first = cache.read(id, { limit: 1 })
+            expect(first?.data.tokenUsage).toMatchObject({ input: 100, output: 20, cachedInput: 80, total: 120 })
+            expect(first?.data.modelProvider).toBe('local')
+            expect(cache.read(id, { limit: 1 })?.timing.cache).toBe('hit')
+            appendFileSync(file, transcriptRecord({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 200, output_tokens: 40 } } } }))
+            expect(cache.read(id, { limit: 1 })?.data.tokenUsage?.total).toBe(240)
+        } finally { rmSync(root, { recursive: true, force: true }) }
+    })
     it('reads across large UTF-8 records and retains the exact trailing append boundary', () => {
         const root = mkdtempSync(join(tmpdir(), 'hapi-chunked-transcript-'))
         const id = 'a1234567-1234-4234-8234-123456789012'

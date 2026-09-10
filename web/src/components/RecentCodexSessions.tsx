@@ -23,12 +23,16 @@ import {
     History,
     LoaderCircle as LoaderCircleIcon,
     Pin,
+    ArrowDownUp,
     type LucideIcon
 } from 'lucide-react'
 import type { ApiClient } from '@/api/client'
 import type { SessionGroup } from '@hapi/protocol/sessionGroups'
 import { resolveSessionGroup, useSessionGroups } from '@/hooks/useSessionGroups'
 import { useSessionPins, type SessionPinTarget } from '@/hooks/useSessionPins'
+import { useKanbanOrder, kanbanOrderQueryKey } from '@/hooks/useKanbanOrder'
+import { normalizeKanbanOrder, sortKanbanLanes } from '@hapi/protocol/kanbanOrder'
+import { KanbanOrderDrawer } from '@/components/KanbanOrderDrawer'
 import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { getDetachedBranchLabel } from '@/lib/files-i18n'
@@ -1145,6 +1149,8 @@ export function RecentCodexSessions(props: {
         }] : []
     }), [mergedSessions, props.api, props.machineId, sessionsOwner])
     const sessionPins = useSessionPins(props.api, pinTargets)
+    const kanbanOrder = useKanbanOrder(props.api, isMerged && props.viewMode === 'kanban')
+    const [orderDrawerOpen, setOrderDrawerOpen] = useState(false)
     const pinnedSessionKeys = sessionPins.enabled ? sessionPins.pinnedSessionKeys : props.pinnedSessionKeys
     const onTogglePin = sessionPins.enabled ? sessionPins.togglePinnedSessionKey : props.onTogglePin
     const completedDirectoryColors = useMemo(
@@ -1204,6 +1210,14 @@ export function RecentCodexSessions(props: {
             daysAgo: (days) => t('shares.timeline.daysAgo', { days })
         })
     }, [dateLocale, kanbanGroups, localDay, t])
+    const orderedKanbanGroups = sortKanbanLanes(kanbanGroups, normalizeKanbanOrder(
+        kanbanOrder.data?.order ?? [], sessionGroupsQuery.data?.groups.map(group => group.id) ?? [...sessionGroupsByKey.values()].map(group => group.id)
+    ))
+    const sortableLanes = orderedKanbanGroups.filter(group => group.id !== 'processing' && group.id !== 'completed' && (!group.customGroup || group.sessions.length > 0)).map(group => {
+        const presentation = KANBAN_GROUP_PRESENTATION[group.customGroup ? 'completed' : group.id as BuiltInKanbanGroupId]
+        const Icon = presentation.Icon
+        return { id: group.id, label: group.customGroup?.name ?? t(presentation.labelKey), icon: group.customGroup ? <span>{group.customGroup.emoji}</span> : <Icon className="h-4 w-4" /> }
+    })
 
     useEffect(() => {
         if (!isMerged || props.hapiIsLoading || isCodexKanbanLastSeenInitialized) {
@@ -1566,11 +1580,11 @@ export function RecentCodexSessions(props: {
             ) : isMerged && props.viewMode === 'kanban' ? (
                 <div
                     className={embedded
-                        ? 'cupertino-session-board mt-1 flex min-h-0 flex-col gap-6 pb-3'
-                        : 'mt-4 flex min-h-0 flex-col gap-6 overflow-y-auto pb-3 pr-1'}
+                        ? 'cupertino-session-board mt-1 flex min-h-0 flex-col gap-4 pb-3'
+                        : 'mt-4 flex min-h-0 flex-col gap-4 overflow-y-auto pb-3 pr-1'}
                     data-testid="session-kanban-board"
                 >
-                    {kanbanGroups
+                    {orderedKanbanGroups
                         .filter((group) => group.id !== 'completed' && group.sessions.length > 0)
                         .map((group) => {
                         const presentation = KANBAN_GROUP_PRESENTATION[group.customGroup ? 'completed' : group.id as BuiltInKanbanGroupId]
@@ -1605,7 +1619,7 @@ export function RecentCodexSessions(props: {
                                         ) : t(presentation.labelKey)}
                                     </h2>
                                 </div>
-                                {!collapsed ? <ul className="cupertino-kanban-card-column mt-2 flex flex-col gap-2.5" data-kanban-card-column>
+                                {!collapsed ? <ul className="cupertino-kanban-card-column mt-1 flex flex-col gap-2.5" data-kanban-card-column>
                                     {group.sessions.map((session) => (
                                         <KanbanSessionCard
                                             key={session.key}
@@ -1631,7 +1645,7 @@ export function RecentCodexSessions(props: {
                     {completedTimelineGroups.length > 0 ? (
                         <section className="min-w-0" data-kanban-group="completed">
                             <div className="cupertino-kanban-date-groups" data-kanban-card-column>
-                                <div className="space-y-5">
+                                <div className="space-y-4">
                                     {completedTimelineGroups.map((group) => (
                                         <section key={group.key} data-kanban-date-group={group.key}>
                                             <h3 className={`cupertino-kanban-date-heading flex min-h-6 items-center gap-2 px-1 ${KANBAN_HEADING_CLASS_NAME}`}>
@@ -1641,7 +1655,7 @@ export function RecentCodexSessions(props: {
                                                 {collapsedSessionGroups.has(`date:${group.key}`) ? <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
                                                 </button>
                                             </h3>
-                                            {!collapsedSessionGroups.has(`date:${group.key}`) ? <ul className="cupertino-kanban-card-column mt-2 flex flex-col gap-2.5">
+                                            {!collapsedSessionGroups.has(`date:${group.key}`) ? <ul className="cupertino-kanban-card-column mt-1 flex flex-col gap-2.5">
                                                 {group.shares.map((session) => (
                                                     <KanbanSessionCard
                                                         key={session.key}
@@ -1667,6 +1681,10 @@ export function RecentCodexSessions(props: {
                             </div>
                         </section>
                     ) : null}
+                    <button type="button" className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl text-sm text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] focus-visible:ring-2 focus-visible:ring-[var(--app-link)]" onClick={() => setOrderDrawerOpen(true)}>
+                        <ArrowDownUp className="h-4 w-4" aria-hidden="true" />{t('kanbanOrder.title')}
+                    </button>
+                    {orderDrawerOpen ? <KanbanOrderDrawer key={kanbanOrderQueryKey(props.api).join(':')} lanes={sortableLanes} revision={kanbanOrder.data?.revision ?? 0} ready={Boolean(kanbanOrder.data) && !kanbanOrder.isError} saving={kanbanOrder.saving} onSave={kanbanOrder.save} onRetry={() => { void kanbanOrder.refetch() }} onClose={() => setOrderDrawerOpen(false)} /> : null}
                 </div>
             ) : isMerged ? (
                 <div className={embedded

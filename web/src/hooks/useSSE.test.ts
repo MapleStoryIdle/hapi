@@ -137,16 +137,16 @@ describe('useSSE skills updates', () => {
 })
 
 describe('useSSE pin updates', () => {
-    it('invalidates Hub pins on the global connection while another session is selected', async () => {
+    it.each([['session-pins-updated', 'session-pins'], ['kanban-order-updated', 'kanban-order']] as const)('invalidates %s on the global connection while another session is selected', async (type, key) => {
         Object.defineProperty(globalThis, 'EventSource', { value: MockEventSource, configurable: true, writable: true })
         const invalidateQueries = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
         renderHook(() => useSSE({ enabled: true, token: 'test-token', baseUrl: 'http://hub.test', subscription: { sessionId: 'other-session' }, scope: 'global', onEvent: vi.fn() }), { wrapper: createWrapper() })
         act(() => {
             MockEventSource.instances[0]?.onmessage?.({
-                data: JSON.stringify({ type: 'session-pins-updated', namespace: 'default' }), lastEventId: '1'
+                data: JSON.stringify({ type, namespace: 'default' }), lastEventId: '1'
             } as MessageEvent<string>)
         })
-        await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['session-pins'] }))
+        await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: [key] }))
     })
 })
 

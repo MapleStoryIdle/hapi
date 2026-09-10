@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CodexTokenUsageSchema } from './codexUsage'
 import { CODEX_COLLABORATION_MODES, PERMISSION_MODES } from './modes'
 import { NativeCodexSessionControlsSchema } from './codexSessionControl'
 
@@ -63,6 +64,8 @@ export const MetadataSchema = z.object({
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(),
     codexSessionId: z.string().optional(),
+    codexTokenUsage: CodexTokenUsageSchema.nullish(),
+    codexModelProvider: z.string().nullish(),
     geminiSessionId: z.string().optional(),
     opencodeSessionId: z.string().optional(),
     cursorSessionId: z.string().optional(),
@@ -525,6 +528,9 @@ export const CodexLocalSessionRealtimeSnapshotSchema = z.object({
 }).strict()
 
 export const SyncEventSchema = z.discriminatedUnion('type', [
+    SessionEventBaseSchema.extend({
+        type: z.literal('kanban-order-updated')
+    }),
     SessionEventBaseSchema.extend({
         type: z.literal('session-pins-updated')
     }),
