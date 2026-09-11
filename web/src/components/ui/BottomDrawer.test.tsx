@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import { BottomDrawer, drawerDragSize, shouldDismissDrawer } from './BottomDrawer'
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.appKeyboardOpen })
 
 function Harness() {
     const [open, setOpen] = useState(false)
@@ -114,6 +114,55 @@ describe('BottomDrawer', () => {
         act(() => { viewport.height = 350; viewport.offsetTop = 60; viewport.dispatchEvent(new Event('resize')) })
         expect(dialog.style.getPropertyValue('--drawer-viewport-height')).toBe('350px')
         expect(dialog.style.getPropertyValue('--drawer-bottom')).toBe('390px')
+    })
+
+    it('uses a keyboard-safe dialog for editable detail content', () => {
+        const viewport = Object.assign(new EventTarget(), { height: 700, offsetTop: 0 })
+        vi.stubGlobal('visualViewport', viewport)
+        vi.stubGlobal('innerHeight', 800)
+        render(<I18nProvider><BottomDrawer open inputDialog onOpenChange={() => {}} title="Rename" testId="keyboard-safe-dialog"><input data-drawer-initial-focus /></BottomDrawer></I18nProvider>)
+        const dialog = screen.getByTestId('keyboard-safe-dialog')
+        expect(dialog).toHaveAttribute('data-keyboard-safe-dialog', 'true')
+        expect(dialog).not.toHaveAttribute('data-keyboard-open')
+        expect(dialog.style.left).toBe('calc(var(--app-safe-area-left) + var(--app-mobile-input-dialog-edge-gap))')
+        expect(dialog.style.right).toBe('calc(var(--app-safe-area-right) + var(--app-mobile-input-dialog-edge-gap))')
+        expect(dialog.style.width).toBe('auto')
+        expect(dialog.style.top).toBe('auto')
+        expect(dialog.style.bottom).toBe('calc(var(--app-safe-area-bottom) + var(--app-mobile-input-dialog-edge-gap))')
+        expect(dialog.style.transform).toBe('none')
+        expect(dialog.className).not.toContain('left-1/2')
+        expect(dialog.className).not.toContain('-translate-x-1/2')
+        const input = dialog.querySelector('input')!
+        input.focus()
+        act(() => { viewport.height = 400; viewport.dispatchEvent(new Event('resize')) })
+        expect(dialog).toHaveAttribute('data-keyboard-open', 'true')
+        expect(dialog).toHaveAttribute('data-keyboard-fixed-viewport', 'layout')
+        expect(dialog.querySelector('[data-question-drawer-handle]')).toBeNull()
+        expect(dialog.style.top).toBe('auto')
+        expect(dialog.style.bottom).toBe('calc(var(--drawer-keyboard-bottom) + var(--app-mobile-input-dialog-keyboard-gap))')
+        expect(dialog.style.getPropertyValue('--drawer-keyboard-bottom')).toBe('400px')
+        expect(dialog.style.maxHeight).toBe('calc(var(--drawer-viewport-height) - var(--app-safe-area-top) - var(--app-mobile-input-dialog-edge-gap) - var(--app-mobile-input-dialog-edge-gap))')
+        expect(dialog.style.transform).toBe('none')
+    })
+
+    it('does not raise an editable dialog twice when iOS fixed positioning follows the visual viewport', () => {
+        const viewport = Object.assign(new EventTarget(), { height: 700, offsetTop: 0 })
+        vi.stubGlobal('visualViewport', viewport)
+        vi.stubGlobal('innerHeight', 800)
+        render(<I18nProvider><BottomDrawer open inputDialog onOpenChange={() => {}} title="Rename" testId="visual-viewport-dialog"><input data-drawer-initial-focus /></BottomDrawer></I18nProvider>)
+        const dialog = screen.getByTestId('visual-viewport-dialog')
+        const input = dialog.querySelector('input')!
+        input.focus()
+        act(() => {
+            vi.stubGlobal('innerHeight', 400)
+            viewport.height = 400
+            viewport.dispatchEvent(new Event('resize'))
+        })
+        expect(dialog).toHaveAttribute('data-keyboard-open', 'true')
+        expect(dialog).toHaveAttribute('data-keyboard-fixed-viewport', 'visual')
+        expect(dialog.style.getPropertyValue('--drawer-keyboard-bottom')).toBe('0px')
+        expect(dialog.style.bottom).toBe('calc(var(--drawer-keyboard-bottom) + var(--app-mobile-input-dialog-keyboard-gap))')
+        expect(dialog.style.transform).toBe('none')
     })
 })
 

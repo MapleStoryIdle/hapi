@@ -18,6 +18,9 @@
     --app-mobile-header-shell-background: transparent;
     --app-mobile-header-shell-backdrop-filter: none;
     --app-mobile-composer-expanded-keyboard-offset: 4px;
+    /* Editable-detail dialogs stay above the software keyboard. */
+    --app-mobile-input-dialog-keyboard-gap: 8px;
+    --app-mobile-input-dialog-edge-gap: 12px;
     --app-mobile-standalone-top-safe-area-min: 50px;
     --app-mobile-standalone-bottom-safe-area-min: 34px;
     --app-mobile-composer-touch-safe-area-min: 12px;

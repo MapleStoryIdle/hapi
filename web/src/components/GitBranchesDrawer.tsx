@@ -405,6 +405,7 @@ export function GitBranchesDrawer(props: {
                 density="compact"
                 busy={busy}
                 testId="git-branches-drawer"
+                desktopClassName="max-w-2xl"
             >
                 {branchesQuery.isPending ? (
                     <div className="flex min-h-32 items-center justify-center" data-git-branches-loading>
@@ -516,6 +517,7 @@ export function GitBranchesDrawer(props: {
             <BottomDrawer
                 open={createOpen}
                 onOpenChange={setCreateOpen}
+                inputDialog
                 title={t('gitBranches.new')}
                 density="compact"
                 busy={creating}
@@ -544,6 +546,7 @@ export function GitBranchesDrawer(props: {
                 <label className="block">
                     <span className="sr-only">{t('gitBranches.new')}</span>
                     <input
+                        data-drawer-initial-focus
                         value={branchName}
                         onChange={(event) => setBranchName(event.target.value)}
                         onKeyDown={(event) => {
@@ -565,6 +568,7 @@ export function GitBranchesDrawer(props: {
             <BottomDrawer
                 open={commitOpen}
                 onOpenChange={setCommitOpen}
+                inputDialog
                 title={t('gitBranches.commit')}
                 density="compact"
                 busy={committing}
@@ -593,6 +597,7 @@ export function GitBranchesDrawer(props: {
                 <label className="block">
                     <span className="sr-only">{t('gitBranches.commitMessage')}</span>
                     <textarea
+                        data-drawer-initial-focus
                         value={commitMessage}
                         onChange={(event) => setCommitMessage(event.target.value)}
                         onKeyDown={(event) => {

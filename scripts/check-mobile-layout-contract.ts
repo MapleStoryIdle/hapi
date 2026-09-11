@@ -76,10 +76,15 @@ requireMatch(contract, /backdropFilter:\s*'none'/, 'header shell must not use a 
 requireMatch(contract, /state:\s*'scrolls-under-transparent-header'/, 'thread must scroll under the transparent header')
 requireMatch(contract, /state:\s*'floating-above-composer'/, 'bottom status must float above the composer')
 requireMatch(contract, /keyboardOpenExpandedOffset:\s*'4px'/, 'expanded composer keyboard offset must stay 4px')
+requireMatch(contract, /inputDialog:[\s\S]*?state:\s*'visual-viewport-keyboard-safe'/, 'editable-detail dialogs must stay visual-viewport safe')
+requireMatch(contract, /keyboardGap:\s*'8px'/, 'editable-detail keyboard gap must stay 8px')
+requireMatch(contract, /edgeGap:\s*'12px'/, 'editable-detail dialog edge gap must stay 12px')
 
 requireMatch(css, /--app-mobile-header-shell-background:\s*transparent\s*;/, 'CSS header background token must stay transparent')
 requireMatch(css, /--app-mobile-header-shell-backdrop-filter:\s*none\s*;/, 'CSS header backdrop token must stay none')
 requireMatch(css, /--app-mobile-composer-expanded-keyboard-offset:\s*4px\s*;/, 'CSS keyboard offset token must stay 4px')
+requireMatch(css, /--app-mobile-input-dialog-keyboard-gap:\s*8px\s*;/, 'editable-detail keyboard gap must have one contract token')
+requireMatch(css, /--app-mobile-input-dialog-edge-gap:\s*12px\s*;/, 'editable-detail dialog edge gap must have one contract token')
 requireMatch(css, /--app-safe-area-top:\s*env\(safe-area-inset-top,\s*0px\)\s*;/, 'top safe-area token must own the browser inset')
 requireMatch(css, /--app-safe-area-right:\s*env\(safe-area-inset-right,\s*0px\)\s*;/, 'right safe-area token must own the browser inset')
 requireMatch(css, /--app-safe-area-bottom:\s*env\(safe-area-inset-bottom,\s*0px\)\s*;/, 'bottom safe-area token must own the browser inset')
@@ -159,6 +164,27 @@ if (/backdrop-blur/.test(queuedMessages)) {
 
 const chatDrawer = source('web/src/components/ui/BottomDrawer.tsx')
 const drawerCss = source('web/src/index.css')
+requireMatch(chatDrawer, /inputDialog\?: boolean/, 'editable-detail drawers must expose the shared dialog presentation')
+requireMatch(chatDrawer, /data-keyboard-safe-dialog/, 'editable-detail dialogs must expose their keyboard-safe surface')
+requireMatch(chatDrawer, /window\.visualViewport\?\.addEventListener\('resize', onVisualResize\)/, 'editable-detail dialogs must react to visual viewport changes')
+requireMatch(chatDrawer, /--drawer-keyboard-bottom/, 'keyboard-open dialog must distinguish the fixed-position viewport from the layout viewport')
+requireMatch(chatDrawer, /bottom: viewport\?\.keyboardOpen[\s\S]*?'calc\(var\(--drawer-keyboard-bottom\) \+ var\(--app-mobile-input-dialog-keyboard-gap\)\)'[\s\S]*?'calc\(var\(--app-safe-area-bottom\) \+ var\(--app-mobile-input-dialog-edge-gap\)\)'/, 'editable dialog must use separate keyboard-open and keyboard-closed bottom anchors')
+requireMatch(chatDrawer, /maxHeight: 'calc\(var\(--drawer-viewport-height\) - var\(--app-safe-area-top\) - var\(--app-mobile-input-dialog-edge-gap\) - var\(--app-mobile-input-dialog-edge-gap\)\)'/, 'editable-detail dialog must stay within the visual viewport')
+requireMatch(chatDrawer, /left: 'calc\(var\(--app-safe-area-left\) \+ var\(--app-mobile-input-dialog-edge-gap\)\)'/, 'editable-detail dialog must anchor to the left safe-area edge')
+requireMatch(chatDrawer, /right: 'calc\(var\(--app-safe-area-right\) \+ var\(--app-mobile-input-dialog-edge-gap\)\)'/, 'editable-detail dialog must anchor to the right safe-area edge')
+requireMatch(chatDrawer, /transform: 'none'/, 'keyboard-open editable dialog must not retain a horizontal translate')
+requireMatch(chatDrawer, /if \(keyboardSafeDialog\)[\s\S]*?<Dialog\.Portal>[\s\S]*?<Dialog\.Content/, 'mobile input dialogs must use their own portal branch')
+for (const [path, rule] of [
+    ['web/src/components/RenameSessionDialog.tsx', 'session rename must use the keyboard-safe dialog'],
+    ['web/src/components/SessionGroupDrawer.tsx', 'session group editing must use the keyboard-safe dialog'],
+    ['web/src/components/GitBranchesDrawer.tsx', 'Git input flows must use the keyboard-safe dialog'],
+    ['web/src/components/ToolCard/QuestionAnswerForm.tsx', 'question text input must use the keyboard-safe dialog']
+] as const) {
+    requireMatch(source(path), /inputDialog/, rule)
+}
+if (/\binputDialog\b/.test(source('web/src/components/SessionFiles/SessionFilesDrawer.tsx'))) {
+    throw new Error('Mobile layout contract violation: file browsing must remain a bottom drawer')
+}
 requireMatch(drawerCss, /html\[data-drawer-chrome='true'\]/, 'drawer chrome tint must be root paint, not a layout spacer')
 requireMatch(source('web/src/lib/drawer-background.ts'), /setDrawerChromeProgress\(progress\)/, 'drawer chrome must follow the shared nested drawer progress')
 requireMatch(drawerCss, /--app-mobile-detail-sheet-ratio:\s*0\.7\s*;/, 'mobile chat detail sheets must default to 70%')

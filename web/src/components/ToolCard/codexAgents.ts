@@ -144,6 +144,35 @@ export function getCodexAgentReasoningEffort(input: unknown): string | null {
     return getInputStringAny(input, ['reasoning_effort', 'reasoningEffort'])
 }
 
+/**
+ * The visible card and its information drawer must describe the same agent
+ * configuration. A spawn can carry an explicit value, SHAPI can later attach
+ * the child's resolved configuration, or the child can inherit the parent's
+ * configuration. Keep that resolution in one place rather than letting the
+ * two surfaces drift apart.
+ */
+export function getCodexAgentEffectiveConfiguration(
+    input: unknown,
+    fallbackModel?: string | null
+): { model: string | null; reasoningEffort: string | null } {
+    const config = isObject(input) && isObject(input.hapiSubagentConfig)
+        ? input.hapiSubagentConfig
+        : null
+    const explicitModel = getInputStringAny(input, ['model'])?.trim() || null
+    const explicitReasoning = getCodexAgentReasoningEffort(input)?.trim() || null
+    const childModel = getInputStringAny(config, ['childModel', 'child_model'])?.trim() || null
+    const childReasoning = getInputStringAny(config, ['childReasoningEffort', 'child_reasoning_effort'])?.trim() || null
+    const parentModel = getInputStringAny(config, ['parentModel', 'parent_model'])?.trim()
+        || (config ? fallbackModel?.trim() || null : null)
+    const parentReasoning = getInputStringAny(config, ['parentReasoningEffort', 'parent_reasoning_effort'])?.trim() || null
+    const fallback = fallbackModel?.trim() || null
+
+    return {
+        model: explicitModel ?? childModel ?? parentModel ?? fallback,
+        reasoningEffort: explicitReasoning ?? childReasoning ?? parentReasoning
+    }
+}
+
 export function formatCodexAgentReasoningEffort(effort: string): string {
     const normalized = effort.trim().toLowerCase()
     if (!normalized || normalized === 'default') return 'reasoning default'

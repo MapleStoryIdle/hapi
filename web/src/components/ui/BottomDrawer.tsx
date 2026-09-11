@@ -1,6 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactElement, type ReactNode } from 'react'
 import { useMobileSheet } from '@/hooks/useMobileSheet'
+import { getKeyboardViewportState } from '@/hooks/useViewportHeight'
 import { updateDrawerBackground } from '@/lib/drawer-background'
 import { DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
@@ -27,6 +28,11 @@ export function BottomDrawer(props: {
     density?: 'compact'
     /** Keep the original centered layout on desktop for detail previews. */
     desktopDialog?: boolean
+    /**
+     * Editable content cannot live in a phone sheet: iOS can cover it with the
+     * software keyboard. Render it as a VisualViewport-aware dialog instead.
+     */
+    inputDialog?: boolean
     desktopClassName?: string
     /** Fill 70% of the visible viewport, including header and safe-area padding. */
     fixedHeight?: boolean
@@ -47,11 +53,15 @@ export function BottomDrawer(props: {
     const contentRef = useRef<HTMLDivElement>(null)
     const returnFocus = useRef<HTMLElement | null>(null)
     const mobile = useMobileSheet()
+    const useDesktopDialog = !mobile && Boolean(props.inputDialog || props.desktopDialog)
+    const keyboardSafeDialog = Boolean(props.inputDialog && mobile)
     const backgroundId = useRef(Symbol('drawer')).current
     const heightRef = useRef(400)
     const resizeFrom = useRef<number | null>(null)
     const resizeAnimation = useRef<Animation | null>(null)
     const expandedLimit = useRef(800)
+    const stableViewportHeight = useRef(0)
+    const keyboardWasOpen = useRef(false)
     const gesture = useRef<{ id: number; start: number; last: number; at: number; velocity: number } | null>(null)
     const [offset, setOffset] = useState(0)
     const [dragging, setDragging] = useState(false)
@@ -64,7 +74,14 @@ export function BottomDrawer(props: {
         if (props.open) lastContent.current = { children: props.children, header: props.header, accessory: props.accessory, footer: props.footer }
     })
     const content = props.open ? props : lastContent.current
-    const [viewport, setViewport] = useState<{ height: number; bottom: number } | null>(null)
+    const [viewport, setViewport] = useState<{
+        height: number
+        top: number
+        bottom: number
+        keyboardBottom: number
+        keyboardOpen: boolean
+        fixedViewport: 'layout' | 'visual'
+    } | null>(null)
 
     useLayoutEffect(() => {
         if (dragging || resizeFrom.current === null || !props.open) return
@@ -81,6 +98,23 @@ export function BottomDrawer(props: {
     }, [expanded, dragging, dragHeight, props.open])
     useEffect(() => () => resizeAnimation.current?.cancel(), [])
 
+    useLayoutEffect(() => {
+        if (!props.open || !keyboardSafeDialog || !viewport) return
+        const frame = window.requestAnimationFrame(() => {
+            const dialog = contentRef.current
+            const active = document.activeElement
+            if (!dialog || !(active instanceof HTMLElement) || !dialog.contains(active)) return
+            const body = active.closest<HTMLElement>('[data-chat-drawer-body]')
+            if (!body) return
+            const field = active.getBoundingClientRect()
+            const visible = body.getBoundingClientRect()
+            const gap = 12
+            if (field.bottom > visible.bottom - gap) body.scrollTop += field.bottom - visible.bottom + gap
+            else if (field.top < visible.top + gap) body.scrollTop -= visible.top - field.top + gap
+        })
+        return () => window.cancelAnimationFrame(frame)
+    }, [keyboardSafeDialog, props.open, viewport?.height, viewport?.keyboardOpen, viewport?.top])
+
     // Previews can be siblings in React (global providers), not just nested children.
     // Stack above the currently visible sheets, on desktop as well as mobile.
     useLayoutEffect(() => {
@@ -91,38 +125,86 @@ export function BottomDrawer(props: {
         setLayer(others.reduce((top, element) => Math.max(top, Number(element.style.zIndex) + 1), 60))
     }, [props.open, mobile])
 
-    useEffect(() => {
-        if (!props.open || (props.desktopDialog && !mobile)) return
+    useLayoutEffect(() => {
+        if (!props.open || useDesktopDialog) return
         gesture.current = null
         setDragging(false)
         setOffset(0)
         setEntered(false)
         setExpanded(false)
         setDragHeight(null)
-        const measure = () => {
+        stableViewportHeight.current = 0
+        keyboardWasOpen.current = false
+        const measure = (confirmKeyboardOpen = false) => {
             const visual = window.visualViewport
             const topInset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-safe-area-top')) || 0
-            expandedLimit.current = Math.max(0, (visual?.height ?? window.innerHeight) - topInset - 12)
+            const height = visual?.height ?? window.innerHeight
+            const top = visual?.offsetTop ?? 0
+            const layoutHeight = Math.max(document.documentElement.clientHeight, window.innerHeight)
+            const active = document.activeElement
+            const textEntryFocused = active instanceof HTMLTextAreaElement
+                || (active instanceof HTMLInputElement && !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(active.type))
+                || (active instanceof HTMLElement && active.isContentEditable)
+            const keyboardState = getKeyboardViewportState({
+                layoutViewportHeight: layoutHeight,
+                visualViewportHeight: height,
+                hasFocusedTextEntry: textEntryFocused,
+                stableViewportHeight: stableViewportHeight.current,
+                wasKeyboardOpen: keyboardWasOpen.current,
+                confirmKeyboardOpen
+            })
+            const keyboardOpen = document.documentElement.dataset.appKeyboardOpen === 'true' || keyboardState.keyboardOpen
+            stableViewportHeight.current = keyboardOpen
+                ? Math.max(stableViewportHeight.current, layoutHeight, height)
+                : keyboardState.stableViewportHeight
+            keyboardWasOpen.current = keyboardOpen
+            // iOS can either keep fixed positioning in the layout viewport or
+            // move it into the shrunken visual viewport.  Raising a dialog by
+            // the keyboard height in the latter case sends it above the screen.
+            const fixedTracksVisualViewport = keyboardOpen && Math.abs(window.innerHeight - height) < 2
+            const keyboardBottom = visual && keyboardOpen && !fixedTracksVisualViewport
+                ? Math.max(0, window.innerHeight - top - height)
+                : 0
+            expandedLimit.current = Math.max(0, height - topInset - 12)
             setViewport({
-                height: visual?.height ?? window.innerHeight,
-                bottom: visual ? Math.max(0, window.innerHeight - visual.offsetTop - visual.height) : 0
+                height,
+                top,
+                bottom: visual ? Math.max(0, layoutHeight - top - height) : 0,
+                keyboardBottom,
+                keyboardOpen,
+                fixedViewport: fixedTracksVisualViewport ? 'visual' : 'layout'
             })
         }
         measure()
-        window.addEventListener('resize', measure)
-        window.visualViewport?.addEventListener('resize', measure)
-        window.visualViewport?.addEventListener('scroll', measure)
+        const onWindowResize = () => measure()
+        const onFocusChange = () => measure()
+        const onVisualResize = () => measure(true)
+        const onVisualScroll = () => measure()
+        window.addEventListener('resize', onWindowResize)
+        document.addEventListener('focusin', onFocusChange)
+        document.addEventListener('focusout', onFocusChange)
+        window.visualViewport?.addEventListener('resize', onVisualResize)
+        window.visualViewport?.addEventListener('scroll', onVisualScroll)
         return () => {
-            window.removeEventListener('resize', measure)
-            window.visualViewport?.removeEventListener('resize', measure)
-            window.visualViewport?.removeEventListener('scroll', measure)
+            window.removeEventListener('resize', onWindowResize)
+            document.removeEventListener('focusin', onFocusChange)
+            document.removeEventListener('focusout', onFocusChange)
+            window.visualViewport?.removeEventListener('resize', onVisualResize)
+            window.visualViewport?.removeEventListener('scroll', onVisualScroll)
         }
-    }, [props.open, mobile, props.desktopDialog])
+    }, [props.open, mobile, props.desktopDialog, props.inputDialog, useDesktopDialog])
 
     useEffect(() => {
         if (!props.open || !mobile) return
+        // A typing dialog is already isolated by its scrim. Do not also shrink
+        // the chat stage, which can make iOS recalculate fixed coordinates
+        // while the keyboard is opening.
+        if (keyboardSafeDialog) {
+            updateDrawerBackground(backgroundId, null)
+            return
+        }
         updateDrawerBackground(backgroundId, { progress: Math.min(1, Math.max(0, 1 - offset / heightRef.current)), dragging })
-    }, [backgroundId, props.open, mobile, offset, dragging])
+    }, [backgroundId, props.open, mobile, keyboardSafeDialog, offset, dragging])
 
     useEffect(() => {
         if (!props.open || !mobile) return
@@ -160,6 +242,11 @@ export function BottomDrawer(props: {
     const focusContent = (event: Event) => {
         returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
         event.preventDefault()
+        const initialFocus = contentRef.current?.querySelector<HTMLElement>('[data-drawer-initial-focus]')
+        if (initialFocus && !initialFocus.hasAttribute('disabled')) {
+            initialFocus.focus({ preventScroll: true })
+            return
+        }
         contentRef.current?.focus({ preventScroll: true })
     }
     const restoreFocus = (event: Event) => {
@@ -172,10 +259,74 @@ export function BottomDrawer(props: {
     const style = {
         '--drawer-drag': `${offset}px`,
         '--drawer-overlay-opacity': Math.min(1, Math.max(0, 1 - offset / heightRef.current)),
-        ...(viewport ? { '--drawer-viewport-height': `${viewport.height}px`, '--drawer-bottom': `${viewport.bottom}px` } : {})
+        ...(viewport ? {
+            '--drawer-viewport-height': `${viewport.height}px`,
+            '--drawer-viewport-top': `${viewport.top}px`,
+            '--drawer-bottom': `${viewport.bottom}px`,
+            '--drawer-keyboard-bottom': `${viewport.keyboardBottom}px`
+        } : {})
     } as CSSProperties
 
-    if (props.desktopDialog && !mobile) {
+    // Mobile input dialogs deliberately do not use DialogContent. Its desktop
+    // centering utilities include left: 50% and translateX(-50%), which can be
+    // resolved in different coordinate spaces while iOS animates the keyboard.
+    // This branch owns every edge and never applies a positional transform.
+    const keyboardSafeDialogStyle: CSSProperties = keyboardSafeDialog ? {
+        left: 'calc(var(--app-safe-area-left) + var(--app-mobile-input-dialog-edge-gap))',
+        right: 'calc(var(--app-safe-area-right) + var(--app-mobile-input-dialog-edge-gap))',
+        top: 'auto',
+        width: 'auto',
+        maxWidth: 'none',
+        bottom: viewport?.keyboardOpen
+            ? 'calc(var(--drawer-keyboard-bottom) + var(--app-mobile-input-dialog-keyboard-gap))'
+            : 'calc(var(--app-safe-area-bottom) + var(--app-mobile-input-dialog-edge-gap))',
+        transform: 'none',
+        ...(viewport ? {
+            maxHeight: 'calc(var(--drawer-viewport-height) - var(--app-safe-area-top) - var(--app-mobile-input-dialog-edge-gap) - var(--app-mobile-input-dialog-edge-gap))'
+        } : {})
+    } : {}
+
+    if (keyboardSafeDialog) {
+        return (
+            <Dialog.Root open={props.open} onOpenChange={changeOpen}>
+                {props.trigger ? <Dialog.Trigger asChild>{props.trigger}</Dialog.Trigger> : null}
+                <Dialog.Portal>
+                    <Dialog.Overlay
+                        className="chat-overlay-scrim fixed inset-0 bg-slate-950/35"
+                        style={{ zIndex: layer }}
+                    />
+                    <Dialog.Content
+                        ref={contentRef}
+                        className={cn('keyboard-input-dialog chat-overlay fixed flex flex-col overflow-hidden rounded-[24px] border border-[var(--app-border)] bg-[var(--app-dialog-bg)] p-5 text-[var(--app-fg)] shadow-2xl outline-none', props.desktopClassName)}
+                        style={{ zIndex: layer + 1, ...style, ...keyboardSafeDialogStyle }}
+                        data-chat-overlay
+                        data-keyboard-safe-dialog="true"
+                        data-keyboard-open={viewport?.keyboardOpen ? 'true' : undefined}
+                        data-keyboard-fixed-viewport={viewport?.keyboardOpen ? viewport.fixedViewport : undefined}
+                        data-density={props.density}
+                        data-testid={props.testId}
+                        aria-describedby={props.subtitle ? descriptionId : undefined}
+                        aria-busy={props.busy || undefined}
+                        onOpenAutoFocus={focusContent}
+                        onCloseAutoFocus={restoreFocus}
+                        onEscapeKeyDown={(event) => { if (props.busy) event.preventDefault() }}
+                        onPointerDownOutside={(event) => { if (props.busy) event.preventDefault() }}
+                    >
+                        <header className={cn('chat-overlay-header mb-4 min-w-0 shrink-0', !props.header && 'pr-11')}>
+                            {content.header ?? <Dialog.Title className="text-base font-semibold">{props.title}</Dialog.Title>}
+                            {props.subtitle ? <Dialog.Description id={descriptionId} className="mt-1 text-sm text-[var(--app-hint)]">{props.subtitle}</Dialog.Description> : null}
+                        </header>
+                        {content.accessory}
+                        <div className={cn('min-h-0 flex-1 overflow-auto overscroll-contain', props.bodyClassName)} data-chat-drawer-body>{content.children}</div>
+                        {content.footer ? <div className="chat-sheet-footer mt-4 shrink-0 border-t border-[var(--app-divider)] pt-4">{content.footer}</div> : null}
+                        <Dialog.Close type="button" data-testid={props.closeTestId} disabled={props.busy} aria-label={t('button.close')} className="chat-sheet-close absolute right-3 top-3 flex h-11 w-11 items-center justify-center"><CloseIcon className="h-4 w-4" /></Dialog.Close>
+                    </Dialog.Content>
+                </Dialog.Portal>
+            </Dialog.Root>
+        )
+    }
+
+    if (useDesktopDialog) {
         return (
             <Dialog.Root open={props.open} onOpenChange={changeOpen}>
                 {props.trigger ? <Dialog.Trigger asChild>{props.trigger}</Dialog.Trigger> : null}
@@ -186,7 +337,8 @@ export function BottomDrawer(props: {
                     overlayStyle={{ zIndex: layer }}
                     style={{
                         zIndex: layer + 1,
-                        left: 'calc(50% + (var(--app-safe-area-left) - var(--app-safe-area-right)) / 2)'
+                        left: 'calc(50% + (var(--app-safe-area-left) - var(--app-safe-area-right)) / 2)',
+                        ...style
                     }}
                     data-chat-overlay
                     data-density={props.density}
@@ -195,6 +347,8 @@ export function BottomDrawer(props: {
                     aria-busy={props.busy || undefined}
                     onOpenAutoFocus={focusContent}
                     onCloseAutoFocus={restoreFocus}
+                    onEscapeKeyDown={(event) => { if (props.busy) event.preventDefault() }}
+                    onPointerDownOutside={(event) => { if (props.busy) event.preventDefault() }}
                     hideClose
                 >
                     <header className={cn('chat-overlay-header mb-4 min-w-0 shrink-0', !props.header && 'pr-11')}>

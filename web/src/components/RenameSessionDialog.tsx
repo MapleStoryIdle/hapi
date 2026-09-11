@@ -1,11 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle
-} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { BottomDrawer } from '@/components/ui/BottomDrawer'
 import { useTranslation } from '@/lib/use-translation'
 
 type RenameSessionDialogProps = {
@@ -50,55 +45,54 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
         }
     }
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Escape') {
-            onClose()
-        }
-    }
-
     return (
-        <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="max-w-sm">
-                <DialogHeader>
-                    <DialogTitle>{t('dialog.rename.title')}</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-4">
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder={t('dialog.rename.placeholder')}
-                        className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent"
+        <BottomDrawer
+            open={isOpen}
+            onOpenChange={(open) => { if (!open) onClose() }}
+            title={t('dialog.rename.title')}
+            inputDialog
+            busy={isPending}
+            testId="rename-session-dialog"
+            desktopClassName="max-w-sm"
+            footer={(
+                <div className="flex justify-end gap-2">
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={onClose}
                         disabled={isPending}
-                        maxLength={255}
-                    />
+                    >
+                        {t('button.cancel')}
+                    </Button>
+                    <Button
+                        type="submit"
+                        form="rename-session-form"
+                        disabled={isPending || !name.trim()}
+                    >
+                        {isPending ? t('dialog.rename.saving') : t('button.save')}
+                    </Button>
+                </div>
+            )}
+        >
+            <form id="rename-session-form" onSubmit={handleSubmit} className="flex flex-col gap-4">
+                <input
+                    ref={inputRef}
+                    data-drawer-initial-focus
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={t('dialog.rename.placeholder')}
+                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent"
+                    disabled={isPending}
+                    maxLength={255}
+                />
 
-                    {error ? (
-                        <div className="rounded-md bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
-                            {error}
-                        </div>
-                    ) : null}
-
-                    <div className="flex gap-2 justify-end">
-                        <Button
-                            type="button"
-                            variant="secondary"
-                            onClick={onClose}
-                            disabled={isPending}
-                        >
-                            {t('button.cancel')}
-                        </Button>
-                        <Button
-                            type="submit"
-                            disabled={isPending || !name.trim()}
-                        >
-                            {isPending ? t('dialog.rename.saving') : t('button.save')}
-                        </Button>
+                {error ? (
+                    <div className="rounded-md bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
+                        {error}
                     </div>
-                </form>
-            </DialogContent>
-        </Dialog>
+                ) : null}
+            </form>
+        </BottomDrawer>
     )
 }

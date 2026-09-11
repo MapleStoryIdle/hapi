@@ -1,13 +1,12 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
-import { isObject, safeStringify } from '@hapi/protocol'
+import { safeStringify } from '@hapi/protocol'
 import type { ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
 import { ChatDetailTabs } from '@/components/ui/ChatDetailTabs'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
-import { getInputStringAny } from '@/lib/toolInputUtils'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
-import { getCodexAgentActivity, getCodexAgentFieldRows, getCodexAgentPrompt } from './codexAgents'
+import { getCodexAgentActivity, getCodexAgentEffectiveConfiguration, getCodexAgentFieldRows, getCodexAgentPrompt } from './codexAgents'
 import { DetailCopyButton } from '@/components/ui/DetailCopyButton'
 import { TraceSection } from './trace'
 import { extractTextFromResult } from './views/_results'
@@ -30,17 +29,12 @@ export function SubagentDetailView(props: { block: ToolCallBlock; metadata: Sess
     const prompt = getCodexAgentPrompt(tool.input)
     const resultText = extractTextFromResult(tool.result)
     const fields = getCodexAgentFieldRows(tool.name, tool.input)
+    const configuration = getCodexAgentEffectiveConfiguration(tool.input, props.block.model)
     const rows = fields.filter((row) => row.label !== 'Status' && row.label !== 'Work'
+        && row.label !== 'Model' && row.label !== 'Reasoning'
         && !(row.label === 'Target' && fields.some((field) => field.label === 'Agent' && field.value === row.value)))
-    const config = isObject(tool.input) && isObject(tool.input.hapiSubagentConfig) ? tool.input.hapiSubagentConfig : null
-    if (!rows.some((row) => row.label === 'Model')) {
-        const model = getInputStringAny(config, ['childModel', 'child_model', 'parentModel', 'parent_model']) ?? props.block.model
-        if (model) rows.push({ label: 'Model', value: model })
-    }
-    if (!rows.some((row) => row.label === 'Reasoning')) {
-        const effort = getInputStringAny(config, ['childReasoningEffort', 'child_reasoning_effort', 'parentReasoningEffort', 'parent_reasoning_effort'])
-        if (effort) rows.push({ label: 'Reasoning', value: effort })
-    }
+    if (configuration.model) rows.push({ label: 'Model', value: configuration.model })
+    if (configuration.reasoningEffort) rows.push({ label: 'Reasoning', value: configuration.reasoningEffort })
     const stateClass = tool.state === 'error'
         ? 'bg-[var(--app-badge-error-bg)] text-[var(--app-badge-error-text)]'
         : tool.state === 'completed'

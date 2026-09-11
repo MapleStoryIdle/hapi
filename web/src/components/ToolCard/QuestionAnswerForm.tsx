@@ -49,6 +49,7 @@ export function QuestionAnswerForm(props: {
     // A double tap must not approve the same request twice.
     const submitting = useRef(false)
     const questionRef = useRef<HTMLDivElement>(null)
+    const textInputRef = useRef<HTMLTextAreaElement>(null)
     const previousStep = useRef(step)
     const question = props.questions[step]
     const selection = selections[step] ?? EMPTY_SELECTION
@@ -64,6 +65,12 @@ export function QuestionAnswerForm(props: {
         const body = questionRef.current?.closest('[data-question-drawer-body]')
         if (body) body.scrollTop = 0
     }, [step])
+
+    useEffect(() => {
+        if (!open || (!pureText && !selection.other)) return
+        const frame = window.requestAnimationFrame(() => textInputRef.current?.focus({ preventScroll: true }))
+        return () => window.cancelAnimationFrame(frame)
+    }, [open, pureText, selection.other, step])
 
     const isAnswered = (answer: QuestionSelection | undefined, index: number) => {
         if (!answer) return false
@@ -154,8 +161,10 @@ export function QuestionAnswerForm(props: {
                 open={open}
                 onOpenChange={setOpen}
                 busy={loading}
+                inputDialog={pureText || selection.other}
                 title={t('tool.answerQuestion')}
                 testId="question-answer-form-drawer"
+                desktopClassName="max-w-2xl"
                 trigger={props.messageCard ? (
                     <button type="button" className="w-full min-h-11 rounded-2xl text-left focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:opacity-50" disabled={props.disabled || loading} aria-label={t('tool.answerQuestion')}>
                         <NativeQuestionSummary questions={props.questions} status={t('tool.waitingForAnswer')} pending />
@@ -188,6 +197,8 @@ export function QuestionAnswerForm(props: {
                     ) : null}
                     {pureText || selection.other ? (
                         <textarea
+                            ref={textInputRef}
+                            data-drawer-initial-focus
                             aria-label={question.question || t('tool.answerQuestion')}
                             value={selection.text}
                             onChange={(event) => update({ ...selection, text: event.target.value })}

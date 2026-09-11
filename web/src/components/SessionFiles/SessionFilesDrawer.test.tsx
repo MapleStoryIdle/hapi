@@ -17,6 +17,9 @@ function show(api: Partial<ApiClient>, native = true, open = true) {
 it('starts with changes and only loads native directories when selected', async () => {
     const browse = vi.fn().mockResolvedValue({ success: true, isGitRepository: true, status: '? note.md\n', entries: [{ name: 'src', type: 'directory' }] })
     show({ browseCodexSessionFiles: browse })
+    const drawer = screen.getByTestId('session-files-drawer')
+    expect(drawer).not.toHaveAttribute('data-keyboard-safe-dialog')
+    expect(drawer.querySelector('[data-question-drawer-handle]')).not.toBeNull()
     await screen.findByRole('button', { name: /note.md/ })
     expect(screen.getByRole('button', { name: 'Changes 1' })).toHaveAttribute('aria-pressed', 'true')
     expect(browse).toHaveBeenCalledTimes(1)

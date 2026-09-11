@@ -42,6 +42,27 @@ describe('SubagentDetailView', () => {
         expect(screen.queryByRole('status')).not.toBeInTheDocument()
     })
 
+    it('uses the same resolved model and reasoning values as the compact subagent card', () => {
+        const value = block()
+        value.model = 'parent-model'
+        value.tool.input = {
+            ...(value.tool.input as Record<string, unknown>),
+            hapiSubagentConfig: {
+                childModel: 'child-model',
+                childReasoningEffort: 'medium',
+                parentModel: 'parent-model',
+                parentReasoningEffort: 'high'
+            }
+        }
+
+        render(detail(value))
+        fireEvent.click(screen.getByRole('tab', { name: 'Information' }))
+
+        expect(screen.getByText('child-model')).toBeVisible()
+        expect(screen.getByText('medium')).toBeVisible()
+        expect(screen.queryByText('parent-model')).not.toBeInTheDocument()
+    })
+
     it('supports keyboard tabs and displays live results without resetting the tab', () => {
         const initial = block()
         const view = render(detail(initial))

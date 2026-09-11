@@ -208,6 +208,26 @@ test('reduced motion and keyboard-sized viewport keep details reachable', async 
     await expect(dialog.getByRole('button', { name: 'Close' })).toBeInViewport()
 })
 
+test('free-text input leaves the browsing sheet and stays inside a keyboard-sized viewport', async ({ page }) => {
+    await page.goto(fixture)
+    await page.waitForLoadState('networkidle')
+    await page.getByRole('button', { name: 'Choose options' }).tap()
+    const dialog = page.getByTestId('question-answer-form-drawer')
+    await expect(dialog.locator('[data-question-drawer-handle]')).toBeVisible()
+    await dialog.getByRole('checkbox', { name: /Other/ }).tap()
+    await expect(dialog).toHaveAttribute('data-keyboard-safe-dialog', 'true')
+    await expect(dialog.locator('[data-question-drawer-handle]')).toHaveCount(0)
+
+    await page.setViewportSize({ width: 390, height: 380 })
+    await expect(dialog).toHaveCSS('transform', 'none')
+    const bounds = await dialog.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(12)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(378)
+    await expect(dialog.getByRole('textbox')).toBeInViewport()
+    await expect(dialog.getByRole('button', { name: 'Close' })).toBeInViewport()
+})
+
 test('desktop keeps centered details and no background recession', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto(fixture)

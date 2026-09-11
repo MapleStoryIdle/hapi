@@ -29,6 +29,13 @@ export const MOBILE_LAYOUT_CONTRACT = {
     composer: {
         keyboardOpenExpandedOffsetVariable: '--app-mobile-composer-expanded-keyboard-offset',
         keyboardOpenExpandedOffset: '4px'
+    },
+    inputDialog: {
+        state: 'visual-viewport-keyboard-safe',
+        keyboardGapVariable: '--app-mobile-input-dialog-keyboard-gap',
+        keyboardGap: '8px',
+        edgeGapVariable: '--app-mobile-input-dialog-edge-gap',
+        edgeGap: '12px'
     }
 } as const
 

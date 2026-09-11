@@ -56,7 +56,7 @@ export function SessionGroupDrawer(props: {
         setError(false)
     }
 
-    return <BottomDrawer open={props.open} busy={busy} desktopDialog onOpenChange={open => {
+    return <BottomDrawer open={props.open} busy={busy} desktopDialog inputDialog={editing !== null} onOpenChange={open => {
         if (busy) return
         props.onOpenChange(open)
         if (!open) { setEditing(null); setError(false); setCreatedGroupId(null) }
@@ -82,7 +82,7 @@ export function SessionGroupDrawer(props: {
                     <input value={emoji} onChange={e => setEmoji(e.target.value)} maxLength={32} required disabled={busy} className="h-11 w-full rounded-xl bg-[var(--app-subtle-bg)] px-3 text-center text-base text-[var(--app-fg)]" />
                 </label>
                 <label className="min-w-0 flex-1 space-y-2 text-sm text-[var(--app-hint)]">{t('session.groups.name')}
-                    <input value={name} onChange={e => setName(e.target.value)} maxLength={80} required disabled={busy} className="h-11 w-full rounded-xl bg-[var(--app-subtle-bg)] px-3 text-base text-[var(--app-fg)]" />
+                    <input data-drawer-initial-focus autoFocus value={name} onChange={e => setName(e.target.value)} maxLength={80} required disabled={busy} className="h-11 w-full rounded-xl bg-[var(--app-subtle-bg)] px-3 text-base text-[var(--app-fg)]" />
                 </label>
             </div>
             <div className="flex gap-3">

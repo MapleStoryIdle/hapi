@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { isObject } from '@hapi/protocol'
 import { getToolGroupActionKind, type ToolGroupBlock } from '@/chat/toolGroups'
 import type { ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
@@ -11,7 +10,7 @@ import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandSummary, joinTerminalSummaryParts } from '@/components/ToolCard/terminalCommandIntent'
 import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutationDetail'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
-import { getCodexAgentReasoningEffort, getCodexAgentSummary, parseCodexSpawnAgentResult } from '@/components/ToolCard/codexAgents'
+import { getCodexAgentEffectiveConfiguration, getCodexAgentSummary, parseCodexSpawnAgentResult } from '@/components/ToolCard/codexAgents'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ChatDetailDialog } from '@/components/ui/ChatDetailDialog'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
@@ -553,20 +552,9 @@ function getCodexSubagentCardMetadata(
     tool: ToolCallBlock,
     unavailable: string
 ): string {
-    const input = tool.tool.input
-    const hapiSubagentConfig = isObject(input) && isObject(input.hapiSubagentConfig)
-        ? input.hapiSubagentConfig
-        : null
-    const explicitModel = getTrimmedInputString(input, ['model'])
-    const explicitReasoning = getCodexAgentReasoningEffort(input)?.trim() || null
-    const childModel = getTrimmedInputString(hapiSubagentConfig, ['childModel', 'child_model'])
-    const childReasoning = getTrimmedInputString(hapiSubagentConfig, ['childReasoningEffort', 'child_reasoning_effort'])
-    const parentModel = getTrimmedInputString(hapiSubagentConfig, ['parentModel', 'parent_model'])
-        ?? (hapiSubagentConfig ? (tool.model?.trim() || null) : null)
-    const parentReasoning = getTrimmedInputString(hapiSubagentConfig, ['parentReasoningEffort', 'parent_reasoning_effort'])
-    const model = explicitModel ?? childModel ?? parentModel ?? (tool.model?.trim() || null)
-    const reasoning = explicitReasoning ?? childReasoning ?? parentReasoning
-    const values = [model, reasoning].filter((value): value is string => value !== null)
+    const configuration = getCodexAgentEffectiveConfiguration(tool.tool.input, tool.model)
+    const values = [configuration.model, configuration.reasoningEffort]
+        .filter((value): value is string => value !== null)
     if (values.length === 0) return unavailable
     return values.join(' · ')
 }
@@ -605,26 +593,21 @@ function CodexSubagentCards(props: {
                         data-codex-subagent-status={state}
                         data-tool-id={tool.id}
                     >
-                        <span className="flex w-full min-w-0 items-center gap-2">
-                            <span
-                                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--app-secondary-bg)]"
-                                style={{ color }}
-                                data-codex-subagent-icon
-                            >
-                                <AgentFlavorIcon flavor="codex" className="h-4 w-4" />
-                            </span>
+                        <span className="flex w-full min-w-0 items-center">
                             <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--app-fg)]" title={identity}>
                                 {identity}
                             </span>
+                        </span>
+                        <span className="flex w-full min-w-0 items-center gap-1.5">
                             <span className={cn('shrink-0', toolStatusColorClass(state))} aria-hidden="true">
                                 <ToolStatusIcon state={state} />
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--app-hint)]" title={metadata}>
+                                {metadata}
                             </span>
                             <span className="sr-only" role="status" aria-label={statusLabel} aria-live="polite" aria-atomic="true">
                                 {statusLabel}
                             </span>
-                        </span>
-                        <span className="block w-full truncate text-[11px] text-[var(--app-hint)]" title={metadata}>
-                            {metadata}
                         </span>
                     </button>
                 )
@@ -1108,7 +1091,9 @@ export function ToolGroupCard(props: {
 
                 <ToolGroupDetailSurface
                     selectedTool={selectedTool}
-                    title={selectedPresentation?.title ?? selectedTool?.tool.name ?? ''}
+                    title={selectedTool?.tool.name === 'CodexAgent'
+                        ? getCodexSubagentCardIdentity(selectedTool)
+                        : selectedPresentation?.title ?? selectedTool?.tool.name ?? ''}
                     metadata={props.metadata}
                     onClose={() => setSelectedToolId(null)}
                 />
@@ -1223,7 +1208,9 @@ export function ToolGroupCard(props: {
 
             <ToolGroupDetailSurface
                 selectedTool={selectedTool}
-                title={selectedPresentation?.title ?? selectedTool?.tool.name ?? ''}
+                title={selectedTool?.tool.name === 'CodexAgent'
+                    ? getCodexSubagentCardIdentity(selectedTool)
+                    : selectedPresentation?.title ?? selectedTool?.tool.name ?? ''}
                 metadata={props.metadata}
                 onClose={() => setSelectedToolId(null)}
             />

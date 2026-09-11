@@ -60,10 +60,13 @@ describe('GitBranchesDrawer', () => {
         renderDrawer(api)
 
         expect(await screen.findByText('feature/remote')).toBeInTheDocument()
-        expect(screen.getByTestId('git-branches-drawer')).toHaveTextContent('Git Branchs')
-        expect(screen.getByTestId('git-branches-drawer')).toHaveTextContent(TEST_CWD)
-        expect(screen.getByTestId('git-branches-drawer')).toHaveTextContent('3 files')
-        expect(screen.getByTestId('git-branches-drawer')).not.toHaveTextContent('origin/feature/remote')
+        const drawer = screen.getByTestId('git-branches-drawer')
+        expect(drawer).not.toHaveAttribute('data-keyboard-safe-dialog')
+        expect(drawer.querySelector('[data-question-drawer-handle]')).not.toBeNull()
+        expect(drawer).toHaveTextContent('Git Branchs')
+        expect(drawer).toHaveTextContent(TEST_CWD)
+        expect(drawer).toHaveTextContent('3 files')
+        expect(drawer).not.toHaveTextContent('origin/feature/remote')
         expect(screen.getByText('Local')).toBeInTheDocument()
         expect(screen.getByText('Remote')).toBeInTheDocument()
 
