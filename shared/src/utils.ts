@@ -17,6 +17,13 @@ export function isHttpForbiddenError(message: unknown): boolean {
     return /\b(?:HTTP(?:\/\d(?:\.\d)?)?|status(?:\s+code)?)\s*[:=]?\s*403\b|\b403\s+Forbidden\b/i.test(summary)
 }
 
+/** Match an expired or missing Codex login without exposing the raw provider response. */
+export function isCodexAuthenticationError(message: unknown): boolean {
+    if (typeof message !== 'string') return false
+    const summary = message.slice(0, 1024).split('<', 1)[0]
+    return /\b(?:HTTP(?:\/\d(?:\.\d)?)?|status(?:\s+code)?)\s*[:=]?\s*401\b|\b401\s+Unauthorized\b|\bauthentication required\b|\b(?:not logged in|login required|log in required|please (?:log in|login)|run [`']?codex login|access token (?:has )?expired|invalid (?:access |auth(?:entication)? )?token|missing (?:access |auth(?:entication)? )?token|signed out|logged out)\b/i.test(summary)
+}
+
 export function safeStringify(value: unknown): string {
     if (typeof value === 'string') return value
     try {

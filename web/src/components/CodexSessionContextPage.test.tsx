@@ -120,6 +120,18 @@ function createApi() {
         forkCodexSession: vi.fn(async () => ({
             type: 'success' as const,
             sessionId: 'new-hapi-session'
+        })),
+        recoverCodexSessionControl: vi.fn(async () => ({
+            success: true as const,
+            status: 'ready' as const,
+            recoveryRequestId: 'recovery-1',
+            sessionId: 'managed-session-1'
+        })),
+        getCodexSessionControlRecovery: vi.fn(async () => ({
+            success: true as const,
+            status: 'ready' as const,
+            recoveryRequestId: 'recovery-1',
+            sessionId: 'managed-session-1'
         }))
     } as unknown as ApiClient
 }
@@ -128,12 +140,14 @@ function renderPage(props: {
     api?: ApiClient
     onBack?: () => void
     onForked?: (sessionId: string) => void
+    onRecovered?: (sessionId: string) => void
     realtimeAvailable?: boolean
     realtimeConnected?: boolean
 } = {}) {
     const api = props.api ?? createApi()
     const onBack = props.onBack ?? vi.fn()
     const onForked = props.onForked ?? vi.fn()
+    const onRecovered = props.onRecovered ?? vi.fn()
     const queryClient = new QueryClient({
         defaultOptions: {
             queries: { retry: false },
@@ -151,6 +165,7 @@ function renderPage(props: {
                     realtimeAvailable={props.realtimeAvailable}
                     onBack={onBack}
                     onForked={onForked}
+                    onRecovered={onRecovered}
                 />
             </ToastProvider></I18nProvider>
         </QueryClientProvider>
@@ -163,7 +178,7 @@ function renderPage(props: {
             </NativeCodexRealtimeProvider>
         ))
 
-    return { api, onBack, onForked, unmount: rendered.unmount }
+    return { api, onBack, onForked, onRecovered, unmount: rendered.unmount }
 }
 
 function openNativeSessionMenu() {
@@ -507,7 +522,7 @@ describe('CodexSessionContextPage', () => {
     it('shows native model and reasoning in the disabled shared composer control', async () => {
         renderPage()
         const metadata = await screen.findByTestId('composer-model-info')
-        expect(metadata).toHaveTextContent('5.6-terra')
+        expect(metadata).toHaveTextContent('terra')
         expect(metadata).toHaveTextContent('high')
         expect(metadata).toBeDisabled()
         expect(metadata).toHaveClass('settings-button')
@@ -794,7 +809,7 @@ describe('CodexSessionContextPage', () => {
         })
         renderPage({ api })
 
-        await screen.findByText('Original response')
+        await screen.findByRole('button', { name: /Reading/ })
         expect(screen.queryByTestId('thread-thinking-message')).toBeNull()
     })
 
@@ -2055,6 +2070,69 @@ describe('CodexSessionContextPage', () => {
         const drawer = await screen.findByTestId('native-queued-messages-drawer')
         expect(drawer).toBeInTheDocument()
         expect(drawer).toHaveTextContent('Wait for the current turn')
+    })
+
+    it('recovers a stalled native session without sending a message and opens the exact managed session', async () => {
+        const api = createApi()
+        const onRecovered = vi.fn()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'unknown',
+            stalledSince: Date.now() - 30_000,
+            controlledByCodexSsh: false,
+            queuedMessages: [],
+            controls: { canStop: false, canConfigure: true, queuePaused: false, configuration: {} }
+        })
+        renderPage({ api, onRecovered })
+
+        await screen.findByText('Original response')
+        const originalNow = Date.now.bind(Date)
+        vi.spyOn(Date, 'now').mockImplementation(() => originalNow() + 15_050)
+        await screen.findByTestId('codex-status-error', {}, { timeout: 2_000 })
+        fireEvent.click(await screen.findByRole('button', { name: 'Recover control' }))
+
+        await waitFor(() => expect(api.recoverCodexSessionControl).toHaveBeenCalledWith('codex-thread-1', {
+            machineId: 'machine-1',
+            recoveryRequestId: expect.any(String),
+            expectedVersion: { runnerEpoch: 'runner-a', revision: 1 }
+        }))
+        expect(api.sendCodexSessionMessage).not.toHaveBeenCalled()
+        expect(onRecovered).toHaveBeenCalledWith('managed-session-1')
+    })
+
+    it('keeps reconciling an unconfirmed recovery until its late ready result arrives', async () => {
+        const api = createApi()
+        const onRecovered = vi.fn()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'unknown',
+            stalledSince: Date.now() - 30_000,
+            controlledByCodexSsh: false,
+            queuedMessages: [],
+            controls: { canStop: false, canConfigure: true, queuePaused: false, configuration: {} }
+        })
+        ;(api.recoverCodexSessionControl as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'unconfirmed',
+            recoveryRequestId: 'recovery-late'
+        })
+        ;(api.getCodexSessionControlRecovery as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'ready',
+            recoveryRequestId: 'recovery-late',
+            sessionId: 'managed-session-late'
+        })
+        renderPage({ api, onRecovered })
+
+        await screen.findByText('Original response')
+        const originalNow = Date.now.bind(Date)
+        vi.spyOn(Date, 'now').mockImplementation(() => originalNow() + 15_050)
+        await screen.findByTestId('codex-status-error', {}, { timeout: 2_000 })
+        fireEvent.click(await screen.findByRole('button', { name: 'Recover control' }))
+
+        expect(await screen.findByText('Recovery is not confirmed yet. SHAPI will keep checking without starting another connection.')).toBeInTheDocument()
+        await waitFor(() => expect(onRecovered).toHaveBeenCalledWith('managed-session-late'), { timeout: 3_000 })
+        expect(api.recoverCodexSessionControl).toHaveBeenCalledTimes(1)
     })
 
     it.each(['processing', 'paused'] as const)('keeps uncertain recovery neutral and refuses a resend while %s', async (state) => {

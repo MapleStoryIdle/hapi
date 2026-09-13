@@ -148,7 +148,7 @@ export function describeMonitorBucket(
     if (kind !== 'http') {
         return kind === 'scheduled'
             ? `${time}: ${bucket.total} scheduled trigger${bucket.total === 1 ? '' : 's'}; not uptime`
-            : `${time}: ${bucket.total} received event${bucket.total === 1 ? '' : 's'}; passive signal, not uptime`
+            : `${time}: ${bucket.total} webhook call${bucket.total === 1 ? '' : 's'}; passive signal, not uptime`
     }
     const latency = bucket.latencyMs > 0 && bucket.total > 0
         ? `, ${Math.round(bucket.latencyMs / bucket.total)} ms average`

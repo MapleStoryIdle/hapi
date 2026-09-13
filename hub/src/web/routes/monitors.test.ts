@@ -25,6 +25,9 @@ describe('monitor routes', () => {
                 expect(result.status).toBe(200)
                 expect(store.monitors.get(created.id)?.config.enabled).toBe(enabled)
             }
+            const renamed = await app.request(`/monitors/${created.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...config, name: 'renamed rule' }) })
+            expect(renamed.status).toBe(200)
+            expect(store.monitors.get(created.id)?.config.name).toBe('renamed rule')
             store.monitors.acceptWebhook(store.monitors.get(created.id)!, { eventId: '1', summary: 'event', details: '' })
             expect((await app.request(`/monitors/${created.id}`, { method: 'DELETE' })).status).toBe(200)
             expect(store.monitors.detail(created.id, 'a')).toBeNull()
@@ -49,10 +52,28 @@ describe('monitor routes', () => {
             }
         } finally { store.close() }
     })
+    it('records blocked tests and allows a deferred event to be triggered after the current task closes', async () => {
+        const store = new Store(':memory:')
+        const service = new MonitoringService(store, () => null, { sendToNamespace: async () => undefined })
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => { c.set('namespace', 'a'); await next() })
+        app.route('/', createMonitorRoutes(store, () => null, () => service))
+        try {
+            const config = MonitorConfigSchema.parse({ name: 'hook', kind: 'webhook', machineId: 'm', directory: '/work', prompt: 'Inspect' })
+            const { id } = store.monitors.create('a', config)
+            expect(await (await app.request(`/monitors/${id}/check`, { method: 'POST' })).json()).toEqual({ accepted: true, deferred: false })
+            expect(await (await app.request(`/monitors/${id}/check`, { method: 'POST' })).json()).toEqual({ accepted: true, deferred: true })
+            const deferred = store.monitors.activities(id).find(activity => activity.outcome === 'deferred')!
+            expect((await app.request(`/monitors/${id}/activities/${deferred.id}/retrigger`, { method: 'POST' })).status).toBe(409)
+            const current = store.monitors.openForMonitor(id)!
+            expect(service.close(store.monitors.get(id)!, current.id)).toBe(true)
+            expect((await app.request(`/monitors/${id}/activities/${deferred.id}/retrigger`, { method: 'POST' })).status).toBe(202)
+        } finally { await service.stop(); store.close() }
+    })
     it('resolves bound environment server-side and prevents retargeting', async () => {
         const store = new Store(':memory:')
         store.machines.getOrCreateMachine('m', {}, {}, 'a')
-        const source = { metadata: { path: '/real', machineId: 'm', flavor: 'codex' }, model: 'gpt-test', modelReasoningEffort: 'high', permissionMode: 'read-only' }
+        const source = { metadata: { path: '/real', machineId: 'm', flavor: 'codex' }, model: 'gpt-test', modelReasoningEffort: 'high', permissionMode: 'default' }
         const engine = { getSessionByNamespace: (id: string, ns: string) => id === 's' && ns === 'a' ? source : null, getOnlineMachinesByNamespace: () => [{ id: 'm' }], checkPathsExist: async () => ({ '/real': true }) } as unknown as SyncEngine
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => { c.set('namespace', 'a'); await next() })
@@ -61,7 +82,10 @@ describe('monitor routes', () => {
             const result = await app.request('/monitors', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'bound', kind: 'webhook', machineId: 'evil', directory: '/evil', model: 'evil', targetSession: { type: 'managed', sessionId: 's' } }) })
             expect(result.status).toBe(201)
             const data = await result.json() as { monitor: { id: string; config: Record<string, unknown> } }
-            expect(data.monitor.config).toMatchObject({ machineId: 'm', directory: '/real', model: 'gpt-test' })
+            expect(data.monitor.config).toMatchObject({ machineId: 'm', directory: '/real', model: 'gpt-test', permissionMode: 'default' })
+            const updated = await app.request(`/monitors/${data.monitor.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...data.monitor.config, name: 'renamed bound', prompt: 'Use this preset every time' }) })
+            expect(updated.status).toBe(200)
+            expect(store.monitors.get(data.monitor.id)?.config).toMatchObject({ name: 'renamed bound', prompt: 'Use this preset every time' })
             const changed = await app.request(`/monitors/${data.monitor.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...data.monitor.config, targetSession: { type: 'managed', sessionId: 'other' } }) })
             expect(changed.status).toBe(400)
             expect((await app.request('/monitors/session-target?type=managed&sessionId=other')).status).toBe(404)
@@ -75,7 +99,7 @@ describe('monitor routes', () => {
             const config = MonitorConfigSchema.parse({ name: 'test', kind: 'webhook', machineId: 'm', directory: '/work', prompt: 'Inspect' })
             const created = store.monitors.create('a', config)
             const path = `/events?token=${created.token}`
-            const post = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'bad' }) }
+            const post = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'bad', data: { status: 500, region: 'cn' } }) }
             expect((await app.request(path)).status).toBe(405)
             expect((await app.request(path, { ...post, body: JSON.stringify({ prompt: 'bad', machineId: 'other' }) })).status).toBe(400)
             expect((await app.request(path, { ...post, body: '{' })).status).toBe(400)
@@ -90,6 +114,7 @@ describe('monitor routes', () => {
             const result = await app.request(path, post)
             expect(result.status).toBe(202)
             expect(await result.json()).toEqual({ accepted: true, duplicate: false })
+            expect(store.monitors.openForMonitor(created.id)?.details).toBe('{"prompt":"bad","data":{"status":500,"region":"cn"}}')
             expect(result.headers.get('cache-control')).toBe('no-store')
             const duplicate = await app.request(path, post)
             expect(await duplicate.json()).toEqual({ accepted: true, duplicate: true })

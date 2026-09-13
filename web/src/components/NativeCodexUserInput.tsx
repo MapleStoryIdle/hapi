@@ -3,7 +3,7 @@ import type { NativeCodexUserInput as PendingInput } from '@hapi/protocol/codexS
 import type { ApiClient } from '@/api/client'
 import { QuestionAnswerForm } from '@/components/ToolCard/QuestionAnswerForm'
 import { useTranslation } from '@/lib/use-translation'
-import { NativeQuestionSummary } from './NativeQuestionCards'
+import { NativeQuestionHistory } from './NativeQuestionCards'
 
 /** The form owns a Portal drawer; its reopen control never moves the composer. */
 export function NativeCodexUserInput(props: {
@@ -20,7 +20,7 @@ export function NativeCodexUserInput(props: {
     useEffect(() => {
         if (props.resolved) setAnswered(true)
     }, [props.resolved])
-    if (answered || props.resolved) return <NativeQuestionSummary questions={props.input.questions} answers={answers} status={t('recentCodex.input.resolved')} />
+    if (answered || props.resolved) return <NativeQuestionHistory questions={props.input.questions} answers={answers} status={t('recentCodex.input.resolved')} />
     return (
         <div data-testid="native-user-input">
             <QuestionAnswerForm

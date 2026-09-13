@@ -10,6 +10,7 @@
         "./kanbanOrder": "./src/kanbanOrder.ts",
         "./sessionPins": "./src/sessionPins.ts",
         "./sessionGroups": "./src/sessionGroups.ts",
+        "./sessionLabels": "./src/sessionLabels.ts",
         "./webReader": "./src/webReader.ts",
         "./monitoring": "./src/monitoring.ts",
         ".": "./src/index.ts",

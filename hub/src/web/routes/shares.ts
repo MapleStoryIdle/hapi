@@ -8,8 +8,10 @@ const SAFETY_HEADERS = {
     'CDN-Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    'X-Frame-Options': 'DENY',
-    'Content-Security-Policy': "sandbox; default-src 'none'"
+    // Public shares are inert text/image payloads. Allow only this Hub's own
+    // preview drawer to frame them; third-party origins remain blocked.
+    'X-Frame-Options': 'SAMEORIGIN',
+    'Content-Security-Policy': "sandbox; default-src 'none'; frame-ancestors 'self'"
 }
 
 function notFound(): Response {

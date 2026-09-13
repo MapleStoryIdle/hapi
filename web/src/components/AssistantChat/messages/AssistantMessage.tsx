@@ -107,7 +107,6 @@ export function HappyAssistantMessage() {
     const ctx = useHappyChatContext()
     const { copied, copy } = useCopyToClipboard()
     const [detailsVisible, setDetailsVisible] = useState(false)
-    const [showMetadata, setShowMetadata] = useState(false)
     const [unmanagedCompactToolGroupOpen, setUnmanagedCompactToolGroupOpen] = useState(false)
     const messageId = useAssistantState(({ message }) => message.id)
     const isCliOutput = useAssistantState(({ message }) => {
@@ -150,12 +149,6 @@ export function HappyAssistantMessage() {
     const messageModel = useAssistantState(({ message }) => (message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined)?.model)
     const turnCount = useAssistantState(({ message }) => (message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined)?.turnCount)
 
-    const hasMetadata = invokedAt != null
-        || (typeof durationMs === 'number' && durationMs >= 0)
-        || usage != null
-        || (messageModel != null && messageModel !== '')
-        || (typeof turnCount === 'number' && turnCount >= 2)
-
     const rootClass = toolOnly
         ? cn(
             'py-1 min-w-0 max-w-full overflow-x-hidden',
@@ -167,8 +160,10 @@ export function HappyAssistantMessage() {
     const firstToolGroupActive = firstToolGroup ? isToolGroupActive(firstToolGroup) : false
     const firstToolGroupManaged = ctx.setToolGroupExpansionState !== undefined
     const firstToolGroupDefaultExpansionState = getDefaultToolGroupExpansionState(
-        Boolean(firstToolGroup?.defaultOpen)
-            || (firstToolGroup?.forceCompact !== true && firstToolGroupActive)
+        !firstToolGroupManaged && (
+            Boolean(firstToolGroup?.defaultOpen)
+                || (firstToolGroup?.forceCompact !== true && firstToolGroupActive)
+        )
     )
     const firstToolGroupExpansionState = firstToolGroup
         ? resolveToolGroupExpansionState(
@@ -213,11 +208,7 @@ export function HappyAssistantMessage() {
 
     const toggleDetailsVisible = (event: MouseEvent<HTMLElement>) => {
         if (shouldIgnoreMessageDetailsToggle(event)) return
-        setDetailsVisible((visible) => {
-            const next = !visible
-            if (!next) setShowMetadata(false)
-            return next
-        })
+        setDetailsVisible((visible) => !visible)
     }
 
     if (isCliOutput) {
@@ -230,12 +221,10 @@ export function HappyAssistantMessage() {
                 <CliOutputBlock text={cliText} />
                 <MessageDetailsFooter
                     visible={detailsVisible}
-                    hasMetadata={hasMetadata}
-                    metadataOpen={showMetadata}
-                    onMetadataToggle={() => setShowMetadata((open) => !open)}
                     invokedAt={invokedAt}
                     durationMs={durationMs}
                     usage={usage}
+                    showUsage={false}
                     model={messageModel ?? null}
                     turnCount={turnCount}
                 />
@@ -255,12 +244,10 @@ export function HappyAssistantMessage() {
                         <CodexReviewCard review={codexReview} />
                         <MessageDetailsFooter
                             visible={detailsVisible}
-                            hasMetadata={hasMetadata}
-                            metadataOpen={showMetadata}
-                            onMetadataToggle={() => setShowMetadata((open) => !open)}
                             invokedAt={invokedAt}
                             durationMs={durationMs}
                             usage={usage}
+                            showUsage
                             model={messageModel ?? null}
                             turnCount={turnCount}
                         />
@@ -295,12 +282,10 @@ export function HappyAssistantMessage() {
                     <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />
                     <MessageDetailsFooter
                         visible={detailsVisible}
-                        hasMetadata={hasMetadata}
-                        metadataOpen={showMetadata}
-                        onMetadataToggle={() => setShowMetadata((open) => !open)}
                         invokedAt={invokedAt}
                         durationMs={durationMs}
                         usage={usage}
+                        showUsage={false}
                         model={messageModel ?? null}
                         turnCount={turnCount}
                     />
@@ -329,12 +314,10 @@ export function HappyAssistantMessage() {
                     </ToolGroupCompactHeaderProvider>
                     <MessageDetailsFooter
                         visible={detailsVisible}
-                        hasMetadata={hasMetadata}
-                        metadataOpen={showMetadata}
-                        onMetadataToggle={() => setShowMetadata((open) => !open)}
                         invokedAt={invokedAt}
                         durationMs={durationMs}
                         usage={usage}
+                        showUsage
                         model={messageModel ?? null}
                         turnCount={turnCount}
                     />

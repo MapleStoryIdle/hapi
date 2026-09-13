@@ -95,6 +95,7 @@ export const codexCommand: CommandDefinition = {
                 model?: string
                 modelReasoningEffort?: ReasoningEffort
                 serviceTier?: string
+                recoveryRequestId?: string
             } = {}
             const unknownArgs: string[] = []
             let hasExplicitPermissionMode = false
@@ -150,6 +151,12 @@ export const codexCommand: CommandDefinition = {
                         throw new Error('Missing --service-tier value')
                     }
                     options.serviceTier = parseServiceTier(tier)
+                } else if (arg === '--recover-control') {
+                    const requestId = commandArgs[++i]
+                    if (!requestId || !/^[a-zA-Z0-9:._-]{1,200}$/.test(requestId)) {
+                        throw new Error('Invalid --recover-control request id')
+                    }
+                    options.recoveryRequestId = requestId
                 } else {
                     unknownArgs.push(arg)
                 }

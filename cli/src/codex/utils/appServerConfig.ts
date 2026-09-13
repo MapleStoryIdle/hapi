@@ -4,6 +4,7 @@ import type { McpServersConfig } from './buildHapiMcpBridge';
 import { codexSystemPrompt } from './systemPrompt';
 import type {
     ApprovalPolicy,
+    ApprovalsReviewer,
     SandboxMode,
     SandboxPolicy,
     ThreadStartParams,
@@ -25,6 +26,10 @@ const MODELS_WITHOUT_REASONING_SUMMARY = new Set([
 
 function resolveApprovalPolicy(mode: EnhancedMode): ApprovalPolicy {
     return resolveCodexPermissionModeConfig(mode.permissionMode).approvalPolicy;
+}
+
+function resolveApprovalsReviewer(mode: EnhancedMode): ApprovalsReviewer {
+    return resolveCodexPermissionModeConfig(mode.permissionMode).approvalsReviewer;
 }
 
 function resolveSandbox(mode: EnhancedMode): SandboxMode {
@@ -120,10 +125,12 @@ export function buildThreadStartParams(args: {
     developerInstructions?: string;
 }): ThreadStartParams {
     const approvalPolicy = resolveApprovalPolicy(args.mode);
+    const approvalsReviewer = resolveApprovalsReviewer(args.mode);
     const sandbox = resolveSandbox(args.mode);
     const allowCliOverrides = args.mode.permissionMode === 'default';
     const cliOverrides = allowCliOverrides ? args.cliOverrides : undefined;
     const resolvedApprovalPolicy = cliOverrides?.approvalPolicy ?? approvalPolicy;
+    const resolvedApprovalsReviewer = cliOverrides?.approvalsReviewer ?? approvalsReviewer;
     const resolvedSandbox = cliOverrides?.sandbox ?? sandbox;
 
     const config = buildMcpServerConfig(args.mcpServers);
@@ -140,6 +147,7 @@ export function buildThreadStartParams(args: {
     const params: ThreadStartParams = {
         cwd: args.cwd,
         approvalPolicy: resolvedApprovalPolicy,
+        approvalsReviewer: resolvedApprovalsReviewer,
         sandbox: resolvedSandbox,
         baseInstructions,
         developerInstructions: resolvedDeveloperInstructions,
@@ -168,6 +176,7 @@ export function buildTurnStartParams(args: {
     developerInstructions?: string;
     overrides?: {
         approvalPolicy?: TurnStartParams['approvalPolicy'];
+        approvalsReviewer?: TurnStartParams['approvalsReviewer'];
         sandboxPolicy?: TurnStartParams['sandboxPolicy'];
         model?: string;
         suppressCollaborationMode?: boolean;
@@ -186,6 +195,13 @@ export function buildTurnStartParams(args: {
         ?? (args.mode ? resolveApprovalPolicy(args.mode) : undefined);
     if (approvalPolicy) {
         params.approvalPolicy = approvalPolicy;
+    }
+
+    const approvalsReviewer = args.overrides?.approvalsReviewer
+        ?? cliOverrides?.approvalsReviewer
+        ?? (args.mode ? resolveApprovalsReviewer(args.mode) : undefined);
+    if (approvalsReviewer) {
+        params.approvalsReviewer = approvalsReviewer;
     }
 
     const sandboxPolicy = args.overrides?.sandboxPolicy

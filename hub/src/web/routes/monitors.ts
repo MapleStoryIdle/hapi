@@ -67,14 +67,19 @@ export function createMonitorWebhookRoutes(getService: () => MonitoringService |
         inflightByMonitor.set(monitor.id, (inflightByMonitor.get(monitor.id) ?? 0) + 1)
         try {
             const params = new URL(c.req.url).searchParams
-            const body = z.object({ prompt: z.string().trim().min(1).max(8000) }).strict().safeParse(await readJson(c.req.raw))
+            const body = z.object({
+                prompt: z.string().trim().min(1).max(8000),
+                data: z.unknown().optional()
+            }).strict().safeParse(await readJson(c.req.raw))
             if ([...params.keys()].some(key => key !== 'token') || params.getAll('token').length !== 1 || !body.success) return c.json({ error: 'Expected token query and JSON prompt (1–8000 characters)' }, 400)
             const prompt = body.data.prompt
+            const details = JSON.stringify({ prompt, data: body.data.data ?? {} })
+            if (details.length > 12000) return c.json({ error: 'Webhook data is too large' }, 400)
             // Retried requests must not create duplicate agent work.
-            // Identical prompts coalesce within a minute; an open incident also
+            // Identical prompt/data payloads coalesce within a minute; an open incident also
             // coalesces subsequent requests until it has been handled.
-            const eventId = createHash('sha256').update(`${Math.floor(now / 60000)}:${prompt}`).digest('hex')
-            const result = service.accept(token!, { eventId, summary: prompt.slice(0, 500), details: prompt })
+            const eventId = createHash('sha256').update(`${Math.floor(now / 60000)}:${details}`).digest('hex')
+            const result = service.accept(token!, { eventId, summary: prompt.slice(0, 500), details })
             if (!result) return c.json({ error: 'Service unavailable' }, 503)
             // External callers do not learn private session/monitor identities.
             return c.json({ accepted: true, duplicate: result.duplicate }, 202)
@@ -125,8 +130,7 @@ export function createMonitorRoutes(store: Store, getEngine: () => SyncEngine | 
             const config = await resolveTarget({ name: 'Monitor', kind: 'webhook', machineId: c.req.query('machineId') ?? '',
                 targetSession: { type: c.req.query('type'), sessionId: c.req.query('sessionId') } }, c.get('namespace'))
             return c.json({ config: MonitorConfigSchema.parse(config) })
-        } catch (error) {
-            if (error instanceof Error && error.message.startsWith('Switch the source session to Read Only')) return c.json({ error: error.message }, 409)
+        } catch {
             return c.json({ error: 'Source session is unavailable in this workspace' }, 404)
         }
     })
@@ -161,6 +165,10 @@ export function createMonitorRoutes(store: Store, getEngine: () => SyncEngine | 
             if (!isObject(body) || JSON.stringify(body.targetSession) !== JSON.stringify(monitor.config.targetSession)) return c.json({ error: 'The source session cannot be changed' }, 400)
             if (monitor.config.targetSession && body.machineId !== monitor.config.machineId) return c.json({ error: 'The source machine cannot be changed' }, 400)
             const pause = MonitorConfigSchema.safeParse(body)
+            if (pause.success && JSON.stringify({ ...pause.data, name: monitor.config.name }) === JSON.stringify(monitor.config)) {
+                store.monitors.update(monitor.id, monitor.namespace, pause.data)
+                return c.json({ monitor: store.monitors.detail(monitor.id, monitor.namespace) })
+            }
             if (pause.success && JSON.stringify({ ...pause.data, notificationsEnabled: undefined }) === JSON.stringify({ ...monitor.config, notificationsEnabled: undefined })) {
                 store.monitors.setNotificationsEnabled(monitor.id, monitor.namespace, pause.data.notificationsEnabled !== false)
                 return c.json({ monitor: store.monitors.detail(monitor.id, monitor.namespace) })
@@ -204,8 +212,15 @@ export function createMonitorRoutes(store: Store, getEngine: () => SyncEngine | 
         if (!monitor) return c.json({ error: 'Monitor not found' }, 404)
         const service = getService()
         if (!service) return c.json({ error: 'Monitoring unavailable' }, 503)
-        try { service.requestCheck(monitor); return c.json({ accepted: true }, 202) }
-        catch { return c.json({ error: 'Enable an unexpired HTTP monitor to check it' }, 409) }
+        try { return c.json({ accepted: true, ...service.requestTest(monitor) }, 202) }
+        catch { return c.json({ error: 'Enable or renew this monitor before testing it' }, 409) }
+    })
+    app.post('/monitors/:id/activities/:activityId/retrigger', c => {
+        const monitor = store.monitors.get(c.req.param('id'), c.get('namespace'))
+        if (!monitor) return c.json({ error: 'Monitor not found' }, 404)
+        return getService()?.retrigger(monitor, c.req.param('activityId'))
+            ? c.json({ accepted: true }, 202)
+            : c.json({ error: 'Finish the current task before triggering this event' }, 409)
     })
     app.post('/monitors/:id/incidents/:incidentId/approve', async c => {
         const monitor = store.monitors.get(c.req.param('id'), c.get('namespace'))
@@ -226,6 +241,9 @@ export function createMonitorRoutes(store: Store, getEngine: () => SyncEngine | 
 async function resolveMonitorTarget(body: unknown, namespace: string, store: Store, getEngine: () => SyncEngine | null): Promise<unknown> {
         if (!isObject(body) || !body.targetSession) return body
         const target = MonitorTargetSessionSchema.parse(body.targetSession)
+        const prompt = typeof body.prompt === 'string' && body.prompt.trim()
+            ? body.prompt
+            : 'Investigate the trigger in this session; propose a plan and wait for owner confirmation before making changes.'
         const engine = getEngine()
         if (!engine) throw new Error('Runner unavailable')
         if (target.type === 'managed') {
@@ -233,11 +251,10 @@ async function resolveMonitorTarget(body: unknown, namespace: string, store: Sto
             if (!session?.metadata?.machineId || !session.metadata.path) throw new Error('Session not found')
             const agent = session.metadata.flavor === 'claude' ? 'claude' : 'codex'
             if (!['codex', 'claude'].includes(session.metadata.flavor ?? '')) throw new Error('Unsupported session agent')
-            if (session.permissionMode !== (agent === 'codex' ? 'read-only' : 'plan')) throw new Error('Switch the source session to Read Only (Codex) or Plan (Claude) before creating an automated investigation.')
             return { ...body, targetSession: target, machineId: session.metadata.machineId, directory: session.metadata.path,
                 agent, model: session.model ?? '', reasoningEffort: session.modelReasoningEffort ?? '',
                 permissionMode: session.permissionMode === 'read-only' && agent === 'codex' ? 'read-only' : session.permissionMode === 'plan' && agent === 'claude' ? 'plan' : 'default',
-                prompt: 'Investigate the trigger in this session; propose a plan and wait for owner confirmation before making changes.' }
+                prompt }
         }
         const machineId = typeof body.machineId === 'string' ? body.machineId : ''
         if (namespace !== 'default' || !store.machines.getMachineByNamespace(machineId, namespace)) throw new Error('Native session unavailable in this workspace')
@@ -245,5 +262,5 @@ async function resolveMonitorTarget(body: unknown, namespace: string, store: Sto
         if (!result.success) throw new Error('Native session not found')
         return { ...body, targetSession: target, machineId, directory: result.data.session.cwd, agent: 'codex',
             model: result.data.session.model ?? '', reasoningEffort: result.data.session.modelReasoningEffort ?? '', permissionMode: 'default',
-            prompt: 'Investigate the trigger in this session; propose a plan and wait for owner confirmation before making changes.' }
+            prompt }
     }

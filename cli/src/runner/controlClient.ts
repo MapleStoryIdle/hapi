@@ -91,6 +91,14 @@ export async function notifyRunnerSessionStarted(
   });
 }
 
+export async function notifyRunnerCodexRecoveryReady(input: { recoveryRequestId: string; sessionId: string; threadId: string }): Promise<{ error?: string } | any> {
+  return await runnerPost('/codex-recovery-ready', input)
+}
+
+export async function notifyRunnerCodexRecoveryUnconfirmed(input: { recoveryRequestId: string; sessionId: string; threadId: string; error: string }): Promise<{ error?: string } | any> {
+  return await runnerPost('/codex-recovery-unconfirmed', input)
+}
+
 export async function listRunnerSessions(): Promise<any[]> {
   const result = await runnerPost('/list');
   return result.children || [];

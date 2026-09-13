@@ -1,9 +1,24 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { shouldIgnoreMessageDetailsToggle } from './MessageDetails'
+import { getTurnUsageDisplay, shouldIgnoreMessageDetailsToggle } from './MessageDetails'
 
 afterEach(() => {
     window.getSelection()?.removeAllRanges()
     document.body.replaceChildren()
+})
+
+describe('getTurnUsageDisplay', () => {
+    it('formats compact per-turn totals and cache share', () => {
+        expect(getTurnUsageDisplay({
+            input_tokens: 28_400,
+            output_tokens: 3_000,
+            cache_read_input_tokens: 21_584
+        })).toEqual({
+            total: '31.4K',
+            input: '28.4K',
+            output: '3K',
+            cachePercent: 76
+        })
+    })
 })
 
 function eventFor(target: Element) {

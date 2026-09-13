@@ -17,6 +17,8 @@ export const RPC_METHODS = {
     SendCodexLocalSessionMessage: 'sendCodexLocalSessionMessage',
     DiscardCodexLocalSessionMessage: 'discardCodexLocalSessionMessage',
     ArchiveCodexLocalSession: 'archiveCodexLocalSession',
+    RecoverCodexLocalSessionControl: 'recoverCodexLocalSessionControl',
+    GetCodexLocalSessionRecovery: 'getCodexLocalSessionRecovery',
     RenameCodexLocalSession: 'renameCodexLocalSession',
     ListMachineDirectory: 'list-directory',
     BrowseSessionFiles: 'browse-session-files',

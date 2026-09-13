@@ -87,4 +87,23 @@ describe('runner control server external Codex requests', () => {
             await server.stop()
         }
     })
+
+    it('rejects a recovery-ready acknowledgement that does not match its durable claim', async () => {
+        const server = await startRunnerControlServer({
+            getChildren: () => [], stopSession: () => false,
+            spawnSession: async () => ({ type: 'error', errorMessage: 'not used' }), requestShutdown: () => {},
+            onHappySessionWebhook: () => {}, onExternalCodexRequest: () => {}, onExternalCodexLifecycle: () => {},
+            onCodexRecoveryReady: () => false
+        })
+        try {
+            const response = await fetch(`http://127.0.0.1:${server.port}/codex-recovery-ready`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recoveryRequestId: 'wrong', sessionId: 'managed-1', threadId: 'thread-1' })
+            })
+            expect(response.status).toBe(409)
+            expect(await response.json()).toEqual({ status: 'rejected' })
+        } finally {
+            await server.stop()
+        }
+    })
 })

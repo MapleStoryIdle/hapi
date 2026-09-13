@@ -3,17 +3,7 @@ import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { renderEventLabel } from '@/chat/presentation'
 import type { NormalizedAgentContent, NormalizedMessage } from '@/chat/types'
 import type { HapiSessionExport } from '@/types/api'
-
-function getSessionTitle(payload: HapiSessionExport): string {
-    const metadata = payload.session.metadata
-    if (metadata?.name) return metadata.name
-    if (metadata?.summary?.text) return metadata.summary.text
-    if (metadata?.path) {
-        const parts = metadata.path.split('/').filter(Boolean)
-        return parts.at(-1) ?? metadata.path
-    }
-    return payload.session.id.slice(0, 8)
-}
+import { getSessionDisplayTitle } from '@/lib/session-title'
 
 function escapeYamlString(value: string): string {
     return value
@@ -114,7 +104,7 @@ function formatNormalizedMessage(message: NormalizedMessage): string | null {
 }
 
 export function serializeSessionMarkdown(payload: HapiSessionExport): string {
-    const title = getSessionTitle(payload)
+    const title = getSessionDisplayTitle(payload.session)
     const sections: string[] = [
         formatFrontMatter(payload, title),
         `# ${title}`,

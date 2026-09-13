@@ -813,18 +813,22 @@ export function ToolGroupCard(props: {
     const [historyExhausted, setHistoryExhausted] = useState(false)
     const [retryNonce, setRetryNonce] = useState(0)
     const [now, setNow] = useState(() => Date.now())
+    const [autoExpansionReady, setAutoExpansionReady] = useState(false)
     const hydrationRunRef = useRef(0)
     const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const { suppressFocusRing, onTriggerPointerDown, onTriggerKeyDown, onTriggerBlur } = usePointerFocusRing()
     const compactHeaderState = useContext(ToolGroupCompactHeaderContext)
     const compactMode = ctx.terminalToolDisplayMode === 'compact' || props.block.forceCompact === true
     const hasActiveTools = isToolGroupActive(props.block)
+    const requestsAutomaticExpansion = hasActiveTools && (
+        props.block.defaultOpen || props.block.forceCompact !== true
+    )
     const useExternalCompactHeader = compactMode && compactHeaderState?.groupId === props.block.id
     const expansionStateKeys = getToolGroupExpansionStateKeys(props.block)
     const primaryExpansionStateKey = getPrimaryToolGroupExpansionStateKey(props.block)
     const usesManagedExpansionState = ctx.setToolGroupExpansionState !== undefined
     const defaultExpansionState = getDefaultToolGroupExpansionState(
-        props.block.defaultOpen || (!props.block.forceCompact && hasActiveTools)
+        requestsAutomaticExpansion && autoExpansionReady
     )
     const expansionState = resolveToolGroupExpansionState(
         props.block,
@@ -857,6 +861,17 @@ export function ToolGroupCard(props: {
     }, [ctx, displayedOpen, externalSetOpen, primaryExpansionStateKey, useExternalCompactHeader, usesManagedExpansionState])
 
     useEffect(() => {
+        setAutoExpansionReady(false)
+        if (!requestsAutomaticExpansion) {
+            return
+        }
+        const timer = setTimeout(() => {
+            setAutoExpansionReady(true)
+        }, 3_000)
+        return () => clearTimeout(timer)
+    }, [props.block.id, requestsAutomaticExpansion])
+
+    useEffect(() => {
         if (!usesManagedExpansionState) {
             return
         }
@@ -865,6 +880,29 @@ export function ToolGroupCard(props: {
         }
         ctx.setToolGroupExpansionState?.(primaryExpansionStateKey, defaultExpansionState)
     }, [ctx, defaultExpansionState, expansionStateKeys, primaryExpansionStateKey, usesManagedExpansionState])
+
+    // Do not flash open for sub-second work. Once the active group has stayed
+    // visible for three full seconds, promote only untouched automatic state.
+    useEffect(() => {
+        if (!usesManagedExpansionState || !autoExpansionReady || !requestsAutomaticExpansion) {
+            return
+        }
+        const states = expansionStateKeys.map((key) => ctx.toolGroupExpansionStates?.[key])
+        if (states.some((state) => state === 'user-open' || state === 'user-closed')) {
+            return
+        }
+        if (states.some((state) => state === 'auto-open')) {
+            return
+        }
+        ctx.setToolGroupExpansionState?.(primaryExpansionStateKey, 'auto-open')
+    }, [
+        autoExpansionReady,
+        ctx,
+        expansionStateKeys,
+        primaryExpansionStateKey,
+        requestsAutomaticExpansion,
+        usesManagedExpansionState,
+    ])
 
     // A live process becomes a historical Processed card as the next snapshot
     // arrives. Close only automatic expansion; an explicit user choice stays.

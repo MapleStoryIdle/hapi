@@ -62,6 +62,7 @@ export function BottomDrawer(props: {
     const expandedLimit = useRef(800)
     const stableViewportHeight = useRef(0)
     const keyboardWasOpen = useRef(false)
+    const viewportOpenCycle = useRef(false)
     const gesture = useRef<{ id: number; start: number; last: number; at: number; velocity: number } | null>(null)
     const [offset, setOffset] = useState(0)
     const [dragging, setDragging] = useState(false)
@@ -126,15 +127,30 @@ export function BottomDrawer(props: {
     }, [props.open, mobile])
 
     useLayoutEffect(() => {
-        if (!props.open || useDesktopDialog) return
+        if (!props.open || useDesktopDialog) {
+            if (!props.open) {
+                viewportOpenCycle.current = false
+                stableViewportHeight.current = 0
+                keyboardWasOpen.current = false
+            }
+            return
+        }
         gesture.current = null
         setDragging(false)
         setOffset(0)
         setEntered(false)
         setExpanded(false)
         setDragHeight(null)
-        stableViewportHeight.current = 0
-        keyboardWasOpen.current = false
+        // A mobile sheet can switch to an input dialog without closing (for
+        // example, selecting "edit group"). Keep the pre-keyboard viewport
+        // baseline for that whole open cycle. Resetting it during the switch
+        // lets iOS report only its already-shrunken viewport, so the dialog is
+        // mistaken for a keyboard-closed surface and ends up behind the keys.
+        if (!viewportOpenCycle.current) {
+            stableViewportHeight.current = 0
+            keyboardWasOpen.current = false
+            viewportOpenCycle.current = true
+        }
         const measure = (confirmKeyboardOpen = false) => {
             const visual = window.visualViewport
             const topInset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-safe-area-top')) || 0
@@ -161,9 +177,19 @@ export function BottomDrawer(props: {
             // iOS can either keep fixed positioning in the layout viewport or
             // move it into the shrunken visual viewport.  Raising a dialog by
             // the keyboard height in the latter case sends it above the screen.
-            const fixedTracksVisualViewport = keyboardOpen && Math.abs(window.innerHeight - height) < 2
+            // Home Screen WebKit can shrink `innerHeight` to the visual
+            // viewport while still resolving fixed-position `bottom` against
+            // the old layout viewport. Treating equal heights as proof that
+            // fixed positioning follows the visual viewport leaves the dialog
+            // underneath the keyboard. The standalone marker is a stronger
+            // signal: keep using the pre-keyboard baseline there.
+            const iosStandalone = document.documentElement.dataset.iosStandalone === 'true'
+            const fixedTracksVisualViewport = keyboardOpen
+                && !iosStandalone
+                && Math.abs(window.innerHeight - height) < 2
+            const layoutBottomReference = Math.max(layoutHeight, stableViewportHeight.current)
             const keyboardBottom = visual && keyboardOpen && !fixedTracksVisualViewport
-                ? Math.max(0, window.innerHeight - top - height)
+                ? Math.max(0, layoutBottomReference - top - height)
                 : 0
             expandedLimit.current = Math.max(0, height - topInset - 12)
             setViewport({

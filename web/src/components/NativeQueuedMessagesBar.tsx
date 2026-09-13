@@ -4,6 +4,7 @@ import { Loader2, Play, X } from 'lucide-react'
 import type { CodexLocalSessionQueuedMessage } from '@/types/api'
 import { useTranslation } from '@/lib/use-translation'
 import { SessionDetailQueueTrigger } from '@/components/SessionDetailQueueTrigger'
+import { formatUserMessageForDisplay } from '@/chat/questionAnswers'
 
 /**
  * Queue affordance for an original native Codex thread.
@@ -43,7 +44,9 @@ export function NativeQueuedMessagesBar(props: {
 
     // Match the SHAPI queue entry: show the first pending prompt as the quick
     // preview, while the drawer remains the place for the complete list.
-    const preview = props.messages[0]?.text.trim() || t(props.paused ? 'recentCodex.control.queuePaused' : 'queuedMessages.emptyPreview')
+    const preview = props.messages[0]
+        ? formatUserMessageForDisplay(props.messages[0].text).trim()
+        : t(props.paused ? 'recentCodex.control.queuePaused' : 'queuedMessages.emptyPreview')
 
     return (
         <>
@@ -85,7 +88,7 @@ export function NativeQueuedMessagesBar(props: {
                                     </span>
                                     <div className="min-w-0 flex-1">
                                         <p className="line-clamp-2 whitespace-pre-wrap break-words text-sm leading-5 text-[var(--app-fg)]">
-                                            {message.text}
+                                            {formatUserMessageForDisplay(message.text)}
                                         </p>
                                         {message.recoveryRequired ? (
                                             <div className="mt-1.5 text-xs text-[var(--app-hint)]">

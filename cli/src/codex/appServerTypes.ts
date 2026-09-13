@@ -1,4 +1,5 @@
-export type ApprovalPolicy = 'untrusted' | 'on-failure' | 'on-request' | 'never';
+export type ApprovalPolicy = 'untrusted' | 'on-request' | 'never';
+export type ApprovalsReviewer = 'user' | 'auto_review' | 'guardian_subagent';
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 export interface InitializeCapabilities {
@@ -98,6 +99,7 @@ export interface ThreadStartParams {
     serviceTier?: string | null;
     cwd?: string;
     approvalPolicy?: ApprovalPolicy;
+    approvalsReviewer?: ApprovalsReviewer;
     sandbox?: SandboxMode;
     config?: Record<string, unknown>;
     baseInstructions?: string;
@@ -125,6 +127,7 @@ export interface ThreadResumeParams {
     modelProvider?: string;
     cwd?: string;
     approvalPolicy?: ApprovalPolicy;
+    approvalsReviewer?: ApprovalsReviewer;
     sandbox?: SandboxMode;
     config?: Record<string, unknown>;
     baseInstructions?: string;
@@ -149,6 +152,7 @@ export interface ThreadForkParams {
     modelProvider?: string;
     serviceTier?: string | null;
     approvalPolicy?: ApprovalPolicy;
+    approvalsReviewer?: ApprovalsReviewer;
     sandbox?: SandboxMode;
     config?: Record<string, unknown>;
     baseInstructions?: string;
@@ -231,6 +235,7 @@ export interface TurnStartParams {
     input: UserInput[];
     cwd?: string;
     approvalPolicy?: ApprovalPolicy;
+    approvalsReviewer?: ApprovalsReviewer;
     sandboxPolicy?: SandboxPolicy;
     model?: string;
     /**

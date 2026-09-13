@@ -1,4 +1,4 @@
-import { Check, Link, Terminal } from 'lucide-react'
+import { Check, Link, RotateCw, Terminal } from 'lucide-react'
 import { useState } from 'react'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { monitorWebhookCurl, monitorWebhookUrl } from './webhookCommand'
@@ -6,7 +6,7 @@ import { monitorWebhookCurl, monitorWebhookUrl } from './webhookCommand'
 type Translate = (key: string, params?: Record<string, string | number>) => string
 
 /** Credentials remain in component memory only, never query/localStorage caches. */
-export function MonitorTokenReveal(props: { token: string; baseUrl: string; t: Translate }) {
+export function MonitorTokenReveal(props: { token: string; baseUrl: string; t: Translate; onRotate?: () => void; isRotating?: boolean }) {
     const { copy, copied } = useCopyToClipboard()
     const [copiedKind, setCopiedKind] = useState<'url' | 'curl'>('url')
     const origin = props.baseUrl || window.location.origin
@@ -23,9 +23,10 @@ export function MonitorTokenReveal(props: { token: string; baseUrl: string; t: T
                 {(['url', 'curl'] as const).map(kind => <button key={kind} type="button" onClick={() => void copyValue(kind)} aria-label={props.t('monitors.copy.' + kind)} title={props.t('monitors.copy.' + kind)} className="flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-link)] focus-visible:ring-2 focus-visible:ring-[var(--app-link)]">
                     {copied && copiedKind === kind ? <Check className="h-4 w-4" /> : kind === 'url' ? <Link className="h-4 w-4" /> : <Terminal className="h-4 w-4" />}
                 </button>)}
+                {props.onRotate ? <button type="button" onClick={props.onRotate} disabled={props.isRotating} aria-label={props.t('monitors.token.rotate')} title={props.t('monitors.token.rotate')} className="flex h-11 w-11 items-center justify-center rounded-xl border border-amber-500/50 text-amber-700 disabled:cursor-wait disabled:opacity-50 dark:text-amber-300 focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"><RotateCw className={`h-4 w-4 ${props.isRotating ? 'animate-spin motion-reduce:animate-none' : ''}`} /></button> : null}
             </div>
         </div>
-        <pre className="mt-2 overflow-x-auto rounded-xl bg-[var(--app-code-bg)] p-3 text-xs leading-6"><code>{curl.replace(props.token, '••••••••')}</code></pre>
+        <pre className="mt-2 overflow-x-auto rounded-xl bg-[var(--app-code-bg)] p-3 text-xs leading-6"><code>{curl}</code></pre>
         {copyFailed ? <p role="alert" className="mt-2 text-sm text-red-600">{props.t('monitors.copy.failed')}</p> : null}
         <span className="sr-only" aria-live="polite">{copied ? props.t('monitors.token.copied') : ''}</span>
     </section>

@@ -16,7 +16,6 @@ export function HappyUserMessage() {
     const ctx = useHappyChatContext()
     const { copied, copy } = useCopyToClipboard()
     const [detailsVisible, setDetailsVisible] = useState(false)
-    const [showMetadata, setShowMetadata] = useState(false)
     const role = useAssistantState(({ message }) => message.role)
     const messageId = useAssistantState(({ message }) => message.id)
     const text = useAssistantState(({ message }) => {
@@ -52,15 +51,9 @@ export function HappyUserMessage() {
         message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
     )?.questionAnswer)
 
-    const hasMetadata = invokedAt != null
-
     const toggleDetailsVisible = (event: MouseEvent<HTMLElement>) => {
         if (shouldIgnoreMessageDetailsToggle(event)) return
-        setDetailsVisible((visible) => {
-            const next = !visible
-            if (!next) setShowMetadata(false)
-            return next
-        })
+        setDetailsVisible((visible) => !visible)
     }
 
     if (role !== 'user') return null
@@ -80,9 +73,6 @@ export function HappyUserMessage() {
                     <MessageDetailsFooter
                         visible={detailsVisible}
                         align="right"
-                        hasMetadata={hasMetadata}
-                        metadataOpen={showMetadata}
-                        onMetadataToggle={() => setShowMetadata((open) => !open)}
                         invokedAt={invokedAt}
                     />
                 </div>
@@ -107,9 +97,6 @@ export function HappyUserMessage() {
                 <MessageDetailsFooter
                     visible={detailsVisible}
                     align="right"
-                    hasMetadata={hasMetadata}
-                    metadataOpen={showMetadata}
-                    onMetadataToggle={() => setShowMetadata((open) => !open)}
                     invokedAt={invokedAt}
                 />
             </MessagePrimitive.Root>
@@ -152,9 +139,6 @@ export function HappyUserMessage() {
                 <MessageDetailsFooter
                     visible={detailsVisible}
                     align="right"
-                    hasMetadata={hasMetadata}
-                    metadataOpen={showMetadata}
-                    onMetadataToggle={() => setShowMetadata((open) => !open)}
                     invokedAt={invokedAt}
                 />
             </div>

@@ -3,7 +3,7 @@ import type { ApiClient } from '@/api/client'
 import type { NativeAsyncInput } from '@/chat/nativeAsyncInput'
 import { QuestionAnswerForm } from '@/components/ToolCard/QuestionAnswerForm'
 import { useTranslation } from '@/lib/use-translation'
-import { NativeQuestionSummary } from './NativeQuestionCards'
+import { NativeQuestionHistory } from './NativeQuestionCards'
 import { parseUserMessageQuestionReply } from '@/chat/questionAnswers'
 
 /** Desktop async questions receive ordinary user-message replies, not
@@ -27,7 +27,7 @@ export function NativeAsyncUserInput(props: {
         .map((item) => [item.questionItemId!, item.answers]))
     return (
         <div data-testid="native-async-user-input">
-            {props.input.resolved || submitted || props.alreadySaved ? <NativeQuestionSummary questions={props.input.questions} answers={{ ...savedAnswers, ...answers, ...props.input.answers }} status={t(props.input.resolved ? 'recentCodex.input.resolved' : 'recentCodex.input.saved')} /> : (
+            {props.input.resolved || submitted || props.alreadySaved ? <NativeQuestionHistory questions={props.input.questions} answers={{ ...savedAnswers, ...answers, ...props.input.answers }} status={t(props.input.resolved ? 'recentCodex.input.resolved' : 'recentCodex.input.saved')} /> : (
                 <QuestionAnswerForm
                     key={props.input.questions.filter((question) => !props.input.answers?.[question.id]?.length).map((question) => question.id).join(':')}
                     messageCard

@@ -14,7 +14,9 @@ import {
 } from '@/lib/session-connection-context'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionGroupDrawer } from '@/components/SessionGroupDrawer'
+import { SessionLabelDialog } from '@/components/SessionLabelDialog'
 import { resolveSessionGroup, useSessionGroups } from '@/hooks/useSessionGroups'
+import { resolveSessionLabel, useSessionLabels } from '@/hooks/useSessionLabels'
 import type { SessionGroup } from '@hapi/protocol/sessionGroups'
 import { GitBranchesDrawer } from '@/components/GitBranchesDrawer'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
@@ -29,22 +31,9 @@ import { CheckIcon, CopyIcon } from '@/components/icons'
 import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { SESSION_DETAIL_HEADER_ROW_CLASS, SESSION_DETAIL_HEADER_SAFE_AREA_CLASS } from '@/components/SessionDetailHeader'
 import { useMachineGitBranch } from '@/hooks/queries/useGitBranch'
+import { getSessionDisplayTitle } from '@/lib/session-title'
 
 type Translator = (key: string, params?: Record<string, string | number>) => string
-
-function getSessionTitle(session: Session): string {
-    if (session.metadata?.name) {
-        return session.metadata.name
-    }
-    if (session.metadata?.summary?.text) {
-        return session.metadata.summary.text
-    }
-    if (session.metadata?.path) {
-        const parts = session.metadata.path.split('/').filter(Boolean)
-        return parts.length > 0 ? parts[parts.length - 1] : session.id.slice(0, 8)
-    }
-    return session.id.slice(0, 8)
-}
 
 function getSessionProjectPath(session: Session): string | null {
     return session.metadata?.worktree?.basePath ?? session.metadata?.path ?? null
@@ -132,6 +121,8 @@ const EMPTY_SESSION_HEADER_DETAILS: readonly SessionHeaderDetail[] = []
 export function buildSessionHeaderDetails(input: {
     group?: SessionGroup
     onSetGroup?: () => void
+    label?: string
+    onSetLabel?: () => void
     title: string
     sessionId: string
     projectPath?: string | null
@@ -161,6 +152,7 @@ export function buildSessionHeaderDetails(input: {
     return [
         { key: 'title', label: t('session.header.details.fullName'), value: input.title },
         ...(input.onSetGroup ? [{ key: 'group', label: t('session.groups.title'), value: input.group ? `${input.group.emoji} ${input.group.name}` : t('session.groups.none'), onSelect: input.onSetGroup }] : []),
+        ...(input.onSetLabel ? [{ key: 'label', label: t('session.labels.title'), value: input.label ?? t('session.labels.none'), onSelect: input.onSetLabel }] : []),
         { key: 'session-id', label: t('session.header.details.sessionId'), value: input.sessionId },
         {
             key: 'path',
@@ -744,14 +736,18 @@ export const SessionHeader = memo(function SessionHeader(props: {
     const { t } = useTranslation()
     const { session, api, onSessionDeleted, onSessionReopened } = props
     const groupsQuery = useSessionGroups(api)
+    const labelsQuery = useSessionLabels(api)
     const groupSource = useMemo(() => ({ type: 'managed' as const, sessionId: session.id }), [session.id])
     const nativeGroupAlias = useMemo(() => session.metadata?.machineId && session.metadata?.codexSessionId
         ? { type: 'native-codex' as const, machineId: session.metadata.machineId, codexSessionId: session.metadata.codexSessionId }
         : null, [session.metadata?.machineId, session.metadata?.codexSessionId])
     const sessionGroup = resolveSessionGroup(groupsQuery.data, groupSource, nativeGroupAlias)
+    const sessionLabel = resolveSessionLabel(labelsQuery.data, groupSource, nativeGroupAlias)
     const [groupOpen, setGroupOpen] = useState(false)
+    const [labelOpen, setLabelOpen] = useState(false)
     const openGroup = useCallback(() => setGroupOpen(true), [])
-    const title = useMemo(() => getSessionTitle(session), [session])
+    const openLabel = useCallback(() => setLabelOpen(true), [])
+    const title = useMemo(() => getSessionDisplayTitle(session), [session])
     const projectPath = useMemo(() => getSessionProjectPath(session), [session])
     // A worktree session must act on its actual checkout, while the title
     // details may still show the stable project base path.
@@ -767,6 +763,8 @@ export const SessionHeader = memo(function SessionHeader(props: {
     const sessionDetails = useMemo(() => buildSessionHeaderDetails({
         group: sessionGroup,
         onSetGroup: api ? openGroup : undefined,
+        label: sessionLabel,
+        onSetLabel: api ? openLabel : undefined,
         title,
         sessionId: session.id,
         projectPath,
@@ -779,7 +777,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
         permissionMode: session.permissionMode,
         collaborationMode: session.collaborationMode
     }, t), [
-        sessionGroup, api, openGroup,
+        sessionGroup, sessionLabel, api, openGroup, openLabel,
         projectPath,
         session.collaborationMode,
         session.effort,
@@ -800,7 +798,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
     const sessionDetailsRef = useRef<readonly SessionHeaderDetail[]>(sessionDetails)
     sessionDetailsRef.current = sessionDetails
     const sessionDetailsRevision = [
-        sessionGroup?.id ?? '', sessionGroup?.name ?? '', sessionGroup?.emoji ?? '',
+        sessionGroup?.id ?? '', sessionGroup?.name ?? '', sessionGroup?.emoji ?? '', sessionLabel ?? '',
         session.id,
         projectPath ?? '',
         session.metadata?.flavor ?? '',
@@ -913,8 +911,10 @@ export const SessionHeader = memo(function SessionHeader(props: {
             />
 
             <SessionGroupDrawer key={session.id} api={api} source={groupSource} nativeAlias={nativeGroupAlias} open={groupOpen} onOpenChange={setGroupOpen} />
+            <SessionLabelDialog api={api} source={groupSource} nativeAlias={nativeGroupAlias} currentLabel={sessionLabel} open={labelOpen} onOpenChange={setLabelOpen} />
             <SessionActionMenu
                 onSetGroup={api ? openGroup : undefined}
+                onSetLabel={api ? openLabel : undefined}
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionActive={session.active}

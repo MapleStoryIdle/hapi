@@ -153,6 +153,34 @@ describe('reduceChatBlocks', () => {
         })
     })
 
+    it('attaches a Codex token count to the final reply in that turn', () => {
+        const reduced = reduceChatBlocks([
+            userMessage('user', 'go', 1),
+            agentTextMessage('reply', 'done', 2),
+            {
+                id: 'turn-usage',
+                localId: null,
+                createdAt: 3,
+                role: 'event',
+                content: { type: 'token-count', info: {} },
+                isSidechain: false,
+                usage: {
+                    input_tokens: 80,
+                    output_tokens: 12,
+                    cache_read_input_tokens: 40
+                }
+            }
+        ] as NormalizedMessage[], null)
+
+        expect(reduced.blocks.find((block) => block.kind === 'agent-text')).toMatchObject({
+            usage: {
+                input_tokens: 80,
+                output_tokens: 12,
+                cache_read_input_tokens: 40
+            }
+        })
+    })
+
     it('keeps active goals visible across later normal user messages', () => {
         const reduced = reduceChatBlocks([
             goalMessage('goal-active', 'active', 1),

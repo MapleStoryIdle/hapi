@@ -8,7 +8,7 @@ afterEach(() => {
 })
 
 describe('MonitorTokenReveal', () => {
-    it('masks credentials and copies the URL or complete POST command without network requests', async () => {
+    it('shows the credential and copies the URL or complete POST command without network requests', async () => {
         const fetchMock = vi.fn()
         vi.stubGlobal('fetch', fetchMock)
 
@@ -17,12 +17,13 @@ describe('MonitorTokenReveal', () => {
         render(<MonitorTokenReveal token="one-time-webhook-token" baseUrl="https://hub.example" t={(key) => key} />)
 
         expect(screen.getByTestId('monitor-token-reveal')).toBeInTheDocument()
-        expect(screen.getByTestId('monitor-token-reveal')).not.toHaveTextContent('one-time-webhook-token')
+        expect(screen.getByTestId('monitor-token-reveal')).toHaveTextContent('one-time-webhook-token')
         fireEvent.click(screen.getByRole('button', { name: 'monitors.copy.url' }))
         await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://hub.example/hooks/events?token=one-time-webhook-token'))
         fireEvent.click(screen.getByRole('button', { name: 'monitors.copy.curl' }))
         await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining('curl -X POST')))
-        expect(writeText.mock.calls.at(-1)?.[0]).toContain('--data-raw \'{"prompt":"YOUR_PROMPT"}\'')
+        expect(writeText.mock.calls.at(-1)?.[0]).toContain('--data-raw \'{"prompt":"YOUR_PROMPT","data":{"key":"value"}}\'')
+        expect(writeText.mock.calls.at(-1)?.[0]).toContain('token=one-time-webhook-token')
         expect(fetchMock).not.toHaveBeenCalled()
     })
 })

@@ -11,6 +11,7 @@ import {
 } from '@/lib/shareTransfer'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import type { SessionSummary } from '@/types/api'
+import { getSessionDisplayTitle } from '@/lib/session-title'
 
 type LoadState =
     | { state: 'loading' }
@@ -27,13 +28,6 @@ function formatBytes(n: number): string {
     if (n < 1024) return `${n} B`
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
     return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function getSessionTitle(session: SessionSummary): string {
-    return session.metadata?.summary?.text
-        ?? session.metadata?.name
-        ?? session.metadata?.path
-        ?? session.id.slice(0, 8)
 }
 
 function SharePreview(props: { payload: ShareTransferPayload }) {
@@ -264,7 +258,7 @@ export default function SharePage() {
                                         >
                                             <div className="min-w-0 flex-1">
                                                 <div className="truncate text-sm font-medium text-[var(--app-fg)]">
-                                                    {getSessionTitle(session)}
+                                                    {getSessionDisplayTitle(session)}
                                                 </div>
                                                 {session.metadata?.path ? (
                                                     <div className="truncate text-xs text-[var(--app-hint)]">

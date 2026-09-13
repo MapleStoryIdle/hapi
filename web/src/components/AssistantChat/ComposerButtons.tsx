@@ -948,8 +948,10 @@ export function UnifiedButton(props: {
     )
 }
 
-const COMPOSER_TOOLBAR_HORIZONTAL_PADDING_PX = 16
-const COMPOSER_TOOLBAR_GAP_PX = 4
+// Match `pl-1 pr-2` and `gap-0.5` below. Conservative phantom spacing made
+// iPhone-width composers hide Skills even while a full icon slot was visible.
+const COMPOSER_TOOLBAR_HORIZONTAL_PADDING_PX = 12
+const COMPOSER_TOOLBAR_GAP_PX = 2
 const COMPOSER_ICON_BUTTON_WIDTH_PX = 42
 const COMPOSER_OPTIONAL_CONTROL_SLOT_PX = COMPOSER_ICON_BUTTON_WIDTH_PX + COMPOSER_TOOLBAR_GAP_PX
 

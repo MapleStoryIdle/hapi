@@ -347,6 +347,7 @@ function AppInner() {
             }
             const invalidations = [
                 queryClient.invalidateQueries({ queryKey: ['session-groups'] }),
+                queryClient.invalidateQueries({ queryKey: ['session-labels'] }),
                 queryClient.invalidateQueries({ queryKey: ['session-pins'] }),
                 queryClient.invalidateQueries({ queryKey: ['kanban-order'] }),
                 queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),

@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import type { Monitor, MonitorBucket, MonitorConfig, MonitorDetail, MonitorHealth, MonitorIncident, MonitorIncidentState, MonitorWebhook } from '@hapi/protocol/monitoring'
+import type { Monitor, MonitorActivity, MonitorActivityOutcome, MonitorActivitySource, MonitorBucket, MonitorCallStats, MonitorConfig, MonitorDetail, MonitorHealth, MonitorIncident, MonitorIncidentState, MonitorWebhook } from '@hapi/protocol/monitoring'
 import { nextMonitorRun } from '../monitoring/schedule'
 import { MonitorTokenCipher } from './monitorTokenCipher'
 
@@ -37,6 +37,16 @@ CREATE TABLE IF NOT EXISTS monitor_tokens (
     monitor_id TEXT PRIMARY KEY REFERENCES monitors(id) ON DELETE CASCADE,
     ciphertext TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS monitor_events (
+    id TEXT PRIMARY KEY,
+    monitor_id TEXT NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    summary TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_events_monitor_time ON monitor_events(monitor_id, created_at DESC);
 `
 
 type MonitorRow = {
@@ -140,7 +150,7 @@ export class MonitorStore {
 
     list(namespace: string, now = Date.now()): Monitor[] {
         const rows = this.db.query('SELECT id FROM monitors WHERE namespace = ? ORDER BY created_at DESC LIMIT 50').all(namespace) as { id: string }[]
-        return rows.map(r => { const { incidents: _incidents, ...value } = this.detail(r.id, namespace, now, false)!; return value })
+        return rows.map(r => { const { incidents: _incidents, activities: _activities, ...value } = this.detail(r.id, namespace, now, false)!; return value })
     }
 
     detail(id: string, namespace: string, now = Date.now(), includeHistory = true): MonitorDetail | null {
@@ -160,12 +170,38 @@ export class MonitorStore {
             json_set(json_remove(data,'$.config','$.details'),'$.plan',NULL,'$.planHash',NULL) AS data
             FROM monitor_incidents WHERE monitor_id = ? ORDER BY created_at DESC LIMIT 101`).all(id) as IncidentRow[])
             .map(r => publicIncident(incident(r))) : []
+        const activities = includeHistory ? this.activities(id) : []
+        const statsRow = includeHistory ? this.db.query(`SELECT COUNT(*) AS total,
+            SUM(outcome='ok') AS ok, SUM(outcome='failed') AS failed,
+            SUM(outcome='dispatched') AS dispatched, SUM(outcome='deferred') AS deferred,
+            SUM(outcome='duplicate') AS duplicate
+            FROM monitor_events WHERE monitor_id=? AND source!='manual' AND created_at>=?`).get(id, now - MONITOR_WEEK_MS) as Record<keyof MonitorCallStats, number | null> : null
+        const callStats: MonitorCallStats = {
+            total: statsRow?.total ?? 0,
+            ok: statsRow?.ok ?? 0,
+            failed: statsRow?.failed ?? 0,
+            dispatched: statsRow?.dispatched ?? 0,
+            deferred: statsRow?.deferred ?? 0,
+            duplicate: statsRow?.duplicate ?? 0
+        }
         return {
             id, config: JSON.parse(row.config) as MonitorConfig, createdAt: row.created_at, updatedAt: row.updated_at,
             health: row.health, lastCheckedAt: row.last_checked_at, lastLatencyMs: row.last_latency_ms,
             lastError: row.last_error, nextCheckAt: row.next_check_at, buckets,
-            incident: open ? publicIncident(open) : null, incidents, relatedSession
+            incident: open ? publicIncident(open) : null, incidents, activities, callStats, relatedSession
         }
+    }
+
+    activities(id: string, limit = 100): MonitorActivity[] {
+        return this.db.query(`SELECT id,monitor_id AS monitorId,created_at AS createdAt,source,outcome,summary,details
+            FROM monitor_events WHERE monitor_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?`).all(id, limit) as MonitorActivity[]
+    }
+
+    private recordActivity(id: string, source: MonitorActivitySource, outcome: MonitorActivityOutcome, summary: string, details = '', now = Date.now()): string {
+        const eventId = randomUUID()
+        this.db.query('INSERT INTO monitor_events(id,monitor_id,source,outcome,created_at,summary,details) VALUES(?,?,?,?,?,?,?)')
+            .run(eventId, id, source, outcome, now, summary.slice(0, 500), details.slice(0, 12000))
+        return eventId
     }
 
     recordProbe(id: string, ok: boolean, latency: number, error: string | null, nextAt: number, now = Date.now()): void {
@@ -194,16 +230,26 @@ export class MonitorStore {
                 .run(next, now, monitor.id, monitor.nextCheckAt)
             if (!claimed.changes) return null
             this.bucket(monitor.id, true, 0, now)
-            return this.openIncident(monitor, 'Scheduled trigger', '', now)
+            const opened = this.openIncident(monitor, 'Scheduled trigger', '', now)
+            this.recordActivity(monitor.id, 'scheduled', opened.created ? 'dispatched' : 'deferred', 'Scheduled trigger', '', now)
+            return opened
         })()
     }
 
     recordProbeAndIncident(monitor: StoredMonitor, ok: boolean, latency: number, error: string | null, nextAt: number): { incidentId: string; created: boolean } | null {
         return this.db.transaction(() => {
             this.recordProbe(monitor.id, ok, latency, error, nextAt)
-            if (!ok && this.get(monitor.id)?.consecutiveFailures === 2) {
-                return this.openIncident(monitor, error ?? 'HTTP check failed', 'An automatic HTTP probe did not match the configured expectation.')
+            // Successful samples already live in hourly buckets. The activity
+            // ledger is reserved for actionable failures so frequent probes do
+            // not create an unbounded stream of redundant rows.
+            if (ok) return null
+            const summary = error ?? 'HTTP check failed'
+            if ((this.get(monitor.id)?.consecutiveFailures ?? 0) >= 2) {
+                const opened = this.openIncident(monitor, summary, 'An automatic HTTP probe did not match the configured expectation.')
+                this.recordActivity(monitor.id, 'probe', opened.created ? 'dispatched' : 'deferred', summary, `${latency} ms`)
+                return opened
             }
+            this.recordActivity(monitor.id, 'probe', 'failed', summary, `${latency} ms`)
             return null
         })()
     }
@@ -219,15 +265,42 @@ export class MonitorStore {
             this.db.query('DELETE FROM monitor_receipts WHERE monitor_id=? AND created_at < ?').run(monitor.id, now - MONITOR_WEEK_MS)
             const hash = monitorTokenHash(event.eventId)
             const duplicate = this.db.query('SELECT 1 FROM monitor_receipts WHERE monitor_id=? AND event_hash=?').get(monitor.id, hash)
-            if (duplicate) return { duplicate: true, incidentId: '', created: false }
+            // Metrics represent valid webhook calls, while receipts only
+            // deduplicate investigation work. Repeated deliveries are still
+            // calls, but must never create duplicate incidents or sessions.
+            this.bucket(monitor.id, true, 0, now)
+            this.db.query('UPDATE monitors SET last_checked_at=? WHERE id=?').run(now, monitor.id)
+            if (duplicate) {
+                this.recordActivity(monitor.id, 'webhook', 'duplicate', event.summary, event.details, now)
+                return { duplicate: true, incidentId: '', created: false }
+            }
             const counts = this.db.query('SELECT COUNT(*) AS total, SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) AS recent FROM monitor_receipts WHERE monitor_id=?')
                 .get(now - 60_000, monitor.id) as { total: number; recent: number | null }
             if (counts.total >= 2000 || (counts.recent ?? 0) >= 10) throw new Error('Webhook rate limit reached')
             this.db.query('INSERT INTO monitor_receipts(monitor_id,event_hash,created_at) VALUES(?,?,?)').run(monitor.id, hash, now)
-            this.bucket(monitor.id, true, 0, now)
-            this.db.query('UPDATE monitors SET last_checked_at=? WHERE id=?').run(now, monitor.id)
             const opened = this.openIncident(monitor, event.summary, event.details, now)
+            this.recordActivity(monitor.id, 'webhook', opened.created ? 'dispatched' : 'deferred', event.summary, event.details, now)
             return { duplicate: false, ...opened }
+        })()
+    }
+
+    triggerManual(monitor: StoredMonitor, summary = 'Manual test trigger', details = '', now = Date.now()): { activityId: string; incidentId: string; created: boolean } {
+        return this.db.transaction(() => {
+            const opened = this.openIncident(monitor, summary, details, now)
+            const activityId = this.recordActivity(monitor.id, 'manual', opened.created ? 'dispatched' : 'deferred', summary, details, now)
+            return { activityId, ...opened }
+        })()
+    }
+
+    retriggerActivity(monitor: StoredMonitor, activityId: string, now = Date.now()): { incidentId: string; created: boolean } | null {
+        return this.db.transaction(() => {
+            const row = this.db.query(`SELECT summary,details FROM monitor_events
+                WHERE id=? AND monitor_id=? AND outcome='deferred'`).get(activityId, monitor.id) as { summary: string; details: string } | null
+            if (!row || this.openForMonitor(monitor.id)) return null
+            const opened = this.openIncident(monitor, row.summary, row.details, now)
+            if (!opened.created) return null
+            this.db.query("UPDATE monitor_events SET outcome='dispatched' WHERE id=? AND monitor_id=? AND outcome='deferred'").run(activityId, monitor.id)
+            return opened
         })()
     }
 
@@ -245,7 +318,10 @@ export class MonitorStore {
     }
 
     openForMonitor(id: string): StoredMonitorIncident | null {
-        const row = this.db.query("SELECT * FROM monitor_incidents WHERE monitor_id=? AND state NOT IN ('closed','completed') LIMIT 1").get(id) as IncidentRow | null
+        // A completed run still holds the gate until the owner acknowledges its
+        // result by closing it. This prevents later triggers from silently
+        // starting another agent task before the previous result was reviewed.
+        const row = this.db.query("SELECT * FROM monitor_incidents WHERE monitor_id=? AND state!='closed' LIMIT 1").get(id) as IncidentRow | null
         return row ? incident(row) : null
     }
 
@@ -274,10 +350,11 @@ export class MonitorStore {
         this.db.transaction(() => {
             this.db.query('DELETE FROM monitor_buckets WHERE at < ?').run(Math.floor((now - MONITOR_WEEK_MS) / 3600_000) * 3600_000)
             this.db.query('DELETE FROM monitor_receipts WHERE created_at < ?').run(now - MONITOR_WEEK_MS)
-            this.db.query("DELETE FROM monitor_incidents WHERE state IN ('closed','completed') AND created_at < ?").run(now - MONITOR_WEEK_MS)
-            for (const monitor of this.all()) this.db.query("DELETE FROM monitor_incidents WHERE monitor_id=? AND state IN ('closed','completed') AND id NOT IN (SELECT id FROM monitor_incidents WHERE monitor_id=? AND state IN ('closed','completed') ORDER BY created_at DESC LIMIT 100)")
+            this.db.query('DELETE FROM monitor_events WHERE created_at < ?').run(now - MONITOR_WEEK_MS)
+            this.db.query("DELETE FROM monitor_incidents WHERE state='closed' AND created_at < ?").run(now - MONITOR_WEEK_MS)
+            for (const monitor of this.all()) this.db.query("DELETE FROM monitor_incidents WHERE monitor_id=? AND state='closed' AND id NOT IN (SELECT id FROM monitor_incidents WHERE monitor_id=? AND state='closed' ORDER BY created_at DESC LIMIT 100)")
                 .run(monitor.id, monitor.id)
-            this.db.query("DELETE FROM monitor_incidents WHERE state IN ('closed','completed') AND id NOT IN (SELECT id FROM monitor_incidents WHERE state IN ('closed','completed') ORDER BY created_at DESC LIMIT 2000)").run()
+            this.db.query("DELETE FROM monitor_incidents WHERE state='closed' AND id NOT IN (SELECT id FROM monitor_incidents WHERE state='closed' ORDER BY created_at DESC LIMIT 2000)").run()
         })()
     }
 }

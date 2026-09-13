@@ -325,6 +325,14 @@ describe('getComposerOptionalControlsVisibility', () => {
             permission: true,
             skill: true
         })
+        expect(getComposerOptionalControlsVisibility(305, 160, 0, true, true)).toEqual({
+            permission: true,
+            skill: false
+        })
+        expect(getComposerOptionalControlsVisibility(306, 160, 0, true, true)).toEqual({
+            permission: true,
+            skill: true
+        })
     })
 
     /**

@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import { BottomDrawer, drawerDragSize, shouldDismissDrawer } from './BottomDrawer'
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.appKeyboardOpen })
+afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+    delete document.documentElement.dataset.appKeyboardOpen
+    delete document.documentElement.dataset.iosStandalone
+})
 
 function Harness() {
     const [open, setOpen] = useState(false)
@@ -163,6 +168,57 @@ describe('BottomDrawer', () => {
         expect(dialog.style.getPropertyValue('--drawer-keyboard-bottom')).toBe('0px')
         expect(dialog.style.bottom).toBe('calc(var(--drawer-keyboard-bottom) + var(--app-mobile-input-dialog-keyboard-gap))')
         expect(dialog.style.transform).toBe('none')
+    })
+
+    it('keeps an iOS standalone input dialog above the keyboard when innerHeight also shrinks', () => {
+        document.documentElement.dataset.iosStandalone = 'true'
+        const viewport = Object.assign(new EventTarget(), { height: 800, offsetTop: 0 })
+        vi.stubGlobal('visualViewport', viewport)
+        vi.stubGlobal('innerHeight', 800)
+        render(<I18nProvider><BottomDrawer open inputDialog onOpenChange={() => {}} title="Answer" testId="standalone-question-dialog"><textarea data-drawer-initial-focus /></BottomDrawer></I18nProvider>)
+        const dialog = screen.getByTestId('standalone-question-dialog')
+        screen.getByRole('textbox').focus()
+
+        act(() => {
+            vi.stubGlobal('innerHeight', 400)
+            viewport.height = 400
+            viewport.dispatchEvent(new Event('resize'))
+        })
+
+        expect(dialog).toHaveAttribute('data-keyboard-open', 'true')
+        expect(dialog).toHaveAttribute('data-keyboard-fixed-viewport', 'layout')
+        expect(dialog.style.getPropertyValue('--drawer-keyboard-bottom')).toBe('400px')
+        expect(dialog.style.bottom).toBe('calc(var(--drawer-keyboard-bottom) + var(--app-mobile-input-dialog-keyboard-gap))')
+    })
+
+    it('keeps the full viewport baseline when a sheet switches into an input dialog', () => {
+        const viewport = Object.assign(new EventTarget(), { height: 800, offsetTop: 0 })
+        vi.stubGlobal('visualViewport', viewport)
+        vi.stubGlobal('innerHeight', 800)
+
+        function EditableSheet() {
+            const [editing, setEditing] = useState(false)
+            return <I18nProvider><BottomDrawer open inputDialog={editing} onOpenChange={() => {}} title="Group" testId="group-dialog">
+                {editing
+                    ? <input data-drawer-initial-focus aria-label="Group name" />
+                    : <button type="button" onClick={() => setEditing(true)}>Edit group</button>}
+            </BottomDrawer></I18nProvider>
+        }
+
+        render(<EditableSheet />)
+        fireEvent.click(screen.getByRole('button', { name: 'Edit group' }))
+        const dialog = screen.getByTestId('group-dialog')
+        expect(dialog).toHaveAttribute('data-keyboard-safe-dialog', 'true')
+        screen.getByRole('textbox', { name: 'Group name' }).focus()
+
+        act(() => {
+            vi.stubGlobal('innerHeight', 400)
+            viewport.height = 400
+            viewport.dispatchEvent(new Event('resize'))
+        })
+
+        expect(dialog).toHaveAttribute('data-keyboard-open', 'true')
+        expect(dialog.style.bottom).toBe('calc(var(--drawer-keyboard-bottom) + var(--app-mobile-input-dialog-keyboard-gap))')
     })
 })
 

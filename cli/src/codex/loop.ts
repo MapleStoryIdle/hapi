@@ -41,6 +41,7 @@ interface LoopOptions {
     forkSessionId?: string;
     replayTranscriptHistoryOnStart?: boolean;
     onSessionReady?: (session: CodexSession) => void;
+    recoveryRequestId?: string;
 }
 
 export async function loop(opts: LoopOptions): Promise<void> {
@@ -65,7 +66,8 @@ export async function loop(opts: LoopOptions): Promise<void> {
         model: opts.model,
         modelReasoningEffort: opts.modelReasoningEffort,
         collaborationMode: opts.collaborationMode ?? 'default',
-        replayTranscriptHistoryOnStart: opts.replayTranscriptHistoryOnStart ?? false
+        replayTranscriptHistoryOnStart: opts.replayTranscriptHistoryOnStart ?? false,
+        recoveryRequestId: opts.recoveryRequestId
     });
 
     await runLocalRemoteSession({

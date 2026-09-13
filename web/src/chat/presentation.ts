@@ -1,5 +1,5 @@
 import type { AgentEvent } from '@/chat/types'
-import { isHttpForbiddenError } from '@hapi/protocol'
+import { isCodexAuthenticationError, isHttpForbiddenError } from '@hapi/protocol'
 
 function normalizeTimestamp(value: number): Date {
     const ms = value < 1_000_000_000_000 ? value * 1000 : value
@@ -130,6 +130,11 @@ export function isNetworkTaskStatus(event: AgentEvent): boolean {
     return NETWORK_TASK_FAILURE_PATTERNS.some((pattern) => message.includes(pattern))
 }
 
+export function isAuthenticationTaskStatus(event: AgentEvent): boolean {
+    return event.type === 'task-status'
+        && (event.code === 'authentication' || isCodexAuthenticationError(event.message))
+}
+
 function formatTaskStatusEvent(event: AgentEvent): EventPresentation {
     const record = event as Record<string, unknown>
     const status = typeof record.status === 'string' ? record.status : 'failed'
@@ -151,6 +156,9 @@ function formatTaskStatusEvent(event: AgentEvent): EventPresentation {
     }
     if (isForbiddenTaskStatus(event)) {
         return { icon: '⚠️', text: 'Request denied (HTTP 403)' }
+    }
+    if (isAuthenticationTaskStatus(event)) {
+        return { icon: '⚠️', text: 'Codex sign-in required' }
     }
     if (code === 'usage_limit') {
         const resetAtText = typeof record.resetAtText === 'string' ? record.resetAtText : ''

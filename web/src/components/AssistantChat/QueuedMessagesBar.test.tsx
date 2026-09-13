@@ -119,6 +119,11 @@ function createDeferred<T>() {
     return { promise, resolve, reject }
 }
 
+it('humanizes question reply XML before queue display and composer recovery', () => {
+    const xml = '<send_user_message_question_reply>[{"questionItemId":"q","question":"Continue?","answer":"Yes"}]</send_user_message_question_reply>'
+    expect(getQueuedMessagePreview(makeQueuedMessage('question', 1, null, xml)).text).toBe('Continue?\n• Yes')
+})
+
 /**
  * Unit tests for computeCanCancel — the race guard that prevents sending
  * DELETE before the hub has a row to delete (pre-server-echo scenario).

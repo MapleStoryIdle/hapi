@@ -29,6 +29,7 @@ import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken } from './runnerIdentity';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
+import { NativeControlRecoveryCoordinator } from '@/codex/nativeControlRecovery';
 
 export async function startRunner(options: { workspaceRoots?: string[] } = {}): Promise<void> {
   // We don't have cleanup function at the time of server construction
@@ -211,6 +212,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     let applyExternalCodexLifecycle: ((event: ExternalCodexLifecycleEvent) => void) | null = null;
     const pendingExternalCodexLifecycles: ExternalCodexLifecycleEvent[] = [];
     const pendingExternalCodexLifecycleKeys = new Set<string>();
+    const nativeControlRecovery = new NativeControlRecoveryCoordinator(join(configuration.happyHomeDir, 'native-codex-control-recovery.json'));
     const MAX_PENDING_EXTERNAL_CODEX_LIFECYCLES = 64;
     const formatSpawnError = (error: unknown): string => {
       if (error instanceof Error) {
@@ -604,6 +606,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             pidToAwaiter.delete(pid);
             pidToErrorAwaiter.delete(pid);
 
+            if (options.recoveryNoKill) {
+              // A recovery child may have already resumed the exact thread but
+              // lost the acknowledgement. Keep it alive and keep its durable
+              // claim pending; a retry must never spawn a second child.
+              logger.debug(`[RUNNER RUN] Recovery child webhook timeout for PID ${pid}; leaving process untouched`);
+              resolve({ type: 'error', errorMessage: buildWebhookFailureMessage('timeout') });
+              return;
+            }
             // Remove the tracked session entry so a late-arriving webhook
             // from this orphaned PID cannot be silently promoted into a
             // ghost session by onHappySessionWebhook().
@@ -737,6 +747,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       spawnSession,
       requestShutdown: () => requestShutdown('hapi-cli'),
       onHappySessionWebhook,
+      onCodexRecoveryReady: (input) => nativeControlRecovery.acceptReady(input) !== null,
+      onCodexRecoveryUnconfirmed: (input) => nativeControlRecovery.acceptUnconfirmed(input) !== null,
       onExternalCodexRequest,
       onExternalCodexLifecycle
     });
@@ -834,7 +846,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     apiMachine.setRPCHandlers({
       spawnSession,
       stopSession,
-      requestShutdown: () => requestShutdown('hapi-app')
+      requestShutdown: () => requestShutdown('hapi-app'),
+      recoverCodexControl: ({ threadId, recoveryRequestId, cwd }) => nativeControlRecovery.begin({
+        threadId,
+        recoveryRequestId,
+        cwd,
+        spawn: spawnSession
+      }),
+      getCodexRecovery: (threadId) => nativeControlRecovery.get(threadId)
     });
 
     // Connect to server
@@ -1171,6 +1190,9 @@ export function buildCliArgs(
     }
   }
   args.push('--hapi-starting-mode', 'remote', '--started-by', 'runner');
+  if (options.recoveryRequestId && agent === 'codex') {
+    args.push('--recover-control', options.recoveryRequestId);
+  }
   if (options.model) {
     args.push('--model', options.model);
   }

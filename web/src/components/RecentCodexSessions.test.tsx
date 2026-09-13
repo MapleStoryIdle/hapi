@@ -48,6 +48,8 @@ function render(ui: ReactElement) {
 function createApi() {
     return {
         getSessionGroups: vi.fn(async (): Promise<SessionGroupsResponse> => ({ groups: [], assignments: [] })),
+        getSessionLabels: vi.fn(async () => ({ labels: [] })),
+        setSessionLabel: vi.fn(async () => ({ ok: true as const })),
         getCodexSessions: vi.fn(async () => ({
             success: true as const,
             sessions: [{
@@ -116,6 +118,31 @@ function createManagedCodexSession(
 }
 
 describe('RecentCodexSessions', () => {
+    it('shows the label text in the card side slot with a stable color and opens its editor', async () => {
+        const api = createApi()
+        api.getSessionLabels = vi.fn(async () => ({
+            labels: [{
+                source: { type: 'native-codex' as const, machineId: 'machine-1', codexSessionId: 'codex-thread-1' },
+                label: '前端'
+            }]
+        }))
+        const view = render(<I18nProvider><RecentCodexSessions api={api} machineId="machine-1"
+            hapiSessions={[]} onOpen={vi.fn()} embedded hideHeader viewMode="kanban"
+        /></I18nProvider>)
+
+        const label = await screen.findByRole('button', { name: '前端' })
+        expect(label).toHaveAttribute('data-kanban-session-label')
+        expect(label.getAttribute('style')).toContain('color')
+        fireEvent.click(label)
+        expect(await screen.findByRole('dialog')).toHaveTextContent('Label')
+        expect(view.container.querySelector('[data-kanban-directory-row] [data-kanban-session-label]')).toBe(label)
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: '后端' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(api.setSessionLabel).toHaveBeenCalledWith({
+            type: 'native-codex', machineId: 'machine-1', codexSessionId: 'codex-thread-1'
+        }, '后端'))
+    })
+
     it('places custom groups after attention and pins but before recent dates without duplicate cards', () => {
         const now = Date.now()
         const native = (id: string, modifiedAt = now): CodexLocalSessionSummary => ({

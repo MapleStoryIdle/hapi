@@ -60,7 +60,22 @@ describe('monitor store', () => {
             expect(store.monitors.acceptWebhook(monitor, { ...event, eventId: '2' }).created).toBe(false)
             const detail = store.monitors.detail(created.id, 'a')!
             expect(detail.incidents).toHaveLength(1)
-            expect(detail.buckets[0].total).toBe(2)
+            // Every valid call is counted, even when its event is deduplicated.
+            expect(detail.buckets[0].total).toBe(3)
+            expect(detail.callStats).toMatchObject({ total: 3, dispatched: 1, deferred: 1, duplicate: 1 })
+            expect(detail.activities.map(activity => activity.outcome)).toEqual(['deferred', 'duplicate', 'dispatched'])
+            const deferred = detail.activities.find(activity => activity.outcome === 'deferred')!
+            expect(store.monitors.retriggerActivity(monitor, deferred.id)).toBeNull()
+            expect(store.monitors.transition(first.incidentId, 'queued', 'closed')).toBe(true)
+            const retriggered = store.monitors.retriggerActivity(monitor, deferred.id)!
+            expect(retriggered.created).toBe(true)
+            expect(store.monitors.activities(created.id).find(activity => activity.id === deferred.id)?.outcome).toBe('dispatched')
+            expect(store.monitors.transition(retriggered.incidentId, 'queued', 'completed')).toBe(true)
+            const afterCompletion = store.monitors.acceptWebhook(monitor, { ...event, eventId: '3' })
+            expect(afterCompletion.created).toBe(false)
+            expect(store.monitors.openForMonitor(created.id)?.state).toBe('completed')
+            expect(store.monitors.transition(retriggered.incidentId, 'completed', 'closed')).toBe(true)
+            expect(store.monitors.retriggerActivity(monitor, store.monitors.activities(created.id).find(activity => activity.summary === 'Failure' && activity.outcome === 'deferred')!.id)?.created).toBe(true)
             expect(JSON.stringify(detail)).not.toContain(created.token!)
             expect(detail.incidents[0]).not.toHaveProperty('config')
             const token = store.monitors.rotateToken(created.id, 'a')
@@ -143,5 +158,20 @@ describe('monitor store', () => {
                 expect(migrated.push.getBarkKey('a')).toBe('TEST_DEVICE_KEY')
             } finally { migrated.close() }
         } finally { rmSync(dir, { recursive: true, force: true }) }
+    })
+    it('migrates V25 with monitor activity history support', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'shapi-monitor-v25-'))
+        const path = join(dir, 'test.db')
+        let store = new Store(path)
+        try {
+            const rule = store.monitors.create('a', config())
+            store.close()
+            const db = new Database(path)
+            db.exec('DROP TABLE monitor_events; PRAGMA user_version=25;')
+            db.close()
+            store = new Store(path)
+            expect(store.monitors.get(rule.id, 'a')?.config.name).toBe('API')
+            expect(store.monitors.detail(rule.id, 'a')?.activities).toEqual([])
+        } finally { store.close(); rmSync(dir, { recursive: true, force: true }) }
     })
 })

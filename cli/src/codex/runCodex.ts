@@ -35,6 +35,7 @@ export async function runCodex(opts: {
     serviceTier?: string;
     collaborationMode?: EnhancedMode['collaborationMode'];
     existingSessionId?: string;
+    recoveryRequestId?: string;
     workingDirectory?: string;
 }): Promise<void> {
     const workingDirectory = opts.workingDirectory ?? getInvokedCwd();
@@ -415,6 +416,7 @@ export async function runCodex(opts: {
             resumeSessionId: opts.resumeSessionId,
             forkSessionId: opts.forkSessionId,
             replayTranscriptHistoryOnStart,
+            recoveryRequestId: opts.recoveryRequestId,
             onModeChange: createModeChangeHandler(session),
             onSessionReady: (instance) => {
                 sessionWrapperRef.current = instance;

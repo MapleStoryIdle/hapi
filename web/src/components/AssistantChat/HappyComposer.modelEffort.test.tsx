@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     ModelEffortSettingsSection,
     extractLeadingSkillForComposer,
+    formatCompactModelLabel,
     getComposerTextWithSelectedSkill
 } from './HappyComposer';
 
@@ -59,5 +60,14 @@ describe('composer selected skill helpers', () => {
             skill: { name: 'grill-me', description: 'Interview' },
             text: 'sharpen this'
         });
+    });
+});
+
+describe('compact composer model label', () => {
+    it('shows only the text after the final dash', () => {
+        expect(formatCompactModelLabel('gpt-5.6-sol')).toBe('sol');
+        expect(formatCompactModelLabel('5.6-Sol')).toBe('Sol');
+        expect(formatCompactModelLabel('provider-family-model')).toBe('model');
+        expect(formatCompactModelLabel('Composer 2.5')).toBe('Composer 2.5');
     });
 });

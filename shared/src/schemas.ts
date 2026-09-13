@@ -537,6 +537,9 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
     SessionEventBaseSchema.extend({
         type: z.literal('session-groups-updated')
     }),
+    SessionEventBaseSchema.extend({
+        type: z.literal('session-labels-updated')
+    }),
     SessionChangedSchema.extend({
         type: z.literal('session-added'),
         data: z.unknown().optional()

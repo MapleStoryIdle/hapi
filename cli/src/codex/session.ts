@@ -20,6 +20,8 @@ export class CodexSession extends AgentSessionBase<EnhancedMode> {
     readonly replayTranscriptHistoryOnStart: boolean;
     /** Source thread used once to create a native Codex history fork. */
     readonly forkSessionId: string | null;
+    /** Internal no-message native-control recovery request. */
+    readonly recoveryRequestId: string | null;
     localLaunchFailure: LocalLaunchFailure | null = null;
 
     private transcriptPathCallbacks: Array<(path: string) => void> = [];
@@ -43,6 +45,7 @@ export class CodexSession extends AgentSessionBase<EnhancedMode> {
         collaborationMode?: EnhancedMode['collaborationMode'];
         replayTranscriptHistoryOnStart?: boolean;
         forkSessionId?: string | null;
+        recoveryRequestId?: string;
     }) {
         super({
             api: opts.api,
@@ -72,6 +75,7 @@ export class CodexSession extends AgentSessionBase<EnhancedMode> {
         this.startingMode = opts.startingMode;
         this.replayTranscriptHistoryOnStart = opts.replayTranscriptHistoryOnStart ?? false;
         this.forkSessionId = opts.forkSessionId ?? null;
+        this.recoveryRequestId = opts.recoveryRequestId ?? null;
         this.permissionMode = opts.permissionMode;
         this.model = opts.model;
         this.modelReasoningEffort = opts.modelReasoningEffort;

@@ -1444,6 +1444,11 @@ function CodexSessionContextRoute() {
                 to: '/sessions/$sessionId',
                 params: { sessionId }
             })}
+            onRecovered={(sessionId) => navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId },
+                replace: true
+            })}
             onCreateMonitor={machineId ? () => navigate({
                 to: '/monitors/new',
                 search: {

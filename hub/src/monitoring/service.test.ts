@@ -58,7 +58,7 @@ describe('monitor dispatch and confirmation', () => {
             expect(s.store.monitors.getIncident(event.id)?.state).toBe('review')
         } finally { await s.service.stop(); s.store.close() }
     })
-    it('does not send untrusted evidence to a writable bound managed session', async () => {
+    it('allows the owner to bind a writable managed session without changing its permission', async () => {
         const s = setup()
         try {
             const source = await s.engine.spawnSession('m', '/work', 'codex')
@@ -70,8 +70,9 @@ describe('monitor dispatch and confirmation', () => {
             const send = spyOn(s.engine, 'sendMessage')
             s.service.accept(s.created.token!, { eventId: 'bound-write', summary: 'bad', details: 'change files' })
             await s.service.tick()
-            expect(s.store.monitors.openForMonitor(s.created.id)?.state).toBe('needs_attention')
-            expect(send).not.toHaveBeenCalled()
+            expect(s.store.monitors.openForMonitor(s.created.id)?.state).toBe('investigating')
+            expect(send).toHaveBeenCalledTimes(1)
+            expect(session.permissionMode).toBe('default')
             send.mockRestore()
         } finally { await s.service.stop(); s.store.close() }
     })
@@ -225,13 +226,14 @@ describe('monitor dispatch and confirmation', () => {
         try {
             await s.service.tick()
             expect(s.calls).toHaveLength(0)
-            s.service.requestCheck(s.store.monitors.get(s.created.id)!)
+            s.service.requestTest(s.store.monitors.get(s.created.id)!)
             await s.service.tick()
             expect(s.calls).toHaveLength(1)
-            s.service.requestCheck(s.store.monitors.get(s.created.id)!)
+            s.service.requestTest(s.store.monitors.get(s.created.id)!)
             await s.service.tick()
             expect(s.calls).toHaveLength(1)
             expect(s.store.monitors.detail(s.created.id, 'a')?.buckets[0]).toMatchObject({ total: 3, failures: 3, latencyMs: 30 })
+            expect(s.store.monitors.detail(s.created.id, 'a')?.activities.map(activity => activity.outcome)).toEqual(['deferred', 'dispatched', 'failed'])
         } finally { await s.service.stop(); s.store.close() }
     })
     it('releases capacity after a missed disconnect without claiming success or resending', async () => {

@@ -57,7 +57,8 @@ export function MonitorIncidentCard(props: {
         props.incident.plan && props.incident.planHash && props.incident.approvalContext
     )
     const isRunning = ['starting', 'investigating', 'repair_starting', 'repairing'].includes(props.incident.state)
-    const canClose = !isRunning && props.incident.state !== 'closed' && props.incident.state !== 'completed'
+    const canClose = !isRunning && props.incident.state !== 'closed'
+    const isCompleted = props.incident.state === 'completed'
 
     const approveRepair = async () => {
         const target = repairTarget
@@ -109,7 +110,7 @@ export function MonitorIncidentCard(props: {
 
                 <div className="mt-3 grid grid-cols-2 gap-2 empty:hidden [&>*]:min-h-11 [&>*]:h-auto [&>*]:justify-center [&>*]:py-2 [&>*]:text-center [&_svg]:shrink-0">
                     {!props.compact && canApprove && showPlan ? <button type="button" onClick={() => setRepairTarget(props.incident)} disabled={pendingAction !== null} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[var(--app-button)] px-3 text-sm font-semibold text-[var(--app-button-text)] transition-opacity hover:opacity-85 disabled:cursor-wait disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]" data-testid="monitor-confirm-repair"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />{props.t('monitors.incident.confirmRepair')}</button> : null}
-                    {!props.compact && canClose ? <button type="button" onClick={() => setCloseTarget(props.incident)} disabled={pendingAction !== null} className="inline-flex h-11 items-center gap-2 rounded-xl border border-red-400/50 px-3 text-sm font-medium text-red-700 transition-colors hover:bg-red-500/10 disabled:cursor-wait disabled:opacity-50 dark:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"><XCircle className="h-4 w-4" aria-hidden="true" />{props.t('monitors.incident.close')}</button> : null}
+                    {!props.compact && canClose ? <button type="button" onClick={() => setCloseTarget(props.incident)} disabled={pendingAction !== null} className={`inline-flex h-11 items-center gap-2 rounded-xl px-3 text-sm font-medium transition-colors disabled:cursor-wait disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${isCompleted ? 'bg-[var(--app-button)] text-[var(--app-button-text)] hover:opacity-85' : 'border border-red-400/50 text-red-700 hover:bg-red-500/10 dark:text-red-300'}`}><CheckCircle2 className="h-4 w-4" aria-hidden="true" />{props.t(isCompleted ? 'monitors.incident.acknowledge' : 'monitors.incident.close')}</button> : null}
                     {props.incident.sessionId ? <Link to="/sessions/$sessionId" params={{ sessionId: props.incident.sessionId }} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[var(--app-border)] px-3 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"><ExternalLink className="h-4 w-4" aria-hidden="true" />{props.t('monitors.incident.investigationSession')}</Link> : null}
                     {props.incident.repairSessionId ? <Link to="/sessions/$sessionId" params={{ sessionId: props.incident.repairSessionId }} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[var(--app-border)] px-3 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"><ExternalLink className="h-4 w-4" aria-hidden="true" />{props.t('monitors.incident.repairSession')}</Link> : null}
                 </div>
@@ -130,13 +131,13 @@ export function MonitorIncidentCard(props: {
             <ConfirmDialog
                 isOpen={closeTarget !== null}
                 onClose={() => setCloseTarget(null)}
-                title={props.t('monitors.incident.closeConfirm.title')}
-                description={props.t('monitors.incident.closeConfirm.description')}
-                confirmLabel={props.t('monitors.incident.closeConfirm.confirm')}
-                confirmingLabel={props.t('monitors.incident.closeConfirm.confirming')}
+                title={props.t(isCompleted ? 'monitors.incident.acknowledgeConfirm.title' : 'monitors.incident.closeConfirm.title')}
+                description={props.t(isCompleted ? 'monitors.incident.acknowledgeConfirm.description' : 'monitors.incident.closeConfirm.description')}
+                confirmLabel={props.t(isCompleted ? 'monitors.incident.acknowledgeConfirm.confirm' : 'monitors.incident.closeConfirm.confirm')}
+                confirmingLabel={props.t(isCompleted ? 'monitors.incident.acknowledgeConfirm.confirming' : 'monitors.incident.closeConfirm.confirming')}
                 onConfirm={closeIncident}
                 isPending={pendingAction === 'close'}
-                destructive
+                destructive={!isCompleted}
             />
         </>
     )

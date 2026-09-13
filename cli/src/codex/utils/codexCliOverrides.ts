@@ -1,6 +1,9 @@
+import type { ApprovalPolicy, ApprovalsReviewer } from '../appServerTypes';
+
 export type CodexCliOverrides = {
     sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
-    approvalPolicy?: 'untrusted' | 'on-failure' | 'on-request' | 'never';
+    approvalPolicy?: ApprovalPolicy;
+    approvalsReviewer?: ApprovalsReviewer;
 };
 
 const SANDBOX_VALUES = new Set<CodexCliOverrides['sandbox']>([
@@ -11,7 +14,6 @@ const SANDBOX_VALUES = new Set<CodexCliOverrides['sandbox']>([
 
 const APPROVAL_POLICY_VALUES = new Set<CodexCliOverrides['approvalPolicy']>([
     'untrusted',
-    'on-failure',
     'on-request',
     'never'
 ]);
@@ -30,6 +32,13 @@ export function parseCodexCliOverrides(args?: string[]): CodexCliOverrides {
 
         if (arg === '--full-auto') {
             overrides.approvalPolicy = 'on-request';
+            overrides.sandbox = 'workspace-write';
+            continue;
+        }
+
+        if (arg === '--approve-for-me') {
+            overrides.approvalPolicy = 'on-request';
+            overrides.approvalsReviewer = 'auto_review';
             overrides.sandbox = 'workspace-write';
             continue;
         }
@@ -84,7 +93,7 @@ export function parseCodexCliOverrides(args?: string[]): CodexCliOverrides {
 }
 
 export function hasCodexCliOverrides(overrides?: CodexCliOverrides): boolean {
-    return Boolean(overrides?.sandbox || overrides?.approvalPolicy);
+    return Boolean(overrides?.sandbox || overrides?.approvalPolicy || overrides?.approvalsReviewer);
 }
 
 export function stripCodexCliOverrides(args?: string[]): string[] {
@@ -103,6 +112,7 @@ export function stripCodexCliOverrides(args?: string[]): string[] {
 
         if (
             arg === '--full-auto'
+            || arg === '--approve-for-me'
             || arg === '--yolo'
             || arg === '--dangerously-bypass-approvals-and-sandbox'
             || arg.startsWith('--sandbox=')

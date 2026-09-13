@@ -63,7 +63,11 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className={`max-w-sm ${contentClassName ?? ''}`}>
+            <DialogContent
+                className={`max-w-sm ${contentClassName ?? ''}`}
+                overlayStyle={{ zIndex: 200 }}
+                style={{ zIndex: 201 }}
+            >
                 <DialogHeader>
                     <DialogTitle>{title}</DialogTitle>
                     {typeof description === 'string'

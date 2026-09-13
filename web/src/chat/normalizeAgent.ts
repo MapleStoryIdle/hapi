@@ -99,7 +99,14 @@ function normalizeCodexTokenUsage(value: unknown, data?: Record<string, unknown>
             ?? usageSource.contextTokens
             ?? usageSource.context_tokens
         ) ?? inputTokens,
-        context_window: asNumber(info.modelContextWindow ?? info.model_context_window) ?? undefined,
+        context_window: asNumber(
+            info.modelContextWindow
+            ?? info.model_context_window
+            ?? info.contextWindow
+            ?? info.context_window
+            ?? usageSource.contextWindow
+            ?? usageSource.context_window
+        ) ?? undefined,
         thread_id: asString(
             data?.thread_id
             ?? data?.threadId
@@ -626,6 +633,7 @@ export function normalizeAgentRecord(
 
         if ((data.type === 'message' || data.type === 'message-snapshot') && typeof data.message === 'string') {
             const final = data.final === true || data.completed === true
+            const usage = normalizeCodexTokenUsage(data.usage)
             const review = parseCodexReviewMessage(data.message)
             if (review) {
                 return {
@@ -635,7 +643,8 @@ export function normalizeAgentRecord(
                     role: 'agent',
                     isSidechain: false,
                     content: [{ type: 'codex-review', review, uuid: messageId, parentUUID: null }],
-                    meta
+                    meta,
+                    usage: usage ?? undefined
                 }
             }
             return {
@@ -652,7 +661,8 @@ export function normalizeAgentRecord(
                     final: final ? true : undefined,
                     parentUUID: null
                 }],
-                meta
+                meta,
+                usage: usage ?? undefined
             }
         }
 

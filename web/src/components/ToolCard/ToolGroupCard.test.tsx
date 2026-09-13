@@ -123,6 +123,7 @@ function renderCard(block: ToolGroupBlock, options?: {
 
 describe('ToolGroupCard', () => {
     afterEach(() => {
+        vi.useRealTimers()
         cleanup()
     })
 
@@ -1379,6 +1380,7 @@ describe('ToolGroupCard', () => {
     })
 
     it('automatically closes an untouched compact group when processing completes', async () => {
+        vi.useFakeTimers()
         const startedAt = Date.now() - 10_000
 
         function makeActiveGroup(active: boolean): ToolGroupBlock {
@@ -1453,16 +1455,89 @@ describe('ToolGroupCard', () => {
         let toggle = within(view.container)
             .getAllByRole('button', { name: /bun test/i })
             .find((button) => button.hasAttribute('aria-expanded'))!
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByText('bun test')).not.toBeInTheDocument()
+
+        act(() => vi.advanceTimersByTime(2_999))
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+        act(() => vi.advanceTimersByTime(1))
+        toggle = within(view.container)
+            .getAllByRole('button', { name: /bun test/i })
+            .find((button) => button.hasAttribute('aria-expanded'))!
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
         expect(screen.getByText('bun test')).toBeInTheDocument()
 
         fireEvent.click(screen.getByRole('button', { name: 'finish' }))
 
-        await waitFor(() => {
-            toggle = within(view.container).getByRole('button', { name: /processed/i })
-            expect(toggle).toHaveAttribute('aria-expanded', 'false')
-        })
+        toggle = within(view.container).getByRole('button', { name: /processed/i })
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByText('bun test')).not.toBeInTheDocument()
+    })
+
+    it('never flashes open when processing finishes within three seconds', () => {
+        vi.useFakeTimers()
+        const startedAt = Date.now()
+
+        function Harness() {
+            const [active, setActive] = useState(true)
+            const [expansionStates, setExpansionStates] = useState<ToolGroupExpansionStates>({})
+            const tool = makeToolBlock('quick-command', 'Bash', { command: 'pwd' }, {
+                state: active ? 'running' : 'completed',
+                createdAt: startedAt,
+                startedAt,
+                completedAt: active ? null : startedAt + 500,
+            })
+            const block = makeGroup({
+                id: 'tool-group:quick-command',
+                tools: [tool],
+                defaultOpen: active,
+                forceCompact: true,
+                forceGenericCompactTitle: true,
+                summary: {
+                    ...makeGroup().summary,
+                    totalTools: 1,
+                    runningCount: active ? 1 : 0,
+                    commandTargets: ['pwd'],
+                },
+            })
+            return (
+                <I18nProvider>
+                    <HappyChatProvider value={{
+                        api: {} as never,
+                        sessionId: 'session-1',
+                        metadata: { path: 'repo', host: 'local' },
+                        terminalToolDisplayMode: 'compact',
+                        disabled: false,
+                        onRefresh: vi.fn(),
+                        hasMoreMessages: false,
+                        isLoadingMoreMessages: false,
+                        loadOlderMessagesPreservingScroll: vi.fn(async () => false),
+                        toolGroupExpansionStates: expansionStates,
+                        setToolGroupExpansionState: (key, state) => {
+                            setExpansionStates((current) => ({ ...current, [key]: state }))
+                        },
+                    }}>
+                        <button type="button" onClick={() => setActive(false)}>finish quick</button>
+                        <ToolGroupCard block={block} metadata={{ path: 'repo', host: 'local' }} />
+                    </HappyChatProvider>
+                </I18nProvider>
+            )
+        }
+
+        const view = render(<Harness />)
+        let toggle = within(view.container)
+            .getAllByRole('button', { name: /pwd/i })
+            .find((button) => button.hasAttribute('aria-expanded'))!
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+        act(() => vi.advanceTimersByTime(1_500))
+        fireEvent.click(screen.getByRole('button', { name: 'finish quick' }))
+        act(() => vi.advanceTimersByTime(1_500))
+
+        toggle = within(view.container).getByRole('button', { name: /processed/i })
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByText('pwd')).not.toBeInTheDocument()
     })
 
     it('auto-loads older history after expand when the group is incomplete', async () => {

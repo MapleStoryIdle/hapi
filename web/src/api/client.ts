@@ -2,6 +2,7 @@ import type { OpenLocalServiceRequest, OpenLocalServiceResponse } from '@hapi/pr
 import type { NativeCodexSessionControlAction, NativeCodexSessionControlResponse } from '@hapi/protocol/codexSessionControl'
 import type { Monitor, MonitorConfig, MonitorDetail, MonitorRequest } from '@hapi/protocol/monitoring'
 import type { SessionGroup, SessionGroupInput, SessionGroupSource, SessionGroupsResponse } from '@hapi/protocol/sessionGroups'
+import type { SessionLabelSource, SessionLabelsResponse } from '@hapi/protocol/sessionLabels'
 import type { SessionPinSource, SessionPinsResponse } from '@hapi/protocol/sessionPins'
 import type { KanbanOrder, KanbanOrderInput } from '@hapi/protocol/kanbanOrder'
 import type {
@@ -22,6 +23,7 @@ import type {
     CodexDesktopScriptResponse,
     CodexDesktopSyncRequest,
     CodexDesktopStatusResponse,
+    CodexControlRecoveryResponse,
     CodexCollaborationMode,
     FileSearchResponse,
     MachinesResponse,
@@ -95,7 +97,7 @@ type MonitorsResponse = { monitors: Monitor[] }
 type MonitorResponse = { monitor: MonitorDetail }
 type CreateMonitorResponse = MonitorResponse & { token: string | null }
 type RotateMonitorTokenResponse = { token: string }
-type MonitorAcceptedResponse = { accepted: true }
+type MonitorAcceptedResponse = { accepted: true; deferred?: boolean }
 type ParseMonitorCurlResponse = { request: MonitorRequest }
 type MonitorSessionTargetResponse = { config: MonitorConfig }
 
@@ -515,6 +517,14 @@ export class ApiClient {
         })
     }
 
+    async recoverCodexSessionControl(sessionId: string, payload: { machineId: string; recoveryRequestId: string; expectedVersion: CodexLocalSessionSnapshotVersion }): Promise<CodexControlRecoveryResponse> {
+        return await this.request<CodexControlRecoveryResponse>(`/api/codex/sessions/${encodeURIComponent(sessionId)}/recover-control`, { method: 'POST', body: JSON.stringify(payload) })
+    }
+
+    async getCodexSessionControlRecovery(sessionId: string, machineId: string): Promise<CodexControlRecoveryResponse> {
+        return await this.request<CodexControlRecoveryResponse>(`/api/codex/sessions/${encodeURIComponent(sessionId)}/recover-control?machineId=${encodeURIComponent(machineId)}`)
+    }
+
     async getCodexDesktopStatus(): Promise<CodexDesktopStatusResponse> {
         return await this.request<CodexDesktopStatusResponse>('/api/codex/status')
     }
@@ -804,6 +814,14 @@ export class ApiClient {
         return this.request('/api/session-groups/assignment', { method: 'PUT', body: JSON.stringify({ source, groupId }) })
     }
 
+    async getSessionLabels(): Promise<SessionLabelsResponse> {
+        return this.request('/api/session-labels')
+    }
+
+    async setSessionLabel(source: SessionLabelSource, label: string | null): Promise<{ ok: true }> {
+        return this.request('/api/session-labels', { method: 'PUT', body: JSON.stringify({ source, label }) })
+    }
+
     async getMonitors(): Promise<MonitorsResponse> {
         return await this.request<MonitorsResponse>('/api/monitors')
     }
@@ -859,6 +877,13 @@ export class ApiClient {
             method: 'POST',
             body: JSON.stringify({})
         })
+    }
+
+    async retriggerMonitorActivity(monitorId: string, activityId: string): Promise<MonitorAcceptedResponse> {
+        return await this.request<MonitorAcceptedResponse>(
+            `/api/monitors/${encodeURIComponent(monitorId)}/activities/${encodeURIComponent(activityId)}/retrigger`,
+            { method: 'POST', body: JSON.stringify({}) }
+        )
     }
 
     async approveMonitorIncident(

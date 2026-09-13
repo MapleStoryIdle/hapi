@@ -221,6 +221,10 @@ export class CodexAppServerClient extends JsonLineParser {
         return response as ThreadResumeResponse;
     }
 
+    async readThread(params: { threadId: string; includeTurns?: boolean }, options?: { signal?: AbortSignal }): Promise<unknown> {
+        return await this.sendRequest('thread/read', params, { signal: options?.signal, timeoutMs: 30_000 });
+    }
+
     async forkThread(params: ThreadForkParams, options?: { signal?: AbortSignal }): Promise<ThreadForkResponse> {
         const response = await this.sendRequest('thread/fork', params, {
             signal: options?.signal,

@@ -10,6 +10,7 @@
 import { AGENT_MESSAGE_PAYLOAD_TYPE, isKnownFlavor, MAX_UPLOAD_BYTES, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { NativeCodexSessionControlAction, NativeCodexSessionControlResponse } from '@hapi/protocol/codexTranscript'
+import type { RecoverCodexLocalSessionControlRequest, CodexLocalSessionRecoveryResponse } from '@hapi/protocol/codexTranscript'
 import type { LocalServiceTunnelRequest } from '@hapi/protocol/localServices'
 import type { LocalServiceTunnel } from '../localServices/socketTransport'
 import type {
@@ -1924,6 +1925,14 @@ export class SyncEngine {
         sessionId: string
     ): Promise<RpcCodexLocalSessionStatusResponse> {
         return await this.rpcGateway.getCodexLocalSessionStatus(machineId, sessionId)
+    }
+
+    async recoverCodexLocalSessionControl(machineId: string, request: RecoverCodexLocalSessionControlRequest): Promise<CodexLocalSessionRecoveryResponse> {
+        return await this.rpcGateway.recoverCodexLocalSessionControl(machineId, request)
+    }
+
+    async getCodexLocalSessionRecovery(machineId: string, sessionId: string): Promise<CodexLocalSessionRecoveryResponse> {
+        return await this.rpcGateway.getCodexLocalSessionRecovery(machineId, sessionId)
     }
 
     async renameCodexLocalSession(machineId: string, sessionId: string, name: string): Promise<RenameNativeCodexSessionResponse> {

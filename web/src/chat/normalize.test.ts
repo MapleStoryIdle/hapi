@@ -878,6 +878,36 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('keeps turn usage attached to a native Codex final reply', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: 'Done',
+                    final: true,
+                    usage: {
+                        input_tokens: 80,
+                        output_tokens: 12,
+                        cache_read_input_tokens: 40,
+                        context_window: 258_400
+                    }
+                }
+            }
+        })
+
+        expect(normalizeDecryptedMessage(message)).toMatchObject({
+            role: 'agent',
+            usage: {
+                input_tokens: 80,
+                output_tokens: 12,
+                cache_read_input_tokens: 40,
+                context_window: 258_400
+            }
+        })
+    })
+
     it('normalizes token_count payloads with explicit contextTokens', () => {
         const message = makeMessage({
             role: 'agent',

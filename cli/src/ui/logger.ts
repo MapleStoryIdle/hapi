@@ -44,6 +44,33 @@ function getSessionLogPath(): string {
   return join(configuration.logsDir, filename)
 }
 
+export function serializeLogValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value instanceof Error) {
+    if (seen.has(value)) return '[Circular Error]'
+    seen.add(value)
+    return {
+      name: value.name,
+      message: value.message,
+      ...(value.stack ? { stack: value.stack } : {}),
+      ...(value.cause !== undefined ? { cause: serializeLogValue(value.cause, seen) } : {})
+    }
+  }
+  if (typeof value === 'bigint') return value.toString()
+  if (!value || typeof value !== 'object') return value
+  if (seen.has(value)) return '[Circular]'
+  seen.add(value)
+  if (Array.isArray(value)) return value.map(item => serializeLogValue(item, seen))
+  if (value instanceof Date) return value.toISOString()
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, serializeLogValue(entry, seen)])
+  )
+}
+
+function formatLogArgument(value: unknown): string {
+  if (typeof value === 'string') return value
+  return JSON.stringify(serializeLogValue(value)) ?? String(value)
+}
+
 class Logger {
   private dangerouslyUnencryptedServerLoggingUrl: string | undefined
 
@@ -187,9 +214,7 @@ class Logger {
         body: JSON.stringify({
           timestamp: new Date().toISOString(),
           level,
-          message: `${message} ${args.map(a => 
-            typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)
-          ).join(' ')}`,
+          message: `${message} ${args.map(a => JSON.stringify(serializeLogValue(a), null, 2) ?? String(a)).join(' ')}`,
           source: 'cli',
           platform: process.platform
         })
@@ -200,9 +225,7 @@ class Logger {
   }
 
   private logToFile(prefix: string, message: string, ...args: unknown[]): void {
-    const logLine = `${prefix} ${message} ${args.map(arg => 
-      typeof arg === 'string' ? arg : JSON.stringify(arg)
-    ).join(' ')}\n`
+    const logLine = `${prefix} ${message} ${args.map(formatLogArgument).join(' ')}\n`
     
     // Send to remote server if configured
     if (this.dangerouslyUnencryptedServerLoggingUrl) {

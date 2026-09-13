@@ -217,3 +217,9 @@ export function formatQuestionAnswerText(answer: QuestionAnswerPresentation): st
         ...item.answers.map((value) => `• ${value}`)
     ].filter((value): value is string => Boolean(value && value.trim())).join('\n')).join('\n\n')
 }
+
+/** Convert only a complete native question-reply envelope into readable text. */
+export function formatUserMessageForDisplay(text: string): string {
+    const answer = parseUserMessageQuestionReply(text)
+    return answer ? formatQuestionAnswerText(answer) : text
+}

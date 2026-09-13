@@ -84,6 +84,9 @@ describe('native question recovery', () => {
         fireEvent.click(screen.getByRole('radio', { name: 'Yes' }))
         await waitFor(() => expect(screen.getByText('Answer saved for delivery')).toBeInTheDocument())
         expect(screen.getByText('Yes')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'View complete options' }))
+        expect(screen.getByTestId('native-question-history-drawer')).toBeInTheDocument()
+        expect(screen.getByText('No')).toBeInTheDocument()
         expect(sendCodexSessionMessage).toHaveBeenCalledWith('s1', expect.objectContaining({ machineId: 'm1', clientMessageId: 'native-answer:call-1', message: expect.stringContaining('send_user_message_question_reply') }))
     })
     it('replaces an open async drawer with the desktop answer and never reopens on remount', () => {

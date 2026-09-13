@@ -45,6 +45,7 @@ describe('appServerConfig', () => {
 
         expect(params.sandbox).toBe('workspace-write');
         expect(params.approvalPolicy).toBe('on-request');
+        expect(params.approvalsReviewer).toBe('user');
     });
 
     it('passes MCP per-tool approval config through thread config', () => {
@@ -90,7 +91,7 @@ describe('appServerConfig', () => {
         expect(params.approvalPolicy).toBe('never');
     });
 
-    it('keeps on-failure approvals for safe-yolo threads', () => {
+    it('uses automatic on-request approvals for safe-yolo threads', () => {
         const params = buildThreadStartParams({
             cwd: '/workspace/project',
             mode: { permissionMode: 'safe-yolo', collaborationMode: 'default' },
@@ -98,7 +99,8 @@ describe('appServerConfig', () => {
         });
 
         expect(params.sandbox).toBe('workspace-write');
-        expect(params.approvalPolicy).toBe('on-failure');
+        expect(params.approvalPolicy).toBe('on-request');
+        expect(params.approvalsReviewer).toBe('auto_review');
     });
 
     it('concatenates custom developer instructions after base instructions', () => {
@@ -425,7 +427,8 @@ describe('appServerConfig', () => {
             cliOverrides: { sandbox: 'read-only', approvalPolicy: 'never' }
         });
 
-        expect(params.approvalPolicy).toBe('on-failure');
+        expect(params.approvalPolicy).toBe('on-request');
+        expect(params.approvalsReviewer).toBe('auto_review');
         expect(params.sandboxPolicy).toEqual({ type: 'workspaceWrite' });
         expect(params.collaborationMode).toEqual({
             mode: 'default',

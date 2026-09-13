@@ -13,6 +13,7 @@ import { MonitorStore, MONITOR_SCHEMA } from './monitors'
 import { SessionGroupStore, SESSION_GROUP_SCHEMA } from './sessionGroups'
 import { SessionPinStore, SESSION_PIN_SCHEMA } from './sessionPins'
 import { KanbanOrderStore, KANBAN_ORDER_SCHEMA } from './kanbanOrder'
+import { SessionLabelStore, SESSION_LABEL_SCHEMA } from './sessionLabels'
 
 export type {
     FeedbackMetadata,
@@ -35,7 +36,7 @@ export { UserStore } from './userStore'
 export { ArtifactStore } from './artifacts'
 export { KanbanTaskStore } from './kanbanTasks'
 
-const SCHEMA_VERSION: number = 25
+const SCHEMA_VERSION: number = 27
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -45,9 +46,10 @@ const REQUIRED_TABLES = [
     'artifacts',
     'kanban_tasks',
     'session_groups', 'session_group_assignments',
+    'session_labels',
     'session_pins',
     'kanban_order',
-    'monitors', 'monitor_buckets', 'monitor_incidents', 'monitor_receipts', 'bark_settings'
+    'monitors', 'monitor_buckets', 'monitor_incidents', 'monitor_receipts', 'monitor_events', 'bark_settings'
 ] as const
 
 export class Store {
@@ -66,6 +68,7 @@ export class Store {
     readonly sessionGroups: SessionGroupStore
     readonly sessionPins: SessionPinStore
     readonly kanbanOrder: KanbanOrderStore
+    readonly sessionLabels: SessionLabelStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -122,6 +125,7 @@ export class Store {
         this.sessionGroups = new SessionGroupStore(this.db)
         this.sessionPins = new SessionPinStore(this.db)
         this.kanbanOrder = new KanbanOrderStore(this.db)
+        this.sessionLabels = new SessionLabelStore(this.db)
     }
 
     close(): void {
@@ -148,6 +152,8 @@ export class Store {
             22: () => this.db.exec(SESSION_GROUP_SCHEMA),
             23: () => this.db.exec(SESSION_PIN_SCHEMA),
             24: () => this.db.exec(KANBAN_ORDER_SCHEMA),
+            25: () => this.db.exec(MONITOR_SCHEMA),
+            26: () => this.db.exec(SESSION_LABEL_SCHEMA),
             1: () => this.migrateFromV1ToV2(legacy),
             2: () => this.migrateFromV2ToV3(),
             3: () => this.migrateFromV3ToV4(),
@@ -221,6 +227,7 @@ export class Store {
         this.db.exec(SESSION_GROUP_SCHEMA)
         this.db.exec(SESSION_PIN_SCHEMA)
         this.db.exec(KANBAN_ORDER_SCHEMA)
+        this.db.exec(SESSION_LABEL_SCHEMA)
         this.db.exec(BARK_SCHEMA)
         this.db.exec(MONITOR_SCHEMA)
         this.db.exec(`

@@ -19,7 +19,9 @@ import type {
     NativeKanbanFeedbackReviewGuard,
     NativeCodexSessionControlAction,
     NativeCodexSessionControlResponse,
-    SendCodexLocalSessionMessageRpcResponse
+    SendCodexLocalSessionMessageRpcResponse,
+    RecoverCodexLocalSessionControlRequest,
+    CodexLocalSessionRecoveryResponse
 } from '@hapi/protocol/codexTranscript'
 import type {
     BinaryFileReadRequest,
@@ -137,6 +139,7 @@ export type RpcCodexLocalSessionStatusResponse = CodexLocalSessionStatusRpcRespo
 export type RpcArchiveCodexLocalSessionResponse = ArchiveCodexLocalSessionRpcResponse
 export type RpcDiscardCodexLocalSessionMessageResponse = DiscardCodexLocalSessionMessageRpcResponse
 export type RpcSendCodexLocalSessionMessageResponse = SendCodexLocalSessionMessageRpcResponse
+export type RpcCodexLocalSessionRecoveryResponse = CodexLocalSessionRecoveryResponse
 export type RpcNativeKanbanFeedbackStageResponse = NativeKanbanFeedbackStageResponse
 export type RpcNativeKanbanFeedbackDeleteResponse = NativeKanbanFeedbackDeleteResponse
 export type RpcNativeCodexAttachmentStageResponse = NativeCodexAttachmentStageResponse
@@ -367,6 +370,14 @@ export class RpcGateway {
         return await this.machineRpc(machineId, RPC_METHODS.GetCodexLocalSessionStatus, {
             sessionId
         }) as RpcCodexLocalSessionStatusResponse
+    }
+
+    async recoverCodexLocalSessionControl(machineId: string, request: RecoverCodexLocalSessionControlRequest): Promise<RpcCodexLocalSessionRecoveryResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.RecoverCodexLocalSessionControl, request) as RpcCodexLocalSessionRecoveryResponse
+    }
+
+    async getCodexLocalSessionRecovery(machineId: string, sessionId: string): Promise<RpcCodexLocalSessionRecoveryResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.GetCodexLocalSessionRecovery, { sessionId }) as RpcCodexLocalSessionRecoveryResponse
     }
 
     async controlCodexLocalSession(

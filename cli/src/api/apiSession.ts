@@ -617,7 +617,7 @@ export class ApiSessionClient extends EventEmitter {
         type: 'task-status'
         status: 'retrying' | 'compacting' | 'compacted' | 'failed'
         source: 'codex'
-        code: 'system_error' | 'http_forbidden' | 'network_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown'
+        code: 'system_error' | 'authentication' | 'http_forbidden' | 'network_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown'
         message: string
         retryAttempt?: number
         maxRetries?: number

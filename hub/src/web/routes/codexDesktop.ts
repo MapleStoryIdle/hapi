@@ -167,6 +167,22 @@ type DirectCodexLocalSessionTarget = {
     message: string
 }
 
+type RecoverCodexControlRequest = {
+    machineId: string
+    recoveryRequestId: string
+    expectedVersion: { runnerEpoch: string; revision: number }
+}
+
+function parseRecoverCodexControlRequest(value: unknown): RecoverCodexControlRequest | null {
+    const record = asRecord(value)
+    const machineId = typeof record?.machineId === 'string' ? parseCodexRunnerMachineId(record.machineId) : null
+    const recoveryRequestId = typeof record?.recoveryRequestId === 'string' ? record.recoveryRequestId.trim() : ''
+    const version = asRecord(record?.expectedVersion)
+    const revision = version?.revision
+    if (!machineId || !/^[a-zA-Z0-9:._-]{1,200}$/.test(recoveryRequestId) || typeof version?.runnerEpoch !== 'string' || !version.runnerEpoch || typeof revision !== 'number' || !Number.isInteger(revision) || revision < 1) return null
+    return { machineId, recoveryRequestId, expectedVersion: { runnerEpoch: version.runnerEpoch, revision } }
+}
+
 type CodexTranscriptImportData = CodexLocalSessionSummary & {
     messages: CodexImportedMessageContent[]
 }
@@ -946,6 +962,38 @@ function findHapiManagedCodexSession(
             || session.metadata?.codexSessionId === codexSessionId
         )
     ))
+}
+
+function findActiveHapiManagedCodexSession(
+    engine: SyncEngine,
+    namespace: string,
+    machineId: string,
+    codexSessionId: string
+) {
+    return engine.getSessionsByNamespace(namespace).find((session) => (
+        session.active
+        && session.metadata?.flavor === 'codex'
+        && session.metadata?.machineId === machineId
+        && (
+            session.id === codexSessionId
+            || session.metadata?.codexSessionId === codexSessionId
+        )
+    ))
+}
+
+function resolveRecoveredManagedSession(
+    engine: SyncEngine,
+    namespace: string,
+    machineId: string,
+    codexSessionId: string,
+    managedSessionId: string | undefined
+) {
+    if (!managedSessionId) return null
+    const session = engine.getSession(managedSessionId)
+    if (!session || session.namespace !== namespace || !session.active) return null
+    if (session.metadata?.flavor !== 'codex' || session.metadata?.machineId !== machineId) return null
+    if (session.id !== codexSessionId && session.metadata?.codexSessionId !== codexSessionId) return null
+    return session
 }
 
 function resolveImportMachineId(
@@ -2489,6 +2537,61 @@ export function createCodexDesktopRoutes(options: {
                 success: false,
                 error: error instanceof Error ? error.message : 'Could not delete native attachment'
             }, 502)
+        }
+    })
+
+    app.post('/codex/sessions/:id/recover-control', async (c) => {
+        const request = parseRecoverCodexControlRequest(await c.req.json().catch(() => null))
+        if (!request) return c.json({ success: false, error: 'machineId, recoveryRequestId, and expectedVersion are required' }, 400)
+        const engine = options.getSyncEngine()
+        const target = resolveDirectCodexLocalSessionTarget({ engine, namespace: c.get('namespace'), machineId: request.machineId })
+        if (target.type === 'error') return c.json({ success: false, error: target.message }, target.status)
+        const existingManaged = findActiveHapiManagedCodexSession(engine!, c.get('namespace'), target.machine.id, c.req.param('id'))
+        if (existingManaged) {
+            return c.json({ success: true, status: 'ready', recoveryRequestId: request.recoveryRequestId, sessionId: existingManaged.id })
+        }
+        try {
+            const result = await engine!.recoverCodexLocalSessionControl(target.machine.id, {
+                sessionId: c.req.param('id'), recoveryRequestId: request.recoveryRequestId, expectedVersion: request.expectedVersion
+            })
+            if (!result.success) {
+                const status = result.code === 'stale_snapshot' ? 412 : result.code === 'invalid_request' ? 400 : result.code === 'launch_failed' ? 502 : 409
+                return c.json(result, status)
+            }
+            const managed = resolveRecoveredManagedSession(
+                engine!,
+                c.get('namespace'),
+                target.machine.id,
+                c.req.param('id'),
+                result.sessionId
+            )
+            if (result.status === 'ready' && managed) return c.json({ ...result, sessionId: managed.id })
+            return c.json(result, 202)
+        } catch (error) {
+            return c.json({ success: false, error: error instanceof Error ? error.message : 'Failed to recover native control' }, 502)
+        }
+    })
+
+    app.get('/codex/sessions/:id/recover-control', async (c) => {
+        const machineId = parseCodexRunnerMachineId(c.req.query('machineId') ?? '')
+        if (!machineId) return c.json({ success: false, error: 'machineId is required' }, 400)
+        const engine = options.getSyncEngine()
+        const target = resolveDirectCodexLocalSessionTarget({ engine, namespace: c.get('namespace'), machineId })
+        if (target.type === 'error') return c.json({ success: false, error: target.message }, target.status)
+        try {
+            const result = await engine!.getCodexLocalSessionRecovery(target.machine.id, c.req.param('id'))
+            if (!result.success) return c.json(result, 404)
+            const managed = resolveRecoveredManagedSession(
+                engine!,
+                c.get('namespace'),
+                target.machine.id,
+                c.req.param('id'),
+                result.sessionId
+            )
+            if (result.status === 'ready' && managed) return c.json({ ...result, sessionId: managed.id })
+            return c.json(result, result.status === 'ready' ? 202 : 200)
+        } catch (error) {
+            return c.json({ success: false, error: error instanceof Error ? error.message : 'Failed to read native control recovery' }, 502)
         }
     })
 

@@ -137,7 +137,7 @@ describe('useSSE skills updates', () => {
 })
 
 describe('useSSE pin updates', () => {
-    it.each([['session-pins-updated', 'session-pins'], ['kanban-order-updated', 'kanban-order']] as const)('invalidates %s on the global connection while another session is selected', async (type, key) => {
+    it.each([['session-pins-updated', 'session-pins'], ['session-labels-updated', 'session-labels'], ['kanban-order-updated', 'kanban-order']] as const)('invalidates %s on the global connection while another session is selected', async (type, key) => {
         Object.defineProperty(globalThis, 'EventSource', { value: MockEventSource, configurable: true, writable: true })
         const invalidateQueries = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
         renderHook(() => useSSE({ enabled: true, token: 'test-token', baseUrl: 'http://hub.test', subscription: { sessionId: 'other-session' }, scope: 'global', onEvent: vi.fn() }), { wrapper: createWrapper() })

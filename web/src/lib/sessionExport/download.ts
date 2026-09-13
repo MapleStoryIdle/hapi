@@ -1,6 +1,7 @@
 import type { ApiClient } from '@/api/client'
 import type { HapiSessionExport } from '@/types/api'
 import { serializeSessionMarkdown } from './markdown'
+import { getSessionDisplayTitle } from '@/lib/session-title'
 
 export type SessionExportFormat = 'json' | 'markdown'
 
@@ -15,14 +16,6 @@ export function readSessionExportFormat(): SessionExportFormat {
 export function writeSessionExportFormat(format: SessionExportFormat): void {
     if (typeof window === 'undefined') return
     window.localStorage.setItem(SESSION_EXPORT_FORMAT_STORAGE_KEY, format)
-}
-
-function getSessionTitle(payload: HapiSessionExport): string {
-    const metadata = payload.session.metadata
-    return metadata?.name
-        ?? metadata?.summary?.text
-        ?? metadata?.path?.split('/').filter(Boolean).at(-1)
-        ?? payload.session.id.slice(0, 8)
 }
 
 function slugify(value: string): string {
@@ -42,7 +35,7 @@ function formatDate(value: number): string {
 
 export function buildSessionExportFilename(payload: HapiSessionExport, format: SessionExportFormat): string {
     const extension = format === 'json' ? 'json' : 'md'
-    const slug = slugify(getSessionTitle(payload)).slice(0, 80)
+    const slug = slugify(getSessionDisplayTitle(payload.session)).slice(0, 80)
     const shortId = payload.session.id.slice(0, 8)
     return `${slug}-${shortId}-${formatDate(payload.exportedAt)}.${extension}`
 }

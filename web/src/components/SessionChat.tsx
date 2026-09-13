@@ -72,6 +72,7 @@ import {
 } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
 import { usePlatform } from '@/hooks/usePlatform'
+import { getSessionDisplayTitle } from '@/lib/session-title'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
 import { useCursorModels } from '@/hooks/queries/useCursorModels'
@@ -534,16 +535,7 @@ export function canReuseTimelineMessagesForGoalState(
 }
 
 function getOutlineTitle(session: Session): string {
-    if (session.metadata?.name) {
-        return session.metadata.name
-    }
-    if (session.metadata?.summary?.text) {
-        return session.metadata.summary.text
-    }
-    if (session.metadata?.path) {
-        return session.metadata.path
-    }
-    return session.id.slice(0, 8)
+    return getSessionDisplayTitle(session)
 }
 
 function isBlockInTurnScope(block: ChatBlock, minCreatedAt: number | null): boolean {
@@ -2024,6 +2016,7 @@ function SessionChatInner(props: SessionChatProps) {
                         rawMessagesCount={visibleMessages.length}
                         normalizedMessagesCount={normalizedMessages.length}
                         messagesVersion={threadSnapshot.messagesVersion}
+                        sourceMessagesVersion={props.messagesVersion}
                         toolGroupRunActive={runActive}
                         toolGroupCompletionKey={turnCompletionKey}
                         forceScrollToken={forceScrollToken}

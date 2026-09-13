@@ -38,6 +38,7 @@ import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePic
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
 import { useTranslation } from '@/lib/use-translation'
+import { formatUserMessageForDisplay } from '@/chat/questionAnswers'
 import { getModelOptionsForFlavor, getNextModelForFlavor } from './modelOptions'
 import { getClaudeComposerEffortOptions } from './claudeEffortOptions'
 import { getCodexComposerReasoningEffortOptions } from './codexReasoningEffortOptions'
@@ -177,10 +178,11 @@ function formatReasoningLabel(value: string | null | undefined, label: string, l
     return label
 }
 
-function formatCompactModelLabel(label: string): string {
-    return label
-        .replace(/^GPT-/i, '')
-        .replace(/^gpt-/i, '')
+export function formatCompactModelLabel(label: string): string {
+    const normalized = label.trim()
+    const separator = normalized.lastIndexOf('-')
+    const suffix = separator >= 0 ? normalized.slice(separator + 1).trim() : ''
+    return suffix || normalized
 }
 
 function formatTokenCount(value: number): string {
@@ -478,7 +480,7 @@ export function HappyComposer(props: {
         if (!composerDraftReady || !sessionId || !queuedEdit || sendError || composerText || hasAttachments || selectedSkill || pendingSchedule) return
         const restored = extractLeadingSkillForComposer(queuedEdit.text, skillsByName)
         if (restored) setSelectedSkill(restored.skill)
-        api.composer().setText(restored?.text ?? queuedEdit.text)
+        api.composer().setText(formatUserMessageForDisplay(restored?.text ?? queuedEdit.text))
         if (queuedEdit.pendingSchedule?.type === 'absolute' && queuedEdit.pendingSchedule.ms > Date.now()) {
             setPendingSchedule(queuedEdit.pendingSchedule)
         }
@@ -512,7 +514,7 @@ export function HappyComposer(props: {
                 setSelectedSkill(restored.skill)
                 api.composer().setText(restored.text)
             } else {
-                api.composer().setText(sendError.text)
+                api.composer().setText(formatUserMessageForDisplay(sendError.text))
             }
         }
         // Restore the pending schedule too.  `scheduledAt` was already

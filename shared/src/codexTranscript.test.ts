@@ -47,6 +47,36 @@ describe('native completion evidence', () => {
         expect(state.messages).toHaveLength(1)
         expect(state.messages[0]?.content.data).toMatchObject({ final: true, turnOutcome: 'completed' })
     })
+    it('attaches the completed turn usage to its final assistant message', () => {
+        const state = createCodexTranscriptImportAccumulator()
+        const usage = JSON.stringify({
+            type: 'event_msg',
+            payload: {
+                type: 'token_count',
+                info: {
+                    total_token_usage: { input_tokens: 120, output_tokens: 20 },
+                    last_token_usage: { input_tokens: 80, cached_input_tokens: 40, output_tokens: 12 },
+                    model_context_window: 258_400
+                }
+            }
+        })
+        appendCodexTranscriptImportLines(state, [
+            lifecycle('task_started', 'a'),
+            assistant('Done'),
+            usage,
+            lifecycle('task_complete', 'a')
+        ])
+
+        expect(state.messages[0]?.content.data).toMatchObject({
+            usage: {
+                input_tokens: 80,
+                output_tokens: 12,
+                cache_read_input_tokens: 40,
+                context_tokens: 80,
+                context_window: 258_400
+            }
+        })
+    })
     it('does not treat an unscoped completion as proof for a scoped turn', () => {
         const state = createCodexTranscriptImportAccumulator()
         appendCodexTranscriptImportLines(state, [lifecycle('task_started', 'a'), assistant('Partial'), JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })])
@@ -104,6 +134,24 @@ describe('getLocalCodexSessionData', () => {
         ].map((payload) => JSON.stringify({ type: 'event_msg', payload })))
         expect(accumulator.messages).toHaveLength(1)
         expect(accumulator.messages[0].content).toMatchObject({ data: { code: 'http_forbidden' } })
+    })
+
+    it.each([
+        'HTTP 401 Unauthorized',
+        'Authentication required; please run codex login',
+        'Your access token has expired'
+    ])('imports a signed-out Codex failure as a safe authentication status: %s', (error) => {
+        const accumulator = createCodexTranscriptImportAccumulator()
+        appendCodexTranscriptImportLines(accumulator, [JSON.stringify({
+            type: 'event_msg',
+            payload: { type: 'task_failed', error }
+        })])
+
+        expect(accumulator.messages).toHaveLength(1)
+        expect(accumulator.messages[0]?.content).toMatchObject({ data: {
+            type: 'task-status', status: 'failed', code: 'authentication',
+            source: 'codex', message: 'Codex authentication required', recoverable: false
+        } })
     })
 
     it('bounds large child traces while retaining its model and latest terminal', () => {

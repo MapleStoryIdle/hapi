@@ -40,3 +40,10 @@ it('allows cancelling waiting receipts while blocking in-flight receipts', () =>
     fireEvent.click(buttons[0]!)
     expect(onCancel).toHaveBeenCalledWith(messages[0])
 })
+
+it('renders a queued native question reply as readable text', () => {
+    const text = '<send_user_message_question_reply>[{"questionItemId":"q","question":"Continue?","answer":"Yes"}]</send_user_message_question_reply>'
+    render(<I18nProvider><NativeQueuedMessagesBar messages={[{ id: 'q', text, queuedAt: 1 }]} /></I18nProvider>)
+    expect(screen.getByTestId('native-queued-messages-trigger')).toHaveTextContent('Continue?')
+    expect(screen.queryByText(/send_user_message_question_reply/)).toBeNull()
+})

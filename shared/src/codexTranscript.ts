@@ -12,7 +12,7 @@ import type { CodexLocalSessionSnapshotVersion } from './codexSnapshot'
 export type { CodexLocalSessionSnapshotVersion } from './codexSnapshot'
 import { parseAutomationHeartbeatMessageContent } from './messages'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
-import { isHttpForbiddenError } from './utils'
+import { isCodexAuthenticationError, isHttpForbiddenError } from './utils'
 import type { SlashCommand } from './apiTypes'
 import type { NativeCodexSessionControls } from './codexSessionControl'
 import {
@@ -375,6 +375,25 @@ export type CodexLocalSessionSnapshotRpcResponse = {
     timing: CodexLocalSessionReadTiming
 } | {
     success: false
+    error: string
+}
+
+/** A runner-owned, idempotent attempt to attach a managed Codex client without sending a turn. */
+export type RecoverCodexLocalSessionControlRequest = {
+    sessionId: string
+    recoveryRequestId: string
+    expectedVersion: CodexLocalSessionSnapshotVersion
+}
+
+export type CodexLocalSessionRecoveryResponse = {
+    success: true
+    status: 'pending' | 'ready' | 'unconfirmed'
+    recoveryRequestId: string
+    sessionId?: string
+    error?: string
+} | {
+    success: false
+    code: 'invalid_request' | 'stale_snapshot' | 'not_eligible' | 'recovery_busy' | 'launch_failed'
     error: string
 }
 
@@ -1631,6 +1650,16 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
         // Native Codex can end a failed turn with task_complete + error.
         if (eventType === 'task_complete' || eventType === 'task_failed') {
             const error = asString(payload.error) ?? asString(asRecord(payload.error)?.message)
+            if (isCodexAuthenticationError(error)) {
+                return buildImportedAgentMessage({
+                    type: 'task-status',
+                    status: 'failed',
+                    source: 'codex',
+                    code: 'authentication',
+                    message: 'Codex authentication required',
+                    recoverable: false
+                }, createdAt)
+            }
             if (isHttpForbiddenError(error)) {
                 return buildImportedAgentMessage({
                     type: 'task-status',
@@ -1721,6 +1750,8 @@ function getHeartbeatTimestamp(message: CodexImportedMessageContent): number | u
  */
 export type CodexTranscriptImportAccumulator = {
     tokenUsage: CodexTokenUsage | null
+    /** Latest usage reported inside the active parent turn. */
+    currentTurnTokenUsage: CodexTokenUsage | null
     modelProvider: string | null
     usageSessionId: string | null
     messages: CodexImportedMessageContent[]
@@ -1746,6 +1777,7 @@ export type CodexTranscriptImportAccumulator = {
 export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportAccumulator {
     return {
         tokenUsage: null,
+        currentTurnTokenUsage: null,
         modelProvider: null,
         usageSessionId: null,
         messages: [],
@@ -2057,12 +2089,14 @@ export function appendCodexTranscriptImportLines(
                 const threadId = asString(payload?.thread_id ?? payload?.threadId ?? info?.thread_id ?? info?.threadId ?? scope?.thread_id)
                 if (payload?.scope_role !== 'child' && scope?.role !== 'child'
                     && (!threadId || !accumulator.usageSessionId || threadId === accumulator.usageSessionId)) {
-                    accumulator.tokenUsage = selectCodexTokenUsage(accumulator.tokenUsage,
-                        readCodexTokenUsage(info, getCodexRecordTimestamp(record) ?? 0))
+                    const nextUsage = readCodexTokenUsage(info, getCodexRecordTimestamp(record) ?? 0)
+                    accumulator.tokenUsage = selectCodexTokenUsage(accumulator.tokenUsage, nextUsage)
+                    accumulator.currentTurnTokenUsage = nextUsage
                 }
             }
 
             if (recordType === 'event_msg' && payloadType === 'task_started') {
+                accumulator.currentTurnTokenUsage = null
                 accumulator.completionTurnId = extractCodexTurnId(record, payload ?? {})
                 accumulator.completionTurnStartIndex = accumulator.messages.length
                 accumulator.completionTurnSeen = true
@@ -2083,8 +2117,27 @@ export function appendCodexTranscriptImportLines(
                     // completion for this same turn. Never resurrect a failure.
                     const outcome = payloadType === 'turn_aborted' ? 'aborted' : payloadType === 'task_failed' || payload?.error ? 'failed' : 'completed'
                     if (outcome === 'completed' && (data.turnOutcome === 'failed' || data.turnOutcome === 'aborted')) break
-                    accumulator.messages[index] = { ...message, content: { ...message.content, data: { ...data, final: true,
-                        turnOutcome: outcome
+                    const turnUsage = accumulator.currentTurnTokenUsage?.lastTurn
+                        ?? (accumulator.currentTurnTokenUsage?.scope === 'lastTurn' ? accumulator.currentTurnTokenUsage : null)
+                    const usage = turnUsage?.input !== null && turnUsage?.input !== undefined
+                        && turnUsage.output !== null
+                        ? {
+                            input_tokens: turnUsage.input,
+                            output_tokens: turnUsage.output,
+                            ...(turnUsage.cachedInput !== null ? { cache_read_input_tokens: turnUsage.cachedInput } : {}),
+                            ...(accumulator.currentTurnTokenUsage?.contextTokens !== null
+                                && accumulator.currentTurnTokenUsage?.contextTokens !== undefined
+                                ? { context_tokens: accumulator.currentTurnTokenUsage.contextTokens } : {}),
+                            ...(accumulator.currentTurnTokenUsage?.contextWindow !== null
+                                && accumulator.currentTurnTokenUsage?.contextWindow !== undefined
+                                ? { context_window: accumulator.currentTurnTokenUsage.contextWindow } : {})
+                        }
+                        : undefined
+                    accumulator.messages[index] = { ...message, content: { ...message.content, data: {
+                        ...data,
+                        final: true,
+                        turnOutcome: outcome,
+                        ...(usage ? { usage } : {})
                     } } }
                     break
                 }

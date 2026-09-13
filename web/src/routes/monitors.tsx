@@ -63,7 +63,7 @@ export function MonitorCard(props: { onToggle: (monitor: Monitor) => void; onDel
     const healthLabel = status === 'paused' ? props.t('monitors.status.paused') : isWebhook ? props.t(props.monitor.config.kind === 'scheduled' ? 'monitors.status.scheduled' : 'monitors.status.passive') : props.t(`monitors.status.${status}`)
     const healthClass = isWebhook && status !== 'paused' ? 'border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-200' : monitorHealthClass(status)
     const metric = aggregate.passive
-        ? props.t('monitors.card.events', { count: aggregate.sampleCount })
+        ? props.t(props.monitor.config.kind === 'webhook' ? 'monitors.card.calls' : 'monitors.card.triggers', { count: aggregate.sampleCount })
         : aggregate.successRate === null
             ? props.t('monitors.card.noKnownChecks')
             : props.t('monitors.card.successRate', { value: formatPercent(aggregate.successRate) ?? '—' })

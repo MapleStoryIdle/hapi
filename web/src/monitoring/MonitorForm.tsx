@@ -212,7 +212,7 @@ export function MonitorForm(props: {
         // environment just before it validates and saves the configuration.
         if (!lockedBinding && !draft.machineId) throw new Error(props.t('monitors.form.errorMachine'))
         if (!lockedBinding && !directory) throw new Error(props.t('monitors.form.errorDirectory'))
-        if (!lockedBinding && !prompt) throw new Error(props.t('monitors.form.errorPrompt'))
+        if (!prompt) throw new Error(props.t('monitors.form.errorPrompt'))
 
         const common = {
             ...draft,
@@ -316,7 +316,7 @@ export function MonitorForm(props: {
                 {draft.kind === 'scheduled' ? <ScheduledSection schedule={schedule} t={props.t} onChange={updateSchedule} /> : null}
 
                 {!lockedBinding ? <InvestigationSection draft={draft} selectedModel={selectedModel} modelOptions={modelOptions} modelsLoading={codexModelsState.isLoading} modelsError={codexModelsState.error} reasoningValue={reasoningValue} reasoningOptions={reasoningOptions} isSaving={isSaving} t={props.t} onAgentChange={updateAgent} onUpdate={update} /> : null}
-                {!lockedBinding ? <section className="rounded-[22px] border border-[var(--app-border)] bg-[var(--app-bg)] p-4 shadow-[0_1px_4px_rgba(0,0,0,0.03)]"><h2 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('monitors.form.investigation')}</h2><label className="mt-3 block text-xs font-medium text-[var(--app-hint)]">{props.t('monitors.form.prompt')}<textarea value={draft.prompt} onChange={(event) => update('prompt', event.target.value)} rows={5} maxLength={8000} className="mt-1 w-full resize-y rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm leading-6 text-[var(--app-fg)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]" /></label></section> : null}
+                <section className="rounded-[22px] border border-[var(--app-border)] bg-[var(--app-bg)] p-4 shadow-[0_1px_4px_rgba(0,0,0,0.03)]"><h2 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('monitors.form.presetPrompt')}</h2><label className="mt-3 block text-xs font-medium text-[var(--app-hint)]">{props.t('monitors.form.prompt')}<textarea value={draft.prompt} onChange={(event) => update('prompt', event.target.value)} rows={5} maxLength={8000} className="mt-1 w-full resize-y rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm leading-6 text-[var(--app-fg)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]" /></label></section>
 
                 <ExpirySection draft={draft} editing={editing} expiry={expiry} expiryLabel={expiryLabel} initialExpiresAt={props.initialConfig?.expiresAt ?? null} t={props.t} onExpiryChange={setExpiry} />
                 <section className="grid grid-cols-2 gap-4 rounded-[22px] border border-[var(--app-border)] bg-[var(--app-bg)] px-4 py-2">
@@ -360,7 +360,7 @@ function HttpSection(props: {
 }
 
 function WebhookSection(props: { example: string; t: Translate; onCopy: () => void }) {
-    return <section className="rounded-[22px] border border-[var(--app-border)] bg-[var(--app-bg)] p-4 shadow-[0_1px_4px_rgba(0,0,0,0.03)]"><div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('monitors.form.webhook')}</h2></div><button type="button" onClick={props.onCopy} aria-label={props.t('monitors.form.copyWebhook')} title={props.t('monitors.form.copyWebhook')} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"><Copy className="h-4 w-4" aria-hidden="true" /></button></div><pre className="mt-3 overflow-x-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-code-bg)] p-3 text-xs leading-5 text-[var(--app-fg)]"><code>{`POST ${props.example}\nContent-Type: application/json\n\n{"prompt":"YOUR_PROMPT"}`}</code></pre></section>
+    return <section className="rounded-[22px] border border-[var(--app-border)] bg-[var(--app-bg)] p-4 shadow-[0_1px_4px_rgba(0,0,0,0.03)]"><div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-semibold text-[var(--app-fg)]">{props.t('monitors.form.webhook')}</h2></div><button type="button" onClick={props.onCopy} aria-label={props.t('monitors.form.copyWebhook')} title={props.t('monitors.form.copyWebhook')} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"><Copy className="h-4 w-4" aria-hidden="true" /></button></div><pre className="mt-3 overflow-x-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-code-bg)] p-3 text-xs leading-5 text-[var(--app-fg)]"><code>{`POST ${props.example}\nContent-Type: application/json\n\n{"prompt":"YOUR_PROMPT","data":{"key":"value"}}`}</code></pre></section>
 }
 
 function ScheduledSection(props: { schedule: MonitorSchedule; t: Translate; onChange: (next: Partial<MonitorSchedule>) => void }) {

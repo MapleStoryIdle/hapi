@@ -1,8 +1,8 @@
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
-import { Activity, AlertTriangle, Archive, Clock, Layers2, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react'
+import { Activity, AlertTriangle, Archive, Clock, Layers2, LogIn, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react'
 import { MESSAGE_LINK_CLASS, MessageLinkIcon } from '@/components/MessageLink'
 import { useLocalServiceLink } from '@/lib/local-service-links'
-import { getEventPresentation, isForbiddenTaskStatus, isNetworkTaskStatus, isUsageLimitEvent } from '@/chat/presentation'
+import { getEventPresentation, isAuthenticationTaskStatus, isForbiddenTaskStatus, isNetworkTaskStatus, isUsageLimitEvent } from '@/chat/presentation'
 import type { AgentEvent } from '@/chat/types'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { useTranslation } from '@/lib/use-translation'
@@ -81,6 +81,16 @@ function taskStatusVisual(event: TaskStatusEvent): {
             bodyKey: 'taskStatus.forbidden.body',
             toneClassName: 'border-[color-mix(in_srgb,#EF4444_42%,var(--app-border))] [background:color-mix(in_srgb,var(--app-bg)_91%,#EF4444)]',
             iconClassName: 'text-red-600',
+        }
+    }
+
+    if (isAuthenticationTaskStatus(event)) {
+        return {
+            Icon: LogIn,
+            titleKey: 'taskStatus.authentication.title',
+            bodyKey: 'taskStatus.authentication.body',
+            toneClassName: 'border-[color-mix(in_srgb,#F59E0B_42%,var(--app-border))] [background:color-mix(in_srgb,var(--app-bg)_90%,#F59E0B)]',
+            iconClassName: 'text-amber-600',
         }
     }
 

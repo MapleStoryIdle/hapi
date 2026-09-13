@@ -121,6 +121,8 @@ requireMatch(composer, /<ToolbarMenu[\s\S]*?anchorRef=\{settingsButtonRef\}/, 's
 requireMatch(composerButtons, /export function computeToolbarMenuPlacement/, 'composer menus must calculate visual-viewport placement')
 requireMatch(composerButtons, /window\.visualViewport\?\.addEventListener\('resize', measure/, 'composer menus must react to visual-viewport changes')
 requireMatch(composerButtons, /onMouseDown=\{\(event\) => event\.preventDefault\(\)\}/, 'send button must preserve focus at mousedown')
+requireMatch(composerButtons, /COMPOSER_TOOLBAR_HORIZONTAL_PADDING_PX\s*=\s*12/, 'composer optional controls must use the real horizontal padding')
+requireMatch(composerButtons, /COMPOSER_TOOLBAR_GAP_PX\s*=\s*2/, 'composer optional controls must use the real toolbar gap')
 if (/compactTopAnchor/.test(composer) || /h-\[120px\]|h-\[150px\]/.test(composer)) {
     throw new Error('Mobile layout contract violation: status visibility must not reserve composer height')
 }

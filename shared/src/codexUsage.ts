@@ -9,6 +9,12 @@ const counters = z.object({
     total: count
 })
 export const CodexTokenUsageSchema = counters.extend({
+    /** Latest completed/request turn, kept separately from session totals. */
+    lastTurn: counters.optional(),
+    /** Tokens currently occupying the model context, when Codex reports it. */
+    contextTokens: count.optional(),
+    /** Model context capacity reported by Codex. */
+    contextWindow: count.optional(),
     /** Latest raw counter after a reset; totals above retain earlier segments. */
     lastCumulative: counters.optional(),
     scope: z.enum(['session', 'lastTurn', 'partial']),
@@ -36,18 +42,45 @@ export function readCodexTokenUsage(info: unknown, updatedAt: number): CodexToke
     const latest = record(root.last_token_usage ?? root.lastTokenUsage ?? root.last)
     const data = cumulative ?? latest
     if (!data) return null
-    const number = (...keys: string[]) => {
-        const value = keys.map(key => data[key]).find(value => typeof value === 'number' && Number.isFinite(value) && value >= 0)
+    const numberFrom = (source: Record<string, unknown>, ...keys: string[]) => {
+        const value = keys.map(key => source[key]).find(value => typeof value === 'number' && Number.isFinite(value) && value >= 0)
         return typeof value === 'number' ? value : null
     }
-    const input = number('input_tokens', 'inputTokens')
-    const output = number('output_tokens', 'outputTokens')
-    const cachedInput = number('cached_input_tokens', 'cachedInputTokens', 'cache_read_input_tokens')
-    const reasoningOutput = number('reasoning_output_tokens', 'reasoningOutputTokens')
-    const total = number('total_tokens', 'totalTokens') ?? (input !== null && output !== null ? input + output : null)
+    const readCounters = (source: Record<string, unknown>) => {
+        const input = numberFrom(source, 'input_tokens', 'inputTokens')
+        const output = numberFrom(source, 'output_tokens', 'outputTokens')
+        const cachedInput = numberFrom(source, 'cached_input_tokens', 'cachedInputTokens', 'cache_read_input_tokens')
+        const reasoningOutput = numberFrom(source, 'reasoning_output_tokens', 'reasoningOutputTokens')
+        const total = numberFrom(source, 'total_tokens', 'totalTokens') ?? (input !== null && output !== null ? input + output : null)
+        return {
+            input,
+            output,
+            cachedInput: cachedInput !== null && input !== null && cachedInput > input ? null : cachedInput,
+            reasoningOutput,
+            total
+        }
+    }
+    const selected = readCounters(data)
+    const latestCounters = latest ? readCounters(latest) : undefined
+    const contextTokens = numberFrom(root, 'context_tokens', 'contextTokens')
+        ?? (latest ? numberFrom(latest, 'context_tokens', 'contextTokens') : null)
+        ?? latestCounters?.input
+        ?? null
+    const contextWindow = numberFrom(root, 'model_context_window', 'modelContextWindow', 'context_window', 'contextWindow')
+    const { input, output, cachedInput, reasoningOutput, total } = selected
     if (input === null && output === null && total === null) return null
-    return { input, output, cachedInput: cachedInput !== null && input !== null && cachedInput > input ? null : cachedInput,
-        reasoningOutput, total, scope: cumulative ? 'session' : 'lastTurn', updatedAt }
+    return {
+        input,
+        output,
+        cachedInput,
+        reasoningOutput,
+        total,
+        ...(latestCounters ? { lastTurn: latestCounters } : {}),
+        contextTokens,
+        contextWindow,
+        scope: cumulative ? 'session' : 'lastTurn',
+        updatedAt
+    }
 }
 
 export function selectCodexTokenUsage(previous: CodexTokenUsage | null, next: CodexTokenUsage | null): CodexTokenUsage | null {

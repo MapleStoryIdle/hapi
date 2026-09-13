@@ -28,7 +28,11 @@ import {
 } from 'lucide-react'
 import type { ApiClient } from '@/api/client'
 import type { SessionGroup } from '@hapi/protocol/sessionGroups'
+import type { SessionLabelSource } from '@hapi/protocol/sessionLabels'
 import { resolveSessionGroup, useSessionGroups } from '@/hooks/useSessionGroups'
+import { resolveSessionLabel, useSessionLabels } from '@/hooks/useSessionLabels'
+import { SessionLabelDialog } from '@/components/SessionLabelDialog'
+import { getSessionLabelStyle } from '@/lib/session-labels'
 import { useSessionPins, type SessionPinTarget } from '@/hooks/useSessionPins'
 import { useKanbanOrder, kanbanOrderQueryKey } from '@/hooks/useKanbanOrder'
 import { normalizeKanbanOrder, sortKanbanLanes } from '@hapi/protocol/kanbanOrder'
@@ -49,6 +53,7 @@ import { useLocalDayKey } from '@/hooks/useLocalDayKey'
 import { formatShareTimelineTime, groupShareTimeline, localDateKey } from '@/lib/shareTimeline'
 import { queryKeys } from '@/lib/query-keys'
 import { scheduleBackgroundWork } from '@/lib/interaction-priority'
+import { getSessionDisplayTitle } from '@/lib/session-title'
 import {
     getNativeCodexSessionListUpdate,
     subscribeNativeCodexSessionUpdated,
@@ -434,12 +439,7 @@ function getHapiSessionDirectory(session: SessionSummary): string | null {
 }
 
 function getHapiSessionTitle(session: SessionSummary): string {
-    const metadata = session.metadata
-    if (metadata?.name?.trim()) return metadata.name
-    if (metadata?.summary?.text?.trim()) return metadata.summary.text
-    const directory = getHapiSessionDirectory(session)
-    if (directory) return getDirectoryDisplayName(directory)
-    return session.id.slice(0, 8)
+    return getSessionDisplayTitle(session)
 }
 
 function isCodexFlavor(session: SessionSummary): boolean {
@@ -635,11 +635,14 @@ function KanbanSessionCard(props: {
     now: number
     directoryColor: string | null
     sessionGroup?: SessionGroup
+    sessionLabel?: string
+    labelTarget?: { source: SessionLabelSource; nativeAlias?: SessionLabelSource }
     t: (key: string, params?: Record<string, string | number>) => string
 }) {
     const { api, machineId, session, selected = false, pinned, onOpen, onTogglePin, onArchived, dateLocale, now, directoryColor, t } = props
     const queryClient = useQueryClient()
     const [archiveOpen, setArchiveOpen] = useState(false)
+    const [labelOpen, setLabelOpen] = useState(false)
     const [isArchiving, setIsArchiving] = useState(false)
     const status = getMergedCodexKanbanStatus(session)
     const presentation = KANBAN_GROUP_PRESENTATION[status]
@@ -716,7 +719,7 @@ function KanbanSessionCard(props: {
                             strokeWidth={1.8}
                             aria-hidden="true"
                         />
-                        <span className="inline-flex min-w-0 items-center" data-git-label>
+                        <span className="inline-flex min-w-0 flex-1 items-center" data-git-label>
                             <span
                                 className="min-w-0 truncate text-[13px] font-normal leading-5 text-[var(--app-hint)]"
                                 title={session.cwd ?? undefined}
@@ -728,6 +731,22 @@ function KanbanSessionCard(props: {
                                 <GitDirtyIndicator label={t('recentCodex.gitDirty')} />
                             ) : null}
                         </span>
+                        {props.sessionLabel && props.labelTarget ? (
+                            <button
+                                type="button"
+                                onClick={event => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    setLabelOpen(true)
+                                }}
+                                className="pointer-events-auto relative z-[1] ml-auto inline-flex max-w-[5.5rem] shrink-0 truncate rounded-full border px-2 py-1 text-[11px] font-medium leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                style={getSessionLabelStyle(props.sessionLabel)}
+                                title={props.sessionLabel}
+                                data-kanban-session-label
+                            >
+                                <span className="truncate">{props.sessionLabel}</span>
+                            </button>
+                        ) : null}
                     </span>
 
                         <span
@@ -780,6 +799,14 @@ function KanbanSessionCard(props: {
                 ) : null}
             </div>
             </SwipeArchiveRow>
+                {props.labelTarget ? <SessionLabelDialog
+                    api={api}
+                    source={props.labelTarget.source}
+                    nativeAlias={props.labelTarget.nativeAlias}
+                    currentLabel={props.sessionLabel}
+                    open={labelOpen}
+                    onOpenChange={setLabelOpen}
+                /> : null}
                 <ConfirmDialog
                     isOpen={archiveOpen}
                     onClose={() => setArchiveOpen(false)}
@@ -1091,6 +1118,7 @@ export function RecentCodexSessions(props: {
         return next
     })
     const sessionGroupsQuery = useSessionGroups(props.api)
+    const sessionLabelsQuery = useSessionLabels(props.api)
     const autoExpandedSelectionRef = useRef<string | null>(null)
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const realtimeListUpdateBatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1189,6 +1217,30 @@ export function RecentCodexSessions(props: {
         }
         return assignments
     }, [mergedSessions, props.machineId, sessionGroupsQuery.data])
+    const sessionLabelTargetsByKey = useMemo(() => {
+        const targets = new Map<string, { source: SessionLabelSource; nativeAlias?: SessionLabelSource }>()
+        for (const session of mergedSessions) {
+            const nativeId = session.hapiSession?.metadata?.agentSessionId
+            const nativeMachineId = session.hapiSession?.metadata?.machineId ?? props.machineId
+            const nativeAlias = nativeId && nativeMachineId
+                ? { type: 'native-codex' as const, machineId: nativeMachineId, codexSessionId: nativeId }
+                : undefined
+            if (session.source === 'hapi') {
+                targets.set(session.key, { source: { type: 'managed', sessionId: session.id }, nativeAlias })
+            } else if (props.machineId) {
+                targets.set(session.key, { source: { type: 'native-codex', machineId: props.machineId, codexSessionId: session.id } })
+            }
+        }
+        return targets
+    }, [mergedSessions, props.machineId])
+    const sessionLabelsByKey = useMemo(() => {
+        const labels = new Map<string, string>()
+        for (const [key, target] of sessionLabelTargetsByKey) {
+            const label = resolveSessionLabel(sessionLabelsQuery.data, target.source, target.nativeAlias)
+            if (label) labels.set(key, label)
+        }
+        return labels
+    }, [sessionLabelTargetsByKey, sessionLabelsQuery.data])
     const completedHapiSessionsForKanbanBootstrap = useMemo(
         () => mergedSessions
             .filter((session) => session.source === 'hapi' && getMergedCodexKanbanStatus(session) === 'completed')
@@ -1641,6 +1693,8 @@ export function RecentCodexSessions(props: {
                                             now={relativeTimeNow}
                                             directoryColor={getAssignedCompletedSessionDirectoryColor(completedDirectoryColors, session.cwd)}
                                             sessionGroup={sessionGroupsByKey.get(session.key)}
+                                            sessionLabel={sessionLabelsByKey.get(session.key)}
+                                            labelTarget={sessionLabelTargetsByKey.get(session.key)}
                                             t={t}
                                             onTogglePin={onTogglePin ? () => onTogglePin(session.key) : undefined}
                                             onArchived={handleArchived}
@@ -1677,6 +1731,8 @@ export function RecentCodexSessions(props: {
                                                         now={relativeTimeNow}
                                                         directoryColor={getAssignedCompletedSessionDirectoryColor(completedDirectoryColors, session.cwd)}
                                                         sessionGroup={sessionGroupsByKey.get(session.key)}
+                                                        sessionLabel={sessionLabelsByKey.get(session.key)}
+                                                        labelTarget={sessionLabelTargetsByKey.get(session.key)}
                                                         t={t}
                                                         onTogglePin={onTogglePin ? () => onTogglePin(session.key) : undefined}
                                                         onArchived={handleArchived}

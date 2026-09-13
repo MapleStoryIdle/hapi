@@ -29,7 +29,9 @@ import {
 import { AgentFlavorStatusIcon } from '@/components/AgentFlavorIcon'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionGroupDrawer } from '@/components/SessionGroupDrawer'
+import { SessionLabelDialog } from '@/components/SessionLabelDialog'
 import { resolveSessionGroup, useSessionGroups } from '@/hooks/useSessionGroups'
+import { resolveSessionLabel, useSessionLabels } from '@/hooks/useSessionLabels'
 import { SessionFilesDrawer } from '@/components/SessionFiles/SessionFilesDrawer'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { GitBranchesDrawer } from '@/components/GitBranchesDrawer'
@@ -745,6 +747,7 @@ function NativeCodexThread(props: {
     projectPath?: string | null
     model?: string | null
     modelReasoningEffort?: string | null
+    tokenUsage?: CodexLocalSessionSnapshotResponse['tokenUsage']
     controls?: NativeCodexSessionControls
     controlPending: 'stop' | 'configure' | 'resumeQueue' | null
     onStop: () => Promise<void>
@@ -829,6 +832,11 @@ function NativeCodexThread(props: {
     const selectedEffort = configuration?.modelReasoningEffort
         ?? (configuration?.model && configuration.model !== props.model ? modelEntry?.defaultReasoningEffort : props.modelReasoningEffort)
     const effortOptions = modelEntry?.supportedReasoningEfforts?.map((value) => ({ value }))
+    const nativeContextSize = props.tokenUsage?.contextTokens
+        ?? props.tokenUsage?.lastTurn?.input
+        ?? (props.tokenUsage?.scope === 'lastTurn' ? props.tokenUsage.input : undefined)
+    const nativeContextCacheRead = props.tokenUsage?.lastTurn?.cachedInput
+        ?? (props.tokenUsage?.scope === 'lastTurn' ? props.tokenUsage.cachedInput : undefined)
     const attachmentAdapter = useMemo(
         () => props.machineId
             ? createNativeCodexAttachmentAdapter(props.api, props.sessionId, props.machineId)
@@ -1039,6 +1047,9 @@ function NativeCodexThread(props: {
                                 thinking={props.runState === 'processing' && !props.waitingForUserInput && props.connectionPhase === null}
                                 model={selectedModel}
                                 modelReasoningEffort={selectedEffort}
+                                contextSize={nativeContextSize ?? undefined}
+                                contextCacheRead={nativeContextCacheRead ?? undefined}
+                                contextWindow={props.tokenUsage?.contextWindow ?? null}
                                 availableModelOptions={modelOptions}
                                 availableModelReasoningEffortOptions={effortOptions}
                                 onModelChange={configurable ? (model) => {
@@ -1125,6 +1136,7 @@ export function CodexSessionContextPage(props: {
     realtimeAvailable?: boolean
     onBack: () => void
     onForked: (sessionId: string) => void
+    onRecovered?: (sessionId: string) => void
     onCreateMonitor?: () => void
 }) {
     const { t } = useTranslation()
@@ -1153,6 +1165,10 @@ export function CodexSessionContextPage(props: {
         }
     })
     const [forkError, setForkError] = useState<string | null>(null)
+    const [isRecoveringControl, setIsRecoveringControl] = useState(false)
+    const [recoverControlError, setRecoverControlError] = useState<string | null>(null)
+    const [recoveryControlRequestId, setRecoveryControlRequestId] = useState<string | null>(null)
+    const recoveryControlAttemptIdRef = useRef<string | null>(null)
     const contextQuery = useQuery({
         queryKey: nativeSnapshotQueryKey,
         queryFn: async (): Promise<CodexLocalSessionSnapshotResponse> => {
@@ -1585,6 +1601,20 @@ export function CodexSessionContextPage(props: {
         ? statusQuery.data.queuedMessages.filter((message) => !discardedNativeRecoveryIdsRef.current.has(message.id))
         : null
     const activeNativeClientMessageId = statusQuery.data?.success === true ? statusQuery.data.activeClientMessageId : undefined
+    const canRecoverControl = Boolean(
+        props.machineId
+        && contextQuery.data?.version
+        && directStatus === 'unknown'
+        && nativeStalledSince !== null
+        && statusQuery.data?.success === true
+        && statusQuery.data.waitingForUserInput !== true
+        && !statusQuery.data.activeTurnId
+        && statusQuery.data.controlledByCodexSsh === false
+        && (statusQuery.data.queuedMessages?.length ?? 0) === 0
+        && statusQuery.data.controls?.queuePaused !== true
+        && !statusQuery.data.controls?.stoppingTurnId
+        && nativeControls.pendingAction === null
+    )
     const acknowledgedNativeMessageIds = useMemo(() => new Set([
         ...currentNativeDirectMessageEchoes.filter((echo) => echo.deliveryState).map((echo) => echo.id),
         ...(statusQuery.data?.success === true ? statusQuery.data.deliveryReceipts?.map((receipt) => receipt.id) ?? [] : [])
@@ -2109,13 +2139,19 @@ export function CodexSessionContextPage(props: {
         { refetchInterval: false }
     )
     const groupsQuery = useSessionGroups(props.api)
+    const labelsQuery = useSessionLabels(props.api)
     const groupSource = useMemo(() => ({ type: 'native-codex' as const, machineId: props.machineId ?? '', codexSessionId: props.sessionId }), [props.machineId, props.sessionId])
     const sessionGroup = resolveSessionGroup(groupsQuery.data, groupSource)
+    const sessionLabel = resolveSessionLabel(labelsQuery.data, groupSource)
     const [groupOpen, setGroupOpen] = useState(false)
+    const [labelOpen, setLabelOpen] = useState(false)
     const openGroup = useCallback(() => setGroupOpen(true), [])
+    const openLabel = useCallback(() => setLabelOpen(true), [])
     const sessionDetails = useMemo<SessionHeaderDetail[]>(() => buildSessionHeaderDetails({
         group: sessionGroup,
         onSetGroup: props.machineId ? openGroup : undefined,
+        label: sessionLabel,
+        onSetLabel: props.machineId ? openLabel : undefined,
         title,
         sessionId: props.sessionId,
         projectPath: context?.session.cwd,
@@ -2123,7 +2159,7 @@ export function CodexSessionContextPage(props: {
         agentFlavor: 'codex',
         model: context?.session.model,
         reasoning: context?.session.modelReasoningEffort
-    }, t), [sessionGroup, openGroup, props.machineId, context?.session.cwd, context?.session.model, context?.session.modelReasoningEffort, context?.session.modifiedAt, props.sessionId, t, title])
+    }, t), [sessionGroup, sessionLabel, openGroup, openLabel, props.machineId, context?.session.cwd, context?.session.model, context?.session.modelReasoningEffort, context?.session.modifiedAt, props.sessionId, t, title])
 
     const fork = useCallback(async () => {
         if (!canFork || !props.machineId) {
@@ -2143,6 +2179,74 @@ export function CodexSessionContextPage(props: {
             setIsForking(false)
         }
     }, [canFork, props.api, props.machineId, props.onForked, props.sessionId, t])
+
+    const recoverControl = useCallback(async () => {
+        const version = contextQuery.data?.version
+        if (!props.machineId || !version || !canRecoverControl || isRecoveringControl) return
+        const recoveryRequestId = recoveryControlAttemptIdRef.current ?? crypto.randomUUID()
+        recoveryControlAttemptIdRef.current = recoveryRequestId
+        setIsRecoveringControl(true)
+        setRecoverControlError(null)
+        try {
+            const response = await props.api.recoverCodexSessionControl(props.sessionId, {
+                machineId: props.machineId,
+                recoveryRequestId,
+                expectedVersion: version
+            })
+            if (!response.success) throw new Error(response.error)
+            if (response.status === 'ready' && response.sessionId) {
+                props.onRecovered?.(response.sessionId)
+            } else {
+                setRecoveryControlRequestId(response.recoveryRequestId)
+                if (response.status === 'unconfirmed') {
+                    setRecoverControlError(t('recentCodex.recoverControl.unconfirmed'))
+                }
+            }
+        } catch (error) {
+            setRecoverControlError(error instanceof Error ? error.message : t('recentCodex.recoverControl.failed'))
+        } finally {
+            setIsRecoveringControl(false)
+        }
+    }, [canRecoverControl, contextQuery.data?.version, isRecoveringControl, props.api, props.machineId, props.onRecovered, props.sessionId, t])
+
+    useEffect(() => {
+        if (!recoveryControlRequestId || !props.machineId) return
+        const machineId = props.machineId
+        let disposed = false
+        let timer: number | null = null
+        const poll = async () => {
+            try {
+                const response = await props.api.getCodexSessionControlRecovery(props.sessionId, machineId)
+                if (disposed) return
+                if (!response.success) {
+                    setRecoverControlError(response.error)
+                } else if (response.status === 'ready' && response.sessionId) {
+                    setRecoveryControlRequestId(null)
+                    props.onRecovered?.(response.sessionId)
+                    return
+                } else if (response.status === 'unconfirmed') {
+                    setRecoverControlError(t('recentCodex.recoverControl.unconfirmed'))
+                } else {
+                    setRecoverControlError(null)
+                }
+            } catch (error) {
+                if (disposed) return
+                setRecoverControlError(error instanceof Error ? error.message : t('recentCodex.recoverControl.failed'))
+            }
+            if (!disposed) timer = window.setTimeout(() => void poll(), 2_000)
+        }
+        timer = window.setTimeout(() => void poll(), 750)
+        return () => {
+            disposed = true
+            if (timer !== null) window.clearTimeout(timer)
+        }
+    }, [props.api, props.machineId, props.onRecovered, props.sessionId, recoveryControlRequestId, t])
+
+    useEffect(() => {
+        recoveryControlAttemptIdRef.current = null
+        setRecoveryControlRequestId(null)
+        setRecoverControlError(null)
+    }, [props.machineId, props.sessionId])
 
     const recoverNativeDelivery = useCallback(async () => {
         const candidate = nativeRecoveryCandidate.candidate
@@ -2512,6 +2616,7 @@ export function CodexSessionContextPage(props: {
         <SessionConnectionProvider value={nativeConnectionContext}>
             <SessionDetailSurface source="codex" testId="codex-session-context-page">
                 <SessionGroupDrawer key={`group:${props.machineId}:${props.sessionId}`} api={props.api} source={groupSource} open={groupOpen} onOpenChange={setGroupOpen} />
+                <SessionLabelDialog api={props.api} source={groupSource} currentLabel={sessionLabel} open={labelOpen} onOpenChange={setLabelOpen} />
                 <FloatingSessionHeader
                     onBack={props.onBack}
                     backLabel={t('recentCodex.back')}
@@ -2553,6 +2658,7 @@ export function CodexSessionContextPage(props: {
                 />
                 <SessionActionMenu
                     onSetGroup={props.machineId ? openGroup : undefined}
+                    onSetLabel={props.machineId ? openLabel : undefined}
                     isOpen={menuOpen}
                     onClose={() => setMenuOpen(false)}
                     sessionActive={directStatus === 'processing'}
@@ -2667,8 +2773,20 @@ export function CodexSessionContextPage(props: {
                     <NativeCodexFloatingStatusNotice
                         tone="warning"
                         title={directStatus === 'unknown' ? t('recentCodex.status.unknown') : t('recentCodex.status.failed')}
-                        detail={t('recentCodex.status.locked')}
-                        action={{
+                        detail={recoverControlError ?? (recoveryControlRequestId
+                            ? t('recentCodex.recoverControl.pendingDetail')
+                            : canRecoverControl
+                                ? t('recentCodex.recoverControl.detail')
+                                : t('recentCodex.status.locked'))}
+                        action={recoveryControlRequestId ? {
+                            label: t('recentCodex.recoverControl.pending'),
+                            onClick: () => {},
+                            busy: true
+                        } : canRecoverControl ? {
+                            label: isRecoveringControl ? t('recentCodex.recoverControl.pending') : t('recentCodex.recoverControl.action'),
+                            onClick: () => void recoverControl(),
+                            busy: isRecoveringControl
+                        } : {
                             label: t('recentCodex.retry'),
                             onClick: () => void refetchNativeSnapshot(),
                             busy: statusQuery.isFetching
@@ -2717,6 +2835,7 @@ export function CodexSessionContextPage(props: {
                             projectPath={context.session.cwd}
                             model={context.session.model}
                             modelReasoningEffort={context.session.modelReasoningEffort}
+                            tokenUsage={context.tokenUsage}
                             controls={nativeControls.controls}
                             controlPending={nativeControls.pendingAction === 'answerUserInput' ? null : nativeControls.pendingAction}
                             onStop={nativeControls.stop}

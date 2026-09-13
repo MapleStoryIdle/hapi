@@ -594,6 +594,9 @@ export function useSSE(options: {
                 void queryClient.invalidateQueries({ queryKey: ['session-groups'] })
                 void queryClient.invalidateQueries({ queryKey: ['kanban-order'] })
             }
+            if (event.type === 'session-labels-updated') {
+                void queryClient.invalidateQueries({ queryKey: ['session-labels'] })
+            }
             if (event.type === 'kanban-order-updated') {
                 void queryClient.invalidateQueries({ queryKey: ['kanban-order'] })
             }

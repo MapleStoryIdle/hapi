@@ -14,6 +14,7 @@ import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePic
 import { formatScheduledTime } from '@/lib/scheduledTime'
 import { CloseIcon, ScheduleIcon } from '@/components/icons'
 import { SessionDetailQueueTrigger } from '@/components/SessionDetailQueueTrigger'
+import { formatUserMessageForDisplay } from '@/chat/questionAnswers'
 
 function EditIcon(props: { className?: string }) {
     return (
@@ -72,7 +73,7 @@ export function getQueuedMessagePreview(msg: DecryptedMessage): { text: string; 
     if (!normalized || normalized.role !== 'user') {
         return { text: '', attachmentNames: [] }
     }
-    const text = (normalized.content.text ?? '').trim()
+    const text = formatUserMessageForDisplay(normalized.content.text ?? '').trim()
     const attachments = normalized.content.attachments ?? []
     return {
         text,

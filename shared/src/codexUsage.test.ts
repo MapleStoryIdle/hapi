@@ -18,7 +18,13 @@ describe('Codex usage snapshots', () => {
     })
     it('uses reported history totals and flags restarted counters as partial', () => {
         const info = { total: { inputTokens: 500, outputTokens: 50 }, last: { inputTokens: 5, outputTokens: 2 } }
-        expect(readCodexTokenUsage(info, 1)).toMatchObject({ total: 550, scope: 'session' })
+        expect(readCodexTokenUsage({ ...info, modelContextWindow: 258_400 }, 1)).toMatchObject({
+            total: 550,
+            scope: 'session',
+            lastTurn: { input: 5, output: 2, total: 7 },
+            contextTokens: 5,
+            contextWindow: 258_400
+        })
         expect(selectCodexTokenUsage(readCodexTokenUsage(info, 1), readCodexTokenUsage({ total: { inputTokens: 10, outputTokens: 2 } }, 2))?.scope).toBe('partial')
     })
     it('keeps native usage outside message pagination and appends incrementally', () => {

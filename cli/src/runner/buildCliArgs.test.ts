@@ -2,6 +2,14 @@ import { describe, it, expect } from 'vitest'
 import { buildCliArgs } from './run'
 
 describe('buildCliArgs', () => {
+  it('marks native control recovery children with their idempotency request id', () => {
+    expect(buildCliArgs('codex', {
+      directory: '/work',
+      resumeSessionId: 'native-thread',
+      recoveryRequestId: 'recovery-1',
+      recoveryNoKill: true
+    })).toEqual(expect.arrayContaining(['resume', 'native-thread', '--recover-control', 'recovery-1']))
+  })
     it('adds --permission-mode for valid permission mode', () => {
         const args = buildCliArgs('claude', {
             directory: '/tmp',

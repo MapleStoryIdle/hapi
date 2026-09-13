@@ -107,6 +107,14 @@ export type SessionMetadataSummary = {
 
 export type MessageStatus = 'queued' | 'sending' | 'sent' | 'failed'
 
+export type CodexControlRecoveryResponse = {
+    success: true
+    status: 'pending' | 'ready' | 'unconfirmed'
+    recoveryRequestId: string
+    sessionId?: string
+    error?: string
+} | { success: false; code?: string; error: string }
+
 export type DecryptedMessage = ProtocolDecryptedMessage & {
     status?: MessageStatus
     originalText?: string

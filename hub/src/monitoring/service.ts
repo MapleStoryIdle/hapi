@@ -112,13 +112,27 @@ export class MonitoringService {
         const monitor = this.store.monitors.byToken(token)
         if (!monitor || monitor.config.kind !== 'webhook' || !monitorEnabled(monitor.config)) return null
         const result = this.store.monitors.acceptWebhook(monitor, event)
-        if (result.created) this.notify(monitor, '收到新事件，已排队进行只读排查。 / Investigation queued.')
+        if (result.created) this.notify(monitor, '收到新事件，已触发只读排查。 / Investigation triggered.')
         return result
     }
 
-    requestCheck(monitor: StoredMonitor): void {
-        if (!monitorEnabled(monitor.config) || monitor.config.kind !== 'http') throw new Error('Monitor is paused, expired or not an HTTP monitor')
-        this.manualChecks.add(monitor.id)
+    requestTest(monitor: StoredMonitor): { deferred: boolean } {
+        if (!monitorEnabled(monitor.config)) throw new Error('Monitor is paused or expired')
+        if (monitor.config.kind === 'http') {
+            this.manualChecks.add(monitor.id)
+            return { deferred: false }
+        }
+        const result = this.store.monitors.triggerManual(monitor)
+        if (result.created) this.notify(monitor, '手动测试已触发。 / Manual test triggered.')
+        return { deferred: !result.created }
+    }
+
+    retrigger(monitor: StoredMonitor, activityId: string): boolean {
+        if (!monitorEnabled(monitor.config)) return false
+        const result = this.store.monitors.retriggerActivity(monitor, activityId)
+        if (!result?.created) return false
+        this.notify(monitor, '待处理事件已重新触发。 / Deferred event triggered again.')
+        return true
     }
 
     approve(monitor: StoredMonitor, id: string, planHash: string): boolean {
@@ -149,7 +163,7 @@ export class MonitoringService {
         for (const monitor of monitors) {
             if (monitorEnabled(monitor.config, now) && monitor.config.kind === 'scheduled' && monitor.nextCheckAt <= now) {
                 const event = this.store.monitors.claimScheduled(monitor, now)
-                if (event?.created) this.notify(monitor, '定时任务已排队。 / Scheduled task queued.')
+                if (event?.created) this.notify(monitor, '定时任务已触发。 / Scheduled task triggered.')
             }
         }
         const due = monitors.filter(m => monitorEnabled(m.config, now) && m.config.kind === 'http' && m.config.request && (m.nextCheckAt <= now || this.manualChecks.has(m.id))).slice(0, 4)
@@ -163,7 +177,7 @@ export class MonitoringService {
             const current = this.store.monitors.get(monitor.id)
             if (!current || !monitorEnabled(current.config) || JSON.stringify(current.config) !== JSON.stringify(monitor.config)) return
             const opened = this.store.monitors.recordProbeAndIncident(monitor, result.ok, result.latencyMs, result.error, nextAt)
-            if (opened?.created) this.notify(monitor, '服务检测异常，已排队排查。 / Service check failed.')
+            if (opened?.created) this.notify(monitor, '服务检测异常，已触发排查。 / Service check failed; investigation triggered.')
             else if (result.ok && monitor.health === 'down') this.notify(monitor, '服务检测已恢复。 / Service check recovered.')
         }))
         if (this.abort.signal.aborted) return
@@ -240,9 +254,6 @@ export class MonitoringService {
                 if (config.targetSession && (session.thinking || Object.keys(session.agentState?.requests ?? {}).length)) {
                     this.store.monitors.transition(event.id, claimedState, event.state)
                     return
-                }
-                if (config.targetSession && !repairing && session.permissionMode !== (config.agent === 'codex' ? 'read-only' : 'plan')) {
-                    throw new Error('Switch the source session to Read Only (Codex) or Plan (Claude) before automated investigation.')
                 }
                 if (config.targetSession && repairing) assertUnchangedBoundPlan(event, this.store.messages.getMessages(result.sessionId, 50))
             }

@@ -16,6 +16,7 @@
 | 有内容的输入框 | 草稿非空时始终保持展开；工具按钮以 `mousedown` 保持文本焦点，禁止用 `pointerdown.preventDefault()` 吞掉 iOS 的点击事件 | `HappyComposer.tsx`、`ComposerButtons.tsx` |
 | 多行输入框 | 展开态文本行使用自适应 grid 行；超过一行时只能向上扩展，绝不覆盖下方工具、发送或停止按钮 | `HappyComposer.tsx` |
 | 键盘态操作菜单 | 工具、权限、技能、上下文和设置菜单必须留在 `VisualViewport` 内；空间不足时可滚动，不得要求先收起键盘 | `ComposerButtons.tsx`、`HappyComposer.tsx` |
+| 输入框可选按钮 | 必须按工具栏真实的 `12px` 水平内边距和 `2px` 间距计算；保留 42px 点击区域，空间够时不得误隐藏 Skill | `ComposerButtons.tsx` |
 | 最新消息可见性 | 线程必须预留实际测得的底部 overlay 高度，消息不得被输入区遮挡 | `SessionChat.tsx`、`HappyThread.tsx` |
 | 底部动态入口（排队 / 计划 / Git） | 所有入口独立悬浮在输入框 overlay 上方；不得改变输入框容器高度、底部锚点或键盘间距；线程单独预留入口实际高度。排队详情必须通过 Portal 抽屉展示，抽屉不得进入输入框文档流；SHAPI 与原生 Codex 共用底部 dock 与排队入口命中区域 | `SessionChat.tsx`、`CodexSessionContextPage.tsx`、`SessionDetailBottomDock.tsx`、`SessionDetailQueueTrigger.tsx`、`QueuedMessagesBar.tsx`、`HappyComposer.tsx`、`HappyThread.tsx` |
 

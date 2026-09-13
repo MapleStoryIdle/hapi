@@ -22,6 +22,12 @@ describe('parseCodexCliOverrides', () => {
             approvalPolicy: 'on-request'
         });
 
+        expect(parseCodexCliOverrides(['--approve-for-me'])).toEqual({
+            sandbox: 'workspace-write',
+            approvalPolicy: 'on-request',
+            approvalsReviewer: 'auto_review'
+        });
+
         expect(parseCodexCliOverrides(['--yolo'])).toEqual({
             sandbox: 'danger-full-access',
             approvalPolicy: 'never'
@@ -38,8 +44,8 @@ describe('parseCodexCliOverrides', () => {
             sandbox: 'danger-full-access'
         });
 
-        expect(parseCodexCliOverrides(['-a', 'untrusted', '-a', 'on-failure'])).toEqual({
-            approvalPolicy: 'on-failure'
+        expect(parseCodexCliOverrides(['-a', 'untrusted', '-a', 'never'])).toEqual({
+            approvalPolicy: 'never'
         });
     });
 
@@ -59,6 +65,7 @@ describe('parseCodexCliOverrides', () => {
             '--model',
             'o3',
             '--full-auto',
+            '--approve-for-me',
             '--dangerously-bypass-approvals-and-sandbox',
             '--',
             '--sandbox',

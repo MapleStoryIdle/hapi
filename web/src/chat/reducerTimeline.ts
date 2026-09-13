@@ -295,6 +295,8 @@ export function reduceTimeline(
     const textBlocksByStreamId = new Map<string, AgentTextBlock>()
     const reasoningBlocksByStreamId = new Map<string, AgentReasoningBlock>()
     let hasReadyEvent = false
+    let pendingCodexTurnUsage: TracedMessage['usage']
+    let codexUsageTarget: AgentTextBlock | null = null
 
     const ensureAgentRunBlock = (
         cardId: string,
@@ -468,6 +470,10 @@ export function reduceTimeline(
                 continue
             }
             if (msg.content.type === 'token-count') {
+                if (msg.usage) {
+                    pendingCodexTurnUsage = msg.usage
+                    if (codexUsageTarget) codexUsageTarget.usage = msg.usage
+                }
                 continue
             }
             if (msg.content.type === 'turn-duration') {
@@ -671,6 +677,8 @@ export function reduceTimeline(
         }
 
         if (msg.role === 'user') {
+            pendingCodexTurnUsage = undefined
+            codexUsageTarget = null
             if (isCliOutputText(msg.content.text, msg.meta)) {
                 blocks.push(createCliOutputBlock({
                     id: msg.id,
@@ -759,11 +767,12 @@ export function reduceTimeline(
                         const existing = textBlocksByStreamId.get(streamId)
                         if (existing) {
                             existing.text = c.text
-                            existing.usage = msg.usage
+                            existing.usage = msg.usage ?? pendingCodexTurnUsage
                             existing.model = msg.model
                             existing.meta = msg.meta
                             existing.invokedAt = msg.invokedAt
                             if (c.final === true) existing.final = true
+                            codexUsageTarget = existing
                             continue
                         }
                     }
@@ -774,7 +783,7 @@ export function reduceTimeline(
                         localId: msg.localId,
                         createdAt: msg.createdAt,
                         invokedAt: msg.invokedAt,
-                        usage: msg.usage,
+                        usage: msg.usage ?? pendingCodexTurnUsage,
                         model: msg.model,
                         text: c.text,
                         streamId,
@@ -782,6 +791,10 @@ export function reduceTimeline(
                         meta: msg.meta
                     }
                     blocks.push(block)
+                    if (pendingCodexTurnUsage) {
+                        if (codexUsageTarget && codexUsageTarget !== block) codexUsageTarget.usage = undefined
+                    }
+                    codexUsageTarget = block
                     if (streamId) {
                         textBlocksByStreamId.set(streamId, block)
                     }

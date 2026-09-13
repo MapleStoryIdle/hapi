@@ -72,6 +72,25 @@ export type MonitorIncident = {
     approvalContext?: MonitorApprovalContext
 }
 export type MonitorBucket = { at: number; total: number; ok: number; failures: number; latencyMs: number }
+export type MonitorActivitySource = 'probe' | 'webhook' | 'scheduled' | 'manual'
+export type MonitorActivityOutcome = 'ok' | 'failed' | 'dispatched' | 'deferred' | 'duplicate'
+export type MonitorActivity = {
+    id: string
+    monitorId: string
+    createdAt: number
+    source: MonitorActivitySource
+    outcome: MonitorActivityOutcome
+    summary: string
+    details: string
+}
+export type MonitorCallStats = {
+    total: number
+    ok: number
+    failed: number
+    dispatched: number
+    deferred: number
+    duplicate: number
+}
 export type Monitor = {
     id: string
     config: MonitorConfig
@@ -84,9 +103,10 @@ export type Monitor = {
     nextCheckAt: number
     buckets: MonitorBucket[]
     incident: MonitorIncident | null
+    callStats: MonitorCallStats
     relatedSession?: { type: 'managed' | 'native-codex'; sessionId: string; machineId?: string }
 }
-export type MonitorDetail = Monitor & { incidents: MonitorIncident[] }
+export type MonitorDetail = Monitor & { incidents: MonitorIncident[]; activities: MonitorActivity[] }
 export const MonitorWebhookSchema = z.object({
     eventId: z.string().trim().min(1).max(128),
     summary: z.string().trim().min(1).max(500),

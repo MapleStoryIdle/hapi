@@ -56,6 +56,8 @@ import {
     type CodexLocalSessionSnapshotRpcResponse,
     type CodexLocalSessionSnapshotVersion,
     type CodexLocalSessionStatusRpcResponse,
+    type RecoverCodexLocalSessionControlRequest,
+    type CodexLocalSessionRecoveryResponse,
     type CodexLocalSessionSummary,
     type CodexImportedMessageContent,
     type CodexTranscriptLifecycleEvent,
@@ -138,6 +140,8 @@ type MachineRpcHandlers = {
     spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>
     stopSession: (sessionId: string) => boolean
     requestShutdown: () => void
+    recoverCodexControl?: (input: { threadId: string; recoveryRequestId: string; cwd: string }) => { status: 'pending' | 'ready' | 'unconfirmed'; recoveryRequestId: string; sessionId?: string; error?: string }
+    getCodexRecovery?: (threadId: string) => { status: 'pending' | 'ready' | 'unconfirmed'; recoveryRequestId: string; sessionId?: string; error?: string } | null
 }
 
 interface PathExistsRequest {
@@ -176,6 +180,8 @@ interface ReadCodexLocalSessionSnapshotRequest extends ReadCodexLocalSessionRequ
 interface GetCodexLocalSessionStatusRequest {
     sessionId?: unknown
 }
+
+interface RecoverCodexLocalSessionControlRpcRequest extends RecoverCodexLocalSessionControlRequest {}
 
 interface ControlCodexLocalSessionRequest {
     requestId?: unknown
@@ -362,6 +368,7 @@ export class ApiMachineClient {
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
     private codexSshOwnershipMonitor: ReturnType<typeof setInterval> | null = null
     private nativeCodexAttachmentCleanupTimer: ReturnType<typeof setInterval> | null = null
+    private nativeControlRecoveryStatus: ((threadId: string) => { status: 'pending' | 'ready' | 'unconfirmed' } | null) | null = null
     private rpcHandlerManager: RpcHandlerManager
     private readonly nativeCodexSessionTitleCache = new NativeCodexSessionTitleCache()
     private readonly nativeCodexTurnLifecycle = new NativeCodexTurnLifecycleTracker({
@@ -643,6 +650,9 @@ export class ApiMachineClient {
                 if (!sessionId) {
                     return { success: false, code: 'invalid_request', error: 'sessionId is required' }
                 }
+                if (this.nativeControlRecoveryStatus?.(sessionId)) {
+                    return { success: false, code: 'control_busy', error: 'Native control recovery is in progress' }
+                }
                 const action = NativeCodexSessionControlActionSchema.safeParse({
                     action: params?.action,
                     ...(params?.expectedTurnId === undefined ? {} : { expectedTurnId: params.expectedTurnId }),
@@ -710,6 +720,9 @@ export class ApiMachineClient {
                 if (!sessionId) {
                     return { success: false, code: 'invalid_message', error: 'sessionId is required' }
                 }
+                if (this.nativeControlRecoveryStatus?.(sessionId)) {
+                    return { success: false, code: 'launch_failed', error: 'Native control recovery is in progress' }
+                }
                 if (params?.forceRecovery !== undefined && typeof params.forceRecovery !== 'boolean') {
                     return { success: false, code: 'invalid_message', error: 'forceRecovery must be a boolean' }
                 }
@@ -746,6 +759,9 @@ export class ApiMachineClient {
                 if (!sessionId) {
                     return { success: false, code: 'invalid_client_message_id', error: 'sessionId is required' }
                 }
+                if (this.nativeControlRecoveryStatus?.(sessionId)) {
+                    return { success: false, code: 'launch_failed', error: 'Native control recovery has claimed this session' }
+                }
                 this.observeNativeCodexSession(sessionId)
                 return this.nativeCodexSessionDirectSender.discard(sessionId, params?.clientMessageId)
             }
@@ -760,6 +776,9 @@ export class ApiMachineClient {
                 const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
                 if (!sessionId) {
                     return { success: false, code: 'session_not_found', error: 'sessionId is required' }
+                }
+                if (this.nativeControlRecoveryStatus?.(sessionId)) {
+                    return { success: false, code: 'archive_in_progress', error: 'Native control recovery is in progress' }
                 }
 
                 // A Kanban card has not necessarily opened the native drawer,
@@ -816,6 +835,9 @@ export class ApiMachineClient {
                 const request = RenameNativeCodexSessionRequestSchema.safeParse(params)
                 if (!sessionId || !request.success) {
                     return { success: false, code: 'invalid_request', error: 'A session ID and a name of 1–255 characters are required' }
+                }
+                if (this.nativeControlRecoveryStatus?.(sessionId)) {
+                    return { success: false, code: 'rename_failed', error: 'Native control recovery has claimed this session' }
                 }
                 const summary = this.getNativeCodexSessionSummary(sessionId)
                 if (!summary) {
@@ -1109,7 +1131,52 @@ export class ApiMachineClient {
         }
     }
 
-    setRPCHandlers({ spawnSession, stopSession, requestShutdown }: MachineRpcHandlers): void {
+    setRPCHandlers({ spawnSession, stopSession, requestShutdown, recoverCodexControl, getCodexRecovery }: MachineRpcHandlers): void {
+        this.nativeControlRecoveryStatus = getCodexRecovery ?? null
+        this.rpcHandlerManager.registerHandler<RecoverCodexLocalSessionControlRpcRequest, CodexLocalSessionRecoveryResponse>(
+            RPC_METHODS.RecoverCodexLocalSessionControl,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                const recoveryRequestId = typeof params?.recoveryRequestId === 'string' ? params.recoveryRequestId.trim() : ''
+                const expected = params?.expectedVersion
+                if (!sessionId || !/^[a-zA-Z0-9:._-]{1,200}$/.test(recoveryRequestId) || !expected || typeof expected.runnerEpoch !== 'string' || !Number.isInteger(expected.revision)) {
+                    return { success: false, code: 'invalid_request', error: 'A thread id, recovery request id, and snapshot version are required' }
+                }
+                const existing = getCodexRecovery?.(sessionId)
+                if (existing) {
+                    return { success: true, ...existing }
+                }
+                if (!recoverCodexControl) return { success: false, code: 'launch_failed', error: 'This runner does not support native control recovery' }
+                await this.refreshNativeCodexSshOwnership({ forceRefresh: true })
+                const read = this.readNativeCodexTranscript(sessionId, { limit: 50 })
+                if (!read || read.version.runnerEpoch !== expected.runnerEpoch || read.version.revision !== expected.revision) {
+                    return { success: false, code: 'stale_snapshot', error: 'The native transcript changed; refresh before recovering control' }
+                }
+                const summary = this.withNativeCodexSshControlForRead(read).data.session
+                const status = this.getNativeCodexSessionStatus(sessionId, summary)
+                const controls = status.success ? this.nativeCodexSessionDirectSender.getControls(sessionId, {
+                    controlledByCodexSsh: summary.controlledByCodexSsh,
+                    activeTurnId: status.activeTurnId ?? null
+                }) : null
+                if (!status.success || status.status !== 'unknown' || !status.stalledSince || status.waitingForUserInput || status.activeTurnId || summary.controlledByCodexSsh !== false || this.nativeCodexSessionDirectSender.ownsActiveDelivery(sessionId) || (status.queuedMessages?.length ?? 0) > 0 || controls?.queuePaused || controls?.stoppingTurnId) {
+                    return { success: false, code: 'not_eligible', error: 'The native session is no longer safe to recover' }
+                }
+                const cwd = summary.cwd?.trim()
+                if (!cwd) return { success: false, code: 'not_eligible', error: 'The native session has no recoverable working directory' }
+                const operation = recoverCodexControl({ threadId: sessionId, recoveryRequestId, cwd })
+                return { success: true, ...operation }
+            }
+        )
+        this.rpcHandlerManager.registerHandler<{ sessionId?: unknown }, CodexLocalSessionRecoveryResponse>(
+            RPC_METHODS.GetCodexLocalSessionRecovery,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                const operation = sessionId ? getCodexRecovery?.(sessionId) : null
+                return operation
+                    ? { success: true, ...operation }
+                    : { success: false, code: 'invalid_request', error: 'No native control recovery operation exists for this thread' }
+            }
+        )
         this.rpcHandlerManager.registerHandler(RPC_METHODS.SpawnHappySession, async (params: any) => {
             const { directory, sessionId, resumeSessionId, forkSessionId, machineId, approvedNewDirectoryCreation, agent, model, effort, modelReasoningEffort, yolo, permissionMode, serviceTier, token, sessionType, worktreeName } = params || {}
 

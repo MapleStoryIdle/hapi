@@ -33,21 +33,23 @@ type PendingScrollRestore = {
     scrollHeight: number
 }
 
+type PendingLoadBaseline = {
+    messagesVersion: number
+    sourceMessagesVersion: number
+    hasMoreMessages: boolean
+}
+
 const MESSAGE_ANCHOR_SELECTOR = '.happy-thread-messages > [id]'
-const USER_MESSAGE_ANCHOR_SELECTOR = [
-    '.happy-thread-messages > [id^="hapi-message-user-text:"]',
-    '.happy-thread-messages > [id^="hapi-message-question-answer:"]'
-].join(', ')
 const MANUAL_SCROLL_EPSILON_PX = 1
 const INITIAL_SCROLL_SETTLE_MS = 1800
 const INITIAL_SCROLL_SETTLE_DELAYS_MS = [0, 16, 50, 120, 250, 500, 900, 1400, 1800] as const
-const VIEWPORT_EDGE_EPSILON_PX = 1
 const TOP_LOAD_SCROLL_EDGE_PX = 2
 const TOP_LOAD_WHEEL_DELTA_EPSILON_PX = 0.5
 const PULL_TO_LOAD_OLDER_THRESHOLD_PX = 72
 const PULL_TO_LOAD_OLDER_MAX_OFFSET_PX = 48
 const PULL_TO_LOAD_OLDER_LOADING_OFFSET_PX = 34
 const MANUAL_SCROLL_INTENT_WINDOW_MS = 250
+const PAGINATION_RENDER_SETTLE_MS = 200
 
 export type PullToLoadOlderPhase = 'idle' | 'pulling' | 'ready' | 'loading'
 
@@ -74,16 +76,6 @@ type LocateOutlineTargetOptions = {
     findTarget: (anchorId: string) => HTMLElement | null
     hasMoreMessages: () => boolean
     loadOlderPreservingScroll: () => Promise<boolean>
-}
-
-type LocateUserMessageTargetOptions = {
-    viewport: HTMLElement
-    hasMoreMessages: () => boolean
-    loadOlderPreservingScroll: () => Promise<boolean>
-}
-
-type ScrollIntoViewportOptions = {
-    behavior?: ScrollBehavior
 }
 
 export function getScrollIntent(params: {
@@ -155,6 +147,19 @@ export function shouldFollowBottomInsetChange(params: {
     restoringScroll: boolean
 }): boolean {
     return params.autoScrollEnabled && params.atBottom && !params.restoringScroll
+}
+
+/** Keep the pagination anchor until deferred history has reached the DOM. */
+export function shouldWaitForDeferredHistoryRender(params: {
+    hasPendingRestore: boolean
+    baselineSourceMessagesVersion: number | null
+    sourceMessagesVersion: number
+    renderedMessagesVersion: number
+}): boolean {
+    return params.hasPendingRestore
+        && params.baselineSourceMessagesVersion !== null
+        && params.sourceMessagesVersion > params.baselineSourceMessagesVersion
+        && params.renderedMessagesVersion < params.sourceMessagesVersion
 }
 
 export function shouldLoadOlderFromTopWheel(params: {
@@ -246,73 +251,6 @@ export async function locateOutlineTargetMessage(options: LocateOutlineTargetOpt
     return target
 }
 
-export function findVisibleUserMessageAnchor(viewport: HTMLElement): HTMLElement | null {
-    const viewportRect = viewport.getBoundingClientRect()
-    const messages = Array.from(viewport.querySelectorAll<HTMLElement>(USER_MESSAGE_ANCHOR_SELECTOR))
-    return messages.find((message) => {
-        const rect = message.getBoundingClientRect()
-        return rect.bottom > viewportRect.top && rect.top < viewportRect.bottom
-    }) ?? null
-}
-
-export function findNearestUserMessageAnchorAbove(viewport: HTMLElement): HTMLElement | null {
-    const viewportRect = viewport.getBoundingClientRect()
-    const messages = Array.from(viewport.querySelectorAll<HTMLElement>(USER_MESSAGE_ANCHOR_SELECTOR))
-    let nearest: { message: HTMLElement; bottom: number } | null = null
-    for (const message of messages) {
-        const rect = message.getBoundingClientRect()
-        if (rect.bottom > viewportRect.top + VIEWPORT_EDGE_EPSILON_PX) {
-            continue
-        }
-        if (!nearest || rect.bottom > nearest.bottom) {
-            nearest = { message, bottom: rect.bottom }
-        }
-    }
-    return nearest?.message ?? null
-}
-
-export function hasUserMessageAnchor(viewport: HTMLElement): boolean {
-    return Boolean(viewport.querySelector(USER_MESSAGE_ANCHOR_SELECTOR))
-}
-
-export function shouldShowReturnToUserMessageButton(params: {
-    viewport: HTMLElement
-    hasMoreMessages: boolean
-}): boolean {
-    if (findVisibleUserMessageAnchor(params.viewport)) {
-        return false
-    }
-    if (findNearestUserMessageAnchorAbove(params.viewport)) {
-        return true
-    }
-    return params.hasMoreMessages && !hasUserMessageAnchor(params.viewport)
-}
-
-export async function locateNearestUserMessageAbove(options: LocateUserMessageTargetOptions): Promise<HTMLElement | null> {
-    let target = findNearestUserMessageAnchorAbove(options.viewport)
-    while (!target && options.hasMoreMessages()) {
-        const loaded = await options.loadOlderPreservingScroll()
-        if (!loaded) {
-            break
-        }
-        target = findNearestUserMessageAnchorAbove(options.viewport)
-    }
-    return target
-}
-
-export function scrollElementToViewportTop(
-    viewport: HTMLElement,
-    target: HTMLElement,
-    options: ScrollIntoViewportOptions = {}
-): void {
-    const viewportRect = viewport.getBoundingClientRect()
-    const targetRect = target.getBoundingClientRect()
-    viewport.scrollTo({
-        top: viewport.scrollTop + targetRect.top - viewportRect.top,
-        behavior: options.behavior ?? 'smooth'
-    })
-}
-
 function getTouchById(touches: TouchList, touchId: number | null): Touch | null {
     if (touchId === null) {
         return touches[0] ?? null
@@ -373,48 +311,6 @@ export function ScrollToBottomButton(props: {
                     </>
                 ) : (
                     <ArrowDownIcon className="h-4 w-4" />
-                )}
-            </span>
-        </button>
-    )
-}
-
-export function ReturnToUserMessageButton(props: {
-    visible: boolean
-    loading?: boolean
-    hidden?: boolean
-    bottomInset?: number
-    bottomSafeAreaInset?: boolean
-    bottomAccessoryVisible?: boolean
-    onClick: () => void
-}) {
-    const { t } = useTranslation()
-    if (props.hidden || (!props.visible && !props.loading)) {
-        return null
-    }
-
-    const label = t('misc.returnToUserMessage')
-    const bottomOffsetPx = (props.bottomInset ?? 0) + (props.bottomAccessoryVisible ? 8 : 0)
-    const bottomOffset = props.bottomSafeAreaInset
-        ? `calc(${bottomOffsetPx}px + var(--app-safe-area-bottom))`
-        : `${bottomOffsetPx}px`
-    const leftOffset = 'max(1rem, calc((100% - var(--content-max-w, 960px)) / 2 + 0.75rem))'
-
-    return (
-        <button
-            type="button"
-            onClick={props.onClick}
-            disabled={props.loading}
-            style={{ bottom: bottomOffset, left: leftOffset }}
-            className="absolute z-10 bg-transparent p-0 opacity-90 transition-[bottom,opacity] duration-150 ease-out hover:opacity-100 disabled:cursor-wait disabled:opacity-70"
-            aria-label={label}
-            title={label}
-        >
-            <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_8px_22px_rgba(15,23,42,0.14)] animate-bounce-in">
-                {props.loading ? (
-                    <Spinner size="sm" label={null} className="text-current" />
-                ) : (
-                    <ArrowDownIcon className="h-4 w-4 rotate-180" />
                 )}
             </span>
         </button>
@@ -624,6 +520,7 @@ export function HappyThread(props: {
     rawMessagesCount: number
     normalizedMessagesCount: number
     messagesVersion: number
+    sourceMessagesVersion?: number
     toolGroupRunActive: boolean
     toolGroupCompletionKey: string | null
     forceScrollToken: number
@@ -654,11 +551,13 @@ export function HappyThread(props: {
     const hasMoreMessagesRef = useRef(props.hasMoreMessages)
     const isLoadingMessagesRef = useRef(props.isLoadingMessages)
     const messagesVersionRef = useRef(props.messagesVersion)
+    const sourceMessagesVersionRef = useRef(props.sourceMessagesVersion ?? props.messagesVersion)
     const onLoadMoreRef = useRef(props.onLoadMore)
     const handleLoadMoreRef = useRef<() => void>(() => {})
     const pendingLoadPromiseRef = useRef<Promise<boolean> | null>(null)
     const pendingLoadResolveRef = useRef<((value: boolean) => void) | null>(null)
-    const pendingLoadBaselineRef = useRef<{ messagesVersion: number; hasMoreMessages: boolean } | null>(null)
+    const pendingLoadBaselineRef = useRef<PendingLoadBaseline | null>(null)
+    const pendingLoadSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const atBottomRef = useRef(true)
     const onAtBottomChangeRef = useRef(props.onAtBottomChange)
     const onFlushPendingRef = useRef(props.onFlushPending)
@@ -669,10 +568,7 @@ export function HappyThread(props: {
     const initialScrollSessionRef = useRef<string | null>(null)
     const initialScrollDeadlineRef = useRef(0)
     const initialScrollTimersRef = useRef<number[]>([])
-    const returnToUserVisibilityFrameRef = useRef<number | null>(null)
     const [isAwayFromBottom, setIsAwayFromBottom] = useState(false)
-    const [returnToUserMessageVisible, setReturnToUserMessageVisible] = useState(false)
-    const [returnToUserMessageLoading, setReturnToUserMessageLoading] = useState(false)
     const [pullToLoadDistance, setPullToLoadDistanceState] = useState(0)
     const [pullToLoadLoading, setPullToLoadLoading] = useState(false)
     const [toolGroupExpansionStates, setToolGroupExpansionStates] = useState<ToolGroupExpansionStates>({})
@@ -721,34 +617,6 @@ export function HappyThread(props: {
             active: false
         }
     }, [])
-    const updateReturnToUserMessageVisibility = useCallback(() => {
-        const viewport = viewportRef.current
-        setReturnToUserMessageVisible(viewport ? shouldShowReturnToUserMessageButton({
-            viewport,
-            hasMoreMessages: hasMoreMessagesRef.current
-        }) : false)
-    }, [])
-    const updateReturnToUserMessageVisibilityRef = useRef(updateReturnToUserMessageVisibility)
-    useEffect(() => {
-        updateReturnToUserMessageVisibilityRef.current = updateReturnToUserMessageVisibility
-    }, [updateReturnToUserMessageVisibility])
-    const requestReturnToUserMessageVisibilityUpdate = useCallback(() => {
-        if (returnToUserVisibilityFrameRef.current !== null) {
-            return
-        }
-        returnToUserVisibilityFrameRef.current = window.requestAnimationFrame(() => {
-            returnToUserVisibilityFrameRef.current = null
-            updateReturnToUserMessageVisibilityRef.current()
-        })
-    }, [])
-    useEffect(() => {
-        return () => {
-            if (returnToUserVisibilityFrameRef.current !== null) {
-                window.cancelAnimationFrame(returnToUserVisibilityFrameRef.current)
-                returnToUserVisibilityFrameRef.current = null
-            }
-        }
-    }, [])
     useEffect(() => {
         onAtBottomChangeRef.current = props.onAtBottomChange
     }, [props.onAtBottomChange])
@@ -764,6 +632,9 @@ export function HappyThread(props: {
     useEffect(() => {
         messagesVersionRef.current = props.messagesVersion
     }, [props.messagesVersion])
+    useEffect(() => {
+        sourceMessagesVersionRef.current = props.sourceMessagesVersion ?? props.messagesVersion
+    }, [props.messagesVersion, props.sourceMessagesVersion])
     useEffect(() => {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
@@ -800,6 +671,14 @@ export function HappyThread(props: {
             messagesVersionRef.current !== baseline.messagesVersion
             || hasMoreMessagesRef.current !== baseline.hasMoreMessages
         )
+    }, [])
+
+    const clearPendingLoadSettleTimer = useCallback(() => {
+        if (pendingLoadSettleTimerRef.current === null) {
+            return
+        }
+        clearTimeout(pendingLoadSettleTimerRef.current)
+        pendingLoadSettleTimerRef.current = null
     }, [])
 
     const markManualScrollIntent = useCallback(() => {
@@ -841,7 +720,6 @@ export function HappyThread(props: {
         }
 
         const handleScroll = () => {
-            requestReturnToUserMessageVisibilityUpdate()
             const userInitiated = consumeManualScrollIntent()
             const intent = getScrollIntent({
                 scrollTop: viewport.scrollTop,
@@ -890,7 +768,7 @@ export function HappyThread(props: {
 
         viewport.addEventListener('scroll', handleScroll, { passive: true })
         return () => viewport.removeEventListener('scroll', handleScroll)
-    }, [clearInitialScrollTimers, consumeManualScrollIntent, isInitialScrollSettling, requestReturnToUserMessageVisibilityUpdate])
+    }, [clearInitialScrollTimers, consumeManualScrollIntent, isInitialScrollSettling])
 
     const scrollToBottomInstant = useCallback(() => {
         const viewport = viewportRef.current
@@ -902,9 +780,8 @@ export function HappyThread(props: {
             // the thread in the same layout pass.
             viewport.scrollTop = viewport.scrollHeight
             lastScrollTopRef.current = viewport.scrollTop
-            requestReturnToUserMessageVisibilityUpdate()
         }
-    }, [requestReturnToUserMessageVisibilityUpdate])
+    }, [])
 
     // Scroll to bottom handler for the indicator button
     const scrollToBottom = useCallback(() => {
@@ -920,8 +797,7 @@ export function HappyThread(props: {
         }
         setIsAwayFromBottom(false)
         onFlushPendingRef.current()
-        requestReturnToUserMessageVisibilityUpdate()
-    }, [requestReturnToUserMessageVisibilityUpdate])
+    }, [])
 
     // A send is an explicit request to return to the newest message. Unlike
     // the indicator button, do this before paint and without a smooth-scroll
@@ -944,8 +820,6 @@ export function HappyThread(props: {
         lastScrollTopRef.current = viewportRef.current?.scrollTop ?? 0
         atBottomRef.current = true
         setIsAwayFromBottom(false)
-        setReturnToUserMessageVisible(false)
-        setReturnToUserMessageLoading(false)
         setPullToLoadDistance(0)
         setPullToLoadLoading(false)
         pullToLoadLoadingRef.current = false
@@ -959,8 +833,9 @@ export function HappyThread(props: {
         initialScrollSessionRef.current = null
         initialScrollDeadlineRef.current = 0
         clearInitialScrollTimers()
+        clearPendingLoadSettleTimer()
         settlePendingLoad(false)
-    }, [props.sessionId, clearInitialScrollTimers, resetPullGesture, setPullToLoadDistance, settlePendingLoad])
+    }, [props.sessionId, clearInitialScrollTimers, clearPendingLoadSettleTimer, resetPullGesture, setPullToLoadDistance, settlePendingLoad])
 
     useLayoutEffect(() => {
         if (
@@ -1003,9 +878,10 @@ export function HappyThread(props: {
     useEffect(() => {
         return () => {
             clearInitialScrollTimers()
+            clearPendingLoadSettleTimer()
             settlePendingLoad(false)
         }
-    }, [clearInitialScrollTimers, settlePendingLoad])
+    }, [clearInitialScrollTimers, clearPendingLoadSettleTimer, settlePendingLoad])
 
     useLayoutEffect(() => {
         if (forceScrollTokenRef.current === props.forceScrollToken) {
@@ -1073,6 +949,7 @@ export function HappyThread(props: {
         loadStartedRef.current = false
         pendingLoadBaselineRef.current = {
             messagesVersion: messagesVersionRef.current,
+            sourceMessagesVersion: sourceMessagesVersionRef.current,
             hasMoreMessages: hasMoreMessagesRef.current
         }
         const loadPromise = new Promise<boolean>((resolve) => {
@@ -1087,11 +964,25 @@ export function HappyThread(props: {
                 console.error('Failed to load older messages:', error)
             }).finally(() => {
                 if (!loadStartedRef.current && !isLoadingMoreRef.current) {
-                    if (pendingScrollRef.current) {
-                        pendingScrollRef.current = null
-                        loadLockRef.current = false
-                    }
-                    settlePendingLoad(true)
+                    clearPendingLoadSettleTimer()
+                    pendingLoadSettleTimerRef.current = setTimeout(() => {
+                        pendingLoadSettleTimerRef.current = null
+                        const baseline = pendingLoadBaselineRef.current
+                        const waitForDeferredRender = shouldWaitForDeferredHistoryRender({
+                            hasPendingRestore: pendingScrollRef.current !== null,
+                            baselineSourceMessagesVersion: baseline?.sourceMessagesVersion ?? null,
+                            sourceMessagesVersion: sourceMessagesVersionRef.current,
+                            renderedMessagesVersion: messagesVersionRef.current,
+                        })
+                        if (waitForDeferredRender) {
+                            return
+                        }
+                        if (pendingScrollRef.current) {
+                            pendingScrollRef.current = null
+                            loadLockRef.current = false
+                        }
+                        settlePendingLoad(true)
+                    }, PAGINATION_RENDER_SETTLE_MS)
                 }
             })
         } catch (error) {
@@ -1101,7 +992,7 @@ export function HappyThread(props: {
             console.error('Failed to load older messages:', error)
         }
         return loadPromise
-    }, [isInitialScrollSettling, settlePendingLoad])
+    }, [clearPendingLoadSettleTimer, isInitialScrollSettling, settlePendingLoad])
 
     const canStartPullToLoadOlder = useCallback(() => {
         return (
@@ -1252,35 +1143,6 @@ export function HappyThread(props: {
         props.onOutlineOpenChange(false)
     }, [loadOlderPreservingScroll, props.onOutlineItemClick, props.onOutlineOpenChange])
 
-    const handleReturnToUserMessage = useCallback(async () => {
-        const viewport = viewportRef.current
-        if (!viewport || returnToUserMessageLoading) {
-            return
-        }
-
-        setReturnToUserMessageLoading(true)
-        try {
-            const target = await locateNearestUserMessageAbove({
-                viewport,
-                hasMoreMessages: () => hasMoreMessagesRef.current,
-                loadOlderPreservingScroll
-            })
-            if (target) {
-                scrollElementToViewportTop(viewport, target, { behavior: 'smooth' })
-                autoScrollEnabledRef.current = false
-                setReturnToUserMessageVisible(false)
-                return
-            }
-            updateReturnToUserMessageVisibility()
-        } finally {
-            setReturnToUserMessageLoading(false)
-        }
-    }, [
-        loadOlderPreservingScroll,
-        returnToUserMessageLoading,
-        updateReturnToUserMessageVisibility
-    ])
-
     useEffect(() => {
         handleLoadMoreRef.current = () => {
             void loadOlderPreservingScroll()
@@ -1369,11 +1231,10 @@ export function HappyThread(props: {
             })) {
                 scrollToBottomInstant()
             }
-            requestReturnToUserMessageVisibilityUpdate()
         })
         observer.observe(content)
         return () => observer.disconnect()
-    }, [scrollToBottomInstant, requestReturnToUserMessageVisibilityUpdate])
+    }, [scrollToBottomInstant])
 
     useLayoutEffect(() => {
         const pending = pendingScrollRef.current
@@ -1405,27 +1266,27 @@ export function HappyThread(props: {
     useEffect(() => {
         isLoadingMoreRef.current = props.isLoadingMoreMessages
         if (props.isLoadingMoreMessages) {
+            clearPendingLoadSettleTimer()
             loadStartedRef.current = true
         }
         if (prevLoadingMoreRef.current && !props.isLoadingMoreMessages) {
-            if (pendingScrollRef.current) {
+            const baseline = pendingLoadBaselineRef.current
+            const waitForDeferredRender = shouldWaitForDeferredHistoryRender({
+                hasPendingRestore: pendingScrollRef.current !== null,
+                baselineSourceMessagesVersion: baseline?.sourceMessagesVersion ?? null,
+                sourceMessagesVersion: props.sourceMessagesVersion ?? props.messagesVersion,
+                renderedMessagesVersion: props.messagesVersion,
+            })
+            if (pendingScrollRef.current && !waitForDeferredRender) {
                 pendingScrollRef.current = null
                 loadLockRef.current = false
             }
-            settlePendingLoad(true)
+            if (!waitForDeferredRender) {
+                settlePendingLoad(true)
+            }
         }
         prevLoadingMoreRef.current = props.isLoadingMoreMessages
-    }, [props.isLoadingMoreMessages, settlePendingLoad])
-
-    useEffect(() => {
-        requestReturnToUserMessageVisibilityUpdate()
-    }, [
-        props.messagesVersion,
-        props.hasMoreMessages,
-        props.isLoadingMessages,
-        props.isLoadingMoreMessages,
-        requestReturnToUserMessageVisibilityUpdate
-    ])
+    }, [clearPendingLoadSettleTimer, props.isLoadingMoreMessages, props.messagesVersion, props.sourceMessagesVersion, settlePendingLoad])
 
     const showSkeleton = props.isLoadingMessages && props.rawMessagesCount === 0 && props.pendingCount === 0
     const pullToLoadIndicator = getPullToLoadOlderIndicator({
@@ -1504,34 +1365,19 @@ export function HappyThread(props: {
                 </ThreadPrimitive.Viewport>
                 <PullToLoadOlderIndicator {...pullToLoadIndicator} />
                 {(props.scrollButtonPositionReady ?? true) ? (
-                    <>
-                        <ReturnToUserMessageButton
-                            visible={returnToUserMessageVisible}
-                            loading={returnToUserMessageLoading}
-                            hidden={shouldHideScrollToBottomButton({
-                                bottomAccessoryExpanded: props.bottomAccessoryExpanded,
-                                bottomAccessoryVisible: props.bottomAccessoryVisible,
-                                pendingCount: props.pendingCount
-                            })}
-                            bottomInset={props.scrollButtonBottomInset ?? props.bottomInset}
-                            bottomSafeAreaInset={props.bottomSafeAreaInset}
-                            bottomAccessoryVisible={props.scrollButtonBottomInset === undefined ? props.bottomAccessoryVisible : false}
-                            onClick={handleReturnToUserMessage}
-                        />
-                        <ScrollToBottomButton
-                            count={props.pendingCount}
-                            visible={isAwayFromBottom}
-                            hidden={shouldHideScrollToBottomButton({
-                                bottomAccessoryExpanded: props.bottomAccessoryExpanded,
-                                bottomAccessoryVisible: props.bottomAccessoryVisible,
-                                pendingCount: props.pendingCount
-                            })}
-                            bottomInset={props.scrollButtonBottomInset ?? props.bottomInset}
-                            bottomSafeAreaInset={props.bottomSafeAreaInset}
-                            bottomAccessoryVisible={props.scrollButtonBottomInset === undefined ? props.bottomAccessoryVisible : false}
-                            onClick={scrollToBottom}
-                        />
-                    </>
+                    <ScrollToBottomButton
+                        count={props.pendingCount}
+                        visible={isAwayFromBottom}
+                        hidden={shouldHideScrollToBottomButton({
+                            bottomAccessoryExpanded: props.bottomAccessoryExpanded,
+                            bottomAccessoryVisible: props.bottomAccessoryVisible,
+                            pendingCount: props.pendingCount
+                        })}
+                        bottomInset={props.scrollButtonBottomInset ?? props.bottomInset}
+                        bottomSafeAreaInset={props.bottomSafeAreaInset}
+                        bottomAccessoryVisible={props.scrollButtonBottomInset === undefined ? props.bottomAccessoryVisible : false}
+                        onClick={scrollToBottom}
+                    />
                 ) : null}
                 {props.outlineOpen ? (
                     <>

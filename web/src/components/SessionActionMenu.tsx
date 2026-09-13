@@ -8,7 +8,7 @@ import {
     type CSSProperties,
     type ReactNode
 } from 'react'
-import { Activity, GitBranch, GitFork, LoaderCircle, Layers } from 'lucide-react'
+import { Activity, GitBranch, GitFork, LoaderCircle, Layers, Type } from 'lucide-react'
 import { useTranslation } from '@/lib/use-translation'
 
 type SessionActionMenuProps = {
@@ -17,6 +17,7 @@ type SessionActionMenuProps = {
     sessionActive: boolean
     onRename?: () => void
     onSetGroup?: () => void
+    onSetLabel?: () => void
     onExport?: () => void
     onArchive?: () => void
     onReopen?: () => void
@@ -502,6 +503,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                 {props.onSetGroup ? <button type="button" role="menuitem" className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`} onClick={() => { onClose(); props.onSetGroup?.() }}>
                     <Layers className="h-[18px] w-[18px] text-[var(--app-hint)]" aria-hidden="true" />
                     {t('session.groups.title')}
+                </button> : null}
+
+                {props.onSetLabel ? <button type="button" role="menuitem" className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`} onClick={() => { onClose(); props.onSetLabel?.() }}>
+                    <Type className="h-[18px] w-[18px] text-[var(--app-hint)]" aria-hidden="true" />
+                    {t('session.labels.title')}
                 </button> : null}
 
                 {onExport ? (

@@ -1,6 +1,6 @@
 import React from 'react';
 import { readCodexTokenUsage, selectCodexTokenUsage } from '@hapi/protocol/codexUsage';
-import { isHttpForbiddenError } from '@hapi/protocol';
+import { isCodexAuthenticationError, isHttpForbiddenError } from '@hapi/protocol';
 import { randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 
@@ -23,6 +23,7 @@ import { registerAppServerPermissionHandlers } from './utils/appServerPermission
 import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerConfig';
 import type { ReviewTarget, ThreadGoal, ThreadGoalStatus } from './appServerTypes';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
+import { notifyRunnerCodexRecoveryReady, notifyRunnerCodexRecoveryUnconfirmed } from '@/runner/controlClient';
 import { parseCodexSpecialCommand } from './codexSpecialCommands';
 import {
     RemoteLauncherBase,
@@ -72,7 +73,7 @@ type PendingSideSessionFork = {
     }) => void;
     reject: (error: Error) => void;
 };
-type CodexTaskStatusCode = 'system_error' | 'http_forbidden' | 'network_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown';
+type CodexTaskStatusCode = 'system_error' | 'authentication' | 'http_forbidden' | 'network_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown';
 type CodexTaskStatusEvent = {
     type: 'task-status';
     status: 'retrying' | 'compacting' | 'compacted' | 'failed';
@@ -164,12 +165,61 @@ const NETWORK_ERROR_PATTERNS = [
     'enotfound',
     'eai_again'
 ];
+const APP_SERVER_TRANSPORT_ERROR_PATTERNS = [
+    'codex app-server exited',
+    'codex app-server disconnected',
+    'failed to spawn codex app-server',
+    'write epipe',
+    'broken pipe'
+];
 const SAME_THREAD_MAX_RETRIES = 3;
 const SAME_THREAD_MAX_COMPACT_RETRIES = 1;
 const SAME_THREAD_COMPACT_TIMEOUT_MS = 10 * 60 * 1000;
 const CODEX_USAGE_SETTINGS_URL = 'https://chatgpt.com/codex/settings/usage';
 const CODEX_GOALS_UNSUPPORTED_MESSAGE = 'Codex goals are not supported by this Codex runtime. Upgrade Codex or enable features.goals.';
 const MAX_CODEX_GOAL_OBJECTIVE_CHARS = 4_000;
+
+function recoveryRecord(value: unknown): Record<string, unknown> | null {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : null
+}
+
+function recoveryString(value: unknown): string | null {
+    return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+type RecoveredCodexThreadState = 'active' | 'idle' | 'unknown'
+
+export function readRecoveredCodexThreadState(value: unknown, expectedThreadId: string): RecoveredCodexThreadState {
+    const root = recoveryRecord(value)
+    const data = recoveryRecord(root?.data) ?? root
+    const thread = recoveryRecord(data?.thread) ?? data
+    if (recoveryString(thread?.id ?? thread?.threadId) !== expectedThreadId) return 'unknown'
+    const turns = Array.isArray(thread?.turns)
+        ? thread?.turns
+        : Array.isArray(data?.turns)
+            ? data?.turns
+            : null
+    if (!turns) return 'unknown'
+    const active = new Set(['inprogress', 'processing', 'active', 'running'])
+    const terminal = new Set(['idle', 'completed', 'complete', 'failed', 'aborted', 'interrupted', 'cancelled', 'canceled'])
+    for (const turn of turns) {
+        const record = recoveryRecord(turn)
+        const nested = recoveryRecord(record?.turn)
+        const rawStatus = recoveryString(record?.status ?? record?.state ?? nested?.status ?? nested?.state)
+        if (!rawStatus) return 'unknown'
+        const status = rawStatus.toLowerCase().replace(/[-_\s]/g, '')
+        if (active.has(status)) return 'active'
+        if (!terminal.has(status)) return 'unknown'
+    }
+    return 'idle'
+}
+
+/** Strict recovery-only parser: ambiguous/malformed state is never idle. */
+export function isExactIdleRecoveryThreadRead(value: unknown, expectedThreadId: string): boolean {
+    return readRecoveredCodexThreadState(value, expectedThreadId) === 'idle'
+}
 
 type GoalForwardSignature = {
     objective: string | null;
@@ -256,6 +306,12 @@ function isNetworkCodexError(error: string | null): boolean {
     return NETWORK_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
 }
 
+export function isCodexAppServerTransportError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    const normalized = message.toLowerCase();
+    return APP_SERVER_TRANSPORT_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
+
 function extractCodexUsageActionUrl(error: string): string | null {
     const match = error.match(/https:\/\/chatgpt\.com\/codex\/settings\/usage[^\s)]*/i);
     return match?.[0] ?? null;
@@ -276,6 +332,9 @@ function classifyCodexTaskFailure(error: string | null): {
     }
     if (isHttpForbiddenError(error)) {
         return { code: 'http_forbidden' };
+    }
+    if (isCodexAuthenticationError(error)) {
+        return { code: 'authentication' };
     }
 
     const normalized = error.toLowerCase();
@@ -3169,8 +3228,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             session.sendSessionEvent({ type: 'ready' });
         };
 
-        await appServerClient.connect();
-        await appServerClient.initialize({
+        const initializeAppServer = () => appServerClient.initialize({
             clientInfo: {
                 name: 'hapi-codex-client',
                 version: '1.0.0'
@@ -3179,6 +3237,57 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 experimentalApi: true
             }
         });
+        await appServerClient.connect();
+        await initializeAppServer();
+        if (session.recoveryRequestId) {
+            try {
+                const requestedThreadId = session.sessionId;
+                if (!requestedThreadId) {
+                    throw new Error('Native control recovery is missing its requested Codex thread id');
+                }
+                // This path deliberately runs before the normal queue loop. It
+                // attaches the managed client but never starts a turn or sends a
+                // prompt; an explicit exact response is the only readiness proof.
+                const threadParams = buildThreadStartParams({
+                    cwd: session.path,
+                    mode: {
+                        permissionMode: 'default',
+                        collaborationMode: 'default'
+                    },
+                    mcpServers,
+                    cliOverrides: session.codexCliOverrides
+                });
+                const resumed = await appServerClient.resumeThread({ threadId: requestedThreadId, ...threadParams }, { signal: this.abortController.signal });
+                const resumedRecord = asRecord(resumed);
+                const resumedThreadId = asString(asRecord(resumedRecord?.thread)?.id);
+                if (resumedThreadId !== requestedThreadId) {
+                    throw new Error('Native control recovery did not receive an exact thread.id response');
+                }
+                const read = await appServerClient.readThread({ threadId: requestedThreadId, includeTurns: true }, { signal: this.abortController.signal });
+                if (!isExactIdleRecoveryThreadRead(read, requestedThreadId)) {
+                    throw new Error('Native control recovery could not confirm the exact thread is idle');
+                }
+                this.currentThreadId = requestedThreadId;
+                session.onSessionFound(requestedThreadId);
+                const ready = await notifyRunnerCodexRecoveryReady({
+                    recoveryRequestId: session.recoveryRequestId,
+                    sessionId: session.client.sessionId,
+                    threadId: requestedThreadId
+                });
+                if (ready?.error) {
+                    throw new Error(`Native control recovery readiness acknowledgement failed: ${ready.error}`);
+                }
+                logger.debug(`[Codex] Native control recovery ready for ${requestedThreadId}`);
+            } catch (error) {
+                await notifyRunnerCodexRecoveryUnconfirmed({
+                    recoveryRequestId: session.recoveryRequestId,
+                    sessionId: session.client.sessionId,
+                    threadId: session.sessionId ?? 'unknown',
+                    error: errorMessage(error).slice(0, 2_000)
+                }).catch(() => {});
+                throw error;
+            }
+        }
         let supportsTurnCollaborationMode = true;
         let supportsGoals = true;
         try {
@@ -3198,7 +3307,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             logger.debug(`[Codex] collaborationMode/list failed: ${errorMessage(error)}`);
         }
 
-        let hasThread = false;
+        // Recovery already attached and validated the exact thread above; do
+        // not issue a second resume before the first managed turn.
+        let hasThread = this.currentThreadId !== null;
         let pending: QueuedMessage | null = null;
         let suppressReadyForAdminCommand = false;
 
@@ -3837,6 +3948,60 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
         });
 
+        const recoverAppServerThread = async (
+            threadId: string,
+            mode: EnhancedMode
+        ): Promise<{ state: Exclude<RecoveredCodexThreadState, 'unknown'> } | { error: string }> => {
+            try {
+                // A transport failure leaves all pending RPCs rejected. Start a
+                // fresh app-server, repeat its handshake, then attach only to
+                // the exact existing conversation. Never resend the user turn:
+                // its delivery may already have reached Codex before the pipe
+                // disappeared.
+                await appServerClient.disconnect();
+                await appServerClient.connect();
+                await initializeAppServer();
+                const threadParams = buildThreadStartParams({
+                    cwd: session.path,
+                    mode,
+                    mcpServers,
+                    cliOverrides: session.codexCliOverrides
+                });
+                const resumed = await appServerClient.resumeThread({
+                    threadId,
+                    ...threadParams
+                }, { signal: this.abortController.signal });
+                const resumedThreadId = asString(asRecord(asRecord(resumed)?.thread)?.id);
+                if (resumedThreadId !== threadId) {
+                    throw new Error(`Recovery returned a different Codex thread: ${resumedThreadId ?? 'missing'}`);
+                }
+                const read = await appServerClient.readThread({
+                    threadId,
+                    includeTurns: true
+                }, { signal: this.abortController.signal });
+                const state = readRecoveredCodexThreadState(read, threadId);
+                if (state === 'unknown') {
+                    throw new Error('Recovered Codex thread state could not be confirmed');
+                }
+                this.currentThreadId = threadId;
+                this.currentTurnId = null;
+                session.onSessionFound(threadId);
+                hasThread = true;
+                turnInFlight = state === 'active';
+                allowAnonymousTerminalEvent = state === 'active';
+                session.onThinkingChange(state === 'active');
+                if (state === 'idle') {
+                    activeMessage = null;
+                }
+                logger.debug(`[Codex] Recovered app-server thread ${threadId}; state=${state}`);
+                return { state };
+            } catch (recoveryError) {
+                logger.warn(`[Codex] App-server recovery failed for thread ${threadId}:`, recoveryError);
+                await appServerClient.disconnect().catch(() => {});
+                return { error: errorMessage(recoveryError) };
+            }
+        };
+
         while (!this.shouldExit) {
             logActiveHandles('loop-top');
             if (!pending && (turnInFlight || recoveryInFlight) && session.queue.size() === 0) {
@@ -4046,8 +4211,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     }
                 }
             } catch (error) {
-                logger.warn('Error in codex session:', error);
+                const detail = errorMessage(error);
+                logger.warn(`[Codex] Session operation failed: ${detail}`, error);
                 const isAbortError = error instanceof Error && error.name === 'AbortError';
+                const failedThreadId = this.currentThreadId;
                 turnInFlight = false;
                 allowAnonymousTerminalEvent = false;
                 this.currentTurnId = null;
@@ -4055,12 +4222,27 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 if (isAbortError) {
                     messageBuffer.addMessage('Aborted by user', 'status');
                     session.sendSessionEvent({ type: 'message', message: 'Aborted by user' });
+                } else if (failedThreadId && isCodexAppServerTransportError(error)) {
+                    const recovery = await recoverAppServerThread(failedThreadId, {
+                        ...message.mode,
+                        model: session.getModel() ?? message.mode.model
+                    });
+                    if ('error' in recovery) {
+                        const terminalDetail = `${detail}; recovery failed: ${recovery.error}`;
+                        const terminalMessage = `Process exited unexpectedly: ${terminalDetail}`;
+                        messageBuffer.addMessage(terminalMessage, 'status');
+                        session.sendSessionEvent({ type: 'message', message: terminalMessage });
+                        this.currentThreadId = null;
+                        hasThread = false;
+                    }
                 } else {
-                    messageBuffer.addMessage('Process exited unexpectedly', 'status');
-                    session.sendSessionEvent({ type: 'message', message: 'Process exited unexpectedly' });
+                    const failureMessage = `Task failed: ${detail}`;
+                    sendTaskStatus(failureMessage, {
+                        status: 'failed',
+                        eventMessage: detail,
+                        recoverable: false
+                    });
                     this.currentTurnId = null;
-                    this.currentThreadId = null;
-                    hasThread = false;
                 }
             } finally {
                 if (!turnInFlight) {

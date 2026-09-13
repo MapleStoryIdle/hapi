@@ -54,6 +54,17 @@ describe('getEventPresentation — task-status', () => {
         expect(result.text).toBe('Codex usage limit reached · try again at 9:43 AM')
     })
 
+    it('formats authentication failures without exposing provider details', () => {
+        expect(getEventPresentation({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'authentication',
+            message: 'HTTP 401 Unauthorized: private provider response',
+            recoverable: false
+        })).toEqual({ icon: '⚠️', text: 'Codex sign-in required' })
+    })
+
     it('formats classified and older unclassified network failures without the generic task-failed label', () => {
         const result = getEventPresentation({
             type: 'task-status',

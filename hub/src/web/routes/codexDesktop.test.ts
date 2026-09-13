@@ -1282,6 +1282,62 @@ describe('Codex Desktop import routes', () => {
         } finally { store.close() }
     })
 
+    it('does not let an inactive historical wrapper block native control recovery', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const calls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            getSessionsByNamespace: () => [{
+                id: 'historical-wrapper', namespace: 'default', active: false,
+                metadata: { flavor: 'codex', machineId: 'mac-runner', codexSessionId: 'native-thread' }
+            }],
+            recoverCodexLocalSessionControl: async (...args: unknown[]) => {
+                calls.push(args)
+                return { success: true as const, status: 'pending' as const, recoveryRequestId: 'request-1' }
+            }
+        } as unknown as SyncEngine
+        try {
+            const response = await createRoutesAppWithEngine('default', store, engine).request('/api/codex/sessions/native-thread/recover-control', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ machineId: 'mac-runner', recoveryRequestId: 'request-1', expectedVersion: { runnerEpoch: 'runner-a', revision: 1 } })
+            })
+            expect(response.status).toBe(202)
+            expect(calls).toEqual([['mac-runner', {
+                sessionId: 'native-thread', recoveryRequestId: 'request-1', expectedVersion: { runnerEpoch: 'runner-a', revision: 1 }
+            }]])
+        } finally { store.close() }
+    })
+
+    it('maps a ready recovery only to the exact active managed session returned by the runner', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const stale = {
+            id: 'stale-wrapper', namespace: 'default', active: false,
+            metadata: { flavor: 'codex', machineId: 'mac-runner', codexSessionId: 'native-thread' }
+        }
+        const exact = {
+            id: 'managed-exact', namespace: 'default', active: true,
+            metadata: { flavor: 'codex', machineId: 'mac-runner', codexSessionId: 'native-thread' }
+        }
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            getSessionsByNamespace: () => [stale, exact],
+            getSession: (sessionId: string) => sessionId === exact.id ? exact : sessionId === stale.id ? stale : undefined,
+            getCodexLocalSessionRecovery: async () => ({
+                success: true as const,
+                status: 'ready' as const,
+                recoveryRequestId: 'request-1',
+                sessionId: exact.id
+            })
+        } as unknown as SyncEngine
+        try {
+            const response = await createRoutesAppWithEngine('default', store, engine).request('/api/codex/sessions/native-thread/recover-control?machineId=mac-runner')
+            expect(response.status).toBe(200)
+            expect(await response.json()).toMatchObject({ success: true, status: 'ready', sessionId: exact.id })
+        } finally { store.close() }
+    })
+
     it('refuses native control across namespaces and for a managed wrapper', async () => {
         const store = new Store(':memory:')
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')

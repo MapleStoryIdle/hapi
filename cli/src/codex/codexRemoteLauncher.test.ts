@@ -121,6 +121,15 @@ vi.mock('./codexAppServerClient', () => {
             return { thread: { id }, model: 'gpt-5.4' };
         }
 
+        async readThread(params?: { threadId?: string }): Promise<{ thread: { id: string; turns: Array<{ status: string }> } }> {
+            return {
+                thread: {
+                    id: params?.threadId ?? 'thread-unknown',
+                    turns: [{ status: 'completed' }]
+                }
+            };
+        }
+
         async forkThread(params?: { threadId?: string }): Promise<{ thread: { id: string }; model: string; reasoningEffort: string; serviceTier: string }> {
             const sourceId = params?.threadId ?? 'thread-source';
             harness.forkThreadIds.push(sourceId);
@@ -893,7 +902,12 @@ vi.mock('./utils/buildHapiMcpBridge', () => ({
     }
 }));
 
-import { codexRemoteLauncher } from './codexRemoteLauncher';
+import {
+    codexRemoteLauncher,
+    isCodexAppServerTransportError,
+    isExactIdleRecoveryThreadRead,
+    readRecoveredCodexThreadState
+} from './codexRemoteLauncher';
 
 type FakeAgentState = {
     requests: Record<string, unknown>;
@@ -1044,6 +1058,21 @@ function createSessionStub(messages = ['hello from launcher test'], mode = creat
 }
 
 describe('codexRemoteLauncher', () => {
+    it('fails closed for inProgress, missing, and malformed recovery turn state', () => {
+        expect(isExactIdleRecoveryThreadRead({ thread: { id: 'thread-1', turns: [] } }, 'thread-1')).toBe(true);
+        expect(isExactIdleRecoveryThreadRead({ thread: { id: 'thread-1', turns: [{ status: 'interrupted' }] } }, 'thread-1')).toBe(true);
+        expect(isExactIdleRecoveryThreadRead({ thread: { id: 'thread-1', turns: [{ status: 'inProgress' }] } }, 'thread-1')).toBe(false);
+        expect(isExactIdleRecoveryThreadRead({ thread: { id: 'thread-1', turns: [{ status: 'mystery' }] } }, 'thread-1')).toBe(false);
+        expect(isExactIdleRecoveryThreadRead({ thread: { id: 'thread-1' } }, 'thread-1')).toBe(false);
+        expect(isExactIdleRecoveryThreadRead({ thread: { id: 'other', turns: [] } }, 'thread-1')).toBe(false);
+    });
+    it('classifies app-server transport failures and recovered thread state', () => {
+        expect(isCodexAppServerTransportError(new Error('Codex app-server exited (code=null, signal=SIGTERM)'))).toBe(true);
+        expect(isCodexAppServerTransportError(new Error('collaborationMode value failed policy validation'))).toBe(false);
+        expect(readRecoveredCodexThreadState({ thread: { id: 'thread-1', turns: [{ status: 'inProgress' }] } }, 'thread-1')).toBe('active');
+        expect(readRecoveredCodexThreadState({ thread: { id: 'thread-1', turns: [{ status: 'completed' }] } }, 'thread-1')).toBe('idle');
+        expect(readRecoveredCodexThreadState({ thread: { id: 'thread-1', turns: [{ status: 'mystery' }] } }, 'thread-1')).toBe('unknown');
+    });
     afterEach(() => {
         harness.notifications = [];
         harness.registerRequestCalls = [];
@@ -1371,8 +1400,45 @@ describe('codexRemoteLauncher', () => {
             message: 'Plan mode is not supported by this Codex runtime. Sent as a normal turn instead.'
         });
         expect(sessionEvents).toContainEqual({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'unknown',
+            message: 'collaborationMode value failed policy validation',
+            recoverable: false
+        });
+        expect(sessionEvents).not.toContainEqual(expect.objectContaining({
+            message: expect.stringContaining('Process exited unexpectedly')
+        }));
+    });
+
+    it('silently restores the same thread after an app-server transport exit', async () => {
+        harness.startTurnErrors.push(new Error('Codex app-server exited (code=null, signal=SIGTERM)'));
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startThreadIds).toEqual(['thread-1']);
+        expect(harness.resumeThreadIds).toEqual(['thread-1']);
+        expect(harness.initializeCalls).toHaveLength(2);
+        expect(session.sessionId).toBe('thread-1');
+        expect(sessionEvents).not.toContainEqual(expect.objectContaining({
+            message: expect.stringContaining('Process exited unexpectedly')
+        }));
+    });
+
+    it('shows the process-exit error only after exact-thread recovery fails', async () => {
+        harness.startTurnErrors.push(new Error('Codex app-server exited (code=1, signal=null)'));
+        harness.failResumeThreadIds = ['thread-1'];
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.resumeThreadIds).toEqual(['thread-1']);
+        expect(sessionEvents).toContainEqual({
             type: 'message',
-            message: 'Process exited unexpectedly'
+            message: 'Process exited unexpectedly: Codex app-server exited (code=1, signal=null); recovery failed: resume failed'
         });
     });
 
@@ -1749,6 +1815,18 @@ describe('codexRemoteLauncher', () => {
             message: 'stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)',
             recoverable: false
         });
+        expect(session.thinking).toBe(false);
+    });
+
+    it('classifies a signed-out Codex account for structured UI display', async () => {
+        harness.nextTurnFailureMessage = 'Authentication required; please run codex login';
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        await codexRemoteLauncher(session as never);
+
+        expect(sessionEvents).toContainEqual(expect.objectContaining({
+            type: 'task-status', status: 'failed', code: 'authentication', recoverable: false
+        }));
         expect(session.thinking).toBe(false);
     });
 

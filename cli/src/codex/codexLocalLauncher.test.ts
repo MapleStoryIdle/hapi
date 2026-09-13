@@ -228,7 +228,7 @@ describe('codexLocalLauncher', () => {
         ]);
     });
 
-    it('keeps sandbox escalation available in safe-yolo mode', async () => {
+    it('uses the latest Codex auto-review flag in safe-yolo mode', async () => {
         const { session } = createSessionStub('safe-yolo', [
             '--ask-for-approval',
             'never',
@@ -242,10 +242,7 @@ describe('codexLocalLauncher', () => {
 
         expect(harness.launches).toHaveLength(1);
         expect(harness.launches[0]?.codexArgs).toEqual([
-            '--ask-for-approval',
-            'on-failure',
-            '--sandbox',
-            'workspace-write',
+            '--approve-for-me',
             '--model',
             'o3'
         ]);

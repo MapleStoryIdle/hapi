@@ -17,6 +17,9 @@ export interface SpawnSessionOptions {
     token?: string
     sessionType?: 'simple' | 'worktree'
     worktreeName?: string
+    /** Dedicated native-control recovery: never kill the child on webhook timeout. */
+    recoveryNoKill?: boolean
+    recoveryRequestId?: string
 }
 
 export type SpawnSessionResult =

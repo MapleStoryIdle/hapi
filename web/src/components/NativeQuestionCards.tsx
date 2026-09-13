@@ -1,6 +1,9 @@
-import { createContext, type ReactNode } from 'react'
+import { createContext, type ReactNode, useState } from 'react'
 import { CheckIcon } from '@/components/icons'
 import { QuestionIcon } from '@/components/ToolCard/icons'
+import { BottomDrawer } from '@/components/ui/BottomDrawer'
+import { cn } from '@/lib/utils'
+import { useTranslation } from '@/lib/use-translation'
 
 /** Only native threads provide replacements; managed sessions stay unchanged. */
 export const NativeQuestionCards = createContext<ReadonlyMap<string, ReactNode>>(new Map())
@@ -33,4 +36,71 @@ export function NativeQuestionSummary(props: {
             </div>)}
         </div>
     </div>
+}
+
+export function NativeQuestionHistory(props: {
+    questions: readonly {
+        id: string
+        question: string
+        options?: readonly (string | { label: string; description?: string | null })[] | null
+    }[]
+    answers?: Record<string, string[]>
+    status: string
+}) {
+    const { t } = useTranslation()
+    const [open, setOpen] = useState(false)
+
+    return (
+        <BottomDrawer
+            open={open}
+            onOpenChange={setOpen}
+            title={t('questionAnswer.title')}
+            subtitle={t('questionAnswer.completeOptions')}
+            testId="native-question-history-drawer"
+            trigger={(
+                <button
+                    type="button"
+                    className="w-full rounded-[20px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    aria-label={t('questionAnswer.viewOptions')}
+                >
+                    <NativeQuestionSummary questions={props.questions} answers={props.answers} status={props.status} />
+                </button>
+            )}
+        >
+            <div className="divide-y divide-[var(--app-divider)]">
+                {props.questions.map((question, index) => {
+                    const answers = props.answers?.[question.id] ?? []
+                    const options = (question.options ?? []).map((option) => typeof option === 'string'
+                        ? { label: option, description: null }
+                        : { label: option.label, description: option.description ?? null })
+                    const optionLabels = new Set(options.map((option) => option.label))
+                    const customAnswers = answers.filter((answer) => !optionLabels.has(answer))
+                    return (
+                        <section key={question.id} className="py-4 first:pt-0 last:pb-0">
+                            <div className="mb-3 flex items-start gap-2">
+                                <span className="mt-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--app-subtle-bg)] px-1 text-[10px] font-semibold tabular-nums text-[var(--app-hint)]">{index + 1}</span>
+                                <p className="min-w-0 whitespace-pre-wrap break-words text-sm font-semibold leading-6 text-[var(--app-fg)]">{question.question}</p>
+                            </div>
+                            <div className="chat-sheet-group flex flex-col gap-1 p-1" role="list" aria-label={t('questionAnswer.completeOptions')}>
+                                {options.map((option) => {
+                                    const selected = answers.includes(option.label)
+                                    return <div key={option.label} role="listitem" data-native-question-option data-selected={selected ? 'true' : 'false'} className={cn('flex min-w-0 items-start gap-3 rounded-[14px] border px-3 py-3', selected ? 'border-[var(--app-border)] bg-[var(--app-subtle-bg)]' : 'border-transparent')}>
+                                        <span aria-hidden="true" className={cn('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border', selected ? 'border-[var(--app-button)] bg-[var(--app-button)] text-[var(--app-button-text)]' : 'border-[var(--app-border)]')}>
+                                            {selected ? <CheckIcon className="h-3 w-3" /> : null}
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block break-words text-sm font-medium leading-6 text-[var(--app-fg)]">{option.label}</span>
+                                            {option.description ? <span className="mt-1 block break-words text-xs leading-5 text-[var(--app-hint)]">{option.description}</span> : null}
+                                        </span>
+                                        {selected ? <span className="shrink-0 pt-1 text-xs font-medium text-[var(--app-hint)]">{t('questionAnswer.selected')}</span> : null}
+                                    </div>
+                                })}
+                            </div>
+                            {customAnswers.map((answer) => <div key={answer} className="chat-sheet-group mt-3 whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6 text-[var(--app-fg)]">{answer}</div>)}
+                        </section>
+                    )
+                })}
+            </div>
+        </BottomDrawer>
+    )
 }

@@ -136,4 +136,35 @@ describe('MonitorIncidentCard', () => {
         expect(screen.getByText('Open its session to stop it before closing this event.')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'Investigation session' })).toBeInTheDocument()
     })
+
+    it('requires acknowledgement before a completed result releases future triggers', async () => {
+        const closeMonitorIncident = vi.fn().mockResolvedValue({ accepted: true })
+        const onChanged = vi.fn().mockResolvedValue(undefined)
+        render(
+            <I18nProvider>
+                <MonitorIncidentCard
+                    api={{ approveMonitorIncident: vi.fn(), closeMonitorIncident } as unknown as ApiClient}
+                    monitorId="monitor-1"
+                    incident={{ ...reviewIncident(), state: 'completed', planHash: null, approvalContext: undefined }}
+                    locale="en-US"
+                    t={(key) => ({
+                        'monitors.incident.state.completed': 'Completed',
+                        'monitors.incident.acknowledge': 'Acknowledge',
+                        'monitors.incident.acknowledgeConfirm.title': 'Acknowledge this result?',
+                        'monitors.incident.acknowledgeConfirm.description': 'Release future triggers.',
+                        'monitors.incident.acknowledgeConfirm.confirm': 'Acknowledge and continue',
+                        'monitors.incident.acknowledgeConfirm.confirming': 'Acknowledging…',
+                        'monitors.incident.viewPlan': 'View plan'
+                    }[key] ?? key)}
+                    onChanged={onChanged}
+                />
+            </I18nProvider>
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }))
+        expect(screen.getByRole('dialog')).toHaveTextContent('Acknowledge this result?')
+        fireEvent.click(screen.getByRole('button', { name: 'Acknowledge and continue' }))
+        await waitFor(() => expect(closeMonitorIncident).toHaveBeenCalledWith('monitor-1', 'incident-1'))
+        await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+    })
 })
