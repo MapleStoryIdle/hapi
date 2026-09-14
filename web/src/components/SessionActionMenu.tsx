@@ -8,7 +8,7 @@ import {
     type CSSProperties,
     type ReactNode
 } from 'react'
-import { Activity, GitBranch, GitFork, LoaderCircle, MonitorOff } from 'lucide-react'
+import { Activity, GitBranch, GitFork, LoaderCircle, MonitorOff, PanelRightOpen } from 'lucide-react'
 import { useTranslation } from '@/lib/use-translation'
 
 type SessionActionMenuProps = {
@@ -122,7 +122,7 @@ function OutlineIcon(props: MenuIconProps) {
 
 function SideSessionIcon(props: MenuIconProps) {
     return (
-        <GitBranch
+        <PanelRightOpen
             className={`h-[18px] w-[18px] shrink-0 ${props.className ?? ''}`}
             strokeWidth={1.8}
             aria-hidden="true"

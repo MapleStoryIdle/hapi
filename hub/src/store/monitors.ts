@@ -105,13 +105,19 @@ function publicIncident(value: StoredMonitorIncident): MonitorIncident {
     const { details: _details, config, ...result } = value
     const sessionId = value.repairSessionId ?? value.sessionId
     const deliverySession =
-        value.deliveredAt && sessionId
+        config.targetSession
             ? {
-                  type: config.targetSession?.type ?? ('managed' as const),
-                  sessionId,
+                  type: config.targetSession.type,
+                  sessionId: config.targetSession.sessionId,
                   machineId: config.machineId
               }
-            : undefined
+            : sessionId
+                ? {
+                      type: 'managed' as const,
+                      sessionId,
+                      machineId: config.machineId
+                  }
+                : undefined
     return {
         ...result,
         ...(deliverySession ? { deliverySession } : {}),

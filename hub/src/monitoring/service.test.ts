@@ -145,6 +145,41 @@ describe('monitor dispatch and confirmation', () => {
             expect(send).toHaveBeenCalledTimes(1)
         } finally { await service.stop(); store.close() }
     })
+    it('reopens a SHAPI-created native thread through the managed transport', async () => {
+        const store = new Store(':memory:')
+        const managedSend = mock(async (..._args: unknown[]) => undefined)
+        const spawn = mock(async (..._args: unknown[]) => ({ type: 'success' as const, sessionId: 'managed-resume' }))
+        const engine = {
+            getOnlineMachinesByNamespace: () => [{ id: 'm' }],
+            getSessionsByNamespace: () => [],
+            spawnSession: spawn,
+            waitForSessionActive: async () => true,
+            readCodexLocalSession: async () => ({ success: true, data: { session: { cwd: '/work' } } }),
+            stageNativeKanbanFeedback: async () => ({ success: true, path: '/safe/monitor-event.md' }),
+            sendCodexLocalSessionMessage: async () => ({
+                success: false as const,
+                code: 'not_native_session' as const,
+                error: 'Only original native Codex sessions support direct delivery'
+            }),
+            sendMessage: managedSend,
+            readCodexLocalSessionSnapshot: async () => ({ success: true, unchanged: false, snapshot: { status: { status: 'processing' }, data: { importedMessages: [] } } })
+        } as unknown as SyncEngine
+        const service = new MonitoringService(store, () => engine, { sendToNamespace: async () => undefined })
+        try {
+            const rule = store.monitors.create('default', MonitorConfigSchema.parse({
+                name: 'native', kind: 'webhook', machineId: 'm', directory: '/work', prompt: 'Inspect',
+                targetSession: { type: 'native-codex', sessionId: 'native-shapi-thread' }
+            }))
+            service.accept(rule.token!, { eventId: 'one', summary: 'bad', details: '' })
+            await service.tick()
+            expect(spawn).toHaveBeenCalledTimes(1)
+            expect(spawn.mock.calls[0]?.[8]).toBe('native-shapi-thread')
+            expect(spawn.mock.calls[0]?.[10]).toBe('read-only')
+            expect(managedSend).toHaveBeenCalledTimes(1)
+            expect(managedSend.mock.calls[0]?.[0]).toBe('managed-resume')
+            expect(store.monitors.openForMonitor(rule.id)?.state).toBe('investigating')
+        } finally { await service.stop(); store.close() }
+    })
     it('serializes two rules bound to the same native source', async () => {
         const store = new Store(':memory:')
         const send = mock(async () => ({ success: true }))

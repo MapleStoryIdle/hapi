@@ -109,6 +109,24 @@ describe('monitor store', () => {
             expect(store.monitors.getIncident(event.incidentId)?.state).toBe('needs_attention')
         } finally { store.close() }
     })
+    it('keeps the bound source link available when delivery needs attention', () => {
+        const store = new Store(':memory:')
+        try {
+            const targetConfig = MonitorConfigSchema.parse({
+                ...config(),
+                targetSession: { type: 'native-codex', sessionId: 'native-thread' }
+            })
+            const { id } = store.monitors.create('a', targetConfig)
+            const event = store.monitors.openIncident(store.monitors.get(id)!, 'bad', '')
+            expect(store.monitors.transition(event.incidentId, 'queued', 'starting', { sessionId: 'native-thread' })).toBe(true)
+            expect(store.monitors.transition(event.incidentId, 'starting', 'needs_attention', { error: 'delivery failed' })).toBe(true)
+            expect(store.monitors.detail(id, 'a')?.incident?.deliverySession).toEqual({
+                type: 'native-codex',
+                sessionId: 'native-thread',
+                machineId: 'm'
+            })
+        } finally { store.close() }
+    })
     it('migrates V18 without changing existing sessions', () => {
         const dir = mkdtempSync(join(tmpdir(), 'shapi-monitor-migration-'))
         const path = join(dir, 'test.db')

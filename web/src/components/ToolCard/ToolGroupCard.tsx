@@ -549,13 +549,12 @@ function getCodexSubagentCardStatusLabel(
 }
 
 function getCodexSubagentCardMetadata(
-    tool: ToolCallBlock,
-    unavailable: string
-): string {
+    tool: ToolCallBlock
+): string | null {
     const configuration = getCodexAgentEffectiveConfiguration(tool.tool.input, tool.model)
     const values = [configuration.model, configuration.reasoningEffort]
         .filter((value): value is string => value !== null)
-    if (values.length === 0) return unavailable
+    if (values.length === 0) return null
     return values.join(' · ')
 }
 
@@ -572,10 +571,7 @@ function CodexSubagentCards(props: {
         <div className="mt-2 flex flex-wrap gap-2" data-codex-subagent-cards>
             {props.tools.map((tool) => {
                 const identity = getCodexSubagentCardIdentity(tool)
-                const metadata = getCodexSubagentCardMetadata(
-                    tool,
-                    props.t('toolGroup.codexSubagent.unavailable')
-                )
+                const metadata = getCodexSubagentCardMetadata(tool)
                 const state = getCodexSubagentCardState(tool.tool.state)
                 const statusLabel = getCodexSubagentCardStatusLabel(state, props.t)
                 const color = colors.get(tool.id) ?? getCodexSubagentCardColor(tool.id)
@@ -602,9 +598,11 @@ function CodexSubagentCards(props: {
                             <span className={cn('shrink-0', toolStatusColorClass(state))} aria-hidden="true">
                                 <ToolStatusIcon state={state} />
                             </span>
-                            <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--app-hint)]" title={metadata}>
-                                {metadata}
-                            </span>
+                            {metadata ? (
+                                <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--app-hint)]" title={metadata}>
+                                    {metadata}
+                                </span>
+                            ) : null}
                             <span className="sr-only" role="status" aria-label={statusLabel} aria-live="polite" aria-atomic="true">
                                 {statusLabel}
                             </span>

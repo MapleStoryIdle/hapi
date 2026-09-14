@@ -240,7 +240,7 @@ describe('ToolGroupCard', () => {
         expect(within(cards[0]).getByRole('status', { name: 'Completed' })).toHaveClass('sr-only')
         expect(within(cards[0]).queryByText('Completed exploration')).toBeNull()
         expect(within(cards[1]).getByText('gpt-5.4 · medium')).toBeInTheDocument()
-        expect(within(cards[2]).getByText('unavailable')).toBeInTheDocument()
+        expect(within(cards[2]).queryByText('unavailable')).toBeNull()
     })
 
     it('uses explicit, child, then parent configuration for Codex subagent cards', () => {
