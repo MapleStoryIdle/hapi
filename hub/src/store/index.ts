@@ -27,8 +27,8 @@ export { UserStore } from './userStore'
 export { ArtifactStore } from './artifacts'
 export { KanbanTaskStore } from './kanbanTasks'
 
-const SCHEMA_VERSION: number = 30
-const REQUIRED_TABLES = ['sessions', 'machines', 'messages', 'users', 'push_subscriptions', 'artifacts', 'kanban_tasks', 'session_groups', 'session_group_assignments', 'session_labels', 'session_pins', 'kanban_order', 'monitors', 'monitor_buckets', 'monitor_incidents', 'monitor_receipts', 'monitor_events', 'bark_settings', 'plugin_settings', 'workspaces', 'workspace_access_keys'] as const
+const SCHEMA_VERSION: number = 31
+const REQUIRED_TABLES = ['sessions', 'machines', 'messages', 'users', 'push_subscriptions', 'artifacts', 'kanban_tasks', 'session_groups', 'session_group_assignments', 'session_labels', 'session_pins', 'kanban_order', 'monitors', 'monitor_buckets', 'monitor_incidents', 'monitor_receipts', 'monitor_events', 'bark_settings', 'plugin_settings', 'workspaces', 'workspace_access_keys', 'web_sessions', 'runner_pairings'] as const
 
 export class Store {
     private db: Database
@@ -85,7 +85,7 @@ export class Store {
         this.db.exec('PRAGMA synchronous = NORMAL')
         this.db.exec('PRAGMA foreign_keys = ON')
         this.db.exec('PRAGMA busy_timeout = 5000')
-        this.initSchema()
+        const bootstrappingLegacyWorkspaces = this.initSchema()
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -109,7 +109,7 @@ export class Store {
         this.sessionLabels = new SessionLabelStore(this.db)
         this.pluginSettings = new PluginSettingsStore(this.db)
         this.workspaces = new WorkspaceStore(this.db)
-        this.workspaces.bootstrapExistingNamespaces()
+        this.workspaces.bootstrapExistingNamespaces(bootstrappingLegacyWorkspaces)
     }
 
     close(): void {
@@ -126,7 +126,7 @@ export class Store {
         }
     }
 
-    private initSchema(): void {
+    private initSchema(): boolean {
         const currentVersion = this.getUserVersion()
         // V1/V2/V3 entries cover legacy DBs that pre-date our migration ladder.
         // Each step is idempotent (column-existence guards inside) so we can
@@ -140,6 +140,7 @@ export class Store {
             26: () => this.db.exec(SESSION_LABEL_SCHEMA),
             27: () => this.db.exec(PLUGIN_SETTINGS_SCHEMA),
             28: () => this.db.exec(WORKSPACE_SCHEMA),
+            30: () => this.migrateFromV30ToV31(),
             29: () => {
                 const columns = this.db.query('PRAGMA table_info(monitor_events)').all() as { name: string }[]
                 if (!columns.some((column) => column.name === 'incident_id')) this.db.exec('ALTER TABLE monitor_events ADD COLUMN incident_id TEXT REFERENCES monitor_incidents(id) ON DELETE SET NULL')
@@ -188,12 +189,12 @@ export class Store {
                 // a partially-built legacy DB may not have yet.
                 this.createSchema()
                 this.setUserVersion(SCHEMA_VERSION)
-                return
+                return true
             }
 
             this.createSchema()
             this.setUserVersion(SCHEMA_VERSION)
-            return
+            return false
         }
 
         const stepMigrations = buildStepMigrations(false)
@@ -204,7 +205,7 @@ export class Store {
                 step()
             }
             this.setUserVersion(SCHEMA_VERSION)
-            return
+            return true
         }
 
         if (currentVersion !== SCHEMA_VERSION) {
@@ -212,6 +213,7 @@ export class Store {
         }
 
         this.assertRequiredTablesPresent()
+        return false
     }
 
     private createSchema(): void {
@@ -617,6 +619,24 @@ export class Store {
         if (columns.size === 0) return
         if (!columns.has('source_directory_name')) this.db.exec('ALTER TABLE kanban_tasks ADD COLUMN source_directory_name TEXT')
         if (!columns.has('source_git_branch')) this.db.exec('ALTER TABLE kanban_tasks ADD COLUMN source_git_branch TEXT')
+    }
+
+    private migrateFromV30ToV31(): void {
+        this.db.transaction(() => {
+            const workspaceColumns = this.getColumnNames('workspaces')
+            if (workspaceColumns.size !== 0 && !workspaceColumns.has('legacy_eligible')) {
+                this.db.exec('ALTER TABLE workspaces ADD COLUMN legacy_eligible INTEGER NOT NULL DEFAULT 0')
+            }
+            // v30 rows are the explicit migration boundary. Fresh v31 rows stay ineligible.
+            this.db.exec('UPDATE workspaces SET legacy_eligible=1')
+            const accessKeyColumns = this.getColumnNames('workspace_access_keys')
+            if (accessKeyColumns.size !== 0) {
+                if (!accessKeyColumns.has('bound_machine_id')) this.db.exec('ALTER TABLE workspace_access_keys ADD COLUMN bound_machine_id TEXT')
+                if (!accessKeyColumns.has('public_jwk')) this.db.exec('ALTER TABLE workspace_access_keys ADD COLUMN public_jwk TEXT')
+                if (!accessKeyColumns.has('public_key_thumbprint')) this.db.exec('ALTER TABLE workspace_access_keys ADD COLUMN public_key_thumbprint TEXT')
+            }
+            this.db.exec(WORKSPACE_SCHEMA)
+        })()
     }
 
     private getUserVersion(): number {

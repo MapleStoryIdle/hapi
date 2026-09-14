@@ -168,7 +168,8 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
         }
 
         const auth = socket.handshake.auth as Record<string, unknown> | undefined
-        const authenticatedMachineId = typeof auth?.machineId === 'string' ? auth.machineId : null
+        const authenticatedMachineId = socket.data.boundMachineId
+            ?? (typeof auth?.machineId === 'string' ? auth.machineId : null)
         if (authenticatedMachineId !== parsed.data.machineId) {
             emitAccessError('machine', parsed.data.machineId, 'access-denied')
             return
@@ -199,7 +200,8 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
         }
 
         const auth = socket.handshake.auth as Record<string, unknown> | undefined
-        const authenticatedMachineId = typeof auth?.machineId === 'string' ? auth.machineId : null
+        const authenticatedMachineId = socket.data.boundMachineId
+            ?? (typeof auth?.machineId === 'string' ? auth.machineId : null)
         if (authenticatedMachineId !== parsed.data.machineId) {
             emitAccessError('machine', parsed.data.machineId, 'access-denied')
             return

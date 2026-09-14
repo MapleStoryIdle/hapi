@@ -76,7 +76,7 @@ export function SessionFilesDrawer(props: { api: ApiClient; source: LocalService
     const navigationPath = !preview && activeTab === 'directory' ? path : ''
     const fullPath = props.cwd.replace(/[\\/]+$/, '') + (navigationPath ? `/${navigationPath}` : '') || '/'
     return <BottomDrawer open={props.open} onOpenChange={props.onOpenChange} title={t('session.title')} fixedHeight desktopDialog density="compact"
-        desktopClassName="h-[70dvh] max-w-3xl" bodyClassName="file-browser-surface flex min-h-0 flex-col px-4 pb-4 pt-0"
+        desktopClassName="h-[calc(100dvh-3rem)] max-w-3xl" bodyClassName="file-browser-surface flex min-h-0 flex-col px-4 pb-4 pt-0"
         testId="session-files-drawer"
         header={<div className="relative flex min-h-11 items-center justify-center pl-14 sm:px-11">
             {preview ? <button type="button" className="absolute left-0 flex h-11 w-11 items-center justify-center text-[var(--app-link)]" aria-label={t('fileBrowser.back')} onClick={() => setPreview(null)}><ChevronLeft className="h-5 w-5" /></button> : null}

@@ -13,6 +13,7 @@ import { getLatestRunnerLog } from '@/ui/logger'
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
 import { runDoctorCommand } from '@/ui/doctor'
 import { initializeToken } from '@/ui/tokenInit'
+import { handleRunnerPairCommand } from '@/authV2/pairRunner'
 import type { CommandDefinition } from './types'
 
 /**
@@ -85,6 +86,15 @@ export const runnerCommand: CommandDefinition = {
     name: 'runner',
     requiresRuntimeAssets: true,
     run: async ({ commandArgs }) => {
+        if (commandArgs[0] === 'pair') {
+            try {
+                await handleRunnerPairCommand(commandArgs.slice(1))
+            } catch (error) {
+                console.error(chalk.red('Error:'), error instanceof Error ? error.message : String(error))
+                process.exit(1)
+            }
+            return
+        }
         const mutableArgs = [...commandArgs]
         const workspaceRoots = extractWorkspaceRootArgs(mutableArgs)
         const runnerSubcommand = mutableArgs[0]
@@ -193,6 +203,8 @@ export const runnerCommand: CommandDefinition = {
 ${chalk.bold('shapi runner')} - Runner management
 
 ${chalk.bold('Usage:')}
+  shapi runner pair [--hub <url>] [--name <name>] [--web-token-file <path>]
+                                      Pair this machine with a workspace
   shapi runner start              Start the runner (replaces existing runner)
   shapi runner stop               Stop the runner (sessions stay alive)
   shapi runner status             Show runner status

@@ -62,6 +62,10 @@ See `src/commands/auth.ts`.
 ### Runner management
 
 - `shapi runner start` - Start runner as detached process.
+- `shapi runner pair --hub <url> [--name <name>]` - Pair this machine with an existing Web workspace.
+- `shapi workspace register [--name <name>] --hub <url> [--registration-secret <secret>]` - Create an isolated workspace and print its one-time Web credential. The name defaults to the system username. Open-registration Hubs need no secret.
+- `shapi uninstall` - Stop the Runner and remove the program/runtime files while preserving credentials.
+- `shapi uninstall --purge` - Also remove all local SHAPI settings and credentials.
 - `shapi runner stop` - Stop runner gracefully.
 - `shapi runner status` - Show runner diagnostics.
 - `shapi runner list` - List active sessions managed by runner.

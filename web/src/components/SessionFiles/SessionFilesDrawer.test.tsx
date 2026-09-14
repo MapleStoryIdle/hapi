@@ -6,7 +6,10 @@ import { I18nProvider } from '@/lib/i18n-context'
 import { SessionFilesDrawer } from './SessionFilesDrawer'
 
 vi.mock('@/components/ChatPreviewDrawer', () => ({ FilePreview: ({ preview }: { preview: { path: string } }) => <p>Preview: {preview.path}</p> }))
-afterEach(cleanup)
+afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+})
 const copy = vi.hoisted(() => vi.fn(async () => true))
 vi.mock('@/hooks/useCopyToClipboard', () => ({ useCopyToClipboard: () => ({ copy, copied: false }) }))
 function show(api: Partial<ApiClient>, native = true, open = true) {
@@ -26,6 +29,18 @@ it('starts with changes and only loads native directories when selected', async 
     fireEvent.click(screen.getByRole('button', { name: 'Directories' }))
     fireEvent.click(await screen.findByRole('button', { name: 'src' }))
     await waitFor(() => expect(browse).toHaveBeenCalledWith('n1', 'm1', { action: 'directory', path: 'src' }))
+})
+
+it('uses the available viewport height for the desktop file browser', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+        matches: true,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn()
+    })))
+    show({ browseCodexSessionFiles: vi.fn().mockResolvedValue({ success: true, isGitRepository: false, entries: [] }) })
+    const drawer = screen.getByTestId('session-files-drawer')
+    expect(drawer).toHaveAttribute('data-desktop-dialog', 'true')
+    expect(drawer).toHaveClass('h-[calc(100dvh-3rem)]')
 })
 it('hides tabs for non-Git directories and returns from preview in the same sheet', async () => {
     const browse = vi.fn().mockResolvedValue({ success: true, isGitRepository: false, entries: [{ name: 'note.md', type: 'file' }] })

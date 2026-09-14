@@ -1,5 +1,5 @@
 import { dirname, isAbsolute, join } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_TARGETS = [
@@ -204,7 +204,7 @@ function ensureEmbeddedAssetsManifest(workspaceRoot: string, includeWebAssets: b
     writeStubEmbeddedAssets(workspaceRoot);
 }
 
-async function buildTarget(projectRoot: string, target: string, outdir: string, name: string): Promise<void> {
+async function buildTarget(projectRoot: string, target: string, outdir: string, name: string, runnerOnly: boolean): Promise<void> {
     const { platform, arch } = parseTarget(target);
     assertArchivesExist(projectRoot, platform, arch);
     const outputName = platform === 'win32' ? `${name}.exe` : name;
@@ -220,7 +220,7 @@ async function buildTarget(projectRoot: string, target: string, outdir: string, 
         `--feature=${featureFlag}`,
         `--target=${target}`,
         `--outfile=${outfile}`,
-        join(projectRoot, 'src', 'bootstrap.ts')
+        join(projectRoot, 'src', runnerOnly ? 'runnerBootstrap.ts' : 'bootstrap.ts')
     ];
 
     console.log(`[build:exe] ${cmd.join(' ')}`);
@@ -246,10 +246,15 @@ async function main(): Promise<void> {
     const name = getArg(args, '--name') ?? 'hapi';
     const buildAll = args.includes('--all');
     const includeWebAssets = args.includes('--with-web-assets');
+    const runnerOnly = args.includes('--runner-only');
+
+    if (runnerOnly && includeWebAssets) {
+        throw new Error('--runner-only cannot be combined with --with-web-assets');
+    }
 
     if (args.includes('--target') && !target) {
-        console.error('Usage: bun run scripts/build-executable.ts [--target <bun-platform[-arch[-variant]]>] [--outdir dist-exe] [--name hapi] [--with-web-assets]');
-        console.error('   or: bun run scripts/build-executable.ts --all [--outdir dist-exe] [--name hapi] [--with-web-assets]');
+        console.error('Usage: bun run scripts/build-executable.ts [--target <bun-platform[-arch[-variant]]>] [--outdir dist-exe] [--name hapi] [--with-web-assets | --runner-only]');
+        console.error('   or: bun run scripts/build-executable.ts --all [--outdir dist-exe] [--name hapi] [--with-web-assets | --runner-only]');
         process.exit(1);
     }
 
@@ -262,12 +267,26 @@ async function main(): Promise<void> {
     const workspaceRoot = join(projectRoot, '..');
     const outdir = resolveOutdir(projectRoot, outdirArg);
     const resolvedTarget = buildAll ? undefined : resolveTarget(target);
-    const targets = buildAll ? DEFAULT_TARGETS : [resolvedTarget!];
+    const targets = buildAll
+        ? runnerOnly ? DEFAULT_TARGETS.filter((targetName) => !targetName.includes('windows')) : DEFAULT_TARGETS
+        : [resolvedTarget!];
 
-    ensureEmbeddedAssetsManifest(workspaceRoot, includeWebAssets);
+    if (!runnerOnly) {
+        ensureEmbeddedAssetsManifest(workspaceRoot, includeWebAssets);
+    } else {
+        rmSync(outdir, { recursive: true, force: true });
+        mkdirSync(outdir, { recursive: true });
+    }
 
     for (const targetName of targets) {
-        await buildTarget(projectRoot, targetName, outdir, name);
+        await buildTarget(projectRoot, targetName, outdir, name, runnerOnly);
+    }
+
+    if (runnerOnly) {
+        const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8')) as { version: string };
+        const markerPath = join(outdir, 'runner-version.txt');
+        writeFileSync(`${markerPath}.next`, `${packageJson.version}\n`, 'utf8');
+        renameSync(`${markerPath}.next`, markerPath);
     }
 }
 

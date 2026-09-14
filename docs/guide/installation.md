@@ -73,6 +73,41 @@ SHAPI has three components:
 
 ## Install the CLI
 
+The Hub serves a small installer and release manifest while Runner binaries are
+hosted by GitHub Releases. The same Hub-origin command installs or manually
+updates a Runner:
+
+```bash
+curl -fsSL https://your-hub.example/install.sh | sh -s -- --base-url https://your-hub.example
+```
+
+The production Hub needs no URL argument:
+
+```bash
+curl -fsSL https://hapi.ye2moe.fun/install.sh | sh
+```
+
+The installer shows download progress, verifies the release SHA-256, replaces
+`~/.local/bin/shapi`, and configures the default shell PATH. A fresh interactive
+install asks whether to create a new workspace or join an existing workspace
+with its `spw` credential. It then pairs and starts the Runner automatically and
+prints the Hub URL and `spw`. Updates preserve credentials and restart the
+Runner. Hub Web may show the command when a Runner reports an older version; it
+never starts the update remotely.
+
+Uninstall the program and runtime files while keeping credentials for a later
+reinstall:
+
+```bash
+shapi uninstall
+```
+
+Remove the program plus all local SHAPI settings and credentials:
+
+```bash
+shapi uninstall --purge
+```
+
 The first SHAPI package release has not been published yet. Build the current
 source on macOS or Linux:
 
@@ -94,7 +129,7 @@ install options; they do not contain this SHAPI source tree.
 <details>
 <summary>Prebuilt binary</summary>
 
-Download the latest release from [GitHub Releases](https://github.com/MapleStoryIdle/shapi/releases).
+Download the latest Runner release from [GitHub Releases](https://github.com/MapleStoryIdle/hapi/releases).
 Release archives keep the internal binary filename `hapi` for compatibility;
 install it under the public `shapi` command and keep the old alias if needed.
 

@@ -1,16 +1,55 @@
 import type { MiddlewareHandler } from 'hono'
+import { getCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { jwtVerify } from 'jose'
 import type { Store } from '../../store'
 import type { WorkspaceAccessKind } from '../../store/workspaces'
 
 export type WebAppEnv = {
+    Bindings: {
+        remoteAddress?: string
+    }
     Variables: {
         userId: number
         namespace: string
         workspaceId: string
         accessKeyId: string
         accessKind: WorkspaceAccessKind
+        authMethod: 'bearer' | 'cookie'
+        webSessionId: string | null
+    }
+}
+
+export const SECURE_WEB_SESSION_COOKIE = '__Host-shapi_session'
+export const DEVELOPMENT_WEB_SESSION_COOKIE = 'shapi_session'
+export const WEB_SESSION_IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+export const WEB_SESSION_ABSOLUTE_TTL_MS = 90 * 24 * 60 * 60 * 1000
+
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+export function isSameOriginRequest(
+    requestUrl: string,
+    origin: string | undefined,
+    trustedOrigins: string[] = [],
+    fetchSite?: string,
+): boolean {
+    if (!origin || origin === 'null') return false
+    // A same-origin browser request can cross a development or TLS-terminating
+    // reverse proxy that rewrites Host. Fetch Metadata preserves its browser-side
+    // origin relationship without trusting arbitrary forwarded headers.
+    if (fetchSite === 'same-origin') return true
+    try {
+        const normalized = new URL(origin).origin
+        return normalized === new URL(requestUrl).origin
+            || trustedOrigins.some(value => {
+                try {
+                    return new URL(value).origin === normalized
+                } catch {
+                    return false
+                }
+            })
+    } catch {
+        return false
     }
 }
 
@@ -60,12 +99,50 @@ function getPreviewTokenFromReferer(referer: string | undefined): string | undef
     }
 }
 
-export function createAuthMiddleware(jwtSecret: Uint8Array, store?: Store): MiddlewareHandler<WebAppEnv> {
+export function createAuthMiddleware(
+    jwtSecret: Uint8Array,
+    store?: Store,
+    trustedSessionOrigins: string[] = [],
+): MiddlewareHandler<WebAppEnv> {
     return async (c, next) => {
         const path = c.req.path
         if (path === '/api/auth' || path === '/api/bind') {
             await next()
             return
+        }
+
+
+        if (store) {
+            const sessionToken = getCookie(c, SECURE_WEB_SESSION_COOKIE)
+                ?? getCookie(c, DEVELOPMENT_WEB_SESSION_COOKIE)
+            if (sessionToken) {
+                const session = store.workspaces.authenticateWebSession(sessionToken, WEB_SESSION_IDLE_TTL_MS)
+                if (session) {
+                    if (UNSAFE_METHODS.has(c.req.method)) {
+                        if (!isSameOriginRequest(
+                            c.req.url,
+                            c.req.header('origin'),
+                            trustedSessionOrigins,
+                            c.req.header('sec-fetch-site'),
+                        )) {
+                            return c.json({ error: 'Cross-origin session request rejected' }, 403)
+                        }
+                        const csrfToken = c.req.header('x-csrf-token')
+                        if (!csrfToken || !store.workspaces.verifyWebSessionCsrf(session.id, csrfToken)) {
+                            return c.json({ error: 'Invalid CSRF token' }, 403)
+                        }
+                    }
+                    c.set('userId', 1)
+                    c.set('namespace', session.workspace.dataNamespace)
+                    c.set('workspaceId', session.workspace.id)
+                    c.set('accessKeyId', session.accessKeyId)
+                    c.set('accessKind', 'web')
+                    c.set('authMethod', 'cookie')
+                    c.set('webSessionId', session.id)
+                    await next()
+                    return
+                }
+            }
         }
 
         const authorization = c.req.header('authorization')
@@ -92,6 +169,8 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, store?: Store): Midd
             c.set('workspaceId', identity.workspaceId)
             c.set('accessKeyId', identity.accessKeyId)
             c.set('accessKind', identity.accessKind)
+            c.set('authMethod', 'bearer')
+            c.set('webSessionId', null)
             await next()
             return
         }
@@ -110,6 +189,8 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, store?: Store): Midd
             c.set('workspaceId', parsed.data.wid ?? namespace)
             c.set('accessKeyId', parsed.data.aid ?? 'legacy-jwt')
             c.set('accessKind', parsed.data.kind ?? 'legacy')
+            c.set('authMethod', 'bearer')
+            c.set('webSessionId', null)
             await next()
             return
         } catch {

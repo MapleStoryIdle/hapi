@@ -43,6 +43,7 @@ import { readUploadFileBytes } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
+import { asHubAuth, type HubAuth } from '@/authV2/runnerAuth'
 
 /**
  * XML tags that Claude Code injects as `type:'user'` messages.
@@ -160,7 +161,7 @@ export class IncomingMessageFilter {
 }
 
 export class ApiSessionClient extends EventEmitter {
-    private readonly token: string
+    private readonly auth: HubAuth
     readonly sessionId: string
     private metadata: Metadata | null
     private metadataVersion: number
@@ -179,9 +180,9 @@ export class ApiSessionClient extends EventEmitter {
     private agentStateLock = new AsyncLock()
     private metadataLock = new AsyncLock()
 
-    constructor(token: string, session: Session) {
+    constructor(auth: string | HubAuth, session: Session) {
         super()
-        this.token = token
+        this.auth = asHubAuth(auth)
         this.sessionId = session.id
         this.metadata = session.metadata
         this.metadataVersion = session.metadataVersion
@@ -198,11 +199,10 @@ export class ApiSessionClient extends EventEmitter {
         }
 
         this.socket = io(`${configuration.apiUrl}/cli`, {
-            auth: {
-                token: this.token,
+            auth: this.auth.socketAuth({
                 clientType: 'session-scoped' as const,
                 sessionId: this.sessionId
-            },
+            }),
             path: '/socket.io/',
             reconnection: true,
             reconnectionAttempts: Infinity,
@@ -438,12 +438,13 @@ export class ApiSessionClient extends EventEmitter {
         const run = async () => {
             let cursor = startSeq
             while (true) {
+                const url = `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(this.sessionId)}/messages`
                 const response = await axios.get(
-                    `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(this.sessionId)}/messages`,
+                    url,
                     {
                         params: { afterSeq: cursor, limit },
                         headers: buildHubRequestHeaders({
-                            Authorization: `Bearer ${this.token}`,
+                            ...await this.auth.restHeaders('GET', url),
                             'Content-Type': 'application/json'
                         }),
                         timeout: 15_000

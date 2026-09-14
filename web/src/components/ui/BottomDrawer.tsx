@@ -373,6 +373,7 @@ export function BottomDrawer(props: {
                         ...style
                     }}
                     data-chat-overlay
+                    data-desktop-dialog="true"
                     data-density={props.density}
                     data-testid={props.testId}
                     aria-describedby={props.subtitle ? descriptionId : undefined}

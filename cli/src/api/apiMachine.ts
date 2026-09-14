@@ -127,6 +127,7 @@ import {
 import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
+import { asHubAuth, type HubAuth } from '@/authV2/runnerAuth'
 import { collectMachineHealth } from '@/utils/machineHealth'
 import { readGeneratedImageFileBytes, readSessionFileBytes } from '@/modules/common/handlers/files'
 import { readUploadFileBytes } from '@/modules/common/handlers/uploads'
@@ -353,6 +354,7 @@ function mergeAdvertisedRunnerMetadata(
 }
 
 export class ApiMachineClient {
+    private readonly auth: HubAuth
     private readonly localServiceTunnels = new LocalServiceTunnels(() => {
         const ports = [this.machine.runnerState?.httpPort].filter((port): port is number => typeof port === 'number')
         try {
@@ -442,13 +444,14 @@ export class ApiMachineClient {
     private readonly normalizedWorkspaceRoots: string[] | undefined
 
     constructor(
-        private readonly token: string,
+        auth: string | HubAuth,
         private readonly machine: Machine,
         private readonly workspaceRoots?: string[],
         private readonly advertisedMetadata?: MachineMetadata,
         private readonly createNativeCodexArchiveClient: () => NativeCodexArchiveClient = () => new CodexAppServerClient(),
         private readonly createNativeCodexRenameClient: () => Pick<CodexAppServerClient, 'connect' | 'initialize' | 'setThreadName' | 'disconnect'> = () => new CodexAppServerClient()
     ) {
+        this.auth = asHubAuth(auth)
         // Realpath roots once so all subsequent comparisons are against
         // canonical, symlink-resolved locations. Falls back to lexical
         // resolution if realpath fails so we still get protection.
@@ -1705,11 +1708,10 @@ export class ApiMachineClient {
     connect(): void {
         this.socket = io(`${configuration.apiUrl}/cli`, {
             transports: ['websocket'],
-            auth: {
-                token: this.token,
+            auth: this.auth.socketAuth({
                 clientType: 'machine-scoped' as const,
                 machineId: this.machine.id
-            },
+            }),
             path: '/socket.io/',
             reconnection: true,
             reconnectionDelay: 1000,

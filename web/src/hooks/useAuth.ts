@@ -5,9 +5,11 @@ import type { AuthResponse } from '@/types/api'
 export type AuthSource =
     | { type: 'telegram'; initData: string }
     | { type: 'accessToken'; token: string }
+    | { type: 'cookie' }
 
 function getAuthSourceKey(authSource: AuthSource | null, baseUrl: string): string | null {
     if (!authSource) return null
+    if (authSource.type === 'cookie') return `${baseUrl}\u0000cookie`
     return authSource.type === 'telegram'
         ? `${baseUrl}\u0000telegram\u0000${authSource.initData}`
         : `${baseUrl}\u0000access-token\u0000${authSource.token}`
@@ -38,7 +40,8 @@ function getAuthPayload(source: AuthSource): { initData: string } | { accessToke
     if (source.type === 'telegram') {
         return { initData: source.initData }
     }
-    return { accessToken: source.token }
+    if (source.type === 'accessToken') return { accessToken: source.token }
+    throw new Error('Cookie sessions do not use the legacy auth endpoint')
 }
 
 function isNotBoundError(error: unknown): boolean {
@@ -110,12 +113,15 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
 
             try {
                 const client = new ApiClient('', { baseUrl })
-                const auth = await client.authenticate(getAuthPayload(currentSource))
+                const auth = currentSource.type === 'cookie'
+                    ? await client.authenticateWebSession()
+                    : await client.authenticate(getAuthPayload(currentSource))
                 if (sourceKeyRef.current !== currentSourceKey) {
                     return null
                 }
-                tokenRef.current = auth.token
-                setToken(auth.token)
+                const effectiveToken = currentSource.type === 'cookie' ? '__cookie_session__' : auth.token
+                tokenRef.current = effectiveToken
+                setToken(effectiveToken)
                 setUser(auth.user)
                 authenticatedSourceKeyRef.current = currentSourceKey
                 setAuthenticatedSourceKey(currentSourceKey)
@@ -205,13 +211,14 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
     const hasToken = currentToken !== null
     const api = useMemo(() => (
         hasToken
-            ? new ApiClient(tokenRef.current ?? '', {
+            ? new ApiClient(authSource?.type === 'cookie' ? '' : tokenRef.current ?? '', {
                 baseUrl,
                 getToken: () => tokenRef.current,
-                onUnauthorized: () => refreshAuth({ force: true })
+                onUnauthorized: () => refreshAuth({ force: true }),
+                useCookieSession: authSource?.type === 'cookie'
             })
             : null
-    ), [baseUrl, refreshAuth, hasToken])
+    ), [authSource?.type, baseUrl, refreshAuth, hasToken])
 
     useEffect(() => {
         let isCancelled = false
@@ -238,11 +245,14 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
             setAuthenticatedSourceKey(null)
             try {
                 const client = new ApiClient('', { baseUrl }) // temporary for auth call
-                const auth = await client.authenticate(getAuthPayload(authSource))
+                const auth = authSource.type === 'cookie'
+                    ? await client.authenticateWebSession()
+                    : await client.authenticate(getAuthPayload(authSource))
                 if (isCancelled) return
                 if (sourceKeyRef.current !== sourceKey) return
-                tokenRef.current = auth.token
-                setToken(auth.token)
+                const effectiveToken = authSource.type === 'cookie' ? '__cookie_session__' : auth.token
+                tokenRef.current = effectiveToken
+                setToken(effectiveToken)
                 setUser(auth.user)
                 authenticatedSourceKeyRef.current = sourceKey
                 setAuthenticatedSourceKey(sourceKey)

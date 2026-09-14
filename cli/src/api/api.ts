@@ -19,17 +19,18 @@ import { apiValidationError } from '@/utils/errorUtils'
 import { ApiMachineClient } from './apiMachine'
 import { ApiSessionClient } from './apiSession'
 import { buildHubRequestHeaders } from './hubExtraHeaders'
+import { createHubAuth, type HubAuth } from '@/authV2/runnerAuth'
 
 export class ApiClient {
     static async create(): Promise<ApiClient> {
-        return new ApiClient(getAuthToken())
+        return new ApiClient(await createHubAuth(getAuthToken()))
     }
 
-    private constructor(private readonly token: string) { }
+    private constructor(private readonly auth: HubAuth) { }
 
-    private authHeaders(): Record<string, string> {
+    private async authHeaders(method: string, url: string): Promise<Record<string, string>> {
         return buildHubRequestHeaders({
-            Authorization: `Bearer ${this.token}`,
+            ...await this.auth.restHeaders(method, url),
             'Content-Type': 'application/json'
         })
     }
@@ -42,8 +43,9 @@ export class ApiClient {
         modelReasoningEffort?: string
         effort?: string
     }): Promise<Session> {
+        const url = `${configuration.apiUrl}/cli/sessions`
         const response = await axios.post<CreateSessionResponse>(
-            `${configuration.apiUrl}/cli/sessions`,
+            url,
             {
                 tag: opts.tag,
                 metadata: opts.metadata,
@@ -53,10 +55,7 @@ export class ApiClient {
                 effort: opts.effort
             },
             {
-                headers: buildHubRequestHeaders({
-                    Authorization: `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                }),
+                headers: await this.authHeaders('POST', url),
                 timeout: 60_000
             }
         )
@@ -105,10 +104,11 @@ export class ApiClient {
     }
 
     async getSession(sessionId: string): Promise<Session> {
+        const url = `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}`
         const response = await axios.get(
-            `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}`,
+            url,
             {
-                headers: this.authHeaders(),
+                headers: await this.authHeaders('GET', url),
                 timeout: 60_000
             }
         )
@@ -159,18 +159,16 @@ export class ApiClient {
         metadata: MachineMetadata
         runnerState?: RunnerState
     }): Promise<Machine> {
+        const url = `${configuration.apiUrl}/cli/machines`
         const response = await axios.post<CreateMachineResponse>(
-            `${configuration.apiUrl}/cli/machines`,
+            url,
             {
                 id: opts.machineId,
                 metadata: opts.metadata,
                 runnerState: opts.runnerState ?? null
             },
             {
-                headers: buildHubRequestHeaders({
-                    Authorization: `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                }),
+                headers: await this.authHeaders('POST', url),
                 timeout: 60_000
             }
         )
@@ -211,10 +209,11 @@ export class ApiClient {
 
     async listResumableSessions(machineId?: string): Promise<ResumableSession[]> {
         const qs = machineId ? `?machineId=${encodeURIComponent(machineId)}` : ''
+        const url = `${configuration.apiUrl}/cli/sessions/resumable${qs}`
         const response = await axios.get(
-            `${configuration.apiUrl}/cli/sessions/resumable${qs}`,
+            url,
             {
-                headers: this.authHeaders(),
+                headers: await this.authHeaders('GET', url),
                 timeout: 60_000
             }
         )
@@ -226,10 +225,11 @@ export class ApiClient {
     }
 
     async getLocalResumeTarget(sessionId: string): Promise<LocalResumeTarget> {
+        const url = `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/resume-target`
         const response = await axios.get(
-            `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/resume-target`,
+            url,
             {
-                headers: this.authHeaders(),
+                headers: await this.authHeaders('GET', url),
                 timeout: 60_000
             }
         )
@@ -241,11 +241,12 @@ export class ApiClient {
     }
 
     async handoffSessionToLocal(sessionId: string): Promise<void> {
+        const url = `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/handoff-local`
         const response = await axios.post(
-            `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/handoff-local`,
+            url,
             {},
             {
-                headers: this.authHeaders(),
+                headers: await this.authHeaders('POST', url),
                 timeout: 60_000
             }
         )
@@ -256,10 +257,10 @@ export class ApiClient {
     }
 
     sessionSyncClient(session: Session): ApiSessionClient {
-        return new ApiSessionClient(this.token, session)
+        return new ApiSessionClient(this.auth, session)
     }
 
     machineSyncClient(machine: Machine, options?: { workspaceRoots?: string[]; advertisedMetadata?: MachineMetadata }): ApiMachineClient {
-        return new ApiMachineClient(this.token, machine, options?.workspaceRoots, options?.advertisedMetadata)
+        return new ApiMachineClient(this.auth, machine, options?.workspaceRoots, options?.advertisedMetadata)
     }
 }

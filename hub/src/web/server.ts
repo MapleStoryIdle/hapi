@@ -10,8 +10,9 @@ import { buildGeminiLiveSetupMessage, QWEN_REALTIME_MODEL } from '@hapi/protocol
 import { createQwenProxyWebSocketHandler } from './qwenProxyHandler'
 import { decodeVoiceSystemPromptParam } from '../voiceSystemPromptParam'
 import type { SyncEngine } from '../sync/syncEngine'
-import { createAuthMiddleware, verifyWorkspaceJwt, type WebAppEnv } from './middleware/auth'
+import { createAuthMiddleware, DEVELOPMENT_WEB_SESSION_COOKIE, SECURE_WEB_SESSION_COOKIE, verifyWorkspaceJwt, WEB_SESSION_IDLE_TTL_MS, type WebAppEnv } from './middleware/auth'
 import { createAuthRoutes } from './routes/auth'
+import { createAuthV2ProtectedRoutes, createAuthV2PublicRoutes } from './routes/authV2'
 import { createBindRoutes } from './routes/bind'
 import { createEventsRoutes } from './routes/events'
 import { createSessionsRoutes } from './routes/sessions'
@@ -268,6 +269,14 @@ export function createWebApp(options: {
     const app = new Hono<WebAppEnv>()
 
     app.use('*', async (c, next) => {
+        c.header('Referrer-Policy', 'no-referrer')
+        c.header('X-Content-Type-Options', 'nosniff')
+        c.header('X-Frame-Options', 'DENY')
+        c.header('Permissions-Policy', 'camera=(), geolocation=(), payment=()')
+        await next()
+    })
+
+    app.use('*', async (c, next) => {
         if (c.req.path.startsWith('/s/') || c.req.path.startsWith('/a/') || c.req.path.startsWith('/f/') || c.req.path.startsWith('/hooks/')) return await next()
         return await logger()(c, next)
     })
@@ -281,12 +290,15 @@ export function createWebApp(options: {
     const corsMiddleware = cors({
         origin: corsOriginOption,
         allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowHeaders: ['authorization', 'content-type']
+        allowHeaders: ['authorization', 'content-type', 'x-csrf-token']
     })
     app.use('/api/*', corsMiddleware)
     app.use('/cli/*', corsMiddleware)
 
-    app.route('/cli', createCliRoutes(options.getSyncEngine, options.store))
+    app.route('/cli', createCliRoutes(options.getSyncEngine, options.store, undefined, {
+        jwtSecret: options.jwtSecret,
+        publicUrl: configuration.publicUrl,
+    }))
     app.route('/s', createPublicShareRoutes(options.store))
     app.route('/f', createPublicFeedbackRoutes(options.store, undefined, options.pushService))
     app.route('/a', createLegacyPublicShareTombstoneRoutes())
@@ -294,8 +306,21 @@ export function createWebApp(options: {
 
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
     app.route('/api', createBindRoutes(options.jwtSecret, options.store))
+    app.route('/api', createAuthV2PublicRoutes(
+        options.store,
+        configuration.cliApiToken,
+        options.jwtSecret,
+        configuration.publicUrl,
+        configuration.registrationSecret,
+        configuration.registrationMode,
+    ))
 
-    app.use('/api/*', createAuthMiddleware(options.jwtSecret, options.store))
+    app.use('/api/*', createAuthMiddleware(
+        options.jwtSecret,
+        options.store,
+        [configuration.publicUrl],
+    ))
+    app.route('/api', createAuthV2ProtectedRoutes(options.store))
     app.route('/api', createWebReaderRoutes())
     app.route('/api', createWorkspaceRoutes(options.store))
     app.route('/api', createMonitorRoutes(options.store, options.getSyncEngine, options.getMonitoring ?? (() => null)))
@@ -319,31 +344,6 @@ export function createWebApp(options: {
     }))
     app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
     app.route('/api', createVoiceRoutes())
-
-    // Skip static serving in relay mode, show helpful message on root
-    if (options.relayMode) {
-        const officialUrl = options.officialWebUrl || 'https://maplestoryidle.github.io/shapi'
-        app.get('/', (c) => {
-            return c.html(`<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>SHAPI Hub</title></head>
-<body style="font-family: system-ui; padding: 2rem; max-width: 600px;">
-<h1>SHAPI Hub</h1>
-<p>This hub is running in relay mode. Please use the configured web app:</p>
-<p><a href="${officialUrl}">${officialUrl}</a></p>
-<details>
-<summary>Why am I seeing this?</summary>
-<p style="margin-top: 0.5rem; color: #666;">
-When relay mode is enabled, all traffic flows through our relay infrastructure with end-to-end encryption.
-To reduce bandwidth and improve performance, the frontend is served separately
-from GitHub Pages instead of through the relay tunnel.
-</p>
-</details>
-</body>
-</html>`)
-        })
-        return app
-    }
 
     if (options.embeddedAssetMap) {
         const embeddedAssetMap = options.embeddedAssetMap
@@ -545,14 +545,22 @@ export async function startWebServer(options: {
                 return socketHandler.fetch(req, server as never)
             }
 
-            // Voice WebSocket proxies — require JWT auth via query param
-            // (browser WebSocket API cannot set custom headers)
+            // Voice WebSocket proxies use the same-origin HttpOnly session.
+            // Query JWT remains a migration-only fallback.
             if (url.pathname === '/api/voice/gemini-ws' || url.pathname === '/api/voice/qwen-ws') {
                 const token = url.searchParams.get('token')
-                if (!token) {
-                    return new Response('Missing authorization token', { status: 401 })
-                }
-                if (!await verifyWorkspaceJwt(token, options.jwtSecret, options.store)) {
+                const cookies = new Map((req.headers.get('cookie') ?? '').split(';').map((part) => {
+                    const separator = part.indexOf('=')
+                    return separator < 0 ? ['', ''] : [part.slice(0, separator).trim(), part.slice(separator + 1)]
+                }))
+                const sessionToken = cookies.get(SECURE_WEB_SESSION_COOKIE) ?? cookies.get(DEVELOPMENT_WEB_SESSION_COOKIE)
+                const session = sessionToken
+                    ? options.store.workspaces.authenticateWebSession(sessionToken, WEB_SESSION_IDLE_TTL_MS)
+                    : null
+                if (session) {
+                    const origin = req.headers.get('origin')
+                    if (!origin || origin !== url.origin) return new Response('Origin not allowed', { status: 403 })
+                } else if (!token || !await verifyWorkspaceJwt(token, options.jwtSecret, options.store)) {
                     return new Response('Invalid token', { status: 401 })
                 }
             }
@@ -594,7 +602,9 @@ export async function startWebServer(options: {
                 return undefined as unknown as Response
             }
 
-            return app.fetch(req)
+            return app.fetch(req, {
+                remoteAddress: server.requestIP(req)?.address,
+            })
         }
     })
 

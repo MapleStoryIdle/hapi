@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { bodyLimit } from 'hono/body-limit'
+import { randomBytes } from 'node:crypto'
 import type { Store } from '../../store'
 import type { WebAppEnv } from '../middleware/auth'
 
@@ -30,10 +31,12 @@ export function createWorkspaceRoutes(store: Store): Hono<WebAppEnv> {
         if (!parsed.success) return c.json({ error: 'Invalid workspace' }, 400)
         if (c.get('namespace') !== 'default') return c.json({ error: 'Only the Hub owner workspace can create workspaces' }, 403)
         try {
-            const workspace = store.workspaces.create(parsed.data.name)
-            const web = store.workspaces.issueKey(workspace.id, 'web', 'Owner')
-            const runner = store.workspaces.issueKey(workspace.id, 'runner', 'Runner')
-            return c.json({ workspace, credentials: { web, runner } }, 201)
+            const webToken = `spw${randomBytes(32).toString('base64url')}`
+            const { workspace, accessKeyId } = store.workspaces.createWithWebKey(parsed.data.name, webToken)
+            return c.json({
+                workspace,
+                credentials: { web: { id: accessKeyId, token: webToken } },
+            }, 201)
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Unable to create workspace' }, 409)
         }
@@ -42,6 +45,9 @@ export function createWorkspaceRoutes(store: Store): Hono<WebAppEnv> {
     app.post('/workspaces/current/access-keys', async c => {
         const parsed = keySchema.safeParse(await c.req.json().catch(() => null))
         if (!parsed.success) return c.json({ error: 'Invalid access key' }, 400)
+        if (parsed.data.kind === 'runner') {
+            return c.json({ error: 'Runner keys must use the device authorization flow' }, 400)
+        }
         const expiresAt = parsed.data.expiresInDays
             ? Date.now() + parsed.data.expiresInDays * 86_400_000
             : null

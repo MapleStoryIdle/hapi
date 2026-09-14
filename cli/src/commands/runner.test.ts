@@ -10,6 +10,7 @@ const {
     getLatestRunnerLogMock,
     runDoctorCommandMock,
     initializeTokenMock,
+    handleRunnerPairCommandMock,
     existsSyncMock,
     statSyncMock
 } = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ const {
     getLatestRunnerLogMock: vi.fn(async () => null),
     runDoctorCommandMock: vi.fn(async () => {}),
     initializeTokenMock: vi.fn(async () => {}),
+    handleRunnerPairCommandMock: vi.fn(async () => {}),
     existsSyncMock: vi.fn(() => true),
     statSyncMock: vi.fn(() => ({ isDirectory: () => true }))
 }))
@@ -60,6 +62,10 @@ vi.mock('@/ui/doctor', () => ({
 
 vi.mock('@/ui/tokenInit', () => ({
     initializeToken: initializeTokenMock
+}))
+
+vi.mock('@/authV2/pairRunner', () => ({
+    handleRunnerPairCommand: handleRunnerPairCommandMock
 }))
 
 import { runnerCommand } from './runner'
@@ -125,5 +131,15 @@ describe('runnerCommand start', () => {
             consoleLogSpy.mockRestore()
             exitSpy.mockRestore()
         }
+    })
+})
+
+describe('runnerCommand pair', () => {
+    it('dispatches pairing without runner lifecycle operations', async () => {
+        vi.clearAllMocks()
+        await runnerCommand.run(createContext(['pair', '--name', 'Desk']))
+
+        expect(handleRunnerPairCommandMock).toHaveBeenCalledWith(['--name', 'Desk'])
+        expect(checkIfRunnerRunningAndCleanupStaleStateMock).not.toHaveBeenCalled()
     })
 })

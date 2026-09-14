@@ -51,6 +51,7 @@ import { deleteShareTransfer } from '@/lib/shareTransfer'
 import { presentMachineHealth, formatMachineUptimeSeconds } from '@/lib/machineHealth'
 import { getLanNetworkInterfaces } from '@/lib/networkInterfaces'
 import { loadDefaultNewSessionAgentConfig } from '@/components/NewSession/preferences'
+import { RunnerUpdateNotice } from '@/components/RunnerUpdateNotice'
 
 const SessionChat = lazy(() => import('@/components/SessionChat').then((module) => ({ default: module.SessionChat })))
 const NewSession = lazy(() => import('@/components/NewSession').then((module) => ({ default: module.NewSession })))
@@ -72,6 +73,8 @@ const MonitorCreatePage = lazy(() => import('@/routes/monitors').then((module) =
 const MonitorPage = lazy(() => import('@/routes/monitor'))
 const KanbanTaskPage = lazy(() => import('@/routes/kanban-task'))
 const LocalServicePage = lazy(() => import('@/routes/local-service'))
+const PairRunnerPage = lazy(() => import('@/routes/pair'))
+const RunnerInstallPage = lazy(() => import('@/routes/install'))
 
 type ComposerSendError = {
     id: number
@@ -382,6 +385,7 @@ function RunnerDetailsPanel(props: { machine: Machine }) {
             <div className="mt-3 truncate px-1 text-[11px] text-[var(--app-hint)]" title={runnerStartedAt ?? undefined}>
                 启动时间: {runnerStartedAt ?? '—'}
             </div>
+            <RunnerUpdateNotice currentVersion={machine.metadata?.happyCliVersion} />
         </div>
     )
 }
@@ -1627,6 +1631,18 @@ const indexRoute = createRoute({
     component: () => <Navigate to="/sessions" replace />,
 })
 
+const installRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/install',
+    component: RunnerInstallPage,
+})
+
+const pairRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/pair',
+    component: PairRunnerPage,
+})
+
 const sessionsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/sessions',
@@ -1962,6 +1978,8 @@ const shareRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([
     indexRoute,
+    installRoute,
+    pairRoute,
     sessionsRoute.addChildren([
         sessionsIndexRoute,
         newSessionRoute,

@@ -1862,12 +1862,12 @@ body:has(.session-list-screen) .tsqd-open-btn-container {
   container-type: size;
 }
 @container file-browser (max-height: 420px) {
-  .file-browser-surface[data-chat-drawer-body] { display: block; }
+  .chat-overlay:not([data-desktop-dialog]) > .file-browser-surface[data-chat-drawer-body] { display: block; }
   .directory-picker-body > div > .file-browser-surface { height: auto; }
 }
 /* With the keyboard open or in landscape, let the whole body scroll instead
    of allowing the fixed toolbar to squeeze the file list down to zero. */
-@media (max-height: 600px) {
+@media (max-width: 767px) and (max-height: 600px) {
   [data-testid="session-files-drawer"] > .file-browser-surface,
   .directory-picker-body { display: block; }
   .directory-picker-body > div > .file-browser-surface { height: auto; }

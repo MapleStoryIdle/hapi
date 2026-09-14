@@ -5,7 +5,7 @@
  * Environment files should be loaded using Node's --env-file flag
  */
 
-import { existsSync, mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import packageJson from '../package.json'
@@ -86,12 +86,14 @@ class Configuration {
         this.currentCliVersion = packageJson.version
 
         if (!existsSync(this.happyHomeDir)) {
-            mkdirSync(this.happyHomeDir, { recursive: true })
+            mkdirSync(this.happyHomeDir, { recursive: true, mode: 0o700 })
         }
+        try { chmodSync(this.happyHomeDir, 0o700) } catch {}
         // Ensure directories exist
         if (!existsSync(this.logsDir)) {
-            mkdirSync(this.logsDir, { recursive: true })
+            mkdirSync(this.logsDir, { recursive: true, mode: 0o700 })
         }
+        try { chmodSync(this.logsDir, 0o700) } catch {}
     }
 
     get apiUrl(): string {

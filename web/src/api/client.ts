@@ -15,6 +15,7 @@ type ApiClientOptions = {
     getToken?: () => string | null
     onUnauthorized?: () => Promise<string | null>
     requestTimeoutMs?: number
+    useCookieSession?: boolean
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000
@@ -94,6 +95,7 @@ export class ApiClient {
     private readonly getToken: (() => string | null) | null
     private readonly onUnauthorized: (() => Promise<string | null>) | null
     private readonly requestTimeoutMs: number
+    private readonly useCookieSession: boolean
 
     constructor(token: string, options?: ApiClientOptions) {
         this.token = token
@@ -101,6 +103,7 @@ export class ApiClient {
         this.getToken = options?.getToken ?? null
         this.onUnauthorized = options?.onUnauthorized ?? null
         this.requestTimeoutMs = options?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+        this.useCookieSession = options?.useCookieSession ?? false
     }
 
     private buildUrl(path: string): string {
@@ -118,8 +121,15 @@ export class ApiClient {
         const headers = new Headers(init?.headers)
         const liveToken = this.getToken ? this.getToken() : null
         const authToken = overrideToken !== undefined ? (overrideToken ?? liveToken ?? this.token) : (liveToken ?? this.token)
-        if (authToken) {
+        if (authToken && !this.useCookieSession) {
             headers.set('authorization', `Bearer ${authToken}`)
+        }
+        if (this.useCookieSession && init?.method && !['GET', 'HEAD', 'OPTIONS'].includes(init.method.toUpperCase())) {
+            const csrfToken = document.cookie
+                .split('; ')
+                .find((part) => part.startsWith('shapi_csrf='))
+                ?.slice('shapi_csrf='.length)
+            if (csrfToken) headers.set('x-csrf-token', decodeURIComponent(csrfToken))
         }
         const isFormDataBody = typeof FormData !== 'undefined' && init?.body instanceof FormData
         if (init?.body !== undefined && !headers.has('content-type') && !isFormDataBody) {
@@ -146,6 +156,7 @@ export class ApiClient {
             const res = await fetch(this.buildUrl(path), {
                 ...init,
                 headers,
+                credentials: this.useCookieSession ? 'include' : init?.credentials,
                 signal: controller.signal
             })
 
@@ -197,6 +208,31 @@ export class ApiClient {
         }
 
         return (await res.json()) as AuthResponse
+    }
+
+    async authenticateWebSession(): Promise<AuthResponse> {
+        const res = await fetch(this.buildUrl('/api/v2/web-sessions/current'), {
+            credentials: 'include',
+            headers: { accept: 'application/json' }
+        })
+        if (!res.ok) throw new ApiError('No active web session', res.status)
+        return {
+            token: '__cookie_session__',
+            user: { id: 1, firstName: 'Web User' }
+        }
+    }
+
+    async createWebSession(webToken: string): Promise<void> {
+        const res = await fetch(this.buildUrl('/api/v2/web-sessions'), {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ webToken })
+        })
+        if (!res.ok) {
+            const body = await res.text().catch(() => '')
+            throw new ApiError(parseErrorMessage(body) ?? 'Unable to sign in', res.status, parseErrorCode(body), body || undefined)
+        }
     }
 
     async bind(auth: { initData: string; accessToken: string }): Promise<AuthResponse> {

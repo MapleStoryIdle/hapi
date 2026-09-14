@@ -322,12 +322,9 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
             console.log('[Web] Public: ' + tunnelUrl)
 
-            // Generate direct access link with hub and token
-            const params = new URLSearchParams({
-                hub: tunnelUrl,
-                token: config.cliApiToken
-            })
-            const directAccessUrl = `${officialWebUrl}/?${params.toString()}`
+            // Authenticated PWA must share the Hub origin so HttpOnly cookies work.
+            // Never put long-lived credentials in URLs, QR codes, history, or Referer.
+            const directAccessUrl = tunnelUrl
 
             console.log('')
             console.log('Open in browser:')
