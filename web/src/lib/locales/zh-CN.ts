@@ -495,6 +495,8 @@ export default {
   'session.title': '文件',
   'session.back': '返回',
   'session.header.details.title': '会话详情',
+  'session.header.details.overview': '常用',
+  'session.header.details.technical': '技术信息',
   'session.header.details.copy': '复制{label}',
   'session.header.details.fullName': '完整名称',
   'session.header.details.sessionId': '会话 ID',

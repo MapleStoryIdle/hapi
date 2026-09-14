@@ -495,6 +495,8 @@ export default {
   'session.title': 'Files',
   'session.back': 'Back',
   'session.header.details.title': 'Session details',
+  'session.header.details.overview': 'Overview',
+  'session.header.details.technical': 'Technical',
   'session.header.details.copy': 'Copy {label}',
   'session.header.details.fullName': 'Full name',
   'session.header.details.sessionId': 'Session ID',

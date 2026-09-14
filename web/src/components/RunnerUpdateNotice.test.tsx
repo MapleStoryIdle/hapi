@@ -20,9 +20,9 @@ describe('RunnerUpdateNotice', () => {
     it('shows a manual same-origin install command for an outdated runner', () => {
         render(<RunnerUpdateNotice currentVersion="0.20.2" />)
 
-        expect(screen.getByText(/发现 Runner 新版本 0\.20\.3/)).toBeTruthy()
-        expect(screen.getByText(new RegExp(`${window.location.origin}/install\\.sh`))).toBeTruthy()
-        expect(screen.getByRole('button', { name: '复制命令' })).toBeTruthy()
+        expect(screen.getByText(/Runner 可更新至 0\.20\.3/)).toBeTruthy()
+        expect(screen.queryByText(new RegExp(`${window.location.origin}/install\\.sh`))).toBeNull()
+        expect(screen.getByRole('button', { name: '复制更新命令' })).toBeTruthy()
     })
 
     it('does not offer an update action when versions match', () => {

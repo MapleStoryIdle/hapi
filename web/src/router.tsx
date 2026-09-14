@@ -300,7 +300,8 @@ function RunnerMetricCard(props: { label: string; value: string; detail?: string
     )
 }
 
-function RunnerDetailsPanel(props: { machine: Machine }) {
+export function RunnerDetailsPanel(props: { machine: Machine }) {
+    const [tab, setTab] = useState<'overview' | 'details'>('overview')
     const machine = props.machine
     const health = machine.health ?? null
     const presentation = presentMachineHealth(health, machine.metadata?.platform)
@@ -317,79 +318,91 @@ function RunnerDetailsPanel(props: { machine: Machine }) {
     const uptimeText = health?.uptimeSeconds !== undefined ? formatMachineUptimeSeconds(health.uptimeSeconds) : null
 
     return (
-        <div role="dialog" aria-label="Runner 状态" className="absolute left-1/2 top-full z-50 mt-3 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_20px_60px_rgba(15,23,42,0.20)]">
+        <div role="dialog" aria-label="Runner 状态" className="absolute left-1/2 top-full z-50 mt-3 max-h-[calc(100dvh-7rem)] w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 overflow-y-auto overscroll-contain rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_20px_60px_rgba(15,23,42,0.20)]">
             <div className="flex items-start gap-3 px-1 pb-3">
                 <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${machine.active ? 'bg-[#22c55e]' : 'bg-[#a3a3a3]'}`} aria-hidden="true" />
                 <div className="min-w-0 flex-1">
                     <div className="truncate text-base font-semibold text-[var(--app-fg)]">{getMachineTitle(machine)}</div>
-                    <div className="mt-0.5 truncate text-xs text-[var(--app-hint)]" title={machine.id}>{machine.id}</div>
+                    <div className="mt-0.5 truncate text-xs text-[var(--app-hint)]">
+                        Runner {getMachineRunnerVersion(machine) ?? '—'} · {uptimeText ? `已运行 ${uptimeText}` : machine.metadata?.platform ?? 'unknown'}
+                    </div>
                 </div>
                 <div className="rounded-full border border-[var(--app-border)] px-2 py-1 text-[11px] font-medium text-[var(--app-hint)]">
                     {machine.runnerState?.status ?? (machine.active ? 'online' : 'offline')}
                 </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
-                <RunnerMetricCard label="CPU" value={cpuMetric ? `${cpuMetric.percent}%` : '—'} detail={presentation?.loadDetail ? `load ${presentation.loadDetail}` : undefined} />
-                <RunnerMetricCard label="内存" value={ramMetric ? `${ramMetric.percent}%` : '—'} />
-                <RunnerMetricCard label="磁盘" value={diskMetric ? `${diskMetric.percent}%` : '—'} detail={diskDetail} />
+            <div role="tablist" aria-label="Runner 信息" className="mb-3 grid grid-cols-2 rounded-xl bg-[var(--app-subtle-bg)] p-1">
+                {(['overview', 'details'] as const).map((value) => (
+                    <button
+                        key={value}
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === value}
+                        onClick={() => setTab(value)}
+                        className={`min-h-9 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${tab === value ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm' : 'text-[var(--app-hint)]'}`}
+                    >
+                        {value === 'overview' ? '概览' : '详情'}
+                    </button>
+                ))}
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
-                    <div className="font-medium text-[var(--app-hint)]">Runner</div>
-                    <div className="mt-1 space-y-1 text-[var(--app-fg)]">
-                        <div>PID: {machine.runnerState?.pid ?? '—'}</div>
-                        <div>端口: {machine.runnerState?.httpPort ?? '—'}</div>
-                        <div>运行: {uptimeText ?? '—'}</div>
+            {tab === 'overview' ? (
+                <>
+                    <div className="grid grid-cols-3 gap-2">
+                        <RunnerMetricCard label="CPU" value={cpuMetric ? `${cpuMetric.percent}%` : '—'} detail={presentation?.loadDetail ? `load ${presentation.loadDetail}` : undefined} />
+                        <RunnerMetricCard label="内存" value={ramMetric ? `${ramMetric.percent}%` : '—'} />
+                        <RunnerMetricCard label="磁盘" value={diskMetric ? `${diskMetric.percent}%` : '—'} detail={diskDetail} />
                     </div>
-                </div>
-                <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
-                    <div className="font-medium text-[var(--app-hint)]">系统</div>
-                    <div className="mt-1 space-y-1 text-[var(--app-fg)]">
-                        <div>{machine.metadata?.platform ?? 'unknown'}</div>
-                        <div>Runner {getMachineRunnerVersion(machine) ?? '—'}</div>
-                        <div title={lastSeenAt ?? undefined}>心跳: {lastSeenAt ?? '—'}</div>
-                    </div>
-                </div>
-            </div>
-
-            <div className="mt-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-xs font-medium text-[var(--app-hint)]">局域网 IP</div>
-                    <div className="text-[11px] text-[var(--app-hint)]">{networkList.length > 0 ? `${networkList.length} 个地址` : '暂无数据'}</div>
-                </div>
-                {networkList.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
-                        {networkList.map((item) => (
-                            <span key={`${item.name}-${item.address}`} className="rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-[11px] text-[var(--app-fg)]">
-                                {item.name} · {item.address}
-                            </span>
-                        ))}
-                    </div>
-                ) : <div className="text-xs text-[var(--app-hint)]">未发现可直接访问的局域网 IPv4。</div>}
-            </div>
-
-            <div className="mt-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
-                <div className="mb-2 text-xs font-medium text-[var(--app-hint)]">Agent CLI</div>
-                {cliList.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-1.5">
-                        {cliList.map((cli) => (
-                            <div key={cli.id} className="flex items-center justify-between gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5">
-                                <span className="truncate text-xs font-medium text-[var(--app-fg)]">{cli.label}</span>
-                                <span className={`shrink-0 text-[11px] font-semibold ${cli.available ? 'text-green-600 dark:text-green-400' : 'text-[var(--app-hint)]'}`}>
-                                    {cli.available ? '可用' : '未安装'}
-                                </span>
+                    <RunnerUpdateNotice currentVersion={getMachineRunnerVersion(machine)} />
+                </>
+            ) : (
+                <div className="space-y-3">
+                    <div className="overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-xs">
+                        {[
+                            ['机器 ID', machine.id],
+                            ['系统', machine.metadata?.platform ?? 'unknown'],
+                            ['PID / 端口', `${machine.runnerState?.pid ?? '—'} / ${machine.runnerState?.httpPort ?? '—'}`],
+                            ['最近心跳', lastSeenAt ?? '—'],
+                            ['启动时间', runnerStartedAt ?? '—']
+                        ].map(([label, value], index) => (
+                            <div key={label} className={`flex min-h-10 items-center gap-3 px-3 py-2 ${index > 0 ? 'border-t border-[var(--app-divider)]' : ''}`}>
+                                <span className="shrink-0 text-[var(--app-hint)]">{label}</span>
+                                <span className="min-w-0 flex-1 truncate text-right text-[var(--app-fg)]" title={value}>{value}</span>
                             </div>
                         ))}
                     </div>
-                ) : <div className="text-xs text-[var(--app-hint)]">runner 重启后会开始上报 Agent CLI 探测结果。</div>}
-            </div>
 
-            <div className="mt-3 truncate px-1 text-[11px] text-[var(--app-hint)]" title={runnerStartedAt ?? undefined}>
-                启动时间: {runnerStartedAt ?? '—'}
-            </div>
-            <RunnerUpdateNotice currentVersion={getMachineRunnerVersion(machine)} />
+                    <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="text-xs font-medium text-[var(--app-hint)]">局域网 IP</div>
+                            <div className="text-[11px] text-[var(--app-hint)]">{networkList.length > 0 ? `${networkList.length} 个地址` : '暂无数据'}</div>
+                        </div>
+                        {networkList.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                                {networkList.map((item) => (
+                                    <span key={`${item.name}-${item.address}`} className="rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-[11px] text-[var(--app-fg)]">
+                                        {item.name} · {item.address}
+                                    </span>
+                                ))}
+                            </div>
+                        ) : <div className="text-xs text-[var(--app-hint)]">未发现局域网 IPv4。</div>}
+                    </div>
+
+                    <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2">
+                        <div className="mb-2 text-xs font-medium text-[var(--app-hint)]">Agent CLI</div>
+                        {cliList.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                                {cliList.map((cli) => (
+                                    <span key={cli.id} className={`rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-1 text-xs ${cli.available ? 'text-green-600 dark:text-green-400' : 'text-[var(--app-hint)]'}`}>
+                                        {cli.label} · {cli.available ? '可用' : '未安装'}
+                                    </span>
+                                ))}
+                            </div>
+                        ) : <div className="text-xs text-[var(--app-hint)]">暂无探测结果。</div>}
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
