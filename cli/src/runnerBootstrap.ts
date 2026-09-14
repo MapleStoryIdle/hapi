@@ -1,10 +1,11 @@
 process.env.DEV = 'false'
 
-const [{ runCliCore }, { resolveRunnerCommand }] = await Promise.all([
+const [{ runCliCore }, { resolveRunnerCommand }, { RUNNER_VERSION }] = await Promise.all([
     import('./commands/runCliCore'),
-    import('./commands/runnerRegistry')
+    import('./commands/runnerRegistry'),
+    import('./runnerVersion')
 ])
 
-await runCliCore(resolveRunnerCommand)
+await runCliCore(resolveRunnerCommand, RUNNER_VERSION)
 
 export {}

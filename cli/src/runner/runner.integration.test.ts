@@ -387,46 +387,34 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
    * Version mismatch detection test - control flow:
    * 
    * 1. Test starts runner with original version (e.g., 0.9.0-6) compiled into dist/
-   * 2. Test modifies package.json to new version (e.g., 0.0.0-integration-test-*)
-   * 3. Test runs `yarn build` to recompile with new version
-   * 4. Runner's heartbeat (every 30s) reads package.json and compares to its compiled version
-   * 5. Runner detects mismatch: package.json != configuration.currentCliVersion
+   * 2. Test modifies runner-version.json to a new version
+   * 3. A new control invocation reads the new Runner version
+   * 4. The control invocation compares it with the persisted Runner version
+   * 5. Runner detects the mismatch
    * 6. Runner spawns new runner via spawnHappyCLI(['runner', 'start'])
    * 7. New runner starts, reads runner.state.json, sees old version != its compiled version
    * 8. New runner calls stopRunner() to kill old runner, then takes over
    * 
-   * This simulates what happens during `npm upgrade hapi`:
-   * - Running runner has OLD version loaded in memory (configuration.currentCliVersion)
-   * - npm replaces node_modules/hapi/ with NEW version files
-   * - package.json on disk now has NEW version
-   * - Runner reads package.json, detects mismatch, triggers self-update
-   * - Key difference: npm atomically replaces the entire module directory, while
-   *   our test must carefully rebuild to avoid missing entrypoint errors
+   * This simulates the installer replacing an old Runner binary with a new one.
    * 
    * Critical timing constraints:
    * - Heartbeat must be long enough (30s) for yarn build to complete before runner tries to spawn
    * - If heartbeat fires during rebuild, spawn fails (entrypoint missing) and test fails
-   * - pkgroll doesn't reliably update compiled version, must use full yarn build
-   * - Test modifies package.json BEFORE rebuild to ensure new version is compiled in
+   * - Test modifies runner-version.json before the replacement process starts
    * 
    * Common failure modes:
    * - Heartbeat too short: runner tries to spawn while dist/ is being rebuilt
-   * - Using pkgroll alone: doesn't update compiled configuration.currentCliVersion
-   * - Modifying package.json after runner starts: triggers immediate version check on startup
+   * - Modifying runner-version.json after runner starts triggers the version handoff
    */
   it('[takes 1 minute to run] should detect version mismatch and kill old runner', { timeout: 100_000 }, async () => {
-    // Read current package.json to get version
-    const packagePath = path.join(process.cwd(), 'package.json');
-    const packageJsonOriginalRawText = readFileSync(packagePath, 'utf8');
-    const originalPackage = JSON.parse(packageJsonOriginalRawText);
-    const originalVersion = originalPackage.version;
+    const versionPath = path.join(process.cwd(), 'runner-version.json');
+    const originalVersionRawText = readFileSync(versionPath, 'utf8');
+    const originalVersion = JSON.parse(originalVersionRawText).version;
     const testVersion = `0.0.0-integration-test-should-be-auto-cleaned-up-${Math.floor(Math.random() * 100000).toString().padStart(5, '0')}`;
 
     expect(originalVersion, 'Your current cli version was not cleaned up from previous test it seems').not.toBe(testVersion);
     
-    // Modify package.json version
-    const modifiedPackage = { ...originalPackage, version: testVersion };
-    writeFileSync(packagePath, JSON.stringify(modifiedPackage, null, 2));
+    writeFileSync(versionPath, `${JSON.stringify({ version: testVersion }, null, 2)}\n`);
 
     try {
       // Get initial runner state
@@ -436,11 +424,11 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
       const initialPid = initialState!.pid;
 
       // No rebuild needed: bun runs TypeScript directly, so the spawned runner
-      // process reads package.json fresh and picks up the modified version automatically.
+      // process reads runner-version.json fresh and picks up the modified version automatically.
 
       console.log(`[TEST] Current runner running with version ${originalVersion}, PID: ${initialPid}`);
       
-      console.log(`[TEST] Changed package.json version to ${testVersion}`);
+      console.log(`[TEST] Changed Runner version to ${testVersion}`);
 
       // The runner should automatically detect the version mismatch and restart itself
       // We check once per minute, wait for a little longer than that
@@ -453,9 +441,9 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
       expect(finalState!.pid).not.toBe(initialPid);
       console.log('[TEST] Runner version mismatch detection successful');
     } finally {
-      // CRITICAL: Restore original package.json version
-      writeFileSync(packagePath, packageJsonOriginalRawText);
-      console.log(`[TEST] Restored package.json version to ${originalVersion}`);
+      // CRITICAL: Restore original Runner version
+      writeFileSync(versionPath, originalVersionRawText);
+      console.log(`[TEST] Restored Runner version to ${originalVersion}`);
 
       // No rebuild needed with bun (TypeScript is run directly).
     }

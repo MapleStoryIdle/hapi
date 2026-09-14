@@ -8,13 +8,13 @@ import type { CommandContext, CommandDefinition } from './types'
 
 type CommandResolver = (args: string[]) => { command: CommandDefinition; context: CommandContext }
 
-export async function runCliCore(resolveCommand: CommandResolver): Promise<void> {
+export async function runCliCore(resolveCommand: CommandResolver, version = packageJson.version): Promise<void> {
     ensureLoopbackProxyBypass()
 
     const args = getCliArgs()
 
     if (args.includes('-v') || args.includes('--version')) {
-        console.log(`SHAPI version: ${packageJson.version}`)
+        console.log(`SHAPI version: ${version}`)
         process.exit(0)
     }
 

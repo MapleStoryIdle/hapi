@@ -27,8 +27,8 @@ function sha256(path: string): string {
 
 async function main(): Promise<void> {
     const repoRoot = resolve(import.meta.dir, '../..')
-    const cliPackage = JSON.parse(readFileSync(join(repoRoot, 'cli/package.json'), 'utf8')) as { version: string }
-    const version = argument('--version') ?? cliPackage.version
+    const runnerVersion = JSON.parse(readFileSync(join(repoRoot, 'cli/runner-version.json'), 'utf8')) as { version: string }
+    const version = argument('--version') ?? runnerVersion.version
     if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(version)) throw new Error(`Invalid stable version: ${version}`)
     const downloadBaseUrl = argument('--download-base-url')
         ?? `https://github.com/MapleStoryIdle/hapi/releases/download/runner-v${version}`

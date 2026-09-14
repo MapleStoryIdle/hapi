@@ -283,9 +283,9 @@ async function main(): Promise<void> {
     }
 
     if (runnerOnly) {
-        const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8')) as { version: string };
+        const runnerVersion = JSON.parse(readFileSync(join(projectRoot, 'runner-version.json'), 'utf8')) as { version: string };
         const markerPath = join(outdir, 'runner-version.txt');
-        writeFileSync(`${markerPath}.next`, `${packageJson.version}\n`, 'utf8');
+        writeFileSync(`${markerPath}.next`, `${runnerVersion.version}\n`, 'utf8');
         renameSync(`${markerPath}.next`, markerPath);
     }
 }

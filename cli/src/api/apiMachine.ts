@@ -322,6 +322,7 @@ function runnerMetadataMatchesAdvertised(
     return current.host === advertised.host
         && current.platform === advertised.platform
         && current.happyCliVersion === advertised.happyCliVersion
+        && current.runnerVersion === advertised.runnerVersion
         && current.homeDir === advertised.homeDir
         && current.codexHome === advertised.codexHome
         && current.nativeCodexRealtime === advertised.nativeCodexRealtime
@@ -338,6 +339,7 @@ function mergeAdvertisedRunnerMetadata(
         host: _host,
         platform: _platform,
         happyCliVersion: _happyCliVersion,
+        runnerVersion: _runnerVersion,
         homeDir: _homeDir,
         codexHome: _codexHome,
         nativeCodexRealtime: _nativeCodexRealtime,

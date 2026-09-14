@@ -6,7 +6,7 @@
 import { logger } from '@/ui/logger';
 import { clearRunnerState, readRunnerState, readSettings } from '@/persistence';
 import { Metadata } from '@/api/types';
-import packageJson from '../../package.json';
+import { RUNNER_VERSION } from '@/runnerVersion';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { isBunCompiled, projectPath } from '@/projectPath';
@@ -216,9 +216,8 @@ export async function isRunnerRunningCurrentlyInstalledHappyVersion(): Promise<b
           return false;
         }
       } else {
-        const currentCliVersion = packageJson.version;
-        logger.debug(`[RUNNER CONTROL] Current CLI version: ${currentCliVersion}, Runner started with version: ${state.startedWithCliVersion}`);
-        if (currentCliVersion !== state.startedWithCliVersion) {
+        logger.debug(`[RUNNER CONTROL] Current Runner version: ${RUNNER_VERSION}, Runner started with version: ${state.startedWithCliVersion}`);
+        if (RUNNER_VERSION !== state.startedWithCliVersion) {
           return false;
         }
       }

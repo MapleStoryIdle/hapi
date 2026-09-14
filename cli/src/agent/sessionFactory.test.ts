@@ -52,6 +52,7 @@ vi.mock('@/ui/logger', () => ({
 }))
 
 import { bootstrapExistingSession, buildMachineMetadata, buildSessionMetadata } from './sessionFactory'
+import { RUNNER_VERSION } from '@/runnerVersion'
 
 function createSession(): Session {
     return {
@@ -204,7 +205,8 @@ describe('bootstrapExistingSession', () => {
         try {
             expect(buildMachineMetadata()).toMatchObject({
                 codexHome: '/tmp/hapi-test-codex-home',
-                nativeCodexRealtime: true
+                nativeCodexRealtime: true,
+                runnerVersion: RUNNER_VERSION
             })
         } finally {
             if (originalCodexHome === undefined) delete process.env.CODEX_HOME

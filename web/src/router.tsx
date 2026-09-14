@@ -107,6 +107,10 @@ function BackIcon(props: { className?: string }) {
     )
 }
 
+function getMachineRunnerVersion(machine: Machine): string | undefined {
+    return machine.metadata?.runnerVersion ?? machine.metadata?.happyCliVersion
+}
+
 function CodexImportIcon(props: { className?: string }) {
     return (
         <svg
@@ -344,7 +348,7 @@ function RunnerDetailsPanel(props: { machine: Machine }) {
                     <div className="font-medium text-[var(--app-hint)]">系统</div>
                     <div className="mt-1 space-y-1 text-[var(--app-fg)]">
                         <div>{machine.metadata?.platform ?? 'unknown'}</div>
-                        <div>SHAPI {machine.metadata?.happyCliVersion ?? '—'}</div>
+                        <div>Runner {getMachineRunnerVersion(machine) ?? '—'}</div>
                         <div title={lastSeenAt ?? undefined}>心跳: {lastSeenAt ?? '—'}</div>
                     </div>
                 </div>
@@ -385,7 +389,7 @@ function RunnerDetailsPanel(props: { machine: Machine }) {
             <div className="mt-3 truncate px-1 text-[11px] text-[var(--app-hint)]" title={runnerStartedAt ?? undefined}>
                 启动时间: {runnerStartedAt ?? '—'}
             </div>
-            <RunnerUpdateNotice currentVersion={machine.metadata?.happyCliVersion} />
+            <RunnerUpdateNotice currentVersion={getMachineRunnerVersion(machine)} />
         </div>
     )
 }
@@ -412,7 +416,7 @@ function RunnerSwitcherPanel(props: {
                         <LaptopIcon className="h-4 w-4 shrink-0 text-[var(--app-hint)]" />
                         <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-semibold text-[var(--app-fg)]">{getMachineTitle(machine)}</span>
-                            <span className="block truncate text-[11px] text-[var(--app-hint)]">{machine.metadata?.platform ?? 'unknown'} · SHAPI {machine.metadata?.happyCliVersion ?? '—'}</span>
+                            <span className="block truncate text-[11px] text-[var(--app-hint)]">{machine.metadata?.platform ?? 'unknown'} · Runner {getMachineRunnerVersion(machine) ?? '—'}</span>
                         </span>
                         {selected ? <span className="text-xs font-semibold text-[var(--app-link)]">当前</span> : null}
                     </button>

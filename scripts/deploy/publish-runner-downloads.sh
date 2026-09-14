@@ -3,7 +3,7 @@ set -euo pipefail
 
 SSH_HOST="${1:?Usage: publish-runner-downloads.sh <ssh-host> [repo-root] [version]}"
 REPO_ROOT="${2:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
-VERSION="${3:-$(bun -e "console.log(require('$REPO_ROOT/cli/package.json').version)")}"
+VERSION="${3:-$(bun -e "console.log(require('$REPO_ROOT/cli/runner-version.json').version)")}"
 REPOSITORY="${SHAPI_GITHUB_REPOSITORY:-MapleStoryIdle/hapi}"
 KEEP_RELEASES="${SHAPI_KEEP_RUNNER_RELEASES:-3}"
 TAG="runner-v${VERSION}"

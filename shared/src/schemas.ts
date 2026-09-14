@@ -319,6 +319,7 @@ export const MachineMetadataSchema = z.object({
     host: z.string(),
     platform: z.string(),
     happyCliVersion: z.string(),
+    runnerVersion: z.string().optional(),
     displayName: z.string().optional(),
     homeDir: z.string().optional(),
     /** Absolute CODEX_HOME advertised by a runner for native thread affinity. */

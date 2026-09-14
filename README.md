@@ -68,9 +68,15 @@ Operators build and publish Runner-only GitHub Release assets separately from
 the Hub binary:
 
 ```bash
+# Only when Runner code changes: bump cli/runner-version.json first.
 bun run build:runner-downloads
 scripts/deploy/publish-runner-downloads.sh <ssh-host>
 ```
+
+Hub/Web and Runner use independent versions. A Hub/Web-only deployment does not
+change `cli/runner-version.json` and must not run the Runner publish command, so
+it neither creates nor replaces a GitHub Release. Runner machines report the
+dedicated Runner version for the Hub Web update check.
 
 Configure Nginx once with
 `scripts/deploy/shapi-runner-downloads.nginx.conf`; the Hub serves only

@@ -13,6 +13,7 @@ import { runtimePath } from '@/projectPath'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { readWorktreeEnv } from '@/utils/worktreeEnv'
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
+import { RUNNER_VERSION } from '@/runnerVersion'
 import packageJson from '../../package.json'
 
 export { HAPI_SESSION_ID_ENV, exportHapiHubApiUrl, exportHapiSessionEnv } from '@/agent/hapiSessionEnv'
@@ -52,6 +53,7 @@ export function buildMachineMetadata(options?: { workspaceRoots?: string[] }): M
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),
         happyCliVersion: packageJson.version,
+        runnerVersion: RUNNER_VERSION,
         homeDir: os.homedir(),
         codexHome: resolveCodexHome(),
         nativeCodexRealtime: true,
