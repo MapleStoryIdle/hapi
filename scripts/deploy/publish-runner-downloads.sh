@@ -50,21 +50,16 @@ else
         --notes "Runner-only binaries for SHAPI $VERSION. Install or update with: curl -fsSL https://hapi.ye2moe.fun/install.sh | sh"
 fi
 
-mkdir -p "$LOCAL_OUTPUT/github-check"
-gh release download "$TAG" \
-    --repo "$REPOSITORY" \
-    --pattern '*.tar.gz' \
-    --pattern checksums.txt \
-    --dir "$LOCAL_OUTPUT/github-check"
-cmp "$RELEASE_DIR/checksums.txt" "$LOCAL_OUTPUT/github-check/checksums.txt"
-find "$RELEASE_DIR" -maxdepth 1 -type f -exec basename {} \; | sort > "$LOCAL_OUTPUT/expected-assets.txt"
-gh release view "$TAG" --repo "$REPOSITORY" --json assets --jq '.assets[].name' \
+for release_asset in "$RELEASE_DIR"/*; do
+    asset_name="${release_asset##*/}"
+    asset_size="$(wc -c < "$release_asset" | tr -d '[:space:]')"
+    asset_digest="$(shasum -a 256 "$release_asset" | awk '{ print $1 }')"
+    printf '%s\t%s\tsha256:%s\n' "$asset_name" "$asset_size" "$asset_digest"
+done | sort > "$LOCAL_OUTPUT/expected-assets.txt"
+gh api "repos/$REPOSITORY/releases/tags/$TAG" \
+    --jq '.assets[] | [.name, (.size | tostring), .digest] | @tsv' \
     | sort > "$LOCAL_OUTPUT/github-assets.txt"
 cmp "$LOCAL_OUTPUT/expected-assets.txt" "$LOCAL_OUTPUT/github-assets.txt"
-(
-    cd "$LOCAL_OUTPUT/github-check"
-    shasum -a 256 -c checksums.txt
-)
 
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$SSH_HOST" "mkdir -p '$REMOTE_STAGE'"
 scp "$LOCAL_OUTPUT/install.sh" "$SSH_HOST:$REMOTE_STAGE/install.sh"
