@@ -15,7 +15,8 @@ React Mini App / PWA for monitoring and controlling SHAPI sessions.
 ## Runtime behavior
 
 - When opened inside Telegram, auth uses Telegram WebApp init data.
-- When opened in a normal browser, you can log in with `CLI_API_TOKEN:<namespace>` (or `CLI_API_TOKEN` for the default namespace).
+- In a normal same-origin browser, enter the workspace's `spw...` credential once. The Hub exchanges it for an HttpOnly Web session cookie; the app does not retain `spw...` in localStorage.
+- `CLI_API_TOKEN:<namespace>` and localStorage bearer tokens exist only for legacy/dev compatibility.
 - The login screen includes a top-right hub picker; if unset, the app uses the same origin it was loaded from.
 - Live updates come from the hub via SSE.
 
@@ -24,13 +25,16 @@ React Mini App / PWA for monitoring and controlling SHAPI sessions.
 See `src/router.tsx` for route definitions.
 
 - `/` - Redirect to /sessions.
+- `/install` - Runner install/update instructions generated for this Hub.
+- `/pair` - Review and approve a pending Runner pairing.
 - `/sessions` - Session list.
 - `/sessions/$sessionId` - Chat interface.
 - `/sessions/new` - Create new session.
 - `/sessions/$sessionId/files` - File browser with git status.
 - `/sessions/$sessionId/file` - File viewer with diff support.
 - `/sessions/$sessionId/terminal` - Terminal interface.
-- `/settings` - Application settings.
+- `/browse` - Browse connected Runner workspace roots.
+- `/settings` - Application settings and connected Runner details.
 
 ## Features
 
@@ -94,8 +98,11 @@ Modular session creation:
 See `src/hooks/useAuth.ts` and `src/hooks/useAuthSource.ts`.
 
 - Telegram Mini App: Uses initData from WebApp SDK.
-- Browser: Uses CLI_API_TOKEN from login prompt.
-- JWT tokens with auto-refresh.
+- Browser: Exchanges `spw...` through `POST /api/v2/web-sessions`, then sends cookies plus CSRF protection on state-changing requests.
+- The Hub session, not `spw...`, persists browser login. Expired or revoked sessions require the workspace credential again.
+- Legacy/Telegram flows still use short-lived JWTs with refresh behavior.
+
+Workspace identity comes from the authenticated Hub request; never accept a workspace ID from browser input as authorization. One workspace may show several paired Runners.
 
 ## Data fetching
 
@@ -176,6 +183,8 @@ The built assets land in `web/dist` and are served by hapi-hub. The single execu
 ## Standalone hosting
 
 You can host `web/dist` on a static host (GitHub Pages, Cloudflare Pages) and point it at any SHAPI hub:
+
+Current `spw...` Web sessions are same-origin cookies. Prefer serving `web/dist` from the Hub origin for workspace login. Cross-origin static hosting is retained for legacy/Telegram configurations and requires matching Hub CORS policy.
 
 1. Build the web app. If your static host uses a subpath, set the Vite base:
 
