@@ -2,13 +2,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
-import { ToastProvider } from '@/lib/toast-context'
+import { ToastProvider, useToast } from '@/lib/toast-context'
 import { I18nProvider } from '@/lib/i18n-context'
 import { GitBranchesDrawer } from './GitBranchesDrawer'
 
 afterEach(() => cleanup())
 
 const TEST_CWD = '/Users/dev/IdeaProjects/github/hapi'
+
+function ToastProbe() {
+    const { toasts } = useToast()
+    return <div data-testid="toast-probe">{toasts.at(-1)?.title}</div>
+}
 
 function response(overrides: Record<string, unknown> = {}) {
     return {
@@ -46,6 +51,7 @@ function renderDrawer(api: ApiClient) {
                         open
                         onOpenChange={vi.fn()}
                     />
+                    <ToastProbe />
                 </ToastProvider>
             </I18nProvider>
         </QueryClientProvider>
@@ -53,7 +59,7 @@ function renderDrawer(api: ApiClient) {
 }
 
 describe('GitBranchesDrawer', () => {
-    it('uses a fixed Git Branchs title, the full directory path, and compact icon actions', async () => {
+    it('uses a fixed Git Branchs title, the full directory path, and compact labeled actions', async () => {
         const api = {
             getMachineGitBranches: vi.fn(async () => response())
         } as unknown as ApiClient
@@ -88,7 +94,14 @@ describe('GitBranchesDrawer', () => {
         expect(actions).toHaveClass('grid-cols-4')
         expect(within(actions!).getAllByRole('button')).toHaveLength(4)
         expect(screen.getByRole('button', { name: 'Fetch' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Update' })).toBeDisabled()
+        expect(screen.getByRole('button', { name: 'Pull' })).toHaveAttribute('aria-disabled', 'true')
+        expect(screen.getByRole('button', { name: 'Pull' })).toHaveTextContent('Pull')
+        expect(screen.getByRole('button', { name: 'Fetch' })).toHaveTextContent('Fetch')
+        expect(screen.getByRole('button', { name: 'Commit' })).toHaveTextContent('Commit')
+        expect(screen.getByRole('button', { name: 'Push' })).toHaveTextContent('Push')
+
+        fireEvent.click(screen.getByRole('button', { name: 'Pull' }))
+        expect(screen.getByTestId('toast-probe')).toHaveTextContent('Commit or stash local changes first')
     })
 
     it('commits local changes and pushes the current branch from the drawer', async () => {
@@ -137,7 +150,7 @@ describe('GitBranchesDrawer', () => {
             cwd: TEST_CWD
         }))
 
-        fireEvent.click(screen.getByRole('button', { name: 'Update' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Pull' }))
         await waitFor(() => expect(api.updateMachineGitBranch).toHaveBeenCalledWith('machine-1', {
             cwd: TEST_CWD
         }))
