@@ -68,6 +68,14 @@ done
 HOME="$TMP_ROOT/home" SHAPI_INSTALL_DIR="$TMP_ROOT/bin" \
     sh "$REPO_ROOT/scripts/install.sh" --base-url "http://127.0.0.1:$PORT" >"$TMP_ROOT/install.log"
 grep -Fq 'Downloading Runner 1.2.3 (' "$TMP_ROOT/install.log"
+grep -Fqx 'SHAPI setup complete' "$TMP_ROOT/install.log"
+grep -Fqx "Hub: http://127.0.0.1:$PORT" "$TMP_ROOT/install.log"
+grep -Fqx 'Token: preserved locally by you; SHAPI does not store it' "$TMP_ROOT/install.log"
+grep -Fqx 'Runner: running…' "$TMP_ROOT/install.log"
+if LC_ALL=C grep -q "$(printf '\033')" "$TMP_ROOT/install.log"; then
+    echo "Non-interactive installer output unexpectedly contains color escapes" >&2
+    exit 1
+fi
 [[ "$("$TMP_ROOT/bin/shapi" --version)" == "SHAPI 1.2.3" ]]
 [[ "$(cat "$TMP_ROOT/home/.hapi/credentials/runner.json")" == "keep-me" ]]
 
@@ -80,10 +88,12 @@ HOME="$TMP_ROOT/home" SHAPI_INSTALL_DIR="$TMP_ROOT/bin" \
 SHAPI_TEST_COMMAND_LOG="$TMP_ROOT/register.log" \
 HOME="$TMP_ROOT/home" SHAPI_INSTALL_DIR="$TMP_ROOT/bin" \
     sh "$REPO_ROOT/scripts/install.sh" --base-url "http://127.0.0.1:$PORT" \
-        --register --workspace-name "Alice" >/dev/null
+        --register --workspace-name "Alice" >"$TMP_ROOT/register-install.log"
 grep -Fq "workspace register --name Alice --hub http://127.0.0.1:$PORT --output-token-file" "$TMP_ROOT/register.log"
 grep -Fq "runner pair --hub http://127.0.0.1:$PORT --web-token-file" "$TMP_ROOT/register.log"
 grep -Fqx "runner start" "$TMP_ROOT/register.log"
+grep -Eq '^Token: spw[A-Za-z0-9_-]{43}$' "$TMP_ROOT/register-install.log"
+grep -Fqx 'Runner: running…' "$TMP_ROOT/register-install.log"
 
 : > "$TMP_ROOT/register.log"
 SHAPI_TEST_COMMAND_LOG="$TMP_ROOT/register.log" \

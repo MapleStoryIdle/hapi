@@ -6,6 +6,20 @@ INSTALL_DIR="${SHAPI_INSTALL_DIR:-$HOME/.local/bin}"
 SETUP_MODE="ask"
 WORKSPACE_NAME=""
 
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+    color_bold='\033[1m'
+    color_green='\033[32m'
+    color_cyan='\033[36m'
+    color_yellow='\033[33m'
+    color_reset='\033[0m'
+else
+    color_bold=''
+    color_green=''
+    color_cyan=''
+    color_yellow=''
+    color_reset=''
+fi
+
 usage() {
     cat <<'EOF'
 Usage: install.sh [--base-url <https://hub.example.com>] [--install-dir <path>]
@@ -304,14 +318,18 @@ if [ "$setup" != "none" ] || [ "$fresh_install" != "yes" ]; then
 fi
 
 echo
-echo "SHAPI setup complete"
-echo "Hub: $BASE_URL"
+printf '%bSHAPI setup complete%b\n' "$color_bold$color_green" "$color_reset"
+printf '%bHub:%b %s\n' "$color_cyan" "$color_reset" "$BASE_URL"
 if [ -n "$web_token" ]; then
-    echo "spw: $web_token"
+    printf '%bToken:%b %s\n' "$color_yellow" "$color_reset" "$web_token"
 else
-    echo "spw: preserved locally by you; SHAPI does not store it"
+    printf '%bToken:%b preserved locally by you; SHAPI does not store it\n' "$color_yellow" "$color_reset"
 fi
-echo "Runner: $runner_started"
+if [ "$runner_started" = "yes" ]; then
+    printf '%bRunner:%b running…\n' "$color_green" "$color_reset"
+else
+    printf '%bRunner:%b not started\n' "$color_yellow" "$color_reset"
+fi
 
 if [ "$fresh_install" = "yes" ] && [ "$setup" = "none" ]; then
     echo "Runner was not started because no workspace was selected."
