@@ -43,6 +43,19 @@ function createSession(): Session {
 }
 
 describe('mobile layout contract', () => {
+    it('shows the native Codex ID separately for a managed Codex session', () => {
+        const details = buildSessionHeaderDetails({
+            title: 'Task',
+            sessionId: 'shapi-session',
+            codexSessionId: 'codex-thread'
+        }, key => key)
+
+        expect(details).toEqual(expect.arrayContaining([
+            expect.objectContaining({ key: 'session-id', value: 'shapi-session' }),
+            expect.objectContaining({ key: 'codex-session-id', value: 'codex-thread' })
+        ]))
+    })
+
     it('keeps the quota badge hidden until quota data is available', () => {
         const { container } = render(<I18nProvider><CodexSubscriptionLimitsBadge limits={null} isFetching error={null} /></I18nProvider>)
         expect(container.querySelector('button')).toBeNull()

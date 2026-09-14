@@ -10,6 +10,9 @@ import { MONITOR_WEEK_MS } from './monitors'
 const config = () => MonitorConfigSchema.parse({ name: 'API', kind: 'webhook', directory: '/work', machineId: 'm', prompt: 'Investigate' })
 
 describe('monitor store', () => {
+    it('defaults webhook ignore keywords for existing configurations', () => {
+        expect(config().webhookIgnoreKeywords).toBe('')
+    })
     it('persists encrypted tokens, migrates legacy hashes without rotation and fails closed without the key', () => {
         const dir = mkdtempSync(join(tmpdir(), 'monitor-token-'))
         const path = join(dir, 'test.db')

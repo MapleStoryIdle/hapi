@@ -26,7 +26,10 @@ type CreateMonitorResponse = MonitorResponse & { token: string | null }
 type RotateMonitorTokenResponse = { token: string }
 type MonitorAcceptedResponse = { accepted: true; deferred?: boolean }
 type ParseMonitorCurlResponse = { request: MonitorRequest }
-type MonitorSessionTargetResponse = { config: MonitorConfig }
+export type MonitorSessionTargetResponse = {
+    config: MonitorConfig
+    target: { type: 'managed' | 'native-codex'; sessionId: string; title: string }
+}
 
 type ErrorPayload = {
     error?: unknown

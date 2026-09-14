@@ -142,6 +142,13 @@ export class MonitoringService {
         return result
     }
 
+    ignore(token: string, event: MonitorWebhook): boolean {
+        const monitor = this.store.monitors.byToken(token)
+        if (!monitor || monitor.config.kind !== 'webhook' || !monitorEnabled(monitor.config)) return false
+        this.store.monitors.ignoreWebhook(monitor, event)
+        return true
+    }
+
     requestTest(monitor: StoredMonitor): { deferred: boolean } {
         if (!monitorEnabled(monitor.config)) throw new Error('Monitor is paused or expired')
         if (monitor.config.kind === 'http') {
@@ -341,12 +348,13 @@ export class MonitoringService {
                     const staged = await engine.stageNativeKanbanFeedback(config.machineId, {
                         artifactId: event.id.replace(/-/g, ''),
                         codexSessionId: result.sessionId,
+                        purpose: 'monitor',
                         filename: 'monitor-event.md',
                         size: bytes.length,
                         sha256,
                         bytes
                     })
-                    if (!staged.success) throw new Error('Cannot prepare a verified read-only investigation')
+                    if (!staged.success) throw new Error(staged.error || 'Cannot prepare a verified read-only investigation')
                     guard = { stagePath: staged.path, sha256 }
                     // Keep evidence and private owner instructions out of
                     // process arguments; the verified file contains the task.

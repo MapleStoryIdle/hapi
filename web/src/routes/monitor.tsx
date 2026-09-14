@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Activity, ArrowLeft, CircleAlert, ClipboardList, RefreshCw, Settings2, SwitchCamera, Waves } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import type { MonitorActivity, MonitorCallStats, MonitorConfig, MonitorIncident } from '@hapi/protocol/monitoring'
 import { useAppContext } from '@/lib/app-context'
@@ -62,7 +62,8 @@ function CallResultStats(props: { stats: MonitorCallStats; kind: MonitorConfig['
                   ['total', props.stats.total],
                   ['dispatched', props.stats.dispatched],
                   ['deferred', props.stats.deferred],
-                  ['duplicate', props.stats.duplicate]
+                  ['duplicate', props.stats.duplicate],
+                  ['ignored', props.stats.ignored]
               ] as const)
             : ([
                   ['total', props.stats.total],
@@ -104,6 +105,16 @@ export default function MonitorDetailPage() {
     const [retryingActivityId, setRetryingActivityId] = useState<string | null>(null)
     const [targetSessionDialogOpen, setTargetSessionDialogOpen] = useState(false)
     const [isSwitchingTargetSession, setIsSwitchingTargetSession] = useState(false)
+    const targetSession = monitor?.config.targetSession
+    const targetSessionQuery = useQuery({
+        queryKey: ['monitor-session-target', targetSession?.type, targetSession?.sessionId, monitor?.config.machineId],
+        enabled: Boolean(targetSession && monitor),
+        staleTime: 30_000,
+        queryFn: async () => {
+            if (!targetSession || !monitor) throw new Error('Monitor target is unavailable')
+            return await api.getMonitorSessionTarget({ ...targetSession, machineId: monitor.config.machineId })
+        }
+    })
 
     const refreshMonitor = useCallback(async () => {
         await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.monitor(monitorId) }), queryClient.invalidateQueries({ queryKey: queryKeys.monitors })])
@@ -408,7 +419,14 @@ export default function MonitorDetailPage() {
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <div className="min-w-0">
                                         <h2 className="text-sm font-semibold text-[var(--app-fg)]">{t('monitors.targetSession.title')}</h2>
-                                        <p className="mt-1 break-all font-mono text-xs text-[var(--app-hint)]">{monitor.config.targetSession?.type === 'native-codex' ? monitor.config.targetSession.sessionId : t('monitors.targetSession.unbound')}</p>
+                                        {targetSession ? (
+                                            <>
+                                                <p className="mt-1 truncate text-sm font-medium text-[var(--app-fg)]">{targetSessionQuery.data?.target.title ?? targetSession.sessionId}</p>
+                                                <p className="mt-0.5 break-all font-mono text-[11px] text-[var(--app-hint)]">{targetSession.sessionId}</p>
+                                            </>
+                                        ) : (
+                                            <p className="mt-1 text-xs text-[var(--app-hint)]">{t('monitors.targetSession.unbound')}</p>
+                                        )}
                                     </div>
                                     <button type="button" onClick={() => setTargetSessionDialogOpen(true)} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--app-border)] px-3 text-sm font-semibold text-[var(--app-link)] hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]">
                                         <SwitchCamera className="h-4 w-4" aria-hidden="true" />
@@ -423,7 +441,7 @@ export default function MonitorDetailPage() {
                 </div>
             </main>
 
-            <MonitorTargetSessionDialog open={targetSessionDialogOpen} currentSessionId={monitor.config.targetSession?.type === 'native-codex' ? monitor.config.targetSession.sessionId : undefined} isPending={isSwitchingTargetSession} t={t} onOpenChange={setTargetSessionDialogOpen} onSubmit={switchTargetSession} />
+            <MonitorTargetSessionDialog open={targetSessionDialogOpen} currentSessionId={monitor.config.targetSession?.sessionId} isPending={isSwitchingTargetSession} t={t} onOpenChange={setTargetSessionDialogOpen} onSubmit={switchTargetSession} />
             <ConfirmDialog isOpen={rotateConfirmOpen} onClose={() => setRotateConfirmOpen(false)} title={t('monitors.token.rotateConfirm.title')} description={t('monitors.token.rotateConfirm.description')} confirmLabel={t('monitors.token.rotateConfirm.confirm')} confirmingLabel={t('monitors.token.rotateConfirm.confirming')} onConfirm={rotateToken} isPending={isRotating} destructive />
         </div>
     )

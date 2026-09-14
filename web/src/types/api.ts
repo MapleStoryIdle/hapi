@@ -218,6 +218,7 @@ export type CodexLocalSessionSummary = {
     model?: string | null
     modelReasoningEffort?: string | null
     runState?: CodexLocalSessionRunState
+    runStartedAt?: number
     waitingForUserInput?: boolean
     /** Explicit false from current runners clears a stale SSH ownership lock. */
     controlledByCodexSsh?: boolean

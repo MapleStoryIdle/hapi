@@ -8,8 +8,8 @@ import { ToastProvider, useToast } from '@/lib/toast-context'
 vi.mock('./ui/BottomDrawer', () => ({ BottomDrawer: ({ children, footer }: { children: ReactNode; footer: ReactNode }) => <div role="dialog">{children}{footer}</div> }))
 afterEach(cleanup)
 const lanes: KanbanOrderLane[] = [
-    { id: 'pending', label: 'Pending', icon: null }, { id: 'unviewed', label: 'Unread', icon: null },
-    { id: 'pinned', label: 'Pinned', icon: null }, { id: 'custom:work', label: 'Work', icon: null }, { id: 'recent', label: 'Recent', icon: null }
+    { id: 'pending', label: 'Pending', icon: null }, { id: 'pinned', label: 'Pinned', icon: null },
+    { id: 'custom:work', label: 'Work', icon: null }, { id: 'recent', label: 'Recent', icon: null }
 ]
 function Toasts() { const { toasts } = useToast(); return <>{toasts.map(toast => <div key={toast.id} role="alert">{toast.title}</div>)}</> }
 function mount(onSave = vi.fn().mockResolvedValue(undefined)) {
@@ -23,10 +23,10 @@ describe('Kanban order drawer', () => {
         expect(screen.getByText('Fixed at top')).toBeInTheDocument()
         expect(screen.getByText('Fixed at bottom')).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'Reorder Thinking' })).toBeNull()
-        fireEvent.click(screen.getByRole('button', { name: 'Move Unread up' }))
-        expect(onSave).toHaveBeenLastCalledWith(['unviewed', 'pending', 'pinned', 'custom:work', 'recent'], 3, false)
+        fireEvent.click(screen.getByRole('button', { name: 'Move Pinned up' }))
+        expect(onSave).toHaveBeenLastCalledWith(['pinned', 'pending', 'custom:work', 'recent'], 3, false)
         fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Pinned' }), { key: 'ArrowDown' })
-        expect(onSave).toHaveBeenLastCalledWith(['pending', 'unviewed', 'custom:work', 'pinned', 'recent'], 3, false)
+        expect(onSave).toHaveBeenLastCalledWith(['pending', 'custom:work', 'pinned', 'recent'], 3, false)
     })
     it('keeps the dragged snapshot stable across remote updates, and saves only on release', () => {
         const { onSave, rerender, view } = mount()
@@ -44,7 +44,7 @@ describe('Kanban order drawer', () => {
         pointer('pointermove', 240)
         expect(onSave).not.toHaveBeenCalled()
         pointer('pointerup', 240)
-        expect(onSave).toHaveBeenCalledWith(['unviewed', 'pinned', 'pending', 'custom:work', 'recent'], 3, false)
+        expect(onSave).toHaveBeenCalledWith(['pinned', 'custom:work', 'pending', 'recent'], 3, false)
     })
     it('resets and reports save failures with a toast', async () => {
         const { onSave } = mount(vi.fn().mockRejectedValue(new Error('conflict')))

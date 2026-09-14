@@ -88,7 +88,7 @@ function SessionHeaderDetailRow(props: {
                         ) : null}
                     </span>
                 ) : (
-                    <span className={`mt-0.5 block text-sm font-medium leading-5 text-[var(--app-fg)] ${detail.key === 'session-id' ? 'break-all font-mono text-xs' : 'line-clamp-2 break-words'}`} title={detail.value}>{detail.value}</span>
+                    <span className={`mt-0.5 block text-sm font-medium leading-5 text-[var(--app-fg)] ${detail.key === 'session-id' || detail.key === 'codex-session-id' ? 'break-all font-mono text-xs' : 'line-clamp-2 break-words'}`} title={detail.value}>{detail.value}</span>
                 )}
             </span>
         </>
@@ -150,6 +150,7 @@ export function buildSessionHeaderDetails(input: {
     onSetLabel?: () => void
     title: string
     sessionId: string
+    codexSessionId?: string | null
     projectPath?: string | null
     lastActivityAt?: number | null
     agentFlavor?: string | null
@@ -179,6 +180,9 @@ export function buildSessionHeaderDetails(input: {
         ...(input.onSetGroup ? [{ key: 'group', label: t('session.groups.title'), value: input.group ? `${input.group.emoji} ${input.group.name}` : t('session.groups.none'), onSelect: input.onSetGroup }] : []),
         ...(input.onSetLabel ? [{ key: 'label', label: t('session.labels.title'), value: input.label ?? t('session.labels.none'), onSelect: input.onSetLabel }] : []),
         { key: 'session-id', label: t('session.header.details.sessionId'), value: input.sessionId },
+        ...(input.codexSessionId && input.codexSessionId !== input.sessionId
+            ? [{ key: 'codex-session-id', label: t('session.header.details.codexSessionId'), value: input.codexSessionId }]
+            : []),
         {
             key: 'path',
             label: t('session.header.details.projectPath'),
@@ -275,7 +279,7 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
     const detailGroups = [
         details.filter((detail) => detail.key === 'group' || detail.key === 'label'),
         details.filter((detail) => detail.key === 'path' || detail.key === 'last-activity'),
-        details.filter((detail) => detail.key === 'agent' || detail.key === 'session-id')
+        details.filter((detail) => detail.key === 'agent' || detail.key === 'session-id' || detail.key === 'codex-session-id')
     ].filter((group) => group.length > 0)
 
     return (
@@ -838,6 +842,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
         onSetLabel: api ? openLabel : undefined,
         title,
         sessionId: session.id,
+        codexSessionId: session.metadata?.codexSessionId,
         projectPath,
         lastActivityAt: session.updatedAt,
         agentFlavor: session.metadata?.flavor,
@@ -853,6 +858,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
         session.collaborationMode,
         session.effort,
         session.id,
+        session.metadata?.codexSessionId,
         session.metadata?.flavor,
         session.model,
         session.modelReasoningEffort,
@@ -871,6 +877,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
     const sessionDetailsRevision = [
         sessionGroup?.id ?? '', sessionGroup?.name ?? '', sessionGroup?.emoji ?? '', sessionLabel ?? '',
         session.id,
+        session.metadata?.codexSessionId ?? '',
         projectPath ?? '',
         session.metadata?.flavor ?? '',
         session.model ?? '',

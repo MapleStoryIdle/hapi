@@ -142,6 +142,8 @@ export type BinaryFileReadResponse = {
 export type NativeKanbanFeedbackStageRequest = {
     artifactId: string
     codexSessionId: string
+    /** Monitor tasks may target sessions originally created by SHAPI. */
+    purpose?: 'feedback' | 'monitor'
     filename: string
     size: number
     sha256: string

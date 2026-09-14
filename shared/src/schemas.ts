@@ -301,6 +301,7 @@ export type Session = z.infer<typeof SessionSchema>
 export const SessionPatchSchema = z.object({
     active: z.boolean().optional(),
     thinking: z.boolean().optional(),
+    thinkingAt: z.number().optional(),
     activeAt: z.number().optional(),
     updatedAt: z.number().optional(),
     model: z.string().nullable().optional(),
@@ -437,6 +438,7 @@ export const CodexLocalSessionListUpdateSchema = z.object({
     model: z.string().nullable().optional(),
     modelReasoningEffort: z.string().nullable().optional(),
     runState: z.enum(['idle', 'processing', 'unknown']).optional(),
+    runStartedAt: z.number().finite().optional(),
     waitingForUserInput: z.boolean().optional(),
     controlledByCodexSsh: z.boolean().optional()
 }).strict()

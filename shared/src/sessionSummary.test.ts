@@ -65,6 +65,11 @@ describe('getPendingRequestKinds', () => {
 })
 
 describe('toSessionSummary', () => {
+    it('exposes the current thinking start without carrying it into idle summaries', () => {
+        expect(toSessionSummary(makeSession({ thinking: true, thinkingAt: 1234 })).thinkingStartedAt).toBe(1234)
+        expect(toSessionSummary(makeSession({ thinking: false, thinkingAt: 1234 })).thinkingStartedAt).toBeUndefined()
+    })
+
     it('includes pending request kinds and background task count', () => {
         const summary = toSessionSummary(makeSession({
             backgroundTaskCount: 2,

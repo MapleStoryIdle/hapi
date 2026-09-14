@@ -27,6 +27,7 @@ function outcomeClass(outcome: MonitorActivity['outcome']): string {
     if (outcome === 'failed') return 'bg-red-500/10 text-red-700 dark:text-red-300'
     if (outcome === 'ok') return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
     if (outcome === 'duplicate') return 'bg-slate-500/10 text-slate-700 dark:text-slate-200'
+    if (outcome === 'ignored') return 'bg-violet-500/10 text-violet-700 dark:text-violet-300'
     return 'bg-sky-500/10 text-sky-700 dark:text-sky-300'
 }
 

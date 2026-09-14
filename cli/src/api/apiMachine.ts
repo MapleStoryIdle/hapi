@@ -1805,7 +1805,10 @@ export class ApiMachineClient {
             (data: NativeKanbanFeedbackStageRequest, callback: (response: NativeKanbanFeedbackStageResponse) => void) => {
                 const sessionId = typeof data?.codexSessionId === 'string' ? data.codexSessionId.trim() : ''
                 const summary = sessionId ? this.getNativeCodexSessionSummary(sessionId) : null
-                if (!summary || isHapiInitiatedCodexSession(summary)) {
+                // Public-share feedback is restricted to original native threads.
+                // Monitor delivery is a trusted Hub workflow and may deliberately
+                // bind to a Codex thread that SHAPI created earlier.
+                if (!summary || (data.purpose !== 'monitor' && isHapiInitiatedCodexSession(summary))) {
                     callback({ success: false, error: 'Only an original native Codex session may receive feedback' })
                     return
                 }

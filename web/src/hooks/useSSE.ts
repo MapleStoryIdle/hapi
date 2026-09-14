@@ -386,6 +386,9 @@ export function useSSE(options: {
                     ...current,
                     active: patch.active ?? current.active,
                     thinking: patch.thinking ?? current.thinking,
+                    thinkingStartedAt: patch.thinking === false
+                        ? undefined
+                        : patch.thinkingAt ?? current.thinkingStartedAt,
                     activeAt: patch.activeAt ?? current.activeAt,
                     updatedAt: patch.updatedAt ?? current.updatedAt,
                     backgroundTaskCount: Object.prototype.hasOwnProperty.call(patch, 'backgroundTaskCount')

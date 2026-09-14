@@ -38,6 +38,7 @@ export const MonitorConfigSchema = z.object({
     reasoningEffort: z.enum(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']).default(''),
     permissionMode: z.enum(['default', 'read-only', 'plan']).default('default'),
     prompt: z.string().trim().min(1).max(8000),
+    webhookIgnoreKeywords: z.string().max(2000).default(''),
     expiresAt: z.number().int().positive().nullable().default(null),
     enabled: z.boolean().default(true),
     notificationsEnabled: z.boolean().optional(),
@@ -75,7 +76,7 @@ export type MonitorIncident = {
 }
 export type MonitorBucket = { at: number; total: number; ok: number; failures: number; latencyMs: number }
 export type MonitorActivitySource = 'probe' | 'webhook' | 'scheduled' | 'manual'
-export type MonitorActivityOutcome = 'ok' | 'failed' | 'dispatched' | 'deferred' | 'duplicate'
+export type MonitorActivityOutcome = 'ok' | 'failed' | 'dispatched' | 'deferred' | 'duplicate' | 'ignored'
 export type MonitorActivity = {
     id: string
     monitorId: string
@@ -93,6 +94,7 @@ export type MonitorCallStats = {
     dispatched: number
     deferred: number
     duplicate: number
+    ignored: number
 }
 export type Monitor = {
     id: string

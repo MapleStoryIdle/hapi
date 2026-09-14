@@ -248,7 +248,7 @@ export class MonitorStore {
                       `SELECT COUNT(*) AS total,
             SUM(outcome='ok') AS ok, SUM(outcome='failed') AS failed,
             SUM(outcome='dispatched') AS dispatched, SUM(outcome='deferred') AS deferred,
-            SUM(outcome='duplicate') AS duplicate
+            SUM(outcome='duplicate') AS duplicate, SUM(outcome='ignored') AS ignored
             FROM monitor_events WHERE monitor_id=? AND source!='manual' AND created_at>=?`
                   )
                   .get(id, now - MONITOR_WEEK_MS) as Record<keyof MonitorCallStats, number | null>)
@@ -259,7 +259,8 @@ export class MonitorStore {
             failed: statsRow?.failed ?? 0,
             dispatched: statsRow?.dispatched ?? 0,
             deferred: statsRow?.deferred ?? 0,
-            duplicate: statsRow?.duplicate ?? 0
+            duplicate: statsRow?.duplicate ?? 0,
+            ignored: statsRow?.ignored ?? 0
         }
         return {
             id,
@@ -374,6 +375,14 @@ export class MonitorStore {
             const opened = this.openIncident(monitor, event.summary, event.details, now)
             this.recordActivity(monitor.id, 'webhook', opened.created ? 'dispatched' : 'deferred', event.summary, event.details, now, opened.created ? opened.incidentId : undefined)
             return { duplicate: false, ...opened }
+        })()
+    }
+
+    ignoreWebhook(monitor: StoredMonitor, event: MonitorWebhook, now = Date.now()): void {
+        this.db.transaction(() => {
+            this.bucket(monitor.id, true, 0, now)
+            this.db.query('UPDATE monitors SET last_checked_at=? WHERE id=?').run(now, monitor.id)
+            this.recordActivity(monitor.id, 'webhook', 'ignored', event.summary, event.details, now)
         })()
     }
 

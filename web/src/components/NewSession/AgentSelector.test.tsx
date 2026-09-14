@@ -32,6 +32,15 @@ describe('AgentSelector', () => {
         expect(renderedAgentValues()).toEqual(['claude', 'codex'])
     })
 
+    it('shows Claude Code as temporarily unavailable', () => {
+        const { container } = render(
+            <AgentSelector agent={'codex' as AgentType} isDisabled={false} onAgentChange={() => {}} />
+        )
+        expect(container.querySelector('input[value="claude"]')).toBeDisabled()
+        expect(screen.getByText('newSession.agent.temporarilyUnsupported')).toBeTruthy()
+        expect(container.querySelector('input[value="codex"]')).not.toBeDisabled()
+    })
+
     it('renders visible agent tab labels', () => {
         render(
             <AgentSelector agent={'claude' as AgentType} isDisabled={false} onAgentChange={() => {}} />

@@ -204,7 +204,7 @@ export class SessionCache {
         session.active = true
         session.activeAt = Math.max(session.activeAt, t)
         session.thinking = requestedThinking || preserveQueuedThinking
-        session.thinkingAt = t
+        if (session.thinking !== wasThinking) session.thinkingAt = t
         if (requestedThinking || pendingThinkingUntil <= hubNow) {
             this.pendingThinkingUntilBySessionId.delete(session.id)
         }
@@ -270,6 +270,7 @@ export class SessionCache {
                     active: true,
                     activeAt: session.activeAt,
                     thinking: session.thinking,
+                    thinkingAt: session.thinkingAt,
                     permissionMode: session.permissionMode,
                     model: session.model,
                     modelReasoningEffort: session.modelReasoningEffort,
@@ -318,6 +319,7 @@ export class SessionCache {
                 sessionId: session.id,
                 data: {
                     thinking: true,
+                    thinkingAt: session.thinkingAt,
                     updatedAt: session.updatedAt
                 } satisfies SessionPatch
             })
@@ -393,7 +395,7 @@ export class SessionCache {
         this.publisher.emit({
             type: 'session-updated',
             sessionId: session.id,
-            data: { active: false, thinking: false, backgroundTaskCount: 0 } satisfies SessionPatch
+            data: { active: false, thinking: false, thinkingAt: session.thinkingAt, backgroundTaskCount: 0 } satisfies SessionPatch
         })
     }
 

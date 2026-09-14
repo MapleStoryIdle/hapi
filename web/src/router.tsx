@@ -61,6 +61,9 @@ const CodexFilePage = lazy(() => import('@/routes/sessions/codex-file'))
 const TerminalPage = lazy(() => import('@/routes/sessions/terminal'))
 const OpenVikingPage = lazy(() => import('@/routes/memory'))
 const PluginsPage = lazy(() => import('@/routes/plugins'))
+const VoicePluginPage = lazy(() => import('@/routes/plugins/voice'))
+const NotificationsPluginPage = lazy(() => import('@/routes/plugins/notifications'))
+const TerminalPluginPage = lazy(() => import('@/routes/plugins/terminal'))
 const SettingsPage = lazy(() => import('@/routes/settings'))
 const SharePage = lazy(() => import('@/routes/share'))
 const SharesPage = lazy(() => import('@/routes/shares'))
@@ -1849,6 +1852,24 @@ const openVikingPluginRoute = createRoute({
     component: OpenVikingPage,
 })
 
+const voicePluginRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/plugins/voice',
+    component: VoicePluginPage,
+})
+
+const notificationsPluginRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/plugins/notifications',
+    component: NotificationsPluginPage,
+})
+
+const terminalPluginRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/plugins/terminal',
+    component: TerminalPluginPage,
+})
+
 const settingsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/settings',
@@ -1955,6 +1976,9 @@ export const routeTree = rootRoute.addChildren([
     browseRoute,
     pluginsRoute,
     openVikingPluginRoute,
+    voicePluginRoute,
+    notificationsPluginRoute,
+    terminalPluginRoute,
     sharesRoute.addChildren([
         sharesIndexRoute,
         kanbanTaskRoute,

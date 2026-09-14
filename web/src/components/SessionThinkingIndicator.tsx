@@ -15,7 +15,7 @@ function getStartedAt(startedAt: number | null | undefined, fallback: number): n
     return typeof startedAt === 'number' && Number.isFinite(startedAt) ? startedAt : fallback
 }
 
-function formatThinkingDuration(milliseconds: number): string {
+export function formatThinkingDuration(milliseconds: number): string {
     const seconds = Math.max(0, Math.floor(milliseconds / 1_000))
     const hours = Math.floor(seconds / 3_600)
     const minutes = Math.floor(seconds / 60) % 60

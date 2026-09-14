@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const KANBAN_MOVABLE_LANES = ['pending', 'unviewed', 'pinned', 'recent'] as const
+export const KANBAN_MOVABLE_LANES = ['pending', 'pinned', 'recent'] as const
 const laneId = z.union([z.enum(KANBAN_MOVABLE_LANES), z.string().regex(/^custom:[^\s]+$/).max(300)])
 export const KanbanOrderInputSchema = z.object({
     revision: z.number().int().nonnegative(),
@@ -12,7 +12,7 @@ export type KanbanOrder = { order: string[]; revision: number }
 
 /** Include empty groups, discard deleted ones, and insert new groups before Recent. */
 export function normalizeKanbanOrder(saved: readonly string[], groupIds: readonly string[]): string[] {
-    const defaults = ['pending', 'unviewed', 'pinned', ...new Set(groupIds.map(id => `custom:${id}`)), 'recent']
+    const defaults = ['pending', 'pinned', ...new Set(groupIds.map(id => `custom:${id}`)), 'recent']
     const allowed = new Set(defaults)
     const result = [...new Set(saved)].filter(id => allowed.has(id))
     if (!result.length) return defaults

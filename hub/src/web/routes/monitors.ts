@@ -42,6 +42,15 @@ async function readJson(request: Request, limit = 32768): Promise<unknown> {
     }
 }
 
+function matchesWebhookIgnoreKeyword(keywords: string | undefined, content: string): boolean {
+    const haystack = content.toLocaleLowerCase()
+    return (keywords ?? '')
+        .split(/[;；]/)
+        .map((keyword) => keyword.trim().toLocaleLowerCase())
+        .filter(Boolean)
+        .some((keyword) => haystack.includes(keyword))
+}
+
 export function createMonitorWebhookRoutes(getService: () => MonitoringService | null, store: Store): Hono {
     const app = new Hono()
     let inflight = 0
@@ -83,17 +92,22 @@ export function createMonitorWebhookRoutes(getService: () => MonitoringService |
             const prompt = body.data.prompt
             const details = JSON.stringify({ prompt, data: body.data.data ?? {} })
             if (details.length > 12000) return c.json({ error: 'Webhook data is too large' }, 400)
+            const event = {
+                eventId: '',
+                summary: prompt.slice(0, 500),
+                details
+            }
+            if (matchesWebhookIgnoreKeyword(monitor.config.webhookIgnoreKeywords, details)) {
+                if (!service.ignore(token!, event)) return c.json({ error: 'Service unavailable' }, 503)
+                return c.json({ accepted: true, ignored: true }, 202)
+            }
             // Retried requests must not create duplicate agent work.
             // Identical prompt/data payloads coalesce within a minute; an open incident also
             // coalesces subsequent requests until it has been handled.
             const eventId = createHash('sha256')
                 .update(`${Math.floor(now / 60000)}:${details}`)
                 .digest('hex')
-            const result = service.accept(token!, {
-                eventId,
-                summary: prompt.slice(0, 500),
-                details
-            })
+            const result = service.accept(token!, { ...event, eventId })
             if (!result) return c.json({ error: 'Service unavailable' }, 503)
             // External callers do not learn private session/monitor identities.
             return c.json({ accepted: true, duplicate: result.duplicate }, 202)
@@ -117,6 +131,18 @@ export function createMonitorWebhookRoutes(getService: () => MonitoringService |
 export function createMonitorRoutes(store: Store, getEngine: () => SyncEngine | null, getService: () => MonitoringService | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
     const resolveTarget = (body: unknown, namespace: string) => resolveMonitorTarget(body, namespace, store, getEngine)
+    const preserveTargetBinding = (body: Record<string, unknown>, monitor: MonitorConfig): Record<string, unknown> => monitor.targetSession
+        ? {
+              ...body,
+              targetSession: monitor.targetSession,
+              machineId: monitor.machineId,
+              directory: monitor.directory,
+              agent: monitor.agent,
+              model: monitor.model,
+              reasoningEffort: monitor.reasoningEffort,
+              permissionMode: monitor.permissionMode
+          }
+        : body
     app.use('/monitors/*', async (c, next) => {
         c.header('Cache-Control', 'no-store')
         await next()
@@ -157,19 +183,45 @@ export function createMonitorRoutes(store: Store, getEngine: () => SyncEngine | 
     })
     app.get('/monitors/session-target', async (c) => {
         try {
+            const target = MonitorTargetSessionSchema.parse({
+                type: c.req.query('type'),
+                sessionId: c.req.query('sessionId')
+            })
             const config = await resolveTarget(
                 {
                     name: 'Monitor',
                     kind: 'webhook',
                     machineId: c.req.query('machineId') ?? '',
-                    targetSession: {
-                        type: c.req.query('type'),
-                        sessionId: c.req.query('sessionId')
-                    }
+                    targetSession: target
                 },
                 c.get('namespace')
             )
-            return c.json({ config: MonitorConfigSchema.parse(config) })
+            const engine = getEngine()
+            let title = target.sessionId
+            if (target.type === 'managed') {
+                const session = engine?.getSessionByNamespace(target.sessionId, c.get('namespace'))
+                title = session?.metadata?.name
+                    || session?.metadata?.summary?.text
+                    || session?.metadata?.path?.split('/').filter(Boolean).at(-1)
+                    || target.sessionId
+            } else if (engine) {
+                // A native Codex thread may also have a SHAPI session wrapper.
+                // Prefer that user-facing name so the monitor does not expose a
+                // raw first-prompt title after switching by native thread ID.
+                const linked = engine.getSessionsByNamespace(c.get('namespace')).find((session) =>
+                    session.metadata?.flavor === 'codex'
+                    && session.metadata.codexSessionId === target.sessionId
+                    && (!c.req.query('machineId') || session.metadata.machineId === c.req.query('machineId'))
+                )
+                title = linked?.metadata?.name
+                    || linked?.metadata?.summary?.text
+                    || title
+                if (!linked) {
+                    const source = await engine.readCodexLocalSession(c.req.query('machineId') ?? '', target.sessionId, { limit: 1 })
+                    if (source.success) title = source.data.session.title || target.sessionId
+                }
+            }
+            return c.json({ config: MonitorConfigSchema.parse(config), target: { ...target, title } })
         } catch {
             return c.json({ error: 'Source session is unavailable in this workspace' }, 404)
         }
@@ -245,7 +297,10 @@ export function createMonitorRoutes(store: Store, getEngine: () => SyncEngine | 
                     monitor: store.monitors.detail(monitor.id, monitor.namespace)
                 })
             }
-            const parsed = MonitorConfigSchema.safeParse(await resolveTarget(body, c.get('namespace')))
+            // A bound source can later be archived or deleted. Editing the rule
+            // must not depend on resolving that old session again; target changes
+            // use the dedicated endpoint and refresh the server-owned binding.
+            const parsed = MonitorConfigSchema.safeParse(preserveTargetBinding(body, monitor.config))
             if (!parsed.success || parsed.data.kind !== monitor.config.kind) return c.json({ error: 'Invalid configuration; monitor type cannot be changed' }, 400)
             // Pausing must work even when the Runner is offline or rule expired.
             const onlyPausing = !parsed.data.enabled && JSON.stringify({ ...parsed.data, enabled: monitor.config.enabled }) === JSON.stringify(monitor.config)
@@ -269,16 +324,23 @@ export function createMonitorRoutes(store: Store, getEngine: () => SyncEngine | 
                 .object({ sessionId: z.string().trim().min(1).max(256) })
                 .strict()
                 .parse(await readJson(c.req.raw))
-            // This intentionally accepts only a Codex-native source. Managed
-            // bindings keep their existing creation flow; switching changes
-            // future incident snapshots, never an already-queued incident.
+            const namespace = c.get('namespace')
+            const managedSession = getEngine()?.getSessionByNamespace(body.sessionId, namespace)
+            if (managedSession && managedSession.metadata?.flavor !== 'codex') {
+                throw new Error('Only Codex sessions can receive monitor messages')
+            }
+            // Accept either the SHAPI session ID or its native Codex thread ID.
+            // Switching changes future incident snapshots, never an already-queued incident.
+            const targetSession = managedSession
+                ? { type: 'managed' as const, sessionId: body.sessionId }
+                : { type: 'native-codex' as const, sessionId: body.sessionId }
             const resolved = await resolveTarget(
                 {
                     ...monitor.config,
-                    targetSession: { type: 'native-codex', sessionId: body.sessionId },
+                    targetSession,
                     machineId: monitor.config.machineId
                 },
-                c.get('namespace')
+                namespace
             )
             const config = MonitorConfigSchema.parse(resolved)
             const error = await validateConfig(config, c.get('namespace'))

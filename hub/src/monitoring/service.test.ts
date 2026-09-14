@@ -113,6 +113,7 @@ describe('monitor dispatch and confirmation', () => {
             stageNativeKanbanFeedback: async (_machineId: string, input: Parameters<SyncEngine['stageNativeKanbanFeedback']>[1]) => {
                 // Contract enforced by the real Runner feedback-file vault.
                 expect(input.artifactId).toMatch(/^[a-f0-9]{32}$/)
+                expect(input.purpose).toBe('monitor')
                 expect(input.filename).toBe('monitor-event.md')
                 expect(input.size).toBe(input.bytes.byteLength)
                 expect(input.sha256).toBe(createHash('sha256').update(new Uint8Array(input.bytes)).digest('hex'))

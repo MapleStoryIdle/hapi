@@ -36,6 +36,8 @@ export type CodexLocalSessionSummary = {
     modelReasoningEffort?: string | null
     /** Last native turn lifecycle observed while scanning this transcript. */
     runState?: CodexLocalSessionRunState
+    /** Timestamp of the latest non-terminal native turn. */
+    runStartedAt?: number
     /**
      * A local Codex `request_user_input` call is still awaiting an answer on
      * the originating machine. This is deliberately parallel to runState:
@@ -1200,6 +1202,7 @@ function buildCodexLocalSessionSummary(
         lastUserMessage: string | null
         config: CodexLocalSessionConfig
         runState: CodexLocalSessionRunState
+        runStartedAt?: number
         waitingForUserInput?: boolean
     }
 ): CodexLocalSessionSummary | null {
@@ -1220,6 +1223,7 @@ function buildCodexLocalSessionSummary(
         model: latest.config.model,
         modelReasoningEffort: latest.config.modelReasoningEffort,
         runState: latest.runState,
+        ...(latest.runStartedAt === undefined ? {} : { runStartedAt: latest.runStartedAt }),
         ...(latest.waitingForUserInput === undefined ? {} : {
             waitingForUserInput: latest.waitingForUserInput
         })
@@ -1261,11 +1265,13 @@ export function readLocalCodexSessionSummary(
         }
 
         const allLines = content.split(/\r?\n/).filter(Boolean)
+        const lifecycle = getCodexTranscriptRunLifecycle(allLines)
         return buildCodexLocalSessionSummary(filePath, resolvedModifiedAt, getCodexSessionHeader(allLines), {
             changedTitle: getLatestCodexChangedTitle(allLines),
             lastUserMessage: getLatestCodexUserMessage(allLines),
             config: getLatestCodexSessionConfig(allLines),
-            runState: getCodexTranscriptRunState(content),
+            runState: lifecycle.runState,
+            ...(lifecycle.runStartedAt === undefined ? {} : { runStartedAt: lifecycle.runStartedAt }),
             waitingForUserInput: getCodexTranscriptUserInputState(allLines).waiting
         })
     }
@@ -1297,6 +1303,7 @@ export function readLocalCodexSessionSummary(
         // Unknown is deliberately conservative: direct sends will queue until
         // a live transcript append proves the native turn is idle.
         runState: tail.runState ?? 'unknown',
+        ...(tail.runStartedAt === undefined ? {} : { runStartedAt: tail.runStartedAt }),
         ...(tail.waitingForUserInput === undefined ? {} : {
             waitingForUserInput: tail.waitingForUserInput
         })
@@ -1466,9 +1473,13 @@ export function getCodexTranscriptUserInputState(lines: readonly string[]): Code
     return { seen, waiting: active !== null }
 }
 
-function getCodexTranscriptRunState(content: string): CodexLocalSessionRunState {
+function getCodexTranscriptRunLifecycle(lines: readonly string[]): {
+    runState: CodexLocalSessionRunState
+    runStartedAt?: number
+} {
     let state: CodexLocalSessionRunState = 'unknown'
-    for (const line of content.split(/\r?\n/)) {
+    let runStartedAt: number | undefined
+    for (const line of lines) {
         if (!line) continue
         try {
             const record = asRecord(JSON.parse(line))
@@ -1477,8 +1488,10 @@ function getCodexTranscriptRunState(content: string): CodexLocalSessionRunState 
             const eventType = asString(payload?.type)
             if (eventType === 'task_started') {
                 state = 'processing'
+                runStartedAt = getCodexRecordTimestamp(record)
             } else if (eventType === 'task_complete' || eventType === 'turn_aborted' || eventType === 'task_failed') {
                 state = 'idle'
+                runStartedAt = undefined
             }
         } catch {
             // A runner can observe the transcript while Codex is appending a
@@ -1486,7 +1499,7 @@ function getCodexTranscriptRunState(content: string): CodexLocalSessionRunState 
             // give us the safest known state.
         }
     }
-    return state
+    return { runState: state, ...(runStartedAt === undefined ? {} : { runStartedAt }) }
 }
 
 /**
@@ -1500,6 +1513,7 @@ export type CodexTranscriptTailSummary = {
     model?: string
     modelReasoningEffort?: string
     runState?: CodexLocalSessionRunState
+    runStartedAt?: number
     waitingForUserInput?: boolean
 }
 
@@ -1533,8 +1547,10 @@ export function getCodexTranscriptTailSummary(lines: readonly string[]): CodexTr
                 const eventType = asString(payload?.type)
                 if (eventType === 'task_started') {
                     summary.runState = 'processing'
+                    summary.runStartedAt = getCodexRecordTimestamp(record)
                 } else if (eventType === 'task_complete' || eventType === 'turn_aborted' || eventType === 'task_failed') {
                     summary.runState = 'idle'
+                    delete summary.runStartedAt
                 }
             }
         } catch {

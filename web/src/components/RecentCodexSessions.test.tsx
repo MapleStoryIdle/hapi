@@ -23,6 +23,7 @@ import {
     groupMergedCodexCompletedTimeline,
     groupMergedCodexSessionsForKanban,
     groupRecentCodexSessionsByDirectory,
+    isMergedCodexSessionUnviewed,
     mergeRecentCodexSessions,
     type MergedCodexSession
 } from './RecentCodexSessions'
@@ -201,8 +202,8 @@ describe('RecentCodexSessions', () => {
         const assignments = new Map(rows.filter(row => !['recent', 'old'].includes(row.id)).map(row => [row.key, group]))
         const groups = groupMergedCodexSessionsForKanban(rows, new Set(['native:pinned']), {}, now, assignments)
         expect(groups.map(lane => [lane.id, lane.sessions.map(row => row.id)])).toEqual([
-            ['processing', ['thinking']], ['pending', ['pending']], ['unviewed', ['unviewed']],
-            ['pinned', ['pinned']], ['custom:work', ['custom']], ['recent', ['recent']], ['completed', ['old']]
+            ['processing', ['thinking']], ['pending', ['pending']],
+            ['pinned', ['pinned']], ['custom:work', ['unviewed', 'custom']], ['recent', ['recent']], ['completed', ['old']]
         ])
         expect(groups.flatMap(lane => lane.sessions)).toHaveLength(rows.length)
         const cleared = groupMergedCodexSessionsForKanban(rows, new Set(), {}, now)
@@ -210,7 +211,7 @@ describe('RecentCodexSessions', () => {
         expect(cleared.find(lane => lane.id === 'recent')?.sessions.map(row => row.id)).toContain('custom')
     })
 
-    it('keeps group borders across thinking, pending and pinned lanes and allows count-free custom lane collapse', async () => {
+    it('keeps group borders outside thinking and allows count-free custom lane collapse', async () => {
         const api = createApi()
         const group: SessionGroup = { id: 'work', name: 'Work / Shared', emoji: '🧰' }
         api.getSessionGroups = vi.fn(async () => ({
@@ -234,7 +235,10 @@ describe('RecentCodexSessions', () => {
         const board = await screen.findByTestId('session-kanban-board')
         await waitFor(() => expect(board.querySelector('[data-kanban-group="custom:work"]')).not.toBeNull())
         const color = getSessionGroupColor(group.name)
-        for (const lane of ['processing', 'pending', 'pinned', 'custom:work']) {
+        const thinkingCard = board.querySelector('[data-kanban-group="processing"] .session-kanban-card')
+        expect(thinkingCard).toHaveAttribute('data-kanban-group-color', color)
+        expect((thinkingCard as HTMLElement).style.borderLeftColor).toBe('')
+        for (const lane of ['pending', 'pinned', 'custom:work']) {
             const card = board.querySelector(`[data-kanban-group="${lane}"] .session-kanban-card`)
             expect(card).toHaveAttribute('data-kanban-group-color', color)
             expect(card).toHaveStyle({ borderLeftColor: color })
@@ -282,7 +286,7 @@ describe('RecentCodexSessions', () => {
         expect(ids).toHaveLength(rows.length)
     })
 
-    it('keeps only unseen SHAPI completions from the last 30 minutes in Unread', () => {
+    it('keeps unseen state on recent SHAPI completions without creating an Unviewed lane', () => {
         const now = new Date(2026, 8, 5, 12).getTime()
         const rows = mergeRecentCodexSessions([
             createManagedCodexSession('fresh-unread', now - RECENT_COMPLETED_WINDOW_MS + 1),
@@ -292,7 +296,9 @@ describe('RecentCodexSessions', () => {
 
         const groups = groupMergedCodexSessionsForKanban(rows, new Set(), {}, now)
 
-        expect(groups.find((group) => group.id === 'unviewed')?.sessions.map((session) => session.id)).toEqual(['fresh-unread'])
+        expect(isMergedCodexSessionUnviewed(rows[0], {}, now)).toBe(true)
+        expect(groups.map((group) => group.id)).not.toContain('unviewed')
+        expect(groups.find((group) => group.id === 'recent')?.sessions.map((session) => session.id)).toEqual(['fresh-unread'])
         expect(groups.find((group) => group.id === 'completed')?.sessions.map((session) => session.id)).toEqual([
             'unread-at-boundary', 'stale-unread'
         ])
@@ -500,14 +506,13 @@ describe('RecentCodexSessions', () => {
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
             ['processing', ['hapi-processing']],
             ['pending', ['hapi-pending']],
-            ['unviewed', []],
             ['pinned', ['native-completed']],
             ['recent', ['native-newer-completed']],
             ['completed', []]
         ])
     })
 
-    it('puts only unviewed completed SHAPI rows above completed and ahead of pins', () => {
+    it('keeps unviewed completed SHAPI rows in their normal pin or recent lanes', () => {
         const now = 1_800_000_000_000
         const rows = mergeRecentCodexSessions(
             [
@@ -546,9 +551,8 @@ describe('RecentCodexSessions', () => {
         expect(groups.map((group) => [group.id, group.sessions.map((session) => session.id)])).toEqual([
             ['processing', []],
             ['pending', []],
-            ['unviewed', ['hapi-unviewed-newer', 'hapi-unviewed-older']],
-            ['pinned', ['hapi-seen-pinned', 'native-pinned']],
-            ['recent', ['native-completed']],
+            ['pinned', ['hapi-unviewed-newer', 'hapi-seen-pinned', 'native-pinned']],
+            ['recent', ['hapi-unviewed-older', 'native-completed']],
             ['completed', []]
         ])
     })
@@ -869,27 +873,25 @@ describe('RecentCodexSessions', () => {
 
         view.rerender(renderBoard([historical, fresh]))
         await waitFor(() => {
-            const unviewed = board.querySelector('[data-kanban-group="unviewed"]')
-            expect(unviewed).toHaveTextContent('Fresh completion')
-            const icon = unviewed?.querySelector('[data-kanban-group-icon="unviewed"]')
-            expect(icon).toHaveAttribute('aria-hidden', 'true')
-            expect(icon).toHaveClass('text-[#4E7CF5]')
-            expect(board.querySelector('[data-kanban-group="pinned"]')).toBeNull()
+            const pinned = board.querySelector('[data-kanban-group="pinned"]')
+            expect(pinned).toHaveTextContent('Fresh completion')
+            expect(pinned?.querySelector('[data-kanban-unviewed="true"]')).toHaveClass('session-kanban-card-unviewed')
         })
 
-        fireEvent.click(screen.getByRole('button', { name: 'Open Fresh completion' }))
+        fireEvent.click(screen.getByRole('button', { name: /Open Fresh completion/ }))
         expect(onOpenHapi).toHaveBeenCalledWith(fresh)
         await waitFor(() => {
             expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
             expect(board.querySelector('[data-kanban-group="pinned"]')).toHaveTextContent('Fresh completion')
+            expect(board.querySelector('[data-kanban-unviewed="true"]')).toBeNull()
         })
 
         const rerun = { ...fresh, updatedAt: fresh.updatedAt + 100, activeAt: fresh.activeAt + 100 }
         view.rerender(renderBoard([historical, rerun]))
         await waitFor(() => {
-            const unviewed = board.querySelector('[data-kanban-group="unviewed"]')
-            expect(unviewed).toHaveTextContent('Fresh completion')
-            expect(board.querySelector('[data-kanban-group="pinned"]')).toBeNull()
+            const pinned = board.querySelector('[data-kanban-group="pinned"]')
+            expect(pinned).toHaveTextContent('Fresh completion')
+            expect(pinned?.querySelector('[data-kanban-unviewed="true"]')).toHaveClass('session-kanban-card-unviewed')
         })
     })
 
@@ -1080,7 +1082,8 @@ describe('RecentCodexSessions', () => {
             },
             pendingRequestsCount: 0,
             pendingRequestKinds: [],
-            thinking: true
+            thinking: true,
+            thinkingStartedAt: Date.now() - 65_000
         } as SessionSummary
 
         render(
@@ -1128,8 +1131,11 @@ describe('RecentCodexSessions', () => {
         expect(board.querySelectorAll('[data-kanban-group-count]')).toHaveLength(0)
         expect(processingGroup).toHaveTextContent('Thinking task')
         expect(processingGroup?.querySelector('.session-kanban-card-thinking')).not.toBeNull()
+        expect(processingGroup?.querySelector('[data-kanban-card-status="processing"]')).not.toHaveClass('border-l-[3px]')
+        expect((processingGroup?.querySelector('[data-kanban-card-status="processing"]') as HTMLElement).style.borderLeftColor).toBe('')
         expect(processingGroup?.querySelector('.motion-safe\\:animate-pulse')).not.toBeNull()
         expect(processingGroup?.querySelector('[data-kanban-card-time]')).toBeNull()
+        expect(processingGroup?.querySelector('[data-kanban-run-duration]')).toHaveTextContent(/1m5s/)
         const completedGroup = board.querySelector('[data-kanban-group="completed"]')
         expect(completedGroup).toHaveTextContent('Completed Codex task')
         expect(completedGroup?.querySelector('[data-kanban-completed-divider]')).toBeNull()

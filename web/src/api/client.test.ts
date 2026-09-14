@@ -200,6 +200,7 @@ describe('ApiClient error mapping', () => {
             reasoningEffort: '' as const,
             permissionMode: 'read-only' as const,
             prompt: 'Investigate safely and propose a repair.',
+            webhookIgnoreKeywords: '',
             expiresAt: null,
             enabled: true,
             request: {
@@ -257,7 +258,8 @@ describe('ApiClient error mapping', () => {
 
     it('loads a server-resolved monitor target with encoded session identifiers', async () => {
         fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
-            config: { targetSession: { type: 'native-codex', sessionId: 'thread / one' } }
+            config: { targetSession: { type: 'native-codex', sessionId: 'thread / one' } },
+            target: { type: 'native-codex', sessionId: 'thread / one', title: 'Native thread' }
         })))
 
         const api = new ApiClient('test-token')
@@ -266,7 +268,8 @@ describe('ApiClient error mapping', () => {
             sessionId: 'thread / one',
             machineId: 'machine / one'
         })).resolves.toEqual({
-            config: { targetSession: { type: 'native-codex', sessionId: 'thread / one' } }
+            config: { targetSession: { type: 'native-codex', sessionId: 'thread / one' } },
+            target: { type: 'native-codex', sessionId: 'thread / one', title: 'Native thread' }
         })
 
         expect(fetchMock.mock.calls[0]?.[0]).toBe(

@@ -45,6 +45,8 @@ export type SessionSummary = {
     id: string
     active: boolean
     thinking: boolean
+    /** Start of the current thinking turn; omitted while idle or for older runners. */
+    thinkingStartedAt?: number
     activeAt: number
     updatedAt: number
     metadata: SessionSummaryMetadata | null
@@ -136,6 +138,7 @@ export function toSessionSummary(session: Session): SessionSummary {
         id: session.id,
         active: session.active,
         thinking: session.thinking,
+        ...(session.thinking && session.thinkingAt > 0 ? { thinkingStartedAt: session.thinkingAt } : {}),
         activeAt: session.activeAt,
         updatedAt: session.updatedAt,
         metadata,

@@ -7,6 +7,7 @@ import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useSession } from '@/hooks/queries/useSession'
 import { useTerminalSocket } from '@/hooks/useTerminalSocket'
 import { useLongPress } from '@/hooks/useLongPress'
+import { useLocalPluginEnabled } from '@/hooks/useLocalPluginEnabled'
 import { useTranslation } from '@/lib/use-translation'
 import { randomId } from '@/lib/randomId'
 import { TerminalView } from '@/components/Terminal/TerminalView'
@@ -174,10 +175,11 @@ function QuickKeyButton(props: {
 export default function TerminalPage() {
     const { t } = useTranslation()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/terminal' })
+    const { enabled: terminalPluginEnabled } = useLocalPluginEnabled('terminal')
     const { api, token, baseUrl } = useAppContext()
     const goBack = useAppGoBack()
     const { session } = useSession(api, sessionId)
-    const terminalSupported = isRemoteTerminalSupported(session?.metadata)
+    const terminalSupported = terminalPluginEnabled && isRemoteTerminalSupported(session?.metadata)
     const terminalId = useMemo(() => randomId(), [sessionId])
     const terminalRef = useRef<Terminal | null>(null)
     const inputDisposableRef = useRef<{ dispose: () => void } | null>(null)
@@ -190,6 +192,12 @@ export default function TerminalPage() {
     const [altActive, setAltActive] = useState(false)
     const [pasteDialogOpen, setPasteDialogOpen] = useState(false)
     const [manualPasteText, setManualPasteText] = useState('')
+
+    useEffect(() => {
+        if (!terminalPluginEnabled) {
+            goBack()
+        }
+    }, [goBack, terminalPluginEnabled])
 
     const {
         state: terminalState,

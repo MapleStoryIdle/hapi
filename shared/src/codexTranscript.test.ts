@@ -1011,6 +1011,17 @@ describe('getLocalCodexSessionRunState', () => {
 })
 
 describe('getCodexTranscriptTailSummary', () => {
+    it('keeps the latest active turn start and clears it at a terminal event', () => {
+        const startedAt = '2026-09-14T03:00:00.000Z'
+        expect(getCodexTranscriptTailSummary([
+            JSON.stringify({ timestamp: startedAt, type: 'event_msg', payload: { type: 'task_started' } })
+        ])).toMatchObject({ runState: 'processing', runStartedAt: Date.parse(startedAt) })
+        expect(getCodexTranscriptTailSummary([
+            JSON.stringify({ timestamp: startedAt, type: 'event_msg', payload: { type: 'task_started' } }),
+            JSON.stringify({ timestamp: '2026-09-14T03:01:00.000Z', type: 'event_msg', payload: { type: 'task_complete' } })
+        ])).toEqual(expect.objectContaining({ runState: 'idle' }))
+    })
+
     it('uses the extracted request for the latest user preview', () => {
         const wrapper = [
             '# Applications mentioned by the user:',

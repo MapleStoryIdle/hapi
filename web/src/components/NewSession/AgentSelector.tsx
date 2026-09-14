@@ -36,6 +36,8 @@ export function AgentSelector(props: {
                 {NEW_SESSION_AGENT_OPTIONS.map((agentType) => {
                     const label = getAgentTabLabel(agentType)
                     const checked = props.agent === agentType
+                    const unsupported = agentType === 'claude'
+                    const disabled = props.isDisabled || unsupported
 
                     return (
                         <label
@@ -47,7 +49,7 @@ export function AgentSelector(props: {
                                 checked
                                     ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm ring-1 ring-[var(--app-border)]'
                                     : 'bg-transparent text-[var(--app-hint)] hover:text-[var(--app-fg)]',
-                                props.isDisabled ? 'cursor-not-allowed opacity-50' : ''
+                                disabled ? 'cursor-not-allowed opacity-50' : ''
                             ].filter(Boolean).join(' ')}
                         >
                             <input
@@ -56,11 +58,14 @@ export function AgentSelector(props: {
                                 value={agentType}
                                 checked={checked}
                                 onChange={() => props.onAgentChange(agentType)}
-                                disabled={props.isDisabled}
+                                disabled={disabled}
                                 className="sr-only"
                             />
                             <AgentFlavorIcon flavor={agentType} className="h-5 w-5" />
-                            <span className="whitespace-nowrap">{label}</span>
+                            <span className="flex min-w-0 flex-col leading-tight">
+                                <span className="whitespace-nowrap">{label}</span>
+                                {unsupported ? <span className="text-[10px] font-normal text-[var(--app-hint)]">{t('newSession.agent.temporarilyUnsupported')}</span> : null}
+                            </span>
                         </label>
                     )
                 })}

@@ -74,7 +74,8 @@ describe('monitor routes', () => {
         const store = new Store(':memory:')
         store.machines.getOrCreateMachine('m', {}, {}, 'a')
         const source = { metadata: { path: '/real', machineId: 'm', flavor: 'codex' }, model: 'gpt-test', modelReasoningEffort: 'high', permissionMode: 'default' }
-        const engine = { getSessionByNamespace: (id: string, ns: string) => id === 's' && ns === 'a' ? source : null, getOnlineMachinesByNamespace: () => [{ id: 'm' }], checkPathsExist: async () => ({ '/real': true }) } as unknown as SyncEngine
+        let sourceAvailable = true
+        const engine = { getSessionByNamespace: (id: string, ns: string) => sourceAvailable && id === 's' && ns === 'a' ? source : null, getOnlineMachinesByNamespace: () => [{ id: 'm' }], checkPathsExist: async () => ({ '/real': true }) } as unknown as SyncEngine
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => { c.set('namespace', 'a'); await next() })
         app.route('/', createMonitorRoutes(store, () => engine, () => null))
@@ -83,22 +84,33 @@ describe('monitor routes', () => {
             expect(result.status).toBe(201)
             const data = await result.json() as { monitor: { id: string; config: Record<string, unknown> } }
             expect(data.monitor.config).toMatchObject({ machineId: 'm', directory: '/real', model: 'gpt-test', permissionMode: 'default' })
-            const updated = await app.request(`/monitors/${data.monitor.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...data.monitor.config, name: 'renamed bound', prompt: 'Use this preset every time' }) })
+            sourceAvailable = false
+            const updated = await app.request(`/monitors/${data.monitor.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...data.monitor.config, name: 'renamed bound', prompt: 'Use this preset every time', webhookIgnoreKeywords: 'health check' }) })
             expect(updated.status).toBe(200)
-            expect(store.monitors.get(data.monitor.id)?.config).toMatchObject({ name: 'renamed bound', prompt: 'Use this preset every time' })
+            expect(store.monitors.get(data.monitor.id)?.config).toMatchObject({ name: 'renamed bound', prompt: 'Use this preset every time', webhookIgnoreKeywords: 'health check' })
             const changed = await app.request(`/monitors/${data.monitor.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...data.monitor.config, targetSession: { type: 'managed', sessionId: 'other' } }) })
             expect(changed.status).toBe(400)
             expect((await app.request('/monitors/session-target?type=managed&sessionId=other')).status).toBe(404)
         } finally { store.close() }
     })
-    it('switches future deliveries to a verified Codex native session without changing an open incident', async () => {
+    it('switches future deliveries using either a managed SHAPI ID or a native Codex ID without changing an open incident', async () => {
         const store = new Store(':memory:')
         store.machines.getOrCreateMachine('m', {}, {}, 'default')
+        const managed = {
+            metadata: { name: 'Managed target', path: '/managed-workspace', machineId: 'm', flavor: 'codex' },
+            model: 'gpt-managed',
+            modelReasoningEffort: 'medium',
+            permissionMode: 'default'
+        }
         const engine = {
+            getSessionByNamespace: (id: string, namespace: string) => id === 'managed-ok' && namespace === 'default' ? managed : null,
+            getSessionsByNamespace: () => [{
+                metadata: { name: 'Linked native target', path: '/native-workspace', machineId: 'm', flavor: 'codex', codexSessionId: 'native-ok' }
+            }],
             getOnlineMachinesByNamespace: () => [{ id: 'm' }],
-            checkPathsExist: async () => ({ '/native-workspace': true }),
+            checkPathsExist: async () => ({ '/managed-workspace': true, '/native-workspace': true }),
             readCodexLocalSession: async (_machineId: string, sessionId: string) => sessionId === 'native-ok'
-                ? { success: true as const, data: { session: { cwd: '/native-workspace', model: 'gpt-test', modelReasoningEffort: 'high' } } }
+                ? { success: true as const, data: { session: { title: 'Native target', cwd: '/native-workspace', model: 'gpt-test', modelReasoningEffort: 'high' } } }
                 : { success: false as const, error: 'missing' }
         } as unknown as SyncEngine
         const app = new Hono<WebAppEnv>()
@@ -108,9 +120,18 @@ describe('monitor routes', () => {
             const config = MonitorConfigSchema.parse({ name: 'hook', kind: 'webhook', machineId: 'm', directory: '/old', prompt: 'Inspect' })
             const { id } = store.monitors.create('default', config)
             const pending = store.monitors.openIncident(store.monitors.get(id)!, 'existing', '')
+            const managedChanged = await app.request(`/monitors/${id}/target-session`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'managed-ok' }) })
+            expect(managedChanged.status).toBe(200)
+            expect(store.monitors.get(id)?.config).toMatchObject({ targetSession: { type: 'managed', sessionId: 'managed-ok' }, directory: '/managed-workspace', agent: 'codex', model: 'gpt-managed' })
+            expect(await (await app.request('/monitors/session-target?type=managed&sessionId=managed-ok')).json()).toMatchObject({
+                target: { type: 'managed', sessionId: 'managed-ok', title: 'Managed target' }
+            })
             const changed = await app.request(`/monitors/${id}/target-session`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'native-ok' }) })
             expect(changed.status).toBe(200)
             expect(store.monitors.get(id)?.config).toMatchObject({ targetSession: { type: 'native-codex', sessionId: 'native-ok' }, directory: '/native-workspace', agent: 'codex', model: 'gpt-test' })
+            expect(await (await app.request('/monitors/session-target?type=native-codex&sessionId=native-ok&machineId=m')).json()).toMatchObject({
+                target: { type: 'native-codex', sessionId: 'native-ok', title: 'Linked native target' }
+            })
             expect(store.monitors.getIncident(pending.incidentId)?.config.targetSession).toBeUndefined()
             const unavailable = await app.request(`/monitors/${id}/target-session`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'missing' }) })
             expect(unavailable.status).toBe(400)
@@ -147,6 +168,32 @@ describe('monitor routes', () => {
             expect((await app.request(path, { ...post, body: JSON.stringify({ prompt: 'x'.repeat(8001) }) })).status).toBe(400)
             store.monitors.update(created.id, 'a', { ...config, expiresAt: 1 })
             expect((await app.request(path, post)).status).toBe(503)
+        } finally { await service.stop(); store.close() }
+    })
+    it('records matching webhook keywords without creating investigation work', async () => {
+        const store = new Store(':memory:')
+        const service = new MonitoringService(store, () => null, { sendToNamespace: async () => undefined })
+        const app = createMonitorWebhookRoutes(() => service, store)
+        try {
+            const created = store.monitors.create('a', MonitorConfigSchema.parse({
+                name: 'ignored events',
+                kind: 'webhook',
+                machineId: 'm',
+                directory: '/work',
+                prompt: 'Inspect',
+                webhookIgnoreKeywords: 'health check; IGNORE-ME'
+            }))
+            const response = await app.request(`/events?token=${created.token}`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ prompt: 'Routine notification', data: { message: 'Please ignore-me today' } })
+            })
+
+            expect(response.status).toBe(202)
+            expect(await response.json()).toEqual({ accepted: true, ignored: true })
+            expect(store.monitors.openForMonitor(created.id)).toBeNull()
+            expect(store.monitors.activities(created.id).map((activity) => activity.outcome)).toEqual(['ignored'])
+            expect(store.monitors.detail(created.id, 'a')?.callStats).toMatchObject({ total: 1, ignored: 1, dispatched: 0 })
         } finally { await service.stop(); store.close() }
     })
     it('cannot read, rotate, approve or close another namespace monitor', async () => {

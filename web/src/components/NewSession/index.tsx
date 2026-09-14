@@ -438,6 +438,7 @@ export function NewSession(props: {
     )
 
     const handleAgentChange = useCallback((nextAgent: AgentType) => {
+        if (nextAgent === 'claude') return
         setAgent(nextAgent)
         setEffort('auto')
         setModelReasoningEffort(loadPreferredReasoningEffort(nextAgent))

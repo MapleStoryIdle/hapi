@@ -200,6 +200,7 @@ export function createDefaultMonitorConfig(machineId = '', directory = ''): Moni
         reasoningEffort: '',
         permissionMode: 'read-only',
         prompt: 'Investigate the monitor safely. Diagnose the issue and provide a repair plan. Do not make changes until repair is explicitly approved.',
+        webhookIgnoreKeywords: '',
         expiresAt: null,
         enabled: true,
         request: {

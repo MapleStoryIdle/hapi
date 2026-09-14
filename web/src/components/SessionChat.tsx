@@ -97,6 +97,7 @@ import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeRe
 import { useGitStatusFiles } from '@/hooks/queries/useGitStatusFiles'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
+import { useLocalPluginEnabled } from '@/hooks/useLocalPluginEnabled'
 import { useVoiceOptional } from '@/lib/voice-context'
 import { registerSessionStore } from '@/realtime/realtimeClientTools'
 import { registerVoiceHooksStore, voiceHooks } from '@/realtime/hooks/voiceHooks'
@@ -815,6 +816,8 @@ function SessionChatInner(props: SessionChatProps) {
     const { haptic } = usePlatform()
     const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
+    const { enabled: terminalPluginEnabled } = useLocalPluginEnabled('terminal')
+    const { enabled: voicePluginEnabled } = useLocalPluginEnabled('voice')
     const navigate = useNavigate()
     const queryClient = useQueryClient()
     const { sessions: sessionSummaries } = useSessions(props.api, { live: false })
@@ -1911,13 +1914,14 @@ function SessionChatInner(props: SessionChatProps) {
         thinking: props.session.thinking,
         agentState: props.session.agentState,
         backgroundTaskCount: props.session.backgroundTaskCount,
-        voiceStatus: voice?.status
+        voiceStatus: voicePluginEnabled ? voice?.status : undefined
     }), [
         props.session.active,
         props.session.agentState,
         props.session.backgroundTaskCount,
         props.session.thinking,
-        voice?.status
+        voice?.status,
+        voicePluginEnabled
     ])
 
     return (
@@ -2222,16 +2226,16 @@ function SessionChatInner(props: SessionChatProps) {
                                         : undefined
                                 }
                                 onSwitchToRemote={handleSwitchToRemote}
-                                onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
-                                terminalUnsupported={props.session.active && !terminalSupported}
+                                onTerminal={terminalPluginEnabled && props.session.active && terminalSupported ? handleViewTerminal : undefined}
+                                terminalUnsupported={terminalPluginEnabled && props.session.active && !terminalSupported}
                                 autocompleteSuggestions={props.autocompleteSuggestions}
                                 skills={props.skills}
                                 skillsLoading={props.skillsLoading}
                                 skillsError={props.skillsError}
-                                voiceStatus={voice?.status}
-                                voiceMicMuted={voice?.micMuted}
-                                onVoiceToggle={voice ? handleVoiceToggle : undefined}
-                                onVoiceMicToggle={voice && voiceBackendReady ? handleVoiceMicToggle : undefined}
+                                voiceStatus={voicePluginEnabled ? voice?.status : undefined}
+                                voiceMicMuted={voicePluginEnabled ? voice?.micMuted : undefined}
+                                onVoiceToggle={voicePluginEnabled && voice ? handleVoiceToggle : undefined}
+                                onVoiceMicToggle={voicePluginEnabled && voice && voiceBackendReady ? handleVoiceMicToggle : undefined}
                                 scratchlistMode={scratchlistMode}
                                 scratchlistCount={scratchlist.entries.length}
                                 onScratchlistToggle={handleScratchlistToggle}
@@ -2284,7 +2288,7 @@ function SessionChatInner(props: SessionChatProps) {
             </SessionDetailContent>
 
             {/* Voice backend is loaded only after the user asks to start voice. */}
-            {voice && voiceBackendRequested ? (
+            {voicePluginEnabled && voice && voiceBackendRequested ? (
                 <Suspense fallback={null}>
                     <LazyVoiceBackendSession
                         api={props.api}
