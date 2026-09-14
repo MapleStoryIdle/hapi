@@ -10,7 +10,7 @@ import { buildGeminiLiveSetupMessage, QWEN_REALTIME_MODEL } from '@hapi/protocol
 import { createQwenProxyWebSocketHandler } from './qwenProxyHandler'
 import { decodeVoiceSystemPromptParam } from '../voiceSystemPromptParam'
 import type { SyncEngine } from '../sync/syncEngine'
-import { createAuthMiddleware, type WebAppEnv } from './middleware/auth'
+import { createAuthMiddleware, verifyWorkspaceJwt, type WebAppEnv } from './middleware/auth'
 import { createAuthRoutes } from './routes/auth'
 import { createBindRoutes } from './routes/bind'
 import { createEventsRoutes } from './routes/events'
@@ -24,6 +24,7 @@ import { createWebReaderRoutes } from './routes/webReader'
 import type { LocalServiceManager } from '../localServices/manager'
 import type { LocalServiceHandler, LocalServiceWebSocket } from '../localServices/gateway'
 import { createOpenVikingRoutes } from './routes/openViking'
+import { createWorkspaceRoutes } from './routes/workspaces'
 import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
 import { createSessionGroupRoutes } from './routes/sessionGroups'
@@ -42,7 +43,6 @@ import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
 import type { Server as SocketEngine } from '@socket.io/bun-engine'
-import { jwtVerify } from 'jose'
 import type { WebSocketData } from '@socket.io/bun-engine'
 import { loadEmbeddedAssetMap, type EmbeddedWebAsset } from './embeddedAssets'
 import { isBunCompiled } from '../utils/bunCompiled'
@@ -295,8 +295,9 @@ export function createWebApp(options: {
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
     app.route('/api', createBindRoutes(options.jwtSecret, options.store))
 
-    app.use('/api/*', createAuthMiddleware(options.jwtSecret))
+    app.use('/api/*', createAuthMiddleware(options.jwtSecret, options.store))
     app.route('/api', createWebReaderRoutes())
+    app.route('/api', createWorkspaceRoutes(options.store))
     app.route('/api', createMonitorRoutes(options.store, options.getSyncEngine, options.getMonitoring ?? (() => null)))
     app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker))
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
@@ -309,7 +310,7 @@ export function createWebApp(options: {
     app.route('/api', createMachinesRoutes(options.getSyncEngine))
     app.route('/api', createGitRoutes(options.getSyncEngine))
     app.route('/api', createLocalServiceRoutes(options.getSyncEngine, options.getLocalServices ?? (() => null)))
-    app.route('/api', createOpenVikingRoutes(options.getSyncEngine))
+    app.route('/api', createOpenVikingRoutes(options.getSyncEngine, options.store))
     app.route('/api', createShareManagementRoutes(options.store, undefined, options.getSyncEngine))
     // 中文注释：这里提供两类 Codex 辅助能力：扫描本地 transcript 以导入到 SHAPI，以及按需重启 Codex Desktop 客户端。
     app.route('/api', createCodexDesktopRoutes({
@@ -551,9 +552,7 @@ export async function startWebServer(options: {
                 if (!token) {
                     return new Response('Missing authorization token', { status: 401 })
                 }
-                try {
-                    await jwtVerify(token, options.jwtSecret, { algorithms: ['HS256'] })
-                } catch {
+                if (!await verifyWorkspaceJwt(token, options.jwtSecret, options.store)) {
                     return new Response('Invalid token', { status: 401 })
                 }
             }

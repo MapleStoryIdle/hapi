@@ -1508,7 +1508,7 @@ export function ComposerButtons(props: {
                         autoFocus={typeof document === 'undefined'
                             || document.documentElement.dataset.appKeyboardOpen !== 'true'}
                         placeholder={t('composer.skills.search')}
-                        className="h-9 w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] pl-9 pr-3 text-sm text-[var(--app-fg)] outline-none transition-colors placeholder:text-[var(--app-hint)] focus:border-[var(--app-link)]"
+                        className="ios-form-control h-9 w-full pl-9 pr-3 text-sm"
                         onChange={(event) => setSkillQuery(event.target.value)}
                         onKeyDown={(event) => {
                             if (event.key === 'Escape') {

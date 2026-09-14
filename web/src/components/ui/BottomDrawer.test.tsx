@@ -134,6 +134,7 @@ describe('BottomDrawer', () => {
         expect(dialog.style.width).toBe('auto')
         expect(dialog.style.top).toBe('auto')
         expect(dialog.style.bottom).toBe('calc(var(--app-safe-area-bottom) + var(--app-mobile-input-dialog-edge-gap))')
+        expect(dialog.style.maxHeight).toBe('calc(var(--drawer-viewport-height) - var(--app-safe-area-top) - var(--app-safe-area-bottom) - var(--app-mobile-input-dialog-edge-gap) - var(--app-mobile-input-dialog-edge-gap))')
         expect(dialog.style.transform).toBe('none')
         expect(dialog.className).not.toContain('left-1/2')
         expect(dialog.className).not.toContain('-translate-x-1/2')
@@ -146,7 +147,7 @@ describe('BottomDrawer', () => {
         expect(dialog.style.top).toBe('auto')
         expect(dialog.style.bottom).toBe('calc(var(--drawer-keyboard-bottom) + var(--app-mobile-input-dialog-keyboard-gap))')
         expect(dialog.style.getPropertyValue('--drawer-keyboard-bottom')).toBe('400px')
-        expect(dialog.style.maxHeight).toBe('calc(var(--drawer-viewport-height) - var(--app-safe-area-top) - var(--app-mobile-input-dialog-edge-gap) - var(--app-mobile-input-dialog-edge-gap))')
+        expect(dialog.style.maxHeight).toBe('calc(var(--drawer-viewport-height) - var(--app-safe-area-top) - var(--app-mobile-input-dialog-edge-gap) - var(--app-mobile-input-dialog-keyboard-gap))')
         expect(dialog.style.transform).toBe('none')
     })
 

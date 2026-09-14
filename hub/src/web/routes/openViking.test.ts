@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { createOpenVikingRoutes } from './openViking'
+import { Store } from '../../store'
 
 function createMachine(overrides?: Partial<Machine>): Machine {
     return {
@@ -25,13 +26,13 @@ function createMachine(overrides?: Partial<Machine>): Machine {
     }
 }
 
-function createApp(engine: Partial<SyncEngine>) {
+function createApp(engine: Partial<SyncEngine>, store?: Store) {
     const app = new Hono<WebAppEnv>()
     app.use('*', async (c, next) => {
         c.set('namespace', 'default')
         await next()
     })
-    app.route('/api', createOpenVikingRoutes(() => engine as SyncEngine))
+    app.route('/api', createOpenVikingRoutes(() => engine as SyncEngine, store))
     return app
 }
 
@@ -52,6 +53,32 @@ describe('OpenViking context routes', () => {
         expect(response.status).toBe(200)
         expect(calls).toEqual(['machine-1'])
         expect(await response.json()).toEqual({ ok: true, version: '0.4.14', authMode: 'trusted' })
+    })
+
+    it('persists the plugin switch per namespace and blocks disabled plugin calls', async () => {
+        const store = new Store(':memory:')
+        let statusCalls = 0
+        const app = createApp({
+            getMachine: () => createMachine(),
+            getOpenVikingStatus: async () => {
+                statusCalls += 1
+                return { ok: true }
+            }
+        }, store)
+
+        expect(await (await app.request('/api/plugins/openviking')).json()).toEqual({ enabled: true })
+        const update = await app.request('/api/plugins/openviking', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ enabled: false })
+        })
+        expect(await update.json()).toEqual({ enabled: false })
+
+        const blocked = await app.request('/api/openviking/machines/machine-1/status')
+        expect(blocked.status).toBe(409)
+        expect(statusCalls).toBe(0)
+        expect(await blocked.json()).toEqual({ error: 'OpenViking plugin is disabled' })
+        store.close()
     })
 
     it('lists the full OpenViking root when no URI is given', async () => {
@@ -131,5 +158,35 @@ describe('OpenViking context routes', () => {
 
         expect(response.status).toBe(403)
         expect(await response.json()).toEqual({ error: 'Machine access denied' })
+    })
+
+    it('runs a validated machine-scoped retrieval test', async () => {
+        const calls: unknown[] = []
+        const app = createApp({
+            getMachine: () => createMachine(),
+            searchOpenViking: async (machineId: string, request: unknown) => {
+                calls.push({ machineId, request })
+                return { ok: true, total: 0, hits: [], durationMs: 8 }
+            }
+        })
+
+        const response = await app.request('/api/openviking/machines/machine-1/search', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ query: 'deployment preference', limit: 5 })
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{ machineId: 'machine-1', request: { query: 'deployment preference', limit: 5 } }])
+    })
+
+    it('rejects an empty retrieval test before RPC', async () => {
+        const app = createApp({ getMachine: () => createMachine() })
+        const response = await app.request('/api/openviking/machines/machine-1/search', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ query: '' })
+        })
+        expect(response.status).toBe(400)
     })
 })

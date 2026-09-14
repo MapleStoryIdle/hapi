@@ -1,18 +1,52 @@
 import type { MiddlewareHandler } from 'hono'
 import { z } from 'zod'
 import { jwtVerify } from 'jose'
+import type { Store } from '../../store'
+import type { WorkspaceAccessKind } from '../../store/workspaces'
 
 export type WebAppEnv = {
     Variables: {
         userId: number
         namespace: string
+        workspaceId: string
+        accessKeyId: string
+        accessKind: WorkspaceAccessKind
     }
 }
 
 const jwtPayloadSchema = z.object({
     uid: z.number(),
-    ns: z.string()
-})
+    wid: z.string().optional(),
+    ns: z.string().optional(),
+    aid: z.string().optional(),
+    kind: z.enum(['legacy', 'web', 'runner']).optional()
+}).refine((value) => Boolean(value.wid || value.ns))
+
+export async function verifyWorkspaceJwt(token: string, jwtSecret: Uint8Array, store: Store): Promise<{
+    userId: number
+    namespace: string
+    workspaceId: string
+    accessKeyId: string
+    accessKind: WorkspaceAccessKind
+} | null> {
+    try {
+        const verified = await jwtVerify(token, jwtSecret, { algorithms: ['HS256'] })
+        const parsed = jwtPayloadSchema.safeParse(verified.payload)
+        if (!parsed.success || !parsed.data.wid || !parsed.data.aid) return null
+        const workspace = store.workspaces.get(parsed.data.wid)
+        if (!workspace || parsed.data.ns && workspace.dataNamespace !== parsed.data.ns) return null
+        if (parsed.data.aid !== 'telegram' && !store.workspaces.isKeyActive(workspace.id, parsed.data.aid, 'web')) return null
+        return {
+            userId: parsed.data.uid,
+            namespace: workspace.dataNamespace,
+            workspaceId: workspace.id,
+            accessKeyId: parsed.data.aid,
+            accessKind: parsed.data.kind ?? 'web'
+        }
+    } catch {
+        return null
+    }
+}
 
 function getPreviewTokenFromReferer(referer: string | undefined): string | undefined {
     if (!referer) return undefined
@@ -26,7 +60,7 @@ function getPreviewTokenFromReferer(referer: string | undefined): string | undef
     }
 }
 
-export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<WebAppEnv> {
+export function createAuthMiddleware(jwtSecret: Uint8Array, store?: Store): MiddlewareHandler<WebAppEnv> {
     return async (c, next) => {
         const path = c.req.path
         if (path === '/api/auth' || path === '/api/bind') {
@@ -50,6 +84,18 @@ export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<W
             return c.json({ error: 'Missing authorization token' }, 401)
         }
 
+        if (store) {
+            const identity = await verifyWorkspaceJwt(token, jwtSecret, store)
+            if (!identity) return c.json({ error: 'Invalid token' }, 401)
+            c.set('userId', identity.userId)
+            c.set('namespace', identity.namespace)
+            c.set('workspaceId', identity.workspaceId)
+            c.set('accessKeyId', identity.accessKeyId)
+            c.set('accessKind', identity.accessKind)
+            await next()
+            return
+        }
+
         try {
             const verified = await jwtVerify(token, jwtSecret, { algorithms: ['HS256'] })
             const parsed = jwtPayloadSchema.safeParse(verified.payload)
@@ -57,8 +103,13 @@ export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<W
                 return c.json({ error: 'Invalid token payload' }, 401)
             }
 
+            const namespace = parsed.data.ns
+            if (!namespace) return c.json({ error: 'Workspace not found' }, 401)
             c.set('userId', parsed.data.uid)
-            c.set('namespace', parsed.data.ns)
+            c.set('namespace', namespace)
+            c.set('workspaceId', parsed.data.wid ?? namespace)
+            c.set('accessKeyId', parsed.data.aid ?? 'legacy-jwt')
+            c.set('accessKind', parsed.data.kind ?? 'legacy')
             await next()
             return
         } catch {

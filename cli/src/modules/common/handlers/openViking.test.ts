@@ -140,4 +140,72 @@ describe('OpenViking RPC handlers', () => {
         expect(JSON.parse(raw)).toEqual({ ok: false, error: 'Invalid OpenViking context URI' })
         expect(fetchMock).not.toHaveBeenCalled()
     })
+
+    it('summarizes OpenViking retrieval metrics', async () => {
+        globalThis.fetch = (async () => new Response([
+            'openviking_retrieval_requests_total{context_type="memory"} 10',
+            'openviking_retrieval_results_total{context_type="memory"} 24',
+            'openviking_retrieval_zero_result_total{context_type="memory"} 2',
+            'openviking_retrieval_latency_seconds_sum{context_type="memory"} 3',
+            'openviking_retrieval_latency_seconds_count{context_type="memory"} 10',
+            'openviking_retrieval_latency_seconds_bucket{context_type="memory",le="0.5"} 8',
+            'openviking_retrieval_latency_seconds_bucket{context_type="memory",le="1"} 10',
+            'openviking_retrieval_latency_seconds_bucket{context_type="memory",le="+Inf"} 10',
+            'openviking_retrieval_rerank_fallback_total 1',
+            'openviking_queue_pending{queue="semantic"} 3'
+        ].join('\n'), { status: 200 })) as unknown as typeof globalThis.fetch
+
+        const rpc = new RpcHandlerManager({ scopePrefix: 'machine-test' })
+        registerOpenVikingHandlers(rpc)
+        const raw = await rpc.handleRequest({ method: `machine-test:${RPC_METHODS.OpenVikingMetrics}`, params: '{}' })
+
+        expect(JSON.parse(raw)).toMatchObject({ ok: true, retrievalRequests: 10, retrievalResults: 24, zeroResults: 2, zeroResultRate: 0.2, averageLatencyMs: 300, p95LatencyMs: 1000, rerankFallbacks: 1, queuePending: 3 })
+    })
+
+    it('runs a retrieval test and normalizes ranked hits', async () => {
+        let requestBody = ''
+        globalThis.fetch = (async (_input: FetchInput, init?: FetchInit) => {
+            requestBody = String(init?.body)
+            return new Response(JSON.stringify({ status: 'ok', result: {
+                memories: [{ uri: 'viking://~/memories/name.md', context_type: 'memory', score: 0.91, abstract: 'Preferred name' }],
+                resources: [{ uri: 'viking://resources/guide.md', score: 0.72 }],
+                skills: []
+            } }), { status: 200 })
+        }) as unknown as typeof globalThis.fetch
+
+        const rpc = new RpcHandlerManager({ scopePrefix: 'machine-test' })
+        registerOpenVikingHandlers(rpc)
+        const raw = await rpc.handleRequest({ method: `machine-test:${RPC_METHODS.OpenVikingSearch}`, params: JSON.stringify({ query: 'my name', limit: 5 }) })
+
+        expect(JSON.parse(requestBody)).toEqual({ query: 'my name', limit: 5 })
+        expect(JSON.parse(raw)).toMatchObject({ ok: true, total: 2, hits: [
+            { uri: 'viking://~/memories/name.md', contextType: 'memory', score: 0.91 },
+            { uri: 'viking://resources/guide.md', contextType: 'resource', score: 0.72 }
+        ] })
+    })
+
+    it('checks duplicate and explicit conflict candidates on demand', async () => {
+        globalThis.fetch = (async (input: FetchInput) => {
+            const url = new URL(String(input))
+            if (url.pathname.endsWith('/fs/ls')) return new Response(JSON.stringify({ status: 'ok', result: [
+                { name: 'one.md', uri: 'viking://~/memories/one.md', isDir: false, modTime: '2020-01-01T00:00:00Z' },
+                { name: 'two.md', uri: 'viking://~/memories/two.md', isDir: false, modTime: '2020-01-01T00:00:00Z' },
+                { name: 'three.md', uri: 'viking://~/memories/three.md', isDir: false, modTime: '2020-01-01T00:00:00Z' }
+            ] }), { status: 200 })
+            const uri = url.searchParams.get('uri')
+            const content = uri?.endsWith('one.md') ? 'theme: dark\neditor: vim' : uri?.endsWith('two.md') ? 'theme: dark\neditor: vim' : 'theme: light'
+            return new Response(JSON.stringify({ status: 'ok', result: content }), { status: 200 })
+        }) as unknown as typeof globalThis.fetch
+
+        const rpc = new RpcHandlerManager({ scopePrefix: 'machine-test' })
+        registerOpenVikingHandlers(rpc)
+        const raw = await rpc.handleRequest({ method: `machine-test:${RPC_METHODS.OpenVikingQuality}`, params: '{}' })
+        const result = JSON.parse(raw)
+
+        expect(result.ok).toBe(true)
+        expect(result.scannedMemories).toBe(3)
+        expect(result.duplicateGroups).toBe(1)
+        expect(result.conflictGroups).toBe(1)
+        expect(result.stale30d).toBe(3)
+    })
 })

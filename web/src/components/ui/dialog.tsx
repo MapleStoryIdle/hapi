@@ -25,7 +25,7 @@ export const DialogContent = React.forwardRef<
                 className={cn(
                     fullScreenOnMobile
                         ? 'fixed inset-0 z-50 flex h-[100dvh] w-screen flex-col rounded-none bg-[var(--app-dialog-bg)] p-0 shadow-2xl sm:inset-auto sm:left-1/2 sm:top-1/2 sm:block sm:h-auto sm:w-[calc(100vw-24px)] sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:p-4'
-                        : 'fixed left-1/2 top-1/2 z-50 w-[calc(100vw-24px)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl bg-[var(--app-dialog-bg)] p-4 shadow-2xl',
+                        : 'app-safe-dialog fixed left-1/2 z-50 w-[calc(100vw-24px)] max-w-lg -translate-x-1/2 rounded-xl bg-[var(--app-dialog-bg)] p-4 shadow-2xl',
                     className
                 )}
                 {...props}

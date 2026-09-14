@@ -2657,8 +2657,6 @@ export function CodexSessionContextPage(props: {
                     )}
                 />
                 <SessionActionMenu
-                    onSetGroup={props.machineId ? openGroup : undefined}
-                    onSetLabel={props.machineId ? openLabel : undefined}
                     isOpen={menuOpen}
                     onClose={() => setMenuOpen(false)}
                     sessionActive={directStatus === 'processing'}

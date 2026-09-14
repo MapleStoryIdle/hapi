@@ -87,9 +87,9 @@
     --app-md-table-bg: #f5f6f7;
     --app-md-table-head-bg: #e3e7eb;
     --app-reasoning-bg: #f2f4f6;
-    --app-composer-compact-border: rgba(15, 23, 42, 0.12);
+    --app-composer-compact-border: var(--chat-sheet-input-border);
     --app-composer-compact-shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
-    --app-composer-expanded-border: rgba(15, 23, 42, 0.14);
+    --app-composer-expanded-border: var(--chat-sheet-input-border);
     --app-composer-expanded-bg: var(--app-bg);
     --app-composer-expanded-shadow: 0 14px 36px rgba(15, 23, 42, 0.12);
     --app-mermaid-node-fill: #f8fbff;
@@ -225,9 +225,9 @@ html[data-app-keyboard-open="true"] {
     --app-md-table-bg: #2a2f35;
     --app-md-table-head-bg: #3d4550;
     --app-reasoning-bg: #2b3036;
-    --app-composer-compact-border: rgba(255, 255, 255, 0.14);
+    --app-composer-compact-border: var(--chat-sheet-input-border);
     --app-composer-compact-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
-    --app-composer-expanded-border: rgba(255, 255, 255, 0.16);
+    --app-composer-expanded-border: var(--chat-sheet-input-border);
     --app-composer-expanded-bg: var(--app-bg);
     --app-composer-expanded-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
     --app-mermaid-node-fill: #323843;
@@ -314,9 +314,9 @@ html[data-app-keyboard-open="true"] {
     --app-md-table-bg: #0e0e10;
     --app-md-table-head-bg: #1f2024;
     --app-reasoning-bg: #0e0e10;
-    --app-composer-compact-border: rgba(255, 255, 255, 0.16);
+    --app-composer-compact-border: var(--chat-sheet-input-border);
     --app-composer-compact-shadow: 0 10px 30px rgba(0, 0, 0, 0.58);
-    --app-composer-expanded-border: rgba(255, 255, 255, 0.18);
+    --app-composer-expanded-border: var(--chat-sheet-input-border);
     --app-composer-expanded-bg: var(--app-bg);
     --app-composer-expanded-shadow: 0 14px 36px rgba(0, 0, 0, 0.60);
     --app-mermaid-node-fill: #16181d;
@@ -465,6 +465,69 @@ option {
 select {
     min-height: 2.5rem;
     -webkit-font-smoothing: antialiased;
+}
+
+/* Shared iOS-style text controls. Components keep their own dimensions and
+ * layout, while color, border and focus feedback stay consistent everywhere. */
+.ios-form-control,
+.ios-input-shell {
+    border: 1px solid var(--chat-sheet-input-border);
+    border-radius: 14px;
+    background-color: var(--chat-sheet-group);
+    color: var(--chat-sheet-fg);
+    outline: none;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 3%);
+    transition:
+        border-color var(--chat-sheet-feedback-duration),
+        box-shadow var(--chat-sheet-feedback-duration),
+        background-color var(--chat-sheet-feedback-duration);
+}
+
+.ios-form-control:is(input, textarea) {
+    appearance: none;
+    caret-color: var(--chat-sheet-accent);
+}
+
+.ios-form-control::placeholder,
+.ios-input-shell :is(input, textarea)::placeholder {
+    color: var(--chat-sheet-secondary);
+    opacity: .72;
+}
+
+.ios-form-control:focus,
+.ios-form-control:focus-visible,
+.ios-input-shell:focus-within {
+    border-color: var(--chat-sheet-accent);
+    box-shadow: var(--chat-sheet-focus);
+}
+
+.ios-composer-control:focus-within {
+    border-color: var(--chat-sheet-accent);
+}
+
+/* Center ordinary dialogs inside the usable safe-area rectangle. Supplying
+ * both edges plus an intrinsic height lets auto block margins center short
+ * dialogs while max-height keeps long content out of iOS system chrome. */
+.app-safe-dialog {
+    top: calc(var(--app-safe-area-top) + 12px);
+    bottom: calc(var(--app-safe-area-bottom) + 12px);
+    height: fit-content;
+    max-height: calc(var(--app-viewport-height, 100dvh) - var(--app-safe-area-top) - var(--app-safe-area-bottom) - 24px);
+    margin-block: auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.ios-form-control:disabled {
+    background-color: var(--chat-sheet-muted-bg);
+    opacity: .55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ios-form-control,
+    .ios-input-shell {
+        transition: none;
+    }
 }
 
 #root {
@@ -1661,6 +1724,59 @@ html[data-drawer-chrome-closing='true'], html[data-drawer-chrome-closing='true']
 
 body:has(.session-list-screen) .tsqd-open-btn-container {
   display: none !important;
+}
+
+/* Compact iOS-style session metadata popover. Keep motion subtle because the
+   trigger sits in the persistent navigation bar. */
+.session-title-popover {
+  left: calc(var(--app-safe-area-left) + 0.75rem);
+  top: calc(var(--app-safe-area-top) + 4.25rem);
+  width: min(calc(100vw - var(--app-safe-area-left) - var(--app-safe-area-right) - 1.5rem), 24rem);
+  max-height: calc(var(--app-viewport-height, 100dvh) - var(--app-safe-area-top) - var(--app-safe-area-bottom) - 5.25rem);
+  transform-origin: top left;
+  animation: session-title-popover-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes session-title-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-title-popover {
+    animation: none;
+  }
+}
+
+/* Session-list skeletons preserve the final list/card geometry, preventing
+   iOS PWA content jumps while native and managed sessions merge. */
+.session-list-skeleton {
+  background: linear-gradient(
+    105deg,
+    var(--app-subtle-bg) 0%,
+    color-mix(in srgb, var(--app-subtle-bg) 55%, var(--app-bg)) 46%,
+    var(--app-subtle-bg) 100%
+  );
+  background-size: 220% 100%;
+  animation: session-list-skeleton-wave 1.8s ease-in-out infinite;
+}
+
+@keyframes session-list-skeleton-wave {
+  0%, 100% { background-position: 100% 0; }
+  50% { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-list-skeleton {
+    animation: none;
+    background-position: 50% 0;
+  }
 }
 
 /* Shared inset-grouped browsing surface: session files and directory pickers. */

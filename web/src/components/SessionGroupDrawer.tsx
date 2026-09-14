@@ -79,10 +79,10 @@ export function SessionGroupDrawer(props: {
         }}>
             <div className="flex gap-3">
                 <label className="w-20 shrink-0 space-y-2 text-sm text-[var(--app-hint)]">{t('session.groups.emoji')}
-                    <input value={emoji} onChange={e => setEmoji(e.target.value)} maxLength={32} required disabled={busy} className="h-11 w-full rounded-xl bg-[var(--app-subtle-bg)] px-3 text-center text-base text-[var(--app-fg)]" />
+                    <input value={emoji} onChange={e => setEmoji(e.target.value)} maxLength={32} required disabled={busy} className="ios-form-control h-11 w-full px-3 text-center text-base" />
                 </label>
                 <label className="min-w-0 flex-1 space-y-2 text-sm text-[var(--app-hint)]">{t('session.groups.name')}
-                    <input data-drawer-initial-focus autoFocus value={name} onChange={e => setName(e.target.value)} maxLength={80} required disabled={busy} className="h-11 w-full rounded-xl bg-[var(--app-subtle-bg)] px-3 text-base text-[var(--app-fg)]" />
+                    <input data-drawer-initial-focus autoFocus value={name} onChange={e => setName(e.target.value)} maxLength={80} required disabled={busy} className="ios-form-control h-11 w-full px-3 text-base" />
                 </label>
             </div>
             <div className="flex gap-3">

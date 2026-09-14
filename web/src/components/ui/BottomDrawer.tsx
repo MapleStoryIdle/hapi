@@ -308,7 +308,13 @@ export function BottomDrawer(props: {
             : 'calc(var(--app-safe-area-bottom) + var(--app-mobile-input-dialog-edge-gap))',
         transform: 'none',
         ...(viewport ? {
-            maxHeight: 'calc(var(--drawer-viewport-height) - var(--app-safe-area-top) - var(--app-mobile-input-dialog-edge-gap) - var(--app-mobile-input-dialog-edge-gap))'
+            // When the keyboard is closed, the bottom anchor already includes
+            // the home-indicator inset. Subtract it from the height cap too;
+            // otherwise that inset is effectively borrowed from the top and a
+            // tall dialog can cross into the status-bar / Dynamic Island area.
+            maxHeight: viewport.keyboardOpen
+                ? 'calc(var(--drawer-viewport-height) - var(--app-safe-area-top) - var(--app-mobile-input-dialog-edge-gap) - var(--app-mobile-input-dialog-keyboard-gap))'
+                : 'calc(var(--drawer-viewport-height) - var(--app-safe-area-top) - var(--app-safe-area-bottom) - var(--app-mobile-input-dialog-edge-gap) - var(--app-mobile-input-dialog-edge-gap))'
         } : {})
     } : {}
 

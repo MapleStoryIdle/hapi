@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CS
 import type { CodexTokenUsage, CodexUsageAccount } from '@hapi/protocol/codexUsage'
 import { CodexUsageDrawer } from './CodexUsageDrawer'
 import { RefreshCw as RefreshIconNode, Wifi as WifiIconNode, WifiOff as WifiOffIconNode } from 'lucide'
+import { Bot, ChevronRight, Clock3, Folder, Hash, Tag, UsersRound, X } from 'lucide-react'
 import type { CodexSubscriptionLimits, CodexSubscriptionLimitWindow, Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -40,61 +41,85 @@ function getSessionProjectPath(session: Session): string | null {
 }
 
 function SessionHeaderDetailRow(props: {
-    label: string
-    value: string
+    detail: SessionHeaderDetail
     copied: boolean
     onCopy: () => void
-    isAgentInfo?: boolean
-    onSelect?: () => void
+    divided?: boolean
 }) {
     const { t } = useTranslation()
-    const agentParts = props.isAgentInfo
-        ? props.value.split(' · ').map((part) => part.trim()).filter(Boolean)
+    const { detail } = props
+    const agentParts = detail.isAgentInfo
+        ? detail.value.split(' · ').map((part) => part.trim()).filter(Boolean)
         : []
+    const Icon = detail.key === 'group'
+        ? UsersRound
+        : detail.key === 'label'
+            ? Tag
+            : detail.key === 'path'
+                ? Folder
+                : detail.key === 'last-activity'
+                    ? Clock3
+                    : detail.key === 'agent'
+                        ? Bot
+                        : Hash
+
+    const content = (
+        <>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-[var(--app-subtle-bg)] text-[var(--app-hint)]">
+                <Icon className="h-[17px] w-[17px]" strokeWidth={1.8} aria-hidden="true" />
+            </span>
+            <span className="min-w-0 flex-1 py-2.5">
+                <span className="block text-[11px] font-medium leading-4 text-[var(--app-hint)]">{detail.label}</span>
+                {agentParts.length > 0 ? (
+                    <span className="mt-0.5 block">
+                        <span className="block truncate text-sm font-semibold leading-5 text-[var(--app-fg)]">{agentParts[0]}</span>
+                        {agentParts.length > 1 ? (
+                            <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                                {agentParts.slice(1).map((part, index) => {
+                                    const [rawKey, ...rest] = part.split(':')
+                                    const hasValue = rest.length > 0
+                                    return (
+                                        <span key={`${part}-${index}`} className="min-w-0 text-xs leading-4 text-[var(--app-hint)]">
+                                            {hasValue ? <><span>{rawKey.trim()}:</span> <span className="font-medium text-[var(--app-fg)]">{rest.join(':').trim()}</span></> : <span className="font-medium text-[var(--app-fg)]">{part}</span>}
+                                        </span>
+                                    )
+                                })}
+                            </span>
+                        ) : null}
+                    </span>
+                ) : (
+                    <span className={`mt-0.5 block text-sm font-medium leading-5 text-[var(--app-fg)] ${detail.key === 'session-id' ? 'break-all font-mono text-xs' : 'line-clamp-2 break-words'}`} title={detail.value}>{detail.value}</span>
+                )}
+            </span>
+        </>
+    )
+
+    if (detail.onSelect) return (
+        <button
+            type="button"
+            aria-label={detail.value}
+            onClick={detail.onSelect}
+            className={`flex min-h-[58px] w-full items-center gap-3 px-3 text-left transition-colors active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--app-link)] ${props.divided ? 'border-t border-[var(--app-divider)]' : ''}`}
+        >
+            {content}
+            <ChevronRight className="h-4 w-4 shrink-0 text-[var(--app-hint)]" strokeWidth={1.8} aria-hidden="true" />
+        </button>
+    )
 
     return (
-        <div className="min-w-0 rounded-[16px] border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2.5">
-            <div className="mb-1.5 flex items-center justify-between gap-3">
-                <div className="text-[11px] font-semibold leading-4 tracking-wide text-[var(--app-hint)]">{props.label}</div>
-                <button
-                    type="button"
-                    onClick={props.onCopy}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                    aria-label={t('session.header.details.copy', { label: props.label })}
-                    title={t('session.header.details.copy', { label: props.label })}
-                >
-                    {props.copied
-                        ? <CheckIcon className="h-4 w-4 text-green-500" />
-                        : <CopyIcon className="h-4 w-4" />}
-                </button>
-            </div>
-
-            {props.onSelect ? <button type="button" onClick={props.onSelect} className="min-h-11 w-full text-left text-sm font-medium text-[var(--app-link)]">{props.value}</button> : agentParts.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                    {agentParts.map((part, index) => {
-                        const [rawKey, ...rest] = part.split(':')
-                        const hasValue = rest.length > 0
-                        const isAgentFlavor = !hasValue && index === 0
-                        const key = hasValue ? rawKey.trim() : isAgentFlavor ? 'agent' : ''
-                        const value = hasValue ? rest.join(':').trim() : part
-                        return (
-                            <span
-                                // The agent info string is derived from session metadata;
-                                // index keeps duplicate keys copy-safe without changing text.
-                                key={`${part}-${index}`}
-                                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-xs leading-4 text-[var(--app-fg)]"
-                            >
-                                {key ? (
-                                    <span className="shrink-0 font-medium text-[var(--app-hint)]">{key}:</span>
-                                ) : null}
-                                <span className="min-w-0 truncate font-semibold">{value}</span>
-                            </span>
-                        )
-                    })}
-                </div>
-            ) : (
-                <div className="break-words text-sm font-medium leading-5 text-[var(--app-fg)]">{props.value}</div>
-            )}
+        <div className={`flex min-h-[58px] items-center gap-3 px-3 ${props.divided ? 'border-t border-[var(--app-divider)]' : ''}`}>
+            {content}
+            <button
+                type="button"
+                onClick={props.onCopy}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                aria-label={t('session.header.details.copy', { label: detail.label })}
+                title={t('session.header.details.copy', { label: detail.label })}
+            >
+                {props.copied
+                    ? <CheckIcon className="h-4 w-4 text-green-500" />
+                    : <CopyIcon className="h-4 w-4" />}
+            </button>
         </div>
     )
 }
@@ -246,6 +271,13 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
         setCopiedDetailKey(null)
     }, [props.sessionId])
 
+    const titleDetail = details.find((detail) => detail.key === 'title')
+    const detailGroups = [
+        details.filter((detail) => detail.key === 'group' || detail.key === 'label'),
+        details.filter((detail) => detail.key === 'path' || detail.key === 'last-activity'),
+        details.filter((detail) => detail.key === 'agent' || detail.key === 'session-id')
+    ].filter((group) => group.length > 0)
+
     return (
         <div ref={titleDetailsRef} className="relative min-w-0 max-w-[min(58vw,22rem)]">
             <button
@@ -265,20 +297,59 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
                     id={detailsId}
                     role="dialog"
                     aria-label={t('session.header.details.title')}
-                    className="pointer-events-auto fixed left-3 top-[calc(var(--app-safe-area-top)+4.25rem)] z-50 w-[min(calc(100vw-1.5rem),22rem)] rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
+                    data-testid="session-title-details-popover"
+                    className="session-title-popover pointer-events-auto fixed z-50 overflow-y-auto overscroll-contain rounded-[22px] border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-2.5 text-left shadow-[0_20px_56px_rgba(15,23,42,0.2)]"
                 >
-                    <div className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">{t('session.header.details.title')}</div>
-                    <div className="flex flex-col gap-2">
-                        {details.map((row) => (
-                            <SessionHeaderDetailRow
-                                key={row.key}
-                                label={row.label}
-                                value={row.value}
-                                copied={copiedDetailKey === row.key}
-                                onCopy={() => copyDetail(row.key, row.value)}
-                                isAgentInfo={row.isAgentInfo}
-                                onSelect={row.onSelect ? () => { setDetailsOpen(false); row.onSelect?.() } : undefined}
-                            />
+                    <div className="flex min-h-11 items-center justify-between gap-3 px-1.5">
+                        <div className="min-w-0 text-[13px] font-semibold text-[var(--app-hint)]">{t('session.header.details.title')}</div>
+                        <button
+                            type="button"
+                            onClick={() => setDetailsOpen(false)}
+                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                            aria-label={t('button.close')}
+                        >
+                            <X className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" />
+                        </button>
+                    </div>
+
+                    <div className="flex flex-col gap-2.5">
+                        <div className="flex min-h-[68px] items-center gap-3 rounded-[16px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5" data-session-detail-group="title">
+                            <span className="min-w-0 flex-1">
+                                <span className="block text-[11px] font-medium leading-4 text-[var(--app-hint)]">{titleDetail?.label ?? t('session.header.details.fullName')}</span>
+                                <span className="mt-0.5 line-clamp-3 block break-words text-[15px] font-semibold leading-5 text-[var(--app-fg)]" title={titleDetail?.value ?? props.title}>
+                                    {titleDetail?.value ?? props.title}
+                                </span>
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => copyDetail('title', titleDetail?.value ?? props.title)}
+                                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                aria-label={t('session.header.details.copy', { label: titleDetail?.label ?? t('session.header.details.fullName') })}
+                            >
+                                {copiedDetailKey === 'title'
+                                    ? <CheckIcon className="h-4 w-4 text-green-500" />
+                                    : <CopyIcon className="h-4 w-4" />}
+                            </button>
+                        </div>
+
+                        {detailGroups.map((group, groupIndex) => (
+                            <div
+                                key={group.map((detail) => detail.key).join('-')}
+                                data-session-detail-group={groupIndex}
+                                className="overflow-hidden rounded-[16px] border border-[var(--app-border)] bg-[var(--app-bg)]"
+                            >
+                                {group.map((detail, rowIndex) => (
+                                    <SessionHeaderDetailRow
+                                        key={detail.key}
+                                        detail={detail.onSelect
+                                            ? { ...detail, onSelect: () => { setDetailsOpen(false); detail.onSelect?.() } }
+                                            : detail}
+                                        copied={copiedDetailKey === detail.key}
+                                        onCopy={() => copyDetail(detail.key, detail.value)}
+                                        divided={rowIndex > 0}
+                                    />
+                                ))}
+                            </div>
                         ))}
                     </div>
                 </div>
@@ -817,10 +888,11 @@ export const SessionHeader = memo(function SessionHeader(props: {
     const [renameOpen, setRenameOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
+    const [releaseControlOpen, setReleaseControlOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [gitBranchesOpen, setGitBranchesOpen] = useState(false)
 
-    const { archiveSession, reopenSession, renameSession, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, releaseSessionControl, reopenSession, renameSession, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
@@ -851,6 +923,12 @@ export const SessionHeader = memo(function SessionHeader(props: {
             setReopenError(formatReopenError(error))
         }
     }
+
+    const canReleaseControl = session.active
+        && session.metadata?.flavor === 'codex'
+        && session.metadata.startedFromRunner === true
+        && session.metadata.controlOwner !== 'external'
+        && session.agentState?.controlledByUser !== true
 
     const handleMenuToggle = () => {
         if (!menuOpen && menuAnchorRef.current) {
@@ -913,14 +991,13 @@ export const SessionHeader = memo(function SessionHeader(props: {
             <SessionGroupDrawer key={session.id} api={api} source={groupSource} nativeAlias={nativeGroupAlias} open={groupOpen} onOpenChange={setGroupOpen} />
             <SessionLabelDialog api={api} source={groupSource} nativeAlias={nativeGroupAlias} currentLabel={sessionLabel} open={labelOpen} onOpenChange={setLabelOpen} />
             <SessionActionMenu
-                onSetGroup={api ? openGroup : undefined}
-                onSetLabel={api ? openLabel : undefined}
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionActive={session.active}
                 onGitBranches={isGitRepository ? () => setGitBranchesOpen(true) : undefined}
                 onRename={() => setRenameOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
+                onReleaseControl={canReleaseControl ? () => setReleaseControlOpen(true) : undefined}
                 onReopen={handleReopen}
                 onDelete={() => setDeleteOpen(true)}
                 onToggleFiles={props.onToggleFiles}
@@ -978,6 +1055,17 @@ export const SessionHeader = memo(function SessionHeader(props: {
                 onConfirm={archiveSession}
                 isPending={isPending}
                 destructive
+            />
+
+            <ConfirmDialog
+                isOpen={releaseControlOpen}
+                onClose={() => setReleaseControlOpen(false)}
+                title={t('dialog.releaseControl.title')}
+                description={t('dialog.releaseControl.description')}
+                confirmLabel={t('dialog.releaseControl.confirm')}
+                confirmingLabel={t('dialog.releaseControl.confirming')}
+                onConfirm={releaseSessionControl}
+                isPending={isPending}
             />
 
             <ConfirmDialog

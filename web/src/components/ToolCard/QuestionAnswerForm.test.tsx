@@ -47,6 +47,9 @@ describe('QuestionAnswerForm mobile presentation', () => {
     it('opens a free-text-only question directly in the keyboard-safe dialog', () => {
         const drawer = renderQuestion([])
         expect(drawer).toHaveAttribute('data-keyboard-safe-dialog', 'true')
-        expect(screen.getByRole('textbox')).toBeVisible()
+        const input = screen.getByRole('textbox')
+        expect(input).toBeVisible()
+        expect(input).toHaveClass('chat-sheet-input', 'resize-none')
+        expect(input).not.toHaveClass('border-[var(--app-border)]', 'bg-[var(--app-bg)]')
     })
 })

@@ -522,7 +522,7 @@ export default function TerminalPage() {
                         value={manualPasteText}
                         onChange={(event) => setManualPasteText(event.target.value)}
                         placeholder={t('terminal.paste.placeholder')}
-                        className="mt-2 min-h-32 w-full resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                        className="ios-form-control mt-2 min-h-32 w-full resize-y p-3 text-sm"
                         autoCapitalize="none"
                         autoCorrect="off"
                     />

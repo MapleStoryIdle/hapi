@@ -52,6 +52,19 @@ describe('sessionResume', () => {
         expect(inactiveSessionCanResume(makeSession({ active: true }), 0)).toBe(true)
     })
 
+    it('keeps a externally controlled transcript read-only in SHAPI', () => {
+        expect(inactiveSessionCanResume(makeSession({
+            active: false,
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                codexSessionId: 'thread-1',
+                controlOwner: 'external'
+            }
+        }), 1)).toBe(false)
+    })
+
     it('inactiveSessionCanResume allows fresh spawn when no agent id and no messages', () => {
         expect(inactiveSessionCanResume(makeSession(), 0)).toBe(true)
     })

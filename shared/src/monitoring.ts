@@ -69,6 +69,8 @@ export type MonitorIncident = {
     plan: string | null
     planHash: string | null
     error: string | null
+    deliveredAt?: number
+    deliverySession?: { type: 'managed' | 'native-codex'; sessionId: string; machineId: string }
     approvalContext?: MonitorApprovalContext
 }
 export type MonitorBucket = { at: number; total: number; ok: number; failures: number; latencyMs: number }
@@ -82,6 +84,7 @@ export type MonitorActivity = {
     outcome: MonitorActivityOutcome
     summary: string
     details: string
+    incidentId?: string
 }
 export type MonitorCallStats = {
     total: number

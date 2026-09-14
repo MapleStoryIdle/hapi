@@ -55,6 +55,11 @@ const ROUTING_FIELDS = ['flavor', 'machineId'] as const
 
 const RELATION_FIELDS = ['sideSession'] as const
 
+// Ownership is Hub-authored state. A stale CLI cleanup payload must not
+// silently reclaim a session that Hub already released from SHAPI control.
+// `null` remains an explicit future reclaim/clear sentinel.
+const CONTROL_FIELDS = ['controlOwner'] as const
+
 const SIMPLE_RESUME_TOKENS = [
     'claudeSessionId',
     'codexSessionId',
@@ -127,6 +132,7 @@ export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     merged = carryForwardIfMissing(prior, next, merged, PARSE_IDENTITY_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, RELATION_FIELDS)
+    merged = carryForwardIfMissing(prior, next, merged, CONTROL_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next

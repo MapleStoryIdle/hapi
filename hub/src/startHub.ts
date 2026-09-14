@@ -187,6 +187,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     }
 
     const store = new Store(config.dbPath)
+    store.workspaces.bootstrapLegacyCredentials(config.cliApiToken)
     const generatedImageStore = new GeneratedImageStore(join(config.dataDir, 'generated-images'))
     const artifactService = new ArtifactService(store, config.dataDir)
     const jwtSecret = await getOrCreateJwtSecret()

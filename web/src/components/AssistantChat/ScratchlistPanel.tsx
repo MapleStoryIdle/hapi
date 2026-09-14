@@ -630,7 +630,7 @@ export function ScratchlistPanel({
                                     placeholder={t('scratchlist.addPlaceholder')}
                                     aria-label={t('scratchlist.addAriaLabel')}
                                     disabled={hasReachedCap}
-                                    className="flex-1 min-w-0 resize-none rounded-md bg-[var(--app-bg)] px-2 py-1.5 text-sm text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none focus:ring-1 focus:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-50"
+                                    className="ios-form-control min-w-0 flex-1 resize-none px-3 py-2 text-sm disabled:cursor-not-allowed"
                                 />
                                 <button
                                     type="submit"

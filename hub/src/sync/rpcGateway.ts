@@ -57,6 +57,10 @@ import type {
     OpenVikingContextListResponse,
     OpenVikingContextReadRequest,
     OpenVikingContextReadResponse,
+    OpenVikingMetricsResponse,
+    OpenVikingQualityResponse,
+    OpenVikingSearchRequest,
+    OpenVikingSearchResponse,
     OpenVikingStatusResponse,
     ListDirectoryResponse,
     MachineGitBranchCreateRequest,
@@ -108,6 +112,9 @@ export class RpcTargetMissingError extends Error {
     }
 }
 
+/** A runner answered the handoff RPC but declined before beginning teardown. */
+export class HandoffRejectedError extends Error {}
+
 export type RpcCommandResponse = CommandResponse
 export type RpcGitBranchResponse = GitBranchResponse
 export type RpcGitBranchesResponse = GitBranchesResponse
@@ -131,6 +138,9 @@ export type RpcLocalPreviewHttpResponse = LocalPreviewHttpResponse
 export type RpcOpenVikingStatusResponse = OpenVikingStatusResponse
 export type RpcOpenVikingContextListResponse = OpenVikingContextListResponse
 export type RpcOpenVikingContextReadResponse = OpenVikingContextReadResponse
+export type RpcOpenVikingMetricsResponse = OpenVikingMetricsResponse
+export type RpcOpenVikingSearchResponse = OpenVikingSearchResponse
+export type RpcOpenVikingQualityResponse = OpenVikingQualityResponse
 export type RpcCodexLocalSessionsResponse = CodexLocalSessionsRpcResponse
 export type RpcCodexLocalSessionDataResponse = CodexLocalSessionDataRpcResponse
 export type RpcCodexLocalSessionComposerCapabilitiesResponse = CodexLocalSessionComposerCapabilitiesRpcResponse
@@ -259,8 +269,17 @@ export class RpcGateway {
         await this.sessionRpc(sessionId, RPC_METHODS.KillSession, {})
     }
 
-    async handoffSessionToLocal(sessionId: string): Promise<void> {
-        await this.sessionRpc(sessionId, RPC_METHODS.HandoffLocal, {})
+    async handoffSessionToLocal(sessionId: string, destination: 'local-terminal' | 'external' = 'local-terminal'): Promise<void> {
+        const response = await this.sessionRpc(sessionId, RPC_METHODS.HandoffLocal, { destination })
+        if (!response || typeof response !== 'object') {
+            throw new Error('Invalid handoff response from runner')
+        }
+        const result = response as { ok?: unknown; error?: unknown }
+        if (result.ok === true) return
+        if (typeof result.error === 'string' && result.error.length > 0) {
+            throw new HandoffRejectedError(result.error)
+        }
+        throw new Error('Runner did not confirm handoff')
     }
 
     async spawnSession(
@@ -866,6 +885,18 @@ export class RpcGateway {
 
     async readOpenVikingContext(machineId: string, request: OpenVikingContextReadRequest): Promise<RpcOpenVikingContextReadResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.OpenVikingReadContext, request) as RpcOpenVikingContextReadResponse
+    }
+
+    async getOpenVikingMetrics(machineId: string): Promise<RpcOpenVikingMetricsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.OpenVikingMetrics, {}) as RpcOpenVikingMetricsResponse
+    }
+
+    async searchOpenViking(machineId: string, request: OpenVikingSearchRequest): Promise<RpcOpenVikingSearchResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.OpenVikingSearch, request) as RpcOpenVikingSearchResponse
+    }
+
+    async getOpenVikingQuality(machineId: string): Promise<RpcOpenVikingQualityResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.OpenVikingQuality, {}, 45_000) as RpcOpenVikingQualityResponse
     }
 
     /** Generic Pi RPC call — routes all Pi-specific session RPCs through

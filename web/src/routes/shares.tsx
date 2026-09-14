@@ -847,7 +847,7 @@ export default function SharesPage() {
                                         placeholder={t(
                                             'shares.search.placeholder'
                                         )}
-                                        className="h-11 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] py-2 pl-10 pr-3 text-sm text-[var(--app-fg)] shadow-[0_1px_2px_rgba(15,23,42,0.04)] outline-none transition-colors placeholder:text-[var(--app-hint)] focus:border-[var(--app-link)] focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                        className="ios-form-control h-11 w-full py-2 pl-10 pr-3 text-sm"
                                     />
                                 </div>
                             </div>

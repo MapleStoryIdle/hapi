@@ -1,11 +1,7 @@
 import { Server as Engine } from '@socket.io/bun-engine'
 import { Server, type DefaultEventsMap } from 'socket.io'
-import { jwtVerify } from 'jose'
-import { z } from 'zod'
 import type { Store } from '../store'
 import { getConfiguration } from '../configuration'
-import { constantTimeEquals } from '../utils/crypto'
-import { parseAccessToken } from '../utils/accessToken'
 import { registerCliHandlers } from './handlers/cli'
 import { registerTerminalHandlers } from './handlers/terminal'
 import { RpcRegistry } from './rpcRegistry'
@@ -15,11 +11,7 @@ import { TerminalRegistry } from './terminalRegistry'
 import type { CliSocketWithData, SocketData, SocketServer } from './socketTypes'
 import type { GeneratedImageStore } from '../generatedImages/store'
 import type { ExternalCodexRequestPayload } from '@hapi/protocol'
-
-const jwtPayloadSchema = z.object({
-    uid: z.number(),
-    ns: z.string()
-})
+import { verifyWorkspaceJwt } from '../web/middleware/auth'
 
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60_000
 const DEFAULT_MAX_TERMINALS = 4
@@ -110,11 +102,11 @@ export function createSocketServer(deps: SocketServerDeps): {
     cliNs.use((socket, next) => {
         const auth = socket.handshake.auth as Record<string, unknown> | undefined
         const token = typeof auth?.token === 'string' ? auth.token : null
-        const parsedToken = token ? parseAccessToken(token) : null
-        if (!parsedToken || !constantTimeEquals(parsedToken.baseToken, configuration.cliApiToken)) {
+        const access = token ? deps.store.workspaces.authenticate(token, configuration.cliApiToken, 'runner') : null
+        if (!access) {
             return next(new Error('Invalid token'))
         }
-        socket.data.namespace = parsedToken.namespace
+        socket.data.namespace = access.workspace.dataNamespace
         next()
     })
     cliNs.on('connection', (socket) => registerCliHandlers(socket as CliSocketWithData, {
@@ -142,13 +134,10 @@ export function createSocketServer(deps: SocketServerDeps): {
         }
 
         try {
-            const verified = await jwtVerify(token, deps.jwtSecret, { algorithms: ['HS256'] })
-            const parsed = jwtPayloadSchema.safeParse(verified.payload)
-            if (!parsed.success) {
-                return next(new Error('Invalid token payload'))
-            }
-            socket.data.userId = parsed.data.uid
-            socket.data.namespace = parsed.data.ns
+            const identity = await verifyWorkspaceJwt(token, deps.jwtSecret, deps.store)
+            if (!identity) return next(new Error('Invalid token'))
+            socket.data.userId = identity.userId
+            socket.data.namespace = identity.namespace
             next()
             return
         } catch {

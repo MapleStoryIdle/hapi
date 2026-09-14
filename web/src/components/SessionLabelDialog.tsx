@@ -78,7 +78,7 @@ export function SessionLabelDialog(props: {
                     if (getSessionLabelUnits(event.target.value) <= 16) setValue(event.target.value)
                 }}
                 placeholder={t('session.labels.placeholder')}
-                className="h-11 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-base text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                className="ios-form-control h-11 w-full px-3 text-base"
                 disabled={busy}
             />
             {value.trim() ? <span className="inline-flex max-w-full truncate rounded-full border px-2.5 py-1 text-xs font-medium" style={getSessionLabelStyle(value)}>{value.trim()}</span> : null}

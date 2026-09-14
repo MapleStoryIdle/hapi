@@ -37,6 +37,12 @@ export function inactiveSessionCanResume(
     if (session.active) {
         return true
     }
+    // A managed Codex session explicitly released for external control must remain a
+    // read-only transcript in SHAPI.  Reopening it here would silently start
+    // a new runner owner while the user is taking it over in another program.
+    if (session.metadata?.controlOwner === 'external') {
+        return false
+    }
     if (!session.metadata?.path) {
         return false
     }

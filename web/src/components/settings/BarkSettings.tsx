@@ -32,7 +32,7 @@ export function BarkSettings() {
             <label className="block text-xs text-[var(--app-hint)]">{t('settings.bark.url')}
                 <input type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} value={url} onChange={event => setUrl(event.target.value)} maxLength={2048}
                     placeholder={t(status.data?.configured ? 'settings.bark.configured' : 'settings.bark.placeholder')}
-                    className="mt-1 h-11 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-base text-[var(--app-fg)] focus-visible:ring-2 focus-visible:ring-[var(--app-link)]" />
+                    className="ios-form-control mt-1 h-11 w-full px-3 text-base" />
             </label>
             <div className="flex flex-wrap items-center gap-2">
                 <div className="mr-auto min-w-32">

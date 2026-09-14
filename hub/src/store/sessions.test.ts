@@ -11,6 +11,35 @@ function getMetadata(store: Store, id: string): Record<string, unknown> | null {
 }
 
 describe('updateSessionMetadata: protocol resume token preservation', () => {
+    it('preserves external control ownership through a stale CLI cleanup payload, unless explicitly cleared', () => {
+        const store = makeStore()
+        const session = store.sessions.getOrCreateSession(
+            'external-control-owner',
+            { path: '/tmp/project', host: 'example', flavor: 'codex', controlOwner: 'external' },
+            null,
+            'default'
+        )
+
+        const staleCleanup = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', flavor: 'codex', lifecycleState: 'archived' },
+            session.metadataVersion,
+            'default'
+        )
+        expect(staleCleanup.result).toBe('success')
+        expect(getMetadata(store, session.id)?.controlOwner).toBe('external')
+
+        const current = store.sessions.getSession(session.id)!
+        const explicitClear = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', flavor: 'codex', controlOwner: null },
+            current.metadataVersion,
+            'default'
+        )
+        expect(explicitClear.result).toBe('success')
+        expect(getMetadata(store, session.id)?.controlOwner).toBeUndefined()
+    })
+
     it('preserves cursorSessionId when archive payload omits it (Cursor crash-archive)', () => {
         const store = makeStore()
         const session = store.sessions.getOrCreateSession(

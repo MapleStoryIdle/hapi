@@ -54,7 +54,7 @@ export function DirectorySection(props: {
                         onFocus={props.onDirectoryFocus}
                         onBlur={props.onDirectoryBlur}
                         disabled={props.isDisabled}
-                        className="h-11 w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
+                        className="ios-form-control h-11 w-full px-3 text-sm"
                     />
                     {props.suggestions.length > 0 && (
                         <div className="absolute top-full left-0 right-0 z-10 mt-1">
@@ -137,7 +137,7 @@ export function DirectorySection(props: {
                         value={props.worktreeName}
                         onChange={(event) => props.onWorktreeNameChange(event.target.value)}
                         disabled={props.isDisabled}
-                        className="h-10 w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-60"
+                        className="ios-form-control h-10 w-full px-3 text-sm"
                     />
                 </div>
             ) : null}

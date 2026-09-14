@@ -552,9 +552,69 @@ export type OpenVikingStatusResponse = {
     error?: string
 }
 
+export const OpenVikingSearchRequestSchema = z.object({
+    query: z.string().trim().min(1).max(2000),
+    limit: z.number().int().min(1).max(20).default(8)
+})
+
+export type OpenVikingSearchRequest = z.infer<typeof OpenVikingSearchRequestSchema>
+
+export type OpenVikingSearchHit = {
+    uri: string
+    contextType: 'memory' | 'resource' | 'skill' | 'unknown'
+    level?: number
+    score?: number
+    abstract?: string
+    matchReason?: string
+}
+
+export type OpenVikingSearchResponse = {
+    ok: boolean
+    durationMs?: number
+    total?: number
+    hits?: OpenVikingSearchHit[]
+    error?: string
+}
+
+export type OpenVikingMetricsResponse = {
+    ok: boolean
+    retrievalRequests?: number
+    retrievalResults?: number
+    zeroResults?: number
+    zeroResultRate?: number
+    averageLatencyMs?: number
+    p95LatencyMs?: number
+    rerankUses?: number
+    rerankFallbacks?: number
+    queuePending?: number
+    queueInProgress?: number
+    error?: string
+}
+
+export type OpenVikingQualityIssue = {
+    kind: 'duplicate' | 'conflict'
+    uris: string[]
+    summary: string
+}
+
+export type OpenVikingQualityResponse = {
+    ok: boolean
+    scannedMemories?: number
+    scanLimited?: boolean
+    totalMemories?: number
+    stale7d?: number
+    stale30d?: number
+    oldestMemoryAgeDays?: number
+    duplicateGroups?: number
+    conflictGroups?: number
+    issues?: OpenVikingQualityIssue[]
+    checkedAt?: number
+    error?: string
+}
+
 export const AuthRequestSchema = z.union([
-    z.object({ initData: z.string() }),
-    z.object({ accessToken: z.string() })
+    z.object({ initData: z.string().max(16_384) }),
+    z.object({ accessToken: z.string().min(1).max(512) })
 ])
 
 export type AuthRequest = z.infer<typeof AuthRequestSchema>

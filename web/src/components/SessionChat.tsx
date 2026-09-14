@@ -1898,7 +1898,7 @@ function SessionChatInner(props: SessionChatProps) {
         onSendMessage: handleSend,
         onAbort: handleAbort,
         attachmentAdapter,
-        allowSendWhenInactive: true,
+        allowSendWhenInactive: inactiveCanResume,
         pendingScheduleRef
     })
 
@@ -2139,7 +2139,7 @@ function SessionChatInner(props: SessionChatProps) {
                                             : undefined
                                 }
                                 active={props.session.active}
-                                allowSendWhenInactive
+                                allowSendWhenInactive={inactiveCanResume}
                                 inactiveNotice={sessionInactive
                                     ? inactiveCanResume
                                         ? t('session.inactive.composerAutoResume')

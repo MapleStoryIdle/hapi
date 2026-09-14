@@ -224,12 +224,13 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
 
         const token = parsed.data.replace(/^Bearer\s+/i, '')
         const configuration = getConfiguration()
-        const parsedToken = parseAccessToken(token)
-        if (!parsedToken || !constantTimeEquals(parsedToken.baseToken, configuration.cliApiToken)) {
+        const access = store?.workspaces.authenticate(token, configuration.cliApiToken, 'runner')
+        const parsedToken = store || access ? null : parseAccessToken(token)
+        if (!access && (!parsedToken || !constantTimeEquals(parsedToken.baseToken, configuration.cliApiToken))) {
             return c.json({ error: 'Invalid token' }, 401)
         }
 
-        c.set('namespace', parsedToken.namespace)
+        c.set('namespace', access?.workspace.dataNamespace ?? parsedToken!.namespace)
         return await next()
     })
 
@@ -390,7 +391,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         if (result.type === 'error') {
             const status = result.code === 'access_denied' ? 403
                 : result.code === 'session_not_found' ? 404
-                    : result.code === 'already_local' ? 409
+                    : result.code === 'already_local' || result.code === 'externally_controlled' ? 409
                         : 500
             return c.json({ error: result.message, code: result.code }, status)
         }

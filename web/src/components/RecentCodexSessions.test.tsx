@@ -118,6 +118,50 @@ function createManagedCodexSession(
 }
 
 describe('RecentCodexSessions', () => {
+    it('uses geometry-preserving skeletons instead of loading copy for both session views', () => {
+        const api = createApi()
+        api.getCodexSessions = vi.fn(() => new Promise<never>(() => {}))
+
+        const list = render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    hapiSessions={[]}
+                    hapiIsLoading
+                    onOpen={vi.fn()}
+                    embedded
+                    hideHeader
+                    viewMode="list"
+                />
+            </I18nProvider>
+        )
+        const listSkeleton = screen.getByTestId('session-list-loading')
+        expect(listSkeleton).toHaveAttribute('data-session-list-loading-view', 'list')
+        expect(listSkeleton.querySelectorAll('.session-list-skeleton').length).toBeGreaterThan(0)
+        expect(screen.getByText('Loading…')).toHaveClass('sr-only')
+
+        list.unmount()
+        render(
+            <I18nProvider>
+                <RecentCodexSessions
+                    api={api}
+                    machineId="machine-1"
+                    hapiSessions={[]}
+                    hapiIsLoading
+                    onOpen={vi.fn()}
+                    embedded
+                    hideHeader
+                    viewMode="kanban"
+                />
+            </I18nProvider>
+        )
+        const kanbanSkeleton = screen.getByTestId('session-list-loading')
+        expect(kanbanSkeleton).toHaveAttribute('data-session-list-loading-view', 'kanban')
+        expect(kanbanSkeleton.querySelectorAll('.session-list-skeleton').length).toBeGreaterThan(0)
+        expect(kanbanSkeleton.querySelector('.animate-spin')).toBeNull()
+    })
+
     it('shows the label text in the card side slot with a stable color and opens its editor', async () => {
         const api = createApi()
         api.getSessionLabels = vi.fn(async () => ({

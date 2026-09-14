@@ -82,7 +82,7 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder={t('dialog.rename.placeholder')}
-                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent"
+                    className="ios-form-control w-full px-3 py-2.5 text-base"
                     disabled={isPending}
                     maxLength={255}
                 />

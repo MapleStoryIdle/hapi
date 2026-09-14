@@ -89,6 +89,12 @@ export const MetadataSchema = z.object({
     hostPid: z.number().optional(),
     hapiMcpUrl: z.string().url().optional(),
     startedBy: z.enum(['runner', 'terminal']).optional(),
+    /**
+     * Durable ownership of a managed agent session.  `desktop` means SHAPI
+     * intentionally released the runner and must remain read-only until an
+     * explicit future reclaim flow changes it.
+     */
+    controlOwner: z.enum(['shapi', 'external']).optional(),
     lifecycleState: z.string().optional(),
     lifecycleStateSince: z.number().optional(),
     archivedBy: z.string().optional(),

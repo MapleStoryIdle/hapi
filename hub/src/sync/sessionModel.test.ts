@@ -1725,6 +1725,40 @@ describe('session model', () => {
         }
     })
 
+    it('does not expose an externally controlled session as locally resumable', () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const session = engine.getOrCreateSession(
+                'external-owned-local-resume',
+                {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    machineId: 'machine-1',
+                    flavor: 'codex',
+                    codexSessionId: 'codex-thread-1',
+                    controlOwner: 'external'
+                },
+                null,
+                'default'
+            )
+
+            expect(engine.resolveLocalResumeTarget(session.id, 'default')).toEqual({
+                type: 'error',
+                message: 'This session is controlled by another program and is read-only in SHAPI',
+                code: 'resume_unavailable'
+            })
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('returns resume_unavailable when a cursor session lacks cursorSessionId', () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(
@@ -1964,6 +1998,213 @@ describe('session model', () => {
                 message: 'Session is already controlled by a local terminal',
                 code: 'already_local'
             })
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('local handoff cannot reclaim an externally controlled session', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+        try {
+            const session = engine.getOrCreateSession(
+                'local-handoff-external-owned',
+                {
+                    path: '/tmp/project', host: 'localhost', machineId: 'machine-1', flavor: 'codex',
+                    codexSessionId: 'codex-thread-1', controlOwner: 'external'
+                },
+                { controlledByUser: false },
+                'default'
+            )
+
+            await expect(engine.handoffSessionToLocal(session.id, 'default')).resolves.toEqual({
+                type: 'error',
+                message: 'This session is controlled by another program and cannot be handed to a SHAPI terminal',
+                code: 'externally_controlled'
+            })
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('releases only an idle SHAPI-managed Codex session for another program', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const session = engine.getOrCreateSession(
+                'control-release-idle',
+                {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    machineId: 'machine-1',
+                    flavor: 'codex',
+                    codexSessionId: 'codex-thread-1',
+                    startedFromRunner: true
+                },
+                { controlledByUser: false, requests: {} },
+                'default'
+            )
+            engine.handleSessionAlive({ sid: session.id, time: Date.now(), mode: 'remote' })
+
+            const handoffs: Array<[string, 'local-terminal' | 'external']> = []
+            ;(engine as unknown as {
+                rpcGateway: { handoffSessionToLocal: (sessionId: string, destination: 'local-terminal' | 'external') => Promise<void> }
+                waitForSessionInactive: (sessionId: string) => Promise<boolean>
+            }).rpcGateway = {
+                handoffSessionToLocal: async (sessionId, destination) => { handoffs.push([sessionId, destination]) }
+            }
+            ;(engine as unknown as {
+                waitForSessionInactive: (sessionId: string) => Promise<boolean>
+            }).waitForSessionInactive = async () => true
+
+            await expect(engine.releaseSessionControl(session.id, 'default')).resolves.toEqual({ type: 'success' })
+            expect(handoffs).toEqual([[session.id, 'external']])
+            expect(engine.getSession(session.id)?.metadata?.controlOwner).toBe('external')
+            await expect(engine.sendMessage(session.id, { text: 'must not send' })).rejects.toThrow('read-only in SHAPI')
+            await expect(engine.resumeSession(session.id, 'default')).resolves.toMatchObject({
+                type: 'error', code: 'resume_unavailable'
+            })
+            await expect(engine.reopenSession(session.id, 'default')).resolves.toMatchObject({
+                type: 'error', code: 'resume_unavailable'
+            })
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('refuses control release while a queued message exists', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const session = engine.getOrCreateSession(
+                'control-release-queued',
+                {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    machineId: 'machine-1',
+                    flavor: 'codex',
+                    codexSessionId: 'codex-thread-1',
+                    startedFromRunner: true
+                },
+                { controlledByUser: false, requests: {} },
+                'default'
+            )
+            engine.handleSessionAlive({ sid: session.id, time: Date.now(), mode: 'remote' })
+            store.messages.addMessage(session.id, { role: 'user', content: 'do not lose me' }, 'queued-message')
+
+            await expect(engine.releaseSessionControl(session.id, 'default')).resolves.toEqual({
+                type: 'error',
+                code: 'queued_messages',
+                message: 'Send or cancel all queued messages before releasing control'
+            })
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('durably assigns an already inactive managed Codex session to external control', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+        try {
+            const session = engine.getOrCreateSession(
+                'control-release-inactive',
+                {
+                    path: '/tmp/project', host: 'localhost', machineId: 'machine-1', flavor: 'codex',
+                    codexSessionId: 'codex-thread-1', startedFromRunner: true
+                },
+                { controlledByUser: false, requests: {} },
+                'default'
+            )
+
+            await expect(engine.releaseSessionControl(session.id, 'default')).resolves.toEqual({ type: 'success' })
+            expect(engine.getSession(session.id)?.metadata?.controlOwner).toBe('external')
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('does not report an active externally-marked session released without contacting its runner', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+        try {
+            const session = engine.getOrCreateSession(
+                'control-release-active-marker',
+                {
+                    path: '/tmp/project', host: 'localhost', machineId: 'machine-1', flavor: 'codex',
+                    codexSessionId: 'codex-thread-1', startedFromRunner: true, controlOwner: 'external'
+                },
+                { controlledByUser: false, requests: {} },
+                'default'
+            )
+            engine.handleSessionAlive({ sid: session.id, time: Date.now(), mode: 'remote' })
+
+            let handoffCount = 0
+            ;(engine as unknown as {
+                rpcGateway: { handoffSessionToLocal: () => Promise<void> }
+                waitForSessionInactive: () => Promise<boolean>
+            }).rpcGateway = {
+                handoffSessionToLocal: async () => { handoffCount += 1 }
+            }
+            ;(engine as unknown as { waitForSessionInactive: () => Promise<boolean> }).waitForSessionInactive = async () => true
+
+            await expect(engine.releaseSessionControl(session.id, 'default')).resolves.toEqual({ type: 'success' })
+            expect(handoffCount).toBe(1)
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('gates concurrent sends and releases while the control-release RPC is pending', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
+        try {
+            const session = engine.getOrCreateSession(
+                'control-release-race',
+                {
+                    path: '/tmp/project', host: 'localhost', machineId: 'machine-1', flavor: 'codex',
+                    codexSessionId: 'codex-thread-1', startedFromRunner: true
+                },
+                { controlledByUser: false, requests: {} },
+                'default'
+            )
+            engine.handleSessionAlive({ sid: session.id, time: Date.now(), mode: 'remote' })
+
+            let releaseRpcEntered!: () => void
+            const rpcEntered = new Promise<void>((resolve) => { releaseRpcEntered = resolve })
+            let finishRpc!: () => void
+            const rpcFinished = new Promise<void>((resolve) => { finishRpc = resolve })
+            ;(engine as unknown as {
+                rpcGateway: { handoffSessionToLocal: () => Promise<void> }
+                waitForSessionInactive: () => Promise<boolean>
+            }).rpcGateway = {
+                handoffSessionToLocal: async () => {
+                    releaseRpcEntered()
+                    await rpcFinished
+                }
+            }
+            ;(engine as unknown as { waitForSessionInactive: () => Promise<boolean> }).waitForSessionInactive = async () => true
+
+            const releasing = engine.releaseSessionControl(session.id, 'default')
+            await rpcEntered
+            await expect(engine.sendMessage(session.id, { text: 'race message' })).rejects.toThrow('releasing control')
+            await expect(engine.releaseSessionControl(session.id, 'default')).resolves.toMatchObject({
+                type: 'error', code: 'release_in_progress'
+            })
+            finishRpc()
+            await expect(releasing).resolves.toEqual({ type: 'success' })
+            expect(store.messages.getUninvokedLocalMessages(session.id)).toHaveLength(0)
         } finally {
             engine.stop()
         }

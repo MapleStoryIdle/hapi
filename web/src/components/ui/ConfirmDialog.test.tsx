@@ -21,6 +21,8 @@ it('stacks confirmation content and scrim above bottom drawers', () => {
         </I18nProvider>
     )
     const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveClass('app-safe-dialog')
+    expect(dialog).not.toHaveClass('top-1/2', '-translate-y-1/2')
     expect(dialog).toHaveStyle({ zIndex: '201' })
     expect(dialog.previousElementSibling).toHaveStyle({ zIndex: '200' })
 })

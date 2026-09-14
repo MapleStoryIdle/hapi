@@ -1,6 +1,19 @@
-# Namespace (Advanced)
+# Legacy namespace migration
 
-Namespaces are intended for small teams sharing a single public SHAPI hub. Each team member uses a different namespace to isolate their sessions and machines without running separate hubs.
+New SHAPI installations use independent workspace access keys. A credential is
+looked up by its hash and resolves to one immutable workspace ID; clients cannot
+choose a workspace by editing a token suffix.
+
+The older `CLI_API_TOKEN:<namespace>` format remains only as a migration bridge
+for namespaces already present in the Hub database. It cannot create a new
+namespace. After issuing separate Web and Runner keys for a workspace, revoke
+the legacy key from the workspace access-key API.
+
+See [Workspaces and access keys](./workspaces.md) for the current model.
+
+## Previous behavior
+
+Namespaces were intended for small teams sharing a single public SHAPI hub. Each team member used a different namespace to isolate their sessions and machines without running separate hubs.
 
 This is not a default setup path for most users.
 

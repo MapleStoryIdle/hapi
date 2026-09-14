@@ -60,6 +60,7 @@ const FilePage = lazy(() => import('@/routes/sessions/file'))
 const CodexFilePage = lazy(() => import('@/routes/sessions/codex-file'))
 const TerminalPage = lazy(() => import('@/routes/sessions/terminal'))
 const OpenVikingPage = lazy(() => import('@/routes/memory'))
+const PluginsPage = lazy(() => import('@/routes/plugins'))
 const SettingsPage = lazy(() => import('@/routes/settings'))
 const SharePage = lazy(() => import('@/routes/share'))
 const SharesPage = lazy(() => import('@/routes/shares'))
@@ -593,8 +594,8 @@ function SessionsPage() {
             case 'browse':
                 navigate({ to: '/browse' })
                 return
-            case 'memory':
-                navigate({ to: '/memory' })
+            case 'plugins':
+                navigate({ to: '/plugins' })
                 return
             case 'shares':
                 navigate({ to: '/shares' })
@@ -906,7 +907,7 @@ function SessionsPage() {
                                 <option value="" disabled>{t('session.more')}</option>
                                 <option value="new">{t('sessions.new')}</option>
                                 <option value="browse">{t('browse.nav')}</option>
-                                <option value="memory">{t('openViking.nav')}</option>
+                                <option value="plugins">{t('plugins.title')}</option>
                                 <option value="shares">{t('shares.nav')}</option>
                                 <option value="monitors">{t('monitors.nav')}</option>
                                 <option value="settings">{t('settings.title')}</option>
@@ -1830,9 +1831,15 @@ const browseRoute = createRoute({
     component: BrowsePage,
 })
 
-const memoryRoute = createRoute({
+const pluginsRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/memory',
+    path: '/plugins',
+    component: PluginsPage,
+})
+
+const openVikingPluginRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/plugins/openviking',
     validateSearch: (search: Record<string, unknown>): { machineId?: string } => {
         const machineId = typeof search.machineId === 'string' && search.machineId.trim().length > 0
             ? search.machineId
@@ -1946,7 +1953,8 @@ export const routeTree = rootRoute.addChildren([
         ]),
     ]),
     browseRoute,
-    memoryRoute,
+    pluginsRoute,
+    openVikingPluginRoute,
     sharesRoute.addChildren([
         sharesIndexRoute,
         kanbanTaskRoute,

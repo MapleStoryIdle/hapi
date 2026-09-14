@@ -128,7 +128,7 @@ export function VoicePersonaControls(props: {
                     <textarea value={identityEditor}
                         onChange={(e) => setIdentity(e.target.value === DEFAULT_VOICE_IDENTITY ? '' : e.target.value)}
                         rows={6} maxLength={VOICE_IDENTITY_MAX_LENGTH} spellCheck={false}
-                        className="w-full resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-2 font-mono text-xs leading-relaxed text-[var(--app-fg)]" />
+                        className="ios-form-control w-full resize-y px-3 py-2.5 font-mono text-xs leading-relaxed" />
                     <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={resetIdentity}
                             className="rounded-md border border-[var(--app-border)] px-2 py-1 text-xs text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]">
@@ -154,7 +154,7 @@ export function VoicePersonaControls(props: {
                     <textarea value={characterEditor}
                         onChange={(e) => setCharacter(e.target.value === DEFAULT_VOICE_CHARACTER ? '' : e.target.value)}
                         rows={8} maxLength={VOICE_CHARACTER_MAX_LENGTH} spellCheck={false}
-                        className="w-full resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-2 font-mono text-xs leading-relaxed text-[var(--app-fg)]" />
+                        className="ios-form-control w-full resize-y px-3 py-2.5 font-mono text-xs leading-relaxed" />
                     <div className="flex flex-wrap items-center gap-2">
                         <button type="button" onClick={resetCharacter}
                             className="rounded-md border border-[var(--app-border)] px-2 py-1 text-xs text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]">

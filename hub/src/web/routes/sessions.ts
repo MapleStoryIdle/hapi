@@ -475,6 +475,32 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ ok: true })
     })
 
+    app.post('/sessions/:id/release-control', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const result = await engine.releaseSessionControl(
+            sessionResult.sessionId,
+            c.get('namespace')
+        )
+        if (result.type === 'error') {
+            const status = result.code === 'access_denied' ? 403
+                : result.code === 'session_not_found' ? 404
+                    : result.code === 'release_unavailable' || result.code === 'release_in_progress' || result.code === 'session_busy' || result.code === 'queued_messages' || result.code === 'release_uncertain' ? 409
+                        : 500
+            return c.json({ error: result.message, code: result.code }, status)
+        }
+
+        return c.json({ ok: true })
+    })
+
     app.post('/sessions/:id/migrate-to-acp', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {

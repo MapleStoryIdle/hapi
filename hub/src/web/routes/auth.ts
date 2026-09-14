@@ -2,15 +2,16 @@ import { Hono } from 'hono'
 import { SignJWT } from 'jose'
 import { AuthRequestSchema } from '@hapi/protocol'
 import { getConfiguration } from '../../configuration'
-import { constantTimeEquals } from '../../utils/crypto'
-import { parseAccessToken } from '../../utils/accessToken'
 import { validateTelegramInitData } from '../telegramInitData'
 import { getOrCreateOwnerId } from '../../config/ownerId'
 import type { WebAppEnv } from '../middleware/auth'
 import type { Store } from '../../store'
+import { bodyLimit } from 'hono/body-limit'
 
 export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
+    app.use('/auth', bodyLimit({ maxSize: 16_384, onError: c => c.json({ error: 'Request too large' }, 413) }))
+    app.use('/auth', async (c, next) => { c.header('Cache-Control', 'no-store'); c.header('Pragma', 'no-cache'); await next() })
 
     app.post('/auth', async (c) => {
         const json = await c.req.json().catch(() => null)
@@ -24,17 +25,23 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
         let firstName: string | undefined
         let lastName: string | undefined
         let namespace: string
+        let workspaceId: string
+        let accessKeyId = 'telegram'
+        let accessKind: 'legacy' | 'web' = 'web'
 
         // Access Token authentication (CLI_API_TOKEN)
         if ('accessToken' in parsed.data) {
             const configuration = getConfiguration()
-            const parsedToken = parseAccessToken(parsed.data.accessToken)
-            if (!parsedToken || !constantTimeEquals(parsedToken.baseToken, configuration.cliApiToken)) {
+            const access = store.workspaces.authenticate(parsed.data.accessToken, configuration.cliApiToken, 'web')
+            if (!access) {
                 return c.json({ error: 'Invalid access token' }, 401)
             }
             userId = await getOrCreateOwnerId()
             firstName = 'Web User'
-            namespace = parsedToken.namespace
+            namespace = access.workspace.dataNamespace
+            workspaceId = access.workspace.id
+            accessKeyId = access.accessKeyId
+            accessKind = access.kind === 'legacy' ? 'legacy' : 'web'
         } else {
             const configuration = getConfiguration()
             if (!configuration.telegramEnabled || !configuration.telegramBotToken) {
@@ -58,9 +65,10 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
             firstName = result.user.first_name
             lastName = result.user.last_name
             namespace = storedUser.namespace
+            workspaceId = store.workspaces.ensureLegacyWorkspace(namespace).id
         }
 
-        const token = await new SignJWT({ uid: userId, ns: namespace })
+        const token = await new SignJWT({ uid: userId, wid: workspaceId!, ns: namespace, aid: accessKeyId, kind: accessKind })
             .setProtectedHeader({ alg: 'HS256' })
             .setIssuedAt()
             .setExpirationTime('4h')

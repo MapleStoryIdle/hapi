@@ -8,7 +8,7 @@ import {
     type CSSProperties,
     type ReactNode
 } from 'react'
-import { Activity, GitBranch, GitFork, LoaderCircle, Layers, Type } from 'lucide-react'
+import { Activity, GitBranch, GitFork, LoaderCircle, MonitorOff } from 'lucide-react'
 import { useTranslation } from '@/lib/use-translation'
 
 type SessionActionMenuProps = {
@@ -16,10 +16,9 @@ type SessionActionMenuProps = {
     onClose: () => void
     sessionActive: boolean
     onRename?: () => void
-    onSetGroup?: () => void
-    onSetLabel?: () => void
     onExport?: () => void
     onArchive?: () => void
+    onReleaseControl?: () => void
     onReopen?: () => void
     onDelete?: () => void
     onRefresh?: () => void
@@ -198,6 +197,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onRename,
         onExport,
         onArchive,
+        onReleaseControl,
         onReopen,
         onDelete,
         onRefresh,
@@ -233,6 +233,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleArchive = () => {
         onClose()
         onArchive?.()
+    }
+
+    const handleReleaseControl = () => {
+        onClose()
+        onReleaseControl?.()
     }
 
     const handleReopen = () => {
@@ -373,7 +378,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const baseItemClassName =
         'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
     const hasTopActions = Boolean(onRefresh || onGitBranches || onFork || onToggleFiles || onToggleOutline || onCreateSideSession || onCreateMonitor)
-    const hasLifecycleActions = Boolean(onRename || onExport || onArchive || onReopen || onDelete)
+    const hasLifecycleActions = Boolean(onRename || onExport || onArchive || onReleaseControl || onReopen || onDelete)
 
     return (
         <div
@@ -500,16 +505,6 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     </button>
                 ) : null}
 
-                {props.onSetGroup ? <button type="button" role="menuitem" className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`} onClick={() => { onClose(); props.onSetGroup?.() }}>
-                    <Layers className="h-[18px] w-[18px] text-[var(--app-hint)]" aria-hidden="true" />
-                    {t('session.groups.title')}
-                </button> : null}
-
-                {props.onSetLabel ? <button type="button" role="menuitem" className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`} onClick={() => { onClose(); props.onSetLabel?.() }}>
-                    <Type className="h-[18px] w-[18px] text-[var(--app-hint)]" aria-hidden="true" />
-                    {t('session.labels.title')}
-                </button> : null}
-
                 {onExport ? (
                     <button
                         type="button"
@@ -523,15 +518,28 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                 ) : null}
 
                 {sessionActive && onArchive ? (
-                    <button
-                        type="button"
-                        role="menuitem"
-                        className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
-                        onClick={handleArchive}
-                    >
-                        <ArchiveIcon className="text-red-500" />
-                        {t('session.action.archive')}
-                    </button>
+                    <>
+                        {onReleaseControl ? (
+                            <button
+                                type="button"
+                                role="menuitem"
+                                className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                                onClick={handleReleaseControl}
+                            >
+                                <MonitorOff className="h-[18px] w-[18px] shrink-0 text-[var(--app-hint)]" strokeWidth={1.8} aria-hidden="true" />
+                                {t('session.action.releaseControl')}
+                            </button>
+                        ) : null}
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
+                            onClick={handleArchive}
+                        >
+                            <ArchiveIcon className="text-red-500" />
+                            {t('session.action.archive')}
+                        </button>
+                    </>
                 ) : !sessionActive ? (
                     <>
                         {onReopen ? (

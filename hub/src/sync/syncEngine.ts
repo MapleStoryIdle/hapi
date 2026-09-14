@@ -30,6 +30,7 @@ import type {
     MachineGitBranchUpdateRequest,
     OpenVikingContextListRequest,
     OpenVikingContextReadRequest,
+    OpenVikingSearchRequest,
     SlashCommandsResponse,
 } from '@hapi/protocol/apiTypes'
 import type {
@@ -55,6 +56,7 @@ import { MachineCache, type Machine } from './machineCache'
 import { MessageService } from './messageService'
 import {
     RpcGateway,
+    HandoffRejectedError,
     RpcTargetMissingError,
     type RpcCodexModel,
     type RpcCommandResponse,
@@ -74,6 +76,9 @@ import {
     type RpcLocalPreviewProbeResponse,
     type RpcOpenVikingContextListResponse,
     type RpcOpenVikingContextReadResponse,
+    type RpcOpenVikingMetricsResponse,
+    type RpcOpenVikingQualityResponse,
+    type RpcOpenVikingSearchResponse,
     type RpcOpenVikingStatusResponse,
     type RpcCursorModel,
     type RpcCodexLocalSessionComposerCapabilitiesResponse,
@@ -163,7 +168,15 @@ export type LocalResumeTargetResult =
 
 export type LocalHandoffResult =
     | { type: 'success' }
-    | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'handoff_failed' }
+    | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'externally_controlled' | 'handoff_failed' }
+
+export type ControlReleaseResult =
+    | { type: 'success' }
+    | {
+        type: 'error'
+        message: string
+        code: 'session_not_found' | 'access_denied' | 'release_unavailable' | 'release_in_progress' | 'session_busy' | 'queued_messages' | 'release_failed' | 'release_uncertain'
+    }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -290,6 +303,8 @@ export class SyncEngine {
     private generatedImageCleanupTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP load/newSession complete). */
     private readonly sessionReadyIds = new Set<string>()
+    /** Transient gate; durable `metadata.controlOwner` is authoritative after restart. */
+    private readonly controlReleaseSessionIds = new Set<string>()
 
     constructor(
         private readonly store: Store,
@@ -600,6 +615,13 @@ export class SyncEngine {
             scheduledAt?: number | null
         }
     ): Promise<void> {
+        const session = this.getSession(sessionId)
+        if (this.controlReleaseSessionIds.has(sessionId)) {
+            throw new Error('SHAPI is releasing control of this session')
+        }
+        if (session?.metadata?.controlOwner === 'external') {
+            throw new Error('This session is controlled by another program and is read-only in SHAPI')
+        }
         await this.messageService.sendMessage(sessionId, payload)
         this.sessionCache.markMessageQueued(sessionId)
         this.sessionCache.recordSessionActivity(sessionId, Date.now())
@@ -1073,6 +1095,13 @@ export class SyncEngine {
 
         const session = access.session
         const metadata = session.metadata
+        if (metadata?.controlOwner === 'external') {
+            return {
+                type: 'error',
+                message: 'This session is controlled by another program and is read-only in SHAPI',
+                code: 'resume_unavailable'
+            }
+        }
         if (!metadata || typeof metadata.path !== 'string' || metadata.path.length === 0) {
             return { type: 'error', message: 'Session metadata missing path', code: 'resume_unavailable' }
         }
@@ -1419,6 +1448,12 @@ export class SyncEngine {
         }
 
         const initialSession = access.session
+        if (this.controlReleaseSessionIds.has(access.sessionId)) {
+            return { type: 'error', message: 'SHAPI is releasing control of this session', code: 'resume_unavailable' }
+        }
+        if (initialSession.metadata?.controlOwner === 'external') {
+            return { type: 'error', message: 'This session is controlled by another program and is read-only in SHAPI', code: 'resume_unavailable' }
+        }
         if (initialSession.active) {
             return { type: 'success', sessionId: access.sessionId }
         }
@@ -1570,6 +1605,13 @@ export class SyncEngine {
         const session = access.session
         const metadata = session.metadata
 
+        if (this.controlReleaseSessionIds.has(access.sessionId)) {
+            return { type: 'error', message: 'SHAPI is releasing control of this session', code: 'resume_unavailable' }
+        }
+        if (metadata?.controlOwner === 'external') {
+            return { type: 'error', message: 'This session is controlled by another program and is read-only in SHAPI', code: 'resume_unavailable' }
+        }
+
         if (session.active) {
             return { type: 'success', sessionId: access.sessionId, resumed: false }
         }
@@ -1646,6 +1688,14 @@ export class SyncEngine {
             }
         }
 
+        if (access.session.metadata?.controlOwner === 'external') {
+            return {
+                type: 'error',
+                message: 'This session is controlled by another program and cannot be handed to a SHAPI terminal',
+                code: 'externally_controlled'
+            }
+        }
+
         if (!access.session.active) {
             return { type: 'success' }
         }
@@ -1678,6 +1728,174 @@ export class SyncEngine {
         }
 
         return { type: 'success' }
+    }
+
+    /**
+     * Stop only the SHAPI-owned Codex runner process so another program can
+     * reopen the persisted native thread.  This deliberately does not start
+     * or launch another controller. Refusing while a turn or queued delivery exists
+     * is safer than claiming a message was delivered during the handoff.
+     */
+    async releaseSessionControl(sessionId: string, namespace: string): Promise<ControlReleaseResult> {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) {
+            return {
+                type: 'error',
+                message: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found',
+                code: access.reason === 'access-denied' ? 'access_denied' : 'session_not_found'
+            }
+        }
+
+        const session = access.session
+        if (this.controlReleaseSessionIds.has(access.sessionId)) {
+            return {
+                type: 'error',
+                message: 'SHAPI is already releasing control for this session',
+                code: 'release_in_progress'
+            }
+        }
+        if (session.metadata?.controlOwner === 'external' && !session.active) {
+            // Durable, inactive external ownership makes retries idempotent.
+            // An active row must still contact the runner: the marker may be
+            // left behind by a lost acknowledgement before teardown.
+            return { type: 'success' }
+        }
+        this.controlReleaseSessionIds.add(access.sessionId)
+
+        try {
+            if (session.metadata?.flavor !== 'codex' || session.metadata.startedFromRunner !== true) {
+                return {
+                    type: 'error',
+                    message: 'Only SHAPI-managed Codex sessions can be released from SHAPI control',
+                    code: 'release_unavailable'
+                }
+            }
+
+            if (!session.active) {
+                try {
+                    await this.sessionCache.setSessionControlOwner(access.sessionId, 'external')
+                } catch (error) {
+                    return {
+                        type: 'error',
+                        message: error instanceof Error ? error.message : 'Failed to reserve external control',
+                        code: 'release_failed'
+                    }
+                }
+                return { type: 'success' }
+            }
+
+            if (session.agentState?.controlledByUser === true) {
+                return {
+                    type: 'error',
+                    message: 'Session is already controlled by a local terminal',
+                    code: 'release_unavailable'
+                }
+            }
+
+            const pendingRequests = Object.keys(session.agentState?.requests ?? {}).length
+            if (session.thinking || session.backgroundTaskCount || pendingRequests > 0) {
+                return {
+                    type: 'error',
+                    message: 'Wait for the current Codex turn to finish before releasing control',
+                    code: 'session_busy'
+                }
+            }
+
+            const queued = this.store.messages.getUninvokedLocalMessages(access.sessionId)
+            if (queued.length > 0) {
+                return {
+                    type: 'error',
+                    message: 'Send or cancel all queued messages before releasing control',
+                    code: 'queued_messages'
+                }
+            }
+
+            // Claim ownership before sending the RPC. Every web send/resume path
+            // now consults this durable marker, so a lost acknowledgement cannot
+            // race a new SHAPI-controlled turn into the same Codex thread.
+            try {
+                await this.sessionCache.setSessionControlOwner(access.sessionId, 'external')
+            } catch (error) {
+                return {
+                    type: 'error',
+                    message: error instanceof Error ? error.message : 'Failed to reserve external control',
+                    code: 'release_failed'
+                }
+            }
+
+            // A send that began immediately before the gate was set can finish
+            // during the version-safe metadata write. This point is still before
+            // the RPC, so clear our provisional marker and refuse safely.
+            if (this.store.messages.getUninvokedLocalMessages(access.sessionId).length > 0) {
+                try {
+                    await this.sessionCache.clearSessionControlOwner(access.sessionId, 'external')
+                } catch {
+                    return {
+                        type: 'error',
+                        message: 'Queued messages appeared while releasing control; SHAPI kept the session read-only to avoid duplicate delivery',
+                        code: 'release_uncertain'
+                    }
+                }
+                return {
+                    type: 'error',
+                    message: 'Send or cancel all queued messages before releasing control',
+                    code: 'queued_messages'
+                }
+            }
+
+            try {
+                await this.rpcGateway.handoffSessionToLocal(access.sessionId, 'external')
+            } catch (error) {
+                // Only an explicit runner refusal or a missing target is known to
+                // be pre-handoff. Timeouts/protocol failures are ambiguous, so
+                // retain the marker and make SHAPI read-only.
+                if (error instanceof HandoffRejectedError || error instanceof RpcTargetMissingError) {
+                    try {
+                        await this.sessionCache.clearSessionControlOwner(access.sessionId, 'external')
+                    } catch {
+                        return {
+                            type: 'error',
+                            message: 'Runner refused release, but SHAPI could not safely clear the external ownership marker',
+                            code: 'release_uncertain'
+                        }
+                    }
+                    return {
+                        type: 'error',
+                        message: error.message,
+                        code: 'release_failed'
+                    }
+                }
+                return {
+                    type: 'error',
+                    message: 'Release status was not confirmed; SHAPI kept this session read-only for another program',
+                    code: 'release_uncertain'
+                }
+            }
+
+            // After the runner acknowledgement it is unsafe to roll ownership
+            // back. If a late queued row exists, leave it visibly unsent and
+            // require a future explicit recovery rather than falsely delivering.
+            if (this.store.messages.getUninvokedLocalMessages(access.sessionId).length > 0) {
+                return {
+                    type: 'error',
+                    message: 'A queued message was detected during release; SHAPI kept the session read-only and did not mark it delivered',
+                    code: 'release_uncertain'
+                }
+            }
+
+            const inactive = await this.waitForSessionInactive(access.sessionId)
+            if (!inactive) {
+                return {
+                    type: 'error',
+                    message: 'Release status was not confirmed; SHAPI kept this session read-only for another program',
+                    code: 'release_uncertain'
+                }
+            }
+
+            return { type: 'success' }
+        } finally {
+            this.controlReleaseSessionIds.delete(access.sessionId)
+        }
     }
 
     private recoverClaudeSessionIdFromMessages(sessionId: string, namespace: string): string | null {
@@ -2224,6 +2442,18 @@ export class SyncEngine {
 
     async readOpenVikingContext(machineId: string, request: OpenVikingContextReadRequest): Promise<RpcOpenVikingContextReadResponse> {
         return await this.rpcGateway.readOpenVikingContext(machineId, request)
+    }
+
+    async getOpenVikingMetrics(machineId: string): Promise<RpcOpenVikingMetricsResponse> {
+        return await this.rpcGateway.getOpenVikingMetrics(machineId)
+    }
+
+    async searchOpenViking(machineId: string, request: OpenVikingSearchRequest): Promise<RpcOpenVikingSearchResponse> {
+        return await this.rpcGateway.searchOpenViking(machineId, request)
+    }
+
+    async getOpenVikingQuality(machineId: string): Promise<RpcOpenVikingQualityResponse> {
+        return await this.rpcGateway.getOpenVikingQuality(machineId)
     }
 
     /** Generic Pi RPC — delegates to rpcGateway.callPiRpc. */

@@ -64,6 +64,7 @@ function createApp(session: Session, opts?: {
     getSessionExport?: (sessionId: string, session: Session) => unknown
     sessionExists?: boolean
     archiveSession?: (sessionId: string) => Promise<void>
+    releaseSessionControl?: (sessionId: string, namespace: string) => Promise<{ type: string; message?: string; code?: string }>
     uploadFileBytes?: SyncEngine['uploadFileBytes']
     readUploadedFileBytes?: SyncEngine['readUploadedFileBytes']
 }) {
@@ -120,6 +121,7 @@ function createApp(session: Session, opts?: {
     }))
     const sessionExists = opts?.sessionExists !== false
     const archiveSessionMock = opts?.archiveSession ?? (async () => {})
+    const releaseSessionControl = opts?.releaseSessionControl ?? (async () => ({ type: 'success' }))
     const engine = {
         resolveSessionAccess: () => sessionExists
             ? { ok: true, sessionId: session.id, session }
@@ -133,6 +135,7 @@ function createApp(session: Session, opts?: {
         resumeSession,
         reopenSession,
         archiveSession: archiveSessionMock,
+        releaseSessionControl,
         getSessionExport: opts?.getSessionExport ?? (() => ({
             type: 'success',
             payload: {
@@ -1142,6 +1145,68 @@ describe('sessions routes', () => {
                 { name: 'clear', source: 'builtin' },
                 { name: 'project-only', source: 'project', content: 'Project prompt' }
             ]
+        })
+    })
+
+    describe('POST /sessions/:id/release-control', () => {
+        it('releases an authorized managed Codex session through the same namespace', async () => {
+            const calls: Array<[string, string]> = []
+            const session = createSession({
+                metadata: {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'codex',
+                    startedFromRunner: true
+                }
+            })
+            const { app } = createApp(session, {
+                releaseSessionControl: async (sessionId, namespace) => {
+                    calls.push([sessionId, namespace])
+                    return { type: 'success' }
+                }
+            })
+
+            const response = await app.request('/api/sessions/session-1/release-control', { method: 'POST' })
+
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({ ok: true })
+            expect(calls).toEqual([['session-1', 'default']])
+        })
+
+        it('returns a conflict without pretending a busy session was released', async () => {
+            const session = createSession()
+            const { app } = createApp(session, {
+                releaseSessionControl: async () => ({
+                    type: 'error',
+                    code: 'queued_messages',
+                    message: 'Send or cancel all queued messages before releasing control'
+                })
+            })
+
+            const response = await app.request('/api/sessions/session-1/release-control', { method: 'POST' })
+
+            expect(response.status).toBe(409)
+            expect(await response.json()).toEqual({
+                error: 'Send or cancel all queued messages before releasing control',
+                code: 'queued_messages'
+            })
+        })
+
+        it('returns 404 before attempting a release for an unknown session', async () => {
+            const session = createSession()
+            let called = false
+            const { app } = createApp(session, {
+                sessionExists: false,
+                releaseSessionControl: async () => {
+                    called = true
+                    return { type: 'success' }
+                }
+            })
+
+            const response = await app.request('/api/sessions/missing/release-control', { method: 'POST' })
+
+            expect(response.status).toBe(404)
+            expect(called).toBe(false)
         })
     })
 

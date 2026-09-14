@@ -175,6 +175,79 @@ const EMPTY_SESSION_GROUPS: ReadonlyMap<string, SessionGroup> = new Map()
 const KANBAN_HEADING_CLASS_NAME = 'text-xs font-semibold tracking-[0.04em] text-[var(--app-hint)]'
 const KANBAN_DATE_EMOJIS = ['🌿', '🌤️', '🌻', '🍀', '🌙', '🌊', '🍁', '✨', '🌸', '🪴', '🪁', '🍊'] as const
 
+function SessionListLoadingSkeleton(props: { viewMode?: 'list' | 'kanban'; label: string }) {
+    const isKanban = props.viewMode === 'kanban'
+
+    if (isKanban) {
+        return (
+            <div
+                role="status"
+                aria-label={props.label}
+                className="mt-2 flex min-h-0 flex-col gap-4 pb-3"
+                data-testid="session-list-loading"
+                data-session-list-loading-view="kanban"
+            >
+                <span className="sr-only">{props.label}</span>
+                {[0, 1].map((section) => (
+                    <section key={section} className="min-w-0" aria-hidden="true">
+                        <div className="flex h-11 items-center gap-2 px-1">
+                            <span className="session-list-skeleton h-3.5 w-3.5 rounded-full" />
+                            <span className={`session-list-skeleton h-3 rounded-full ${section === 0 ? 'w-20' : 'w-14'}`} />
+                        </div>
+                        <div className="flex flex-col gap-2.5">
+                            {[0, 1].map((row) => (
+                                <div
+                                    key={row}
+                                    className="flex min-h-[112px] items-start gap-3 rounded-[20px] border border-[var(--app-border)] bg-[var(--app-bg)] px-4 py-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                                >
+                                    <span className="session-list-skeleton mt-0.5 h-9 w-9 shrink-0 rounded-full" style={{ animationDelay: `${(section * 2 + row) * 90}ms` }} />
+                                    <span className="min-w-0 flex-1 space-y-3">
+                                        <span className="session-list-skeleton block h-4 w-[72%] rounded-full" style={{ animationDelay: `${(section * 2 + row) * 90 + 35}ms` }} />
+                                        <span className="session-list-skeleton block h-3 w-[58%] rounded-full" style={{ animationDelay: `${(section * 2 + row) * 90 + 70}ms` }} />
+                                        <span className="session-list-skeleton block h-3 w-[42%] rounded-full" style={{ animationDelay: `${(section * 2 + row) * 90 + 105}ms` }} />
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+                ))}
+            </div>
+        )
+    }
+
+    return (
+        <div
+            role="status"
+            aria-label={props.label}
+            className="mt-2 flex min-h-0 flex-col gap-2 pb-3"
+            data-testid="session-list-loading"
+            data-session-list-loading-view="list"
+        >
+            <span className="sr-only">{props.label}</span>
+            {[0, 1, 2].map((section) => (
+                <section key={section} className="min-w-0 py-1" aria-hidden="true">
+                    <div className="flex min-h-11 items-center gap-3 px-2">
+                        <span className="session-list-skeleton h-[25px] w-[25px] shrink-0 rounded-[7px]" style={{ animationDelay: `${section * 100}ms` }} />
+                        <span className={`session-list-skeleton h-4 rounded-full ${section === 1 ? 'w-24' : 'w-32'}`} style={{ animationDelay: `${section * 100 + 35}ms` }} />
+                    </div>
+                    <div className="ml-5 border-l border-[var(--app-divider)] py-1 pl-3.5">
+                        {[0, 1].map((row) => (
+                            <div key={row} className="flex min-h-[3.5rem] items-center gap-3 rounded-2xl px-2.5 py-2">
+                                <span className="session-list-skeleton h-8 w-8 shrink-0 rounded-full" style={{ animationDelay: `${section * 100 + row * 70}ms` }} />
+                                <span className="min-w-0 flex-1 space-y-2">
+                                    <span className={`session-list-skeleton block h-3.5 rounded-full ${row === 0 ? 'w-[68%]' : 'w-[52%]'}`} style={{ animationDelay: `${section * 100 + row * 70 + 30}ms` }} />
+                                    <span className="session-list-skeleton block h-2.5 w-[38%] rounded-full" style={{ animationDelay: `${section * 100 + row * 70 + 60}ms` }} />
+                                </span>
+                                <span className="session-list-skeleton h-2.5 w-10 shrink-0 rounded-full" style={{ animationDelay: `${section * 100 + row * 70 + 90}ms` }} />
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            ))}
+        </div>
+    )
+}
+
 /** Varied by calendar date, stable across refreshes and locale changes. */
 export function getKanbanDateEmoji(dateKey: string): string {
     let hash = 0
@@ -1629,7 +1702,7 @@ export function RecentCodexSessions(props: {
             ) : null}
 
             {busy && !hasRows ? (
-                <div className="cupertino-session-state mt-3 px-2 text-sm text-[var(--app-hint)]">{t('loading')}</div>
+                <SessionListLoadingSkeleton viewMode={props.viewMode} label={t('loading')} />
             ) : !props.machineId ? (
                 <div className="cupertino-session-state mt-3 px-2 py-2 text-xs leading-5 text-[var(--app-hint)]">
                     {t('recentCodex.runnerRequired')}

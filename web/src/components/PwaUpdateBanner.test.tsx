@@ -69,7 +69,8 @@ describe('PwaUpdateBanner', () => {
 
         const prompt = screen.getByTestId('pwa-update-prompt')
         expect(prompt).toBeInTheDocument()
-        expect(prompt).toHaveClass('left-1/2', 'top-1/2', '-translate-x-1/2', '-translate-y-1/2')
+        expect(prompt).toHaveClass('app-safe-dialog', 'left-1/2', '-translate-x-1/2')
+        expect(prompt).not.toHaveClass('top-1/2', '-translate-y-1/2')
         expect(screen.getByText('New version available')).toBeInTheDocument()
         expect(screen.getByText('A new version is ready. Updating now reloads this page.')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument()

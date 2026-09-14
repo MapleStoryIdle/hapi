@@ -138,7 +138,7 @@ export function LoginPrompt(props: LoginPromptProps) {
                             placeholder={t('login.placeholder')}
                             autoComplete="current-password"
                             disabled={isLoading}
-                            className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                            className="ios-form-control w-full px-3 py-2.5 text-base"
                         />
                     </div>
 
@@ -198,7 +198,7 @@ export function LoginPrompt(props: LoginPromptProps) {
                                                 setServerError(null)
                                             }}
                                             placeholder={t('login.server.placeholder')}
-                                            className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent"
+                                            className="ios-form-control w-full px-3 py-2.5 text-base"
                                         />
                                         <div className="text-[11px] text-[var(--app-hint)]">
                                             {t('login.server.hint')}

@@ -232,6 +232,41 @@ describe('SessionHeader back action', () => {
         expect(screen.queryByText('/workspace/old')).not.toBeInTheDocument()
     })
 
+    it('groups title metadata into compact iOS-style sections inside the safe area', () => {
+        const onSetGroup = vi.fn()
+        render(
+            <I18nProvider>
+                <SessionTitleDetails
+                    title="Investigate production API latency"
+                    sessionId="ios-grouped-details"
+                    details={[
+                        { key: 'title', label: 'Full name', value: 'Investigate production API latency' },
+                        { key: 'group', label: 'Group', value: '🚀 Release', onSelect: onSetGroup },
+                        { key: 'label', label: 'Label', value: 'Urgent' },
+                        { key: 'path', label: 'Project path', value: '/workspace/hapi' },
+                        { key: 'last-activity', label: 'Last activity', value: '9/13/2026, 7:30 PM' },
+                        { key: 'agent', label: 'Agent', value: 'Codex · Model: gpt-5.6 · Reasoning: high', isAgentInfo: true },
+                        { key: 'session-id', label: 'Session ID', value: 'ios-grouped-details' }
+                    ]}
+                />
+            </I18nProvider>
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Investigate production API latency' }))
+
+        const popover = screen.getByTestId('session-title-details-popover')
+        expect(popover).toHaveClass(
+            'overflow-y-auto',
+            'session-title-popover'
+        )
+        expect(popover.querySelectorAll('[data-session-detail-group]')).toHaveLength(4)
+        expect(screen.getByText('gpt-5.6')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: '🚀 Release' }))
+        expect(onSetGroup).toHaveBeenCalledOnce()
+        expect(screen.queryByTestId('session-title-details-popover')).not.toBeInTheDocument()
+    })
+
     it('opens title details after a cancelled touch falls back to click', () => {
         render(
             <I18nProvider>

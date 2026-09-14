@@ -91,6 +91,32 @@ describe('monitor routes', () => {
             expect((await app.request('/monitors/session-target?type=managed&sessionId=other')).status).toBe(404)
         } finally { store.close() }
     })
+    it('switches future deliveries to a verified Codex native session without changing an open incident', async () => {
+        const store = new Store(':memory:')
+        store.machines.getOrCreateMachine('m', {}, {}, 'default')
+        const engine = {
+            getOnlineMachinesByNamespace: () => [{ id: 'm' }],
+            checkPathsExist: async () => ({ '/native-workspace': true }),
+            readCodexLocalSession: async (_machineId: string, sessionId: string) => sessionId === 'native-ok'
+                ? { success: true as const, data: { session: { cwd: '/native-workspace', model: 'gpt-test', modelReasoningEffort: 'high' } } }
+                : { success: false as const, error: 'missing' }
+        } as unknown as SyncEngine
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => { c.set('namespace', 'default'); await next() })
+        app.route('/', createMonitorRoutes(store, () => engine, () => null))
+        try {
+            const config = MonitorConfigSchema.parse({ name: 'hook', kind: 'webhook', machineId: 'm', directory: '/old', prompt: 'Inspect' })
+            const { id } = store.monitors.create('default', config)
+            const pending = store.monitors.openIncident(store.monitors.get(id)!, 'existing', '')
+            const changed = await app.request(`/monitors/${id}/target-session`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'native-ok' }) })
+            expect(changed.status).toBe(200)
+            expect(store.monitors.get(id)?.config).toMatchObject({ targetSession: { type: 'native-codex', sessionId: 'native-ok' }, directory: '/native-workspace', agent: 'codex', model: 'gpt-test' })
+            expect(store.monitors.getIncident(pending.incidentId)?.config.targetSession).toBeUndefined()
+            const unavailable = await app.request(`/monitors/${id}/target-session`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'missing' }) })
+            expect(unavailable.status).toBe(400)
+            expect((await unavailable.json() as { error: string }).error).toContain('Codex session was not found')
+        } finally { store.close() }
+    })
     it('rejects invalid/expired tokens uniformly, bounds bodies and keeps routing server-owned', async () => {
         const store = new Store(':memory:')
         const service = new MonitoringService(store, () => null, { sendToNamespace: async () => undefined })

@@ -481,7 +481,7 @@ export function GitBranchesDrawer(props: {
                             </div>
                         </div>
 
-                        <label className="mt-4 flex h-11 items-center gap-2 rounded-[14px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-[var(--app-hint)] focus-within:ring-2 focus-within:ring-[var(--app-link)]">
+                        <label className="ios-input-shell mt-4 flex h-11 items-center gap-2 px-3 text-[var(--app-hint)]">
                             <Search className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
                             <span className="sr-only">{t('gitBranches.search')}</span>
                             <input
@@ -560,7 +560,7 @@ export function GitBranchesDrawer(props: {
                         autoCorrect="off"
                         spellCheck={false}
                         autoFocus
-                        className="h-12 w-full rounded-[14px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-[15px] text-[var(--app-fg)] outline-none placeholder:text-[var(--app-hint)] focus:ring-2 focus:ring-[var(--app-link)]"
+                        className="ios-form-control h-12 w-full px-3 text-[15px]"
                     />
                 </label>
             </BottomDrawer>
@@ -612,7 +612,7 @@ export function GitBranchesDrawer(props: {
                         spellCheck
                         autoFocus
                         rows={4}
-                        className="min-h-28 w-full resize-y rounded-[14px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-3 text-[15px] text-[var(--app-fg)] outline-none placeholder:text-[var(--app-hint)] focus:ring-2 focus:ring-[var(--app-link)]"
+                        className="ios-form-control min-h-28 w-full resize-y px-3 py-3 text-[15px]"
                     />
                 </label>
             </BottomDrawer>

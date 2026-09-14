@@ -1752,6 +1752,8 @@ export type CodexTranscriptImportAccumulator = {
     tokenUsage: CodexTokenUsage | null
     /** Latest usage reported inside the active parent turn. */
     currentTurnTokenUsage: CodexTokenUsage | null
+    /** Cumulative counter immediately before the active parent turn. */
+    turnStartTokenUsage: CodexTokenUsage | null
     modelProvider: string | null
     usageSessionId: string | null
     messages: CodexImportedMessageContent[]
@@ -1778,6 +1780,7 @@ export function createCodexTranscriptImportAccumulator(): CodexTranscriptImportA
     return {
         tokenUsage: null,
         currentTurnTokenUsage: null,
+        turnStartTokenUsage: null,
         modelProvider: null,
         usageSessionId: null,
         messages: [],
@@ -2065,6 +2068,56 @@ function shouldClosePendingReasoning(message: CodexImportedMessageContent | null
     return data?.type !== 'token_count'
 }
 
+function getCurrentTurnMessageUsage(accumulator: CodexTranscriptImportAccumulator): Record<string, number> | undefined {
+    const current = accumulator.currentTurnTokenUsage
+    const baseline = accumulator.turnStartTokenUsage
+    const difference = (value: number | null, start: number | null): number | null => {
+        if (value === null) return null
+        if (start === null || value < start) return value
+        return value - start
+    }
+    const cumulativeTurnUsage = current && current.scope !== 'lastTurn'
+        ? {
+            input: difference(current.input, baseline?.input ?? null),
+            output: difference(current.output, baseline?.output ?? null),
+            cachedInput: difference(current.cachedInput, baseline?.cachedInput ?? null)
+        }
+        : null
+    const turnUsage = current?.lastTurn
+        ?? (current?.scope === 'lastTurn' ? current : cumulativeTurnUsage)
+    if (turnUsage?.input === null || turnUsage?.input === undefined || turnUsage.output === null) return undefined
+
+    return {
+        input_tokens: turnUsage.input,
+        output_tokens: turnUsage.output,
+        ...(turnUsage.cachedInput !== null ? { cache_read_input_tokens: turnUsage.cachedInput } : {}),
+        ...(accumulator.currentTurnTokenUsage?.contextTokens !== null
+            && accumulator.currentTurnTokenUsage?.contextTokens !== undefined
+            ? { context_tokens: accumulator.currentTurnTokenUsage.contextTokens } : {}),
+        ...(accumulator.currentTurnTokenUsage?.contextWindow !== null
+            && accumulator.currentTurnTokenUsage?.contextWindow !== undefined
+            ? { context_window: accumulator.currentTurnTokenUsage.contextWindow } : {})
+    }
+}
+
+function attachCurrentTurnUsage(accumulator: CodexTranscriptImportAccumulator): void {
+    if (!accumulator.completionTurnSeen) return
+    const usage = getCurrentTurnMessageUsage(accumulator)
+    if (!usage) return
+
+    for (let index = accumulator.messages.length - 1; index >= accumulator.completionTurnStartIndex; index--) {
+        const message = accumulator.messages[index]!
+        if (message.role === 'user') break
+        const data = asRecord(message.content.data)
+        if (data?.type !== 'message') continue
+        accumulator.messages[index] = {
+            ...message,
+            content: { ...message.content, data: { ...data, usage } }
+        }
+        return
+    }
+}
+
 /** Append complete JSONL records to an existing native transcript import. */
 export function appendCodexTranscriptImportLines(
     accumulator: CodexTranscriptImportAccumulator,
@@ -2092,10 +2145,18 @@ export function appendCodexTranscriptImportLines(
                     const nextUsage = readCodexTokenUsage(info, getCodexRecordTimestamp(record) ?? 0)
                     accumulator.tokenUsage = selectCodexTokenUsage(accumulator.tokenUsage, nextUsage)
                     accumulator.currentTurnTokenUsage = nextUsage
+                    // Depending on the Codex version, token_count can arrive
+                    // either before or after task_complete. Persist it as soon
+                    // as it is observed so every historical turn keeps its own
+                    // usage instead of only the latest live turn showing it.
+                    attachCurrentTurnUsage(accumulator)
                 }
             }
 
             if (recordType === 'event_msg' && payloadType === 'task_started') {
+                accumulator.turnStartTokenUsage = accumulator.currentTurnTokenUsage?.scope === 'lastTurn'
+                    ? null
+                    : accumulator.currentTurnTokenUsage
                 accumulator.currentTurnTokenUsage = null
                 accumulator.completionTurnId = extractCodexTurnId(record, payload ?? {})
                 accumulator.completionTurnStartIndex = accumulator.messages.length
@@ -2117,22 +2178,7 @@ export function appendCodexTranscriptImportLines(
                     // completion for this same turn. Never resurrect a failure.
                     const outcome = payloadType === 'turn_aborted' ? 'aborted' : payloadType === 'task_failed' || payload?.error ? 'failed' : 'completed'
                     if (outcome === 'completed' && (data.turnOutcome === 'failed' || data.turnOutcome === 'aborted')) break
-                    const turnUsage = accumulator.currentTurnTokenUsage?.lastTurn
-                        ?? (accumulator.currentTurnTokenUsage?.scope === 'lastTurn' ? accumulator.currentTurnTokenUsage : null)
-                    const usage = turnUsage?.input !== null && turnUsage?.input !== undefined
-                        && turnUsage.output !== null
-                        ? {
-                            input_tokens: turnUsage.input,
-                            output_tokens: turnUsage.output,
-                            ...(turnUsage.cachedInput !== null ? { cache_read_input_tokens: turnUsage.cachedInput } : {}),
-                            ...(accumulator.currentTurnTokenUsage?.contextTokens !== null
-                                && accumulator.currentTurnTokenUsage?.contextTokens !== undefined
-                                ? { context_tokens: accumulator.currentTurnTokenUsage.contextTokens } : {}),
-                            ...(accumulator.currentTurnTokenUsage?.contextWindow !== null
-                                && accumulator.currentTurnTokenUsage?.contextWindow !== undefined
-                                ? { context_window: accumulator.currentTurnTokenUsage.contextWindow } : {})
-                        }
-                        : undefined
+                    const usage = getCurrentTurnMessageUsage(accumulator)
                     accumulator.messages[index] = { ...message, content: { ...message.content, data: {
                         ...data,
                         final: true,

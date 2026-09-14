@@ -204,7 +204,7 @@ export function QuestionAnswerForm(props: {
                             onChange={(event) => update({ ...selection, text: event.target.value })}
                             disabled={props.disabled || loading}
                             placeholder={props.textPlaceholder}
-                            className="chat-sheet-input mt-3 min-h-[88px] w-full resize-y rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-base text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
+                            className="ios-form-control chat-sheet-input mt-3 min-h-[96px] resize-none"
                         />
                     ) : null}
                 </div>

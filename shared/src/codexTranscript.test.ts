@@ -77,6 +77,67 @@ describe('native completion evidence', () => {
             }
         })
     })
+    it('keeps usage on every historical turn when Codex reports tokens after completion', () => {
+        const state = createCodexTranscriptImportAccumulator()
+        const usage = (input: number, output: number, cached: number) => JSON.stringify({
+            type: 'event_msg',
+            payload: {
+                type: 'token_count',
+                info: {
+                    total_token_usage: { input_tokens: input, output_tokens: output },
+                    last_token_usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output }
+                }
+            }
+        })
+
+        appendCodexTranscriptImportLines(state, [
+            lifecycle('task_started', 'a'),
+            assistant('First'),
+            lifecycle('task_complete', 'a'),
+            usage(10, 2, 6),
+            lifecycle('task_started', 'b'),
+            assistant('Second'),
+            lifecycle('task_complete', 'b'),
+            usage(20, 4, 12)
+        ])
+
+        const assistantMessages = state.messages.filter((message) => message.content.data?.type === 'message')
+        expect(assistantMessages[0]?.content.data).toMatchObject({
+            usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 6 }
+        })
+        expect(assistantMessages[1]?.content.data).toMatchObject({
+            usage: { input_tokens: 20, output_tokens: 4, cache_read_input_tokens: 12 }
+        })
+    })
+    it('derives each historical turn from cumulative-only token counters', () => {
+        const state = createCodexTranscriptImportAccumulator()
+        const cumulativeUsage = (input: number, output: number, cached: number) => JSON.stringify({
+            type: 'event_msg',
+            payload: {
+                type: 'token_count',
+                info: { total_token_usage: { input_tokens: input, output_tokens: output, cached_input_tokens: cached } }
+            }
+        })
+
+        appendCodexTranscriptImportLines(state, [
+            lifecycle('task_started', 'a'),
+            assistant('First'),
+            cumulativeUsage(100, 10, 80),
+            lifecycle('task_complete', 'a'),
+            lifecycle('task_started', 'b'),
+            assistant('Second'),
+            cumulativeUsage(160, 18, 125),
+            lifecycle('task_complete', 'b')
+        ])
+
+        const assistantMessages = state.messages.filter((message) => message.content.data?.type === 'message')
+        expect(assistantMessages[0]?.content.data).toMatchObject({
+            usage: { input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 80 }
+        })
+        expect(assistantMessages[1]?.content.data).toMatchObject({
+            usage: { input_tokens: 60, output_tokens: 8, cache_read_input_tokens: 45 }
+        })
+    })
     it('does not treat an unscoped completion as proof for a scoped turn', () => {
         const state = createCodexTranscriptImportAccumulator()
         appendCodexTranscriptImportLines(state, [lifecycle('task_started', 'a'), assistant('Partial'), JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })])

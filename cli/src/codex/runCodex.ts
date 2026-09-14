@@ -101,7 +101,19 @@ export async function runCodex(opts: {
 
     lifecycle.registerProcessHandlers();
     registerKillSessionHandler(session.rpcHandlerManager, lifecycle);
-    registerLocalHandoffHandler(session.rpcHandlerManager, lifecycle);
+    registerLocalHandoffHandler(session.rpcHandlerManager, lifecycle, {
+        // Hub checks the durable queue and session state first. Recheck the
+        // authoritative in-process Codex state immediately before teardown:
+        // a message may already have crossed the socket boundary but not yet
+        // be reflected in Hub state.
+        canReleaseControl: () => {
+            const codex = sessionWrapperRef.current;
+            if (!codex) return 'Codex is still starting; wait until it is ready before releasing control';
+            if (codex.thinking) return 'Codex is processing; wait for the current turn to finish';
+            if (messageQueue.queue.length > 0) return 'Codex has queued messages; send or cancel them before releasing control';
+            return null;
+        }
+    });
 
     const applyCurrentConfigToSession = (options?: { syncModel?: boolean }) => {
         const sessionInstance = sessionWrapperRef.current;
