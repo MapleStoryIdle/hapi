@@ -428,7 +428,8 @@ export class RpcGateway {
         forceRecovery?: boolean,
         deliveryPolicy?: NativeCodexDeliveryPolicy,
         reviewGuard?: NativeKanbanFeedbackReviewGuard,
-        attachmentIds?: readonly string[]
+        attachmentIds?: readonly string[],
+        allowHapiInitiated = false
     ): Promise<RpcSendCodexLocalSessionMessageResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.SendCodexLocalSessionMessage, {
             sessionId,
@@ -438,7 +439,8 @@ export class RpcGateway {
             ...(forceRecovery === true ? { forceRecovery: true } : {}),
             ...(deliveryPolicy === undefined || deliveryPolicy === 'default' ? {} : { deliveryPolicy }),
             ...(deliveryPolicy === 'untrusted-review' && reviewGuard ? { reviewGuard } : {}),
-            ...(attachmentIds?.length ? { attachmentIds: [...attachmentIds] } : {})
+            ...(attachmentIds?.length ? { attachmentIds: [...attachmentIds] } : {}),
+            ...(allowHapiInitiated ? { allowHapiInitiated: true } : {})
         }) as RpcSendCodexLocalSessionMessageResponse
     }
 

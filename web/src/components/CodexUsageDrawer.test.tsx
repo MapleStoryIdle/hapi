@@ -22,19 +22,31 @@ describe('iOS Codex usage drawer', () => {
         expect(screen.getByTestId('codex-usage-account-email-row').firstElementChild).toHaveClass('h-7', 'w-7')
         expect(screen.getByTestId('codex-usage-account-plan-row').firstElementChild).toHaveClass('h-7', 'w-7')
         expect(sections[0]).not.toHaveTextContent('Expires')
-        expect(sections[1]).toHaveTextContent('Remaining quota')
-        expect(sections[2]).toHaveTextContent('Effective tokens70')
+        expect(sections[1]).toHaveTextContent('This sessionTotal tokens120')
+        expect(sections[2]).toHaveTextContent('Remaining quota')
         expect(screen.queryByText(/current connection/i)).toBeNull()
         expect(screen.queryByText(/counter restarted/i)).toBeNull()
     })
-    it('shows exact known plan, account mode, input/output and cache subset ratio', () => {
+    it('shows raw input, cached input, output, reasoning output, and model-effort breakdown', () => {
         const expiresAt = Date.parse('2026-10-01T00:00:00.000Z')
-        mount({ account: { mode: 'oauth', label: 'demo@example.com', plan: '20x Pro', expiresAt, source: 'currentConnection' }, usage: { input: 1000, output: 200, cachedInput: 800, total: 1200, reasoningOutput: 100, scope: 'session', updatedAt: 1 } })
+        mount({ account: { mode: 'oauth', label: 'demo@example.com', plan: '20x Pro', expiresAt, source: 'currentConnection' }, usage: {
+            input: 1000,
+            output: 200,
+            cachedInput: 800,
+            total: 1200,
+            reasoningOutput: 100,
+            breakdown: [{ input: 1000, output: 200, cachedInput: 800, total: 1200, reasoningOutput: 100, model: 'gpt-5.6', reasoningEffort: 'high' }],
+            scope: 'session',
+            updatedAt: 1
+        } })
         expect(screen.getByRole('dialog', { name: 'Usage' })).toBeInTheDocument()
         expect(screen.getByTestId('codex-usage-account-plan-row')).toHaveTextContent(`20x Pro · Authorized login · Expires · ${formatCodexAccountExpiry(expiresAt, 'en')}`)
-        expect(screen.getByText('80%')).toBeInTheDocument()
-        expect(screen.getByText('Effective tokens').nextElementSibling).toHaveTextContent('400')
-        expect(screen.getByTestId('codex-usage-input-metric')).toHaveTextContent('Uncached input200')
+        expect(screen.getByText('Total tokens').nextElementSibling).toHaveTextContent('1.2K')
+        expect(screen.getByTestId('codex-usage-input-metric')).toHaveTextContent('Input (includes cached)1K')
+        expect(screen.getByTestId('codex-usage-cached-input-metric')).toHaveTextContent('Cached input (included above)800')
+        expect(screen.getByTestId('codex-usage-reasoning-output-metric')).toHaveTextContent('Reasoning output (included in output)100')
+        expect(screen.getByTestId('codex-usage-breakdown')).toHaveTextContent('By model and reasoning effortgpt-5.6Reasoning effort: high1.2KInput 1K · Cached 800 · Output 200 · Reasoning 100')
+        expect(screen.getByLabelText('This session · parent and subagents')).toBeInTheDocument()
         expect(screen.getByTestId('codex-usage-input-metric')).toHaveClass('items-start', 'text-left')
         expect(screen.getByTestId('codex-usage-output-metric')).toHaveClass('items-end', 'text-right')
         expect(formatCodexPlan('pro')).toBe('Pro')

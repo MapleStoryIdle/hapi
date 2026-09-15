@@ -207,6 +207,7 @@ interface SendCodexLocalSessionMessageRequest {
     deliveryPolicy?: unknown
     reviewGuard?: unknown
     attachmentIds?: unknown
+    allowHapiInitiated?: unknown
 }
 
 interface DiscardCodexLocalSessionMessageRequest {
@@ -732,6 +733,9 @@ export class ApiMachineClient {
                 if (params?.forceRecovery !== undefined && typeof params.forceRecovery !== 'boolean') {
                     return { success: false, code: 'invalid_message', error: 'forceRecovery must be a boolean' }
                 }
+                if (params?.allowHapiInitiated !== undefined && typeof params.allowHapiInitiated !== 'boolean') {
+                    return { success: false, code: 'invalid_message', error: 'allowHapiInitiated must be a boolean' }
+                }
                 if (params?.deliveryPolicy !== undefined && params.deliveryPolicy !== 'default' && params.deliveryPolicy !== 'untrusted-review') {
                     return { success: false, code: 'invalid_message', error: 'deliveryPolicy is invalid' }
                 }
@@ -753,7 +757,8 @@ export class ApiMachineClient {
                     params?.forceRecovery,
                     params?.deliveryPolicy as NativeCodexDeliveryPolicy | undefined,
                     params?.reviewGuard as NativeKanbanFeedbackReviewGuard | undefined,
-                    params?.attachmentIds
+                    params?.attachmentIds,
+                    params?.allowHapiInitiated === true
                 )
             }
         )

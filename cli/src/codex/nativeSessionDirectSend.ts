@@ -1922,7 +1922,8 @@ export class NativeCodexSessionDirectSender {
         rawDeliveryPolicy?: unknown,
         rawReviewGuard?: unknown,
         sharedSsh = false,
-        rawAttachmentIds?: unknown
+        rawAttachmentIds?: unknown,
+        allowHapiInitiated = false
     ): SendCodexLocalSessionMessageRpcResponse {
         if (this.controlStoreUnavailable) {
             return { success: false, code: 'launch_failed', error: 'Native control state is unavailable; repair the runner state file first' }
@@ -1982,7 +1983,7 @@ export class NativeCodexSessionDirectSender {
             return { success: false, code: 'session_not_found', error: status.error }
         }
 
-        if (!session || isHapiInitiatedCodexSession(session)) {
+        if (!session || (isHapiInitiatedCodexSession(session) && !allowHapiInitiated)) {
             return {
                 success: false,
                 code: 'not_native_session',
@@ -2137,7 +2138,8 @@ export class NativeCodexSessionDirectSender {
         rawForceRecovery?: unknown,
         rawDeliveryPolicy?: unknown,
         rawReviewGuard?: unknown,
-        rawAttachmentIds?: unknown
+        rawAttachmentIds?: unknown,
+        allowHapiInitiated = false
     ): Promise<SendCodexLocalSessionMessageRpcResponse> {
         const sharedSsh = await this.isExternallyControlled(sessionId)
         const result = this.send(
@@ -2149,7 +2151,8 @@ export class NativeCodexSessionDirectSender {
             rawDeliveryPolicy,
             rawReviewGuard,
             sharedSsh,
-            rawAttachmentIds
+            rawAttachmentIds,
+            allowHapiInitiated
         )
         if (sharedSsh && result.success && result.status === 'queued') {
             // Do not make the RPC wait on the Desktop socket. The receipt is
@@ -2195,13 +2198,6 @@ export class NativeCodexSessionDirectSender {
         }
 
         const session = this.sessionLookup.getSummary(sessionId)
-        if (session && isHapiInitiatedCodexSession(session)) {
-            return {
-                success: false,
-                code: 'not_native_session',
-                error: 'Only original native Codex sessions support direct delivery'
-            }
-        }
 
         const acceptedKey = this.acceptedKey(sessionId, clientMessageId)
         const accepted = this.acceptedReceipts.get(acceptedKey)
@@ -2666,6 +2662,60 @@ export class NativeCodexSessionDirectSender {
         this.disposeBridge(active)
         this.scheduleQueuePump(sessionId, delay, { replacePending: true })
         this.notifyStateChange(sessionId)
+        return true
+    }
+
+    private moveExecToQueueAfterExternalWriterConflict(
+        sessionId: string,
+        active: ActiveExecSend
+    ): boolean {
+        if (!this.isCurrentActive(sessionId, active)) return false
+        const previousQueue = this.queues.get(sessionId)
+        const queue = previousQueue ? [...previousQueue] : []
+        const id = this.getActiveReceiptId(sessionId, active)
+        if (!queue.some((item) => item.id === id)) {
+            queue.unshift({
+                id,
+                text: active.displayText,
+                deliveryText: active.deliveryText,
+                queuedAt: active.startedAt,
+                recoveryRequired: false,
+                deliveryPolicy: active.deliveryPolicy,
+                ...(active.reviewGuard ? { reviewGuard: active.reviewGuard } : {}),
+                configuration: cloneNativeConfiguration(active.configuration),
+                attachmentIds: [...active.attachmentIds]
+            })
+        }
+
+        this.activeSends.delete(sessionId)
+        this.queues.set(sessionId, queue)
+        if (!this.persistOutbox()) {
+            this.activeSends.set(sessionId, active)
+            if (previousQueue) {
+                this.queues.set(sessionId, previousQueue)
+            } else {
+                this.queues.delete(sessionId)
+            }
+            this.finish(
+                sessionId,
+                active,
+                'Could not safely save this native message after another Codex writer took the session',
+                'launch_failed'
+            )
+            return false
+        }
+
+        this.disposeExec(active)
+        this.recentFailures.delete(sessionId)
+        this.notifyStateChange(sessionId)
+        if (active.deliveryPolicy === 'untrusted-review') {
+            this.scheduleQueuePump(sessionId, NATIVE_QUEUE_RETRY_INTERVAL_MS, { replacePending: true })
+        } else {
+            // The exact resume conflict proves another writer owns this
+            // thread. Bypass the ownership probe that just missed the race
+            // and hand the durable receipt to that writer's shared queue.
+            void this.pumpSharedSshQueue(sessionId)
+        }
         return true
     }
 
@@ -3443,7 +3493,18 @@ export class NativeCodexSessionDirectSender {
                 return
             }
             const status = signal ? `signal ${signal}` : `exit ${code ?? 'unknown'}`
-            finish(stderr || `Codex direct send exited with ${status}`)
+            const failure = stderr || `Codex direct send exited with ${status}`
+            const active = this.activeSends.get(sessionId)
+            if (
+                active?.kind === 'exec-resume'
+                && active.child === child
+                && isExternalNativeWriterConflict(failure)
+                && this.moveExecToQueueAfterExternalWriterConflict(sessionId, active)
+            ) {
+                finished = true
+                return
+            }
+            finish(failure)
         })
     }
 

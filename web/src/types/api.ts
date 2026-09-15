@@ -223,12 +223,16 @@ export type CodexLocalSessionSummary = {
     waitingForUserInput?: boolean
     /** Explicit false from current runners clears a stale SSH ownership lock. */
     controlledByCodexSsh?: boolean
+    /** Canonical SHAPI session that owns this native thread on the selected machine. */
+    managedSessionId?: string | null
 }
 
 export type CodexLocalSessionsResponse = {
     success: true
     sessions: CodexLocalSessionSummary[]
 }
+
+export type { CodexManagedSessionTargetResponse } from '@hapi/protocol/schemas'
 
 export type CodexLocalSessionContextMessage = {
     id: string

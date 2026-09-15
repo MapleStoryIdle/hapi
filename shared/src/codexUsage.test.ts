@@ -1,22 +1,21 @@
 import { describe, expect, it } from 'bun:test'
 import {
-    getCodexBlendedTotal,
-    getCodexNonCachedInput,
+    aggregateCodexTokenUsage,
+    getCodexProcessedTotal,
     readCodexTokenUsage,
     selectCodexTokenUsage
 } from './codexUsage'
 import { appendCodexTranscriptImportLines, createCodexTranscriptImportAccumulator } from './codexTranscript'
 
 describe('Codex usage snapshots', () => {
-    it('matches the Codex TUI blended usage calculation', () => {
+    it('counts all processed tokens while keeping cache reads separate', () => {
         const usage = readCodexTokenUsage({ total_token_usage: {
             input_tokens: 1_000,
             cached_input_tokens: 800,
             output_tokens: 200
         } }, 1)!
-        expect(getCodexNonCachedInput(usage)).toBe(200)
-        expect(getCodexBlendedTotal(usage)).toBe(400)
-        expect(getCodexBlendedTotal({ ...usage, cachedInput: null })).toBeNull()
+        expect(getCodexProcessedTotal(usage)).toBe(1_200)
+        expect(usage.cachedInput).toBe(800)
     })
 
     it('replaces cumulative counters and does not count cached/reasoning subsets twice', () => {
@@ -62,6 +61,19 @@ describe('Codex usage snapshots', () => {
         usage = selectCodexTokenUsage(usage, snapshot(5, 1, 5))
         expect(usage?.total).toBe(162)
         expect(selectCodexTokenUsage(usage, snapshot(30, 6, 4))).toEqual(usage)
+    })
+    it('aggregates independently selected thread snapshots by model and effort', () => {
+        const parent = readCodexTokenUsage({ total: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80, reasoningOutputTokens: 10 } }, 1)!
+        const child = readCodexTokenUsage({ total: { inputTokens: 30, outputTokens: 5, cachedInputTokens: 20, reasoningOutputTokens: 4 } }, 2)!
+        const aggregate = aggregateCodexTokenUsage([
+            { usage: parent, model: 'gpt-5.6', reasoningEffort: 'high' },
+            { usage: child, model: 'gpt-5.6', reasoningEffort: 'low' }
+        ], 3)!
+        expect(aggregate).toMatchObject({ input: 130, output: 25, cachedInput: 100, reasoningOutput: 14, total: 155, scope: 'session' })
+        expect(aggregate.breakdown).toEqual(expect.arrayContaining([
+            expect.objectContaining({ model: 'gpt-5.6', reasoningEffort: 'high', input: 100, output: 20, total: 120 }),
+            expect.objectContaining({ model: 'gpt-5.6', reasoningEffort: 'low', input: 30, output: 5, total: 35 })
+        ]))
     })
     it('keeps available fork history and earlier segments when importing the complete transcript', () => {
         const accumulator = createCodexTranscriptImportAccumulator()

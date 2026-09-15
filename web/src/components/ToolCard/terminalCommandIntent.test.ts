@@ -145,6 +145,19 @@ describe('terminal command intent', () => {
         expect(searched && getTerminalCommandIntentLabel(searchedInput, searched)).toBe('rg')
         expect(getTerminalCommandDisplayTitle(searchedInput)).toBe('rg · knownTools.tsx')
 
+        const searchedMany = getTerminalCommandIntent({
+            command: 'rg -n ToolCard web/src/a.ts web/src/b.ts web/src/c.ts web/src/d.ts web/src/e.ts'
+        })
+        expect(searchedMany && getTerminalCommandIntentDetail(searchedMany)).toBe('5 files')
+
+        const readMany = getTerminalCommandIntent({
+            command: "cat web/src/a.ts; sed -n '1,20p' web/src/b.ts"
+        })
+        expect(readMany && getTerminalCommandIntentDetail(readMany)).toBe('2 files')
+        expect(readMany && getTerminalCommandIntentDetail(readMany, (key, params) => (
+            key === 'toolGroup.compact.fileCount' ? `${params?.n} 个文件` : key
+        ))).toBe('2 个文件')
+
         const grepInput = { command: 'grep -n ToolCard web/src/components/ToolCard/knownTools.tsx' }
         const grep = getTerminalCommandIntent(grepInput)
         expect(grep && getTerminalCommandIntentLabel(grepInput, grep)).toBe('grep')

@@ -1,5 +1,11 @@
 import React from 'react';
-import { readCodexTokenUsage, selectCodexTokenUsage } from '@hapi/protocol/codexUsage';
+import {
+    aggregateCodexTokenUsage,
+    readCodexTokenUsage,
+    selectCodexTokenUsage,
+    type CodexTokenUsage,
+    type CodexUsageBreakdown
+} from '@hapi/protocol/codexUsage';
 import {
     extractCodexFailureMessage,
     isCodexAuthenticationError,
@@ -68,16 +74,6 @@ async function registerGeneratedImageFromPath(args: { id: string; path: string; 
 
 type HappyServer = Awaited<ReturnType<typeof buildHapiMcpBridge>>['server'];
 type QueuedMessage = { message: string; mode: EnhancedMode; isolate: boolean; hash: string };
-type PendingSideSessionFork = {
-    callId: string | null;
-    parentThreadId: string;
-    timeout: ReturnType<typeof setTimeout>;
-    resolve: (value: {
-        childCodexThreadId: string;
-        parentCodexThreadId: string;
-    }) => void;
-    reject: (error: Error) => void;
-};
 type CodexTaskStatusCode = 'system_error' | 'authentication' | 'http_forbidden' | 'network_error' | 'usage_limit' | 'model_capacity' | 'context_window' | 'unknown';
 type CodexTaskStatusEvent = {
     type: 'task-status';
@@ -141,7 +137,6 @@ type CodexSubagentCardConfiguration = {
 
 const AGENT_RUN_UPDATE_THROTTLE_MS = 300;
 const AGENT_RUN_START_TIMEOUT_MS = 30 * 1000;
-const SIDE_SESSION_FORK_TIMEOUT_MS = 60 * 1000;
 const SUBAGENT_STATE_FLUSH_DEBOUNCE_MS = 250;
 const THROTTLED_AGENT_RUN_ACTIVITY_KINDS = new Set(['thinking']);
 const CODEX_SPAWN_AGENT_FULL_HISTORY_ARGUMENT_ERROR =
@@ -233,6 +228,46 @@ export function readRecoveredCodexThreadState(value: unknown, expectedThreadId: 
 /** Strict recovery-only parser: ambiguous/malformed state is never idle. */
 export function isExactIdleRecoveryThreadRead(value: unknown, expectedThreadId: string): boolean {
     return readRecoveredCodexThreadState(value, expectedThreadId) === 'idle'
+}
+
+type SideSessionForkBoundary = {
+    lastTurnId: string | null;
+    hasInProgressTurn: boolean;
+}
+
+/** Selects the latest terminal turn before any in-progress turn. */
+export function readSideSessionForkBoundary(value: unknown, expectedThreadId: string): SideSessionForkBoundary | null {
+    const root = recoveryRecord(value)
+    const data = recoveryRecord(root?.data) ?? root
+    const thread = recoveryRecord(data?.thread) ?? data
+    if (recoveryString(thread?.id ?? thread?.threadId) !== expectedThreadId) return null
+    const turns = Array.isArray(thread?.turns)
+        ? thread.turns
+        : Array.isArray(data?.turns)
+            ? data.turns
+            : null
+    if (!turns) return null
+
+    const terminal = new Set(['completed', 'failed', 'interrupted'])
+    let lastTurnId: string | null = null
+    let hasInProgressTurn = false
+    for (const turn of turns) {
+        const record = recoveryRecord(turn)
+        const nested = recoveryRecord(record?.turn)
+        const turnId = recoveryString(record?.id ?? record?.turnId ?? nested?.id ?? nested?.turnId)
+        const rawStatus = recoveryString(record?.status ?? record?.state ?? nested?.status ?? nested?.state)
+        if (!rawStatus) return null
+        const status = rawStatus.toLowerCase().replace(/[-_\s]/g, '')
+        if (status === 'inprogress') {
+            hasInProgressTurn = true
+            continue
+        }
+        if (!terminal.has(status) || !turnId) return null
+        if (!hasInProgressTurn) {
+            lastTurnId = turnId
+        }
+    }
+    return { lastTurnId, hasInProgressTurn }
 }
 
 type GoalForwardSignature = {
@@ -911,6 +946,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const pendingAgentToolInputByCallId = new Map<string, { name: string; input: unknown }>();
         const childAgentRuntimeById = new Map<string, ChildAgentRuntime>();
         const childAgentConfigurationById = new Map<string, CodexSubagentConfiguration>();
+        const usageByThreadId = new Map<string, CodexTokenUsage>();
+        const usageByModelAndEffort = new Map<string, CodexUsageBreakdown>();
         const subagentCardConfigurationById = new Map<string, CodexSubagentCardConfiguration>();
         const subagentSnapshotById = new Map<string, CodexSubagentSnapshot>();
         const lastAgentRunUpdateAtByAgentId = new Map<string, number>();
@@ -922,19 +959,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const pendingThrottledAgentUpdateTimerByAgentId = new Map<string, ReturnType<typeof setTimeout>>();
         const pendingAgentStartTimersByCardId = new Map<string, ReturnType<typeof setTimeout>>();
         let subagentStateFlushTimer: ReturnType<typeof setTimeout> | null = null;
-        let pendingSideSessionFork: PendingSideSessionFork | null = null;
-        const takePendingSideSessionFork = (parentThreadId?: string): PendingSideSessionFork | null => {
-            const fork = pendingSideSessionFork as PendingSideSessionFork | null;
-            if (!fork) {
-                return null;
-            }
-            if (parentThreadId && fork.parentThreadId !== parentThreadId) {
-                return null;
-            }
-            pendingSideSessionFork = null;
-            clearTimeout(fork.timeout);
-            return fork;
-        };
+        let sideSessionForkInFlight = false;
         this.permissionHandler = permissionHandler;
         this.reasoningProcessor = reasoningProcessor;
         this.diffProcessor = diffProcessor;
@@ -1547,6 +1572,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 event,
                 turn,
                 thread,
+                asRecord(event.info),
                 asRecord(event.config),
                 asRecord(event.configuration),
                 asRecord(event.turnContext),
@@ -1592,6 +1618,85 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 status,
                 statusText: snapshot?.statusText ?? status
             }, cardId);
+        };
+
+        const recordCodexThreadUsage = (
+            threadId: string,
+            role: 'parent' | 'child',
+            event: Record<string, unknown>
+        ): void => {
+            const next = readCodexTokenUsage(event.info, Date.now());
+            if (!next) return;
+
+            const previous = usageByThreadId.get(threadId) ?? null;
+            const usage = selectCodexTokenUsage(previous, next);
+            if (!usage) return;
+
+            const childConfiguration = role === 'child' ? childAgentConfigurationById.get(threadId) : undefined;
+            const eventConfiguration = extractChildAgentConfiguration(event);
+            const childSnapshot = role === 'child' ? subagentSnapshotById.get(threadId) : undefined;
+            const childCardConfiguration = role === 'child'
+                ? subagentCardConfigurationById.get(childSnapshot?.cardId ?? agentCardByAgentId.get(threadId) ?? '')
+                : undefined;
+            const model = eventConfiguration.childModel
+                ?? childConfiguration?.childModel
+                ?? childSnapshot?.model
+                ?? childCardConfiguration?.requestedModel
+                ?? asString(session.getModel())
+                ?? null;
+            const reasoningEffort = eventConfiguration.childReasoningEffort
+                ?? childConfiguration?.childReasoningEffort
+                ?? childSnapshot?.modelReasoningEffort
+                ?? childCardConfiguration?.requestedReasoningEffort
+                ?? asString(session.getModelReasoningEffort())
+                ?? null;
+
+            const key = JSON.stringify([model, reasoningEffort]);
+            const existing = usageByModelAndEffort.get(key) ?? {
+                input: 0,
+                output: 0,
+                cachedInput: 0,
+                reasoningOutput: 0,
+                total: 0,
+                model,
+                reasoningEffort
+            };
+            const increment = <K extends keyof Pick<CodexTokenUsage, 'input' | 'output' | 'cachedInput' | 'reasoningOutput' | 'total'>>(counter: K): number | null => {
+                const current = usage[counter];
+                if (current === null) return null;
+                return Math.max(0, current - (previous?.[counter] ?? 0));
+            };
+            const add = (counter: keyof Pick<CodexUsageBreakdown, 'input' | 'output' | 'cachedInput' | 'reasoningOutput' | 'total'>): number | null => {
+                const delta = increment(counter);
+                return existing[counter] === null || delta === null ? null : existing[counter] + delta;
+            };
+            usageByModelAndEffort.set(key, {
+                ...existing,
+                input: add('input'),
+                output: add('output'),
+                cachedInput: add('cachedInput'),
+                reasoningOutput: add('reasoningOutput'),
+                total: add('total')
+            });
+            usageByThreadId.set(threadId, usage);
+
+            session.client.updateMetadata((metadata) => ({
+                ...metadata,
+                codexTokenUsage: (() => {
+                    const aggregate = aggregateCodexTokenUsage(
+                        Array.from(usageByThreadId.values(), (threadUsage) => ({ usage: threadUsage })),
+                        Date.now()
+                    );
+                    return aggregate ? {
+                        ...aggregate,
+                        breakdown: Array.from(usageByModelAndEffort.values()).sort((left, right) => {
+                            const totalDifference = (right.total ?? -1) - (left.total ?? -1);
+                            if (totalDifference !== 0) return totalDifference;
+                            return `${left.model ?? ''}\u0000${left.reasoningEffort ?? ''}`.localeCompare(`${right.model ?? ''}\u0000${right.reasoningEffort ?? ''}`);
+                        })
+                    } : null;
+                })()
+            }));
         };
 
         failAgentStartCard = (cardId: string, error: unknown): void => {
@@ -1896,10 +2001,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 const agentId = asString(outputRecord?.agent_id ?? outputRecord?.agentId ?? outputRecord?.id)
                     ?? (agentIdsFromState.length === 1 ? agentIdsFromState[0] : null)
                     ?? extractAgentTargets(pending?.input).at(0);
-                const sideSessionFork = pendingSideSessionFork
-                    && (pendingSideSessionFork.callId === null || pendingSideSessionFork.callId === callId)
-                    ? pendingSideSessionFork
-                    : null;
                 if (!agentId) {
                     const detail = isError
                         ? output
@@ -1907,11 +2008,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                             message: 'spawn_agent completed without returning an agent id',
                             output
                         };
-                    if (sideSessionFork) {
-                        pendingSideSessionFork = null;
-                        clearTimeout(sideSessionFork.timeout);
-                        sideSessionFork.reject(new Error(previewText(detail) ?? 'spawn_agent completed without returning an agent id'));
-                    }
                     failAgentStartCard(callId, detail);
                     return;
                 }
@@ -1924,18 +2020,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     ...(isError ? { error: output } : { spawnResult: output })
                 }, callId);
                 flushPendingAgentUpdates(agentId);
-                if (sideSessionFork) {
-                    pendingSideSessionFork = null;
-                    clearTimeout(sideSessionFork.timeout);
-                    if (isError) {
-                        sideSessionFork.reject(new Error(previewText(output) ?? 'spawn_agent failed'));
-                    } else {
-                        sideSessionFork.resolve({
-                            childCodexThreadId: agentId,
-                            parentCodexThreadId: sideSessionFork.parentThreadId
-                        });
-                    }
-                }
                 return;
             }
 
@@ -2029,6 +2113,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             };
 
             if (msgType === 'token_count') {
+                recordCodexThreadUsage(agentId, 'child', msg);
                 return;
             }
 
@@ -2987,10 +3072,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
             if (msgType === 'token_count') {
                 const threadId = eventThreadId ?? this.currentThreadId;
-                session.client.updateMetadata(metadata => ({ ...metadata,
-                    codexTokenUsage: selectCodexTokenUsage(metadata.codexTokenUsage ?? null,
-                        readCodexTokenUsage(msg.info, Date.now()))
-                }));
+                if (threadId) {
+                    recordCodexThreadUsage(threadId, 'parent', msg);
+                }
                 session.sendAgentMessage({
                     ...addCodexEventScope(msg, 'parent', threadId),
                     id: randomUUID()
@@ -3145,9 +3229,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                             const input = msg.input ?? {};
                             pendingAgentToolInputByCallId.set(callId, { name, input });
                             if (name === 'spawn_agent') {
-                                if (pendingSideSessionFork && pendingSideSessionFork.callId === null) {
-                                    pendingSideSessionFork.callId = callId;
-                                }
                                 emitAgentRunStart(callId, input);
                             } else {
                                 for (const agentId of extractAgentTargets(input)) {
@@ -3906,27 +3987,12 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             return threadId;
         };
 
-        const sideSessionForkPrompt = [
-            'Create a SHAPI side session from the current conversation.',
-            'Call spawn_agent exactly once with fork_context: true.',
-            'Do not set agent_type, subagent_type, model, or reasoning_effort.',
-            'Use this child message: "Initialize a SHAPI side session forked from the current conversation. Do not make code changes or take actions yet. Reply only: Side session ready."',
-            'Do not write normal assistant text before or after the tool call.'
-        ].join('\n');
-
         session.client.rpcHandlerManager.registerHandler(RPC_METHODS.ForkCodexSideSession, async () => {
-            if (pendingSideSessionFork) {
+            if (sideSessionForkInFlight) {
                 return {
                     type: 'error',
                     code: 'busy',
                     message: 'A side session fork is already in progress'
-                };
-            }
-            if (turnInFlight || recoveryInFlight || pending || session.queue.size() > 0) {
-                return {
-                    type: 'error',
-                    code: 'busy',
-                    message: 'Codex is busy; wait for the current turn to finish before creating a side session'
                 };
             }
 
@@ -3939,85 +4005,67 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 };
             }
 
-            let parentThreadId: string;
+            sideSessionForkInFlight = true;
             try {
-                parentThreadId = await ensureThreadForSideSessionFork(mode);
-            } catch (error) {
-                return {
-                    type: 'error',
-                    code: 'thread_unavailable',
-                    message: `Codex conversation could not be prepared: ${errorMessage(error)}`
-                };
-            }
-
-            let rejectFork: (error: Error) => void = () => {};
-            const forkPromise = new Promise<{
-                childCodexThreadId: string;
-                parentCodexThreadId: string;
-            }>((resolve, reject) => {
-                rejectFork = reject;
-                const timeout = setTimeout(() => {
-                    const timedOutFork = takePendingSideSessionFork(parentThreadId);
-                    if (!timedOutFork) {
-                        return;
-                    }
-                    reject(new Error('Timed out waiting for Codex to create the side session'));
-                }, SIDE_SESSION_FORK_TIMEOUT_MS);
-                timeout.unref?.();
-                pendingSideSessionFork = {
-                    callId: null,
-                    parentThreadId,
-                    timeout,
-                    resolve,
-                    reject
-                };
-            });
-            void forkPromise.catch(() => {});
-
-            try {
-                suppressReadyForAdminCommand = true;
-                clearReadyAfterTurnTimer?.();
-                turnInFlight = true;
-                allowAnonymousTerminalEvent = false;
-                session.onThinkingChange(true);
-                const turnResponse = await appServerClient.startTurn(buildTurnStartParams({
+                const parentThreadId = await ensureThreadForSideSessionFork(mode);
+                const read = await appServerClient.readThread({
                     threadId: parentThreadId,
-                    message: sideSessionForkPrompt,
-                    cwd: session.path,
-                    mode,
-                    cliOverrides: session.codexCliOverrides
-                }), {
+                    includeTurns: true
+                }, {
                     signal: this.abortController.signal
                 });
-                const turnRecord = asRecord(turnResponse);
-                const turn = turnRecord ? asRecord(turnRecord.turn) : null;
-                const turnId = asString(turn?.id);
-                if (turnId) {
-                    this.currentTurnId = turnId;
-                } else {
-                    allowAnonymousTerminalEvent = true;
+                const boundary = readSideSessionForkBoundary(read, parentThreadId);
+                if (!boundary) {
+                    return {
+                        type: 'error',
+                        code: 'fork_boundary_unavailable',
+                        message: 'Codex conversation history could not be read safely'
+                    };
                 }
 
-                const fork = await forkPromise;
+                let childCodexThreadId: string | null = null;
+                if (boundary.lastTurnId) {
+                    const forkResponse = await appServerClient.forkThread({
+                        threadId: parentThreadId,
+                        lastTurnId: boundary.lastTurnId
+                    }, {
+                        signal: this.abortController.signal
+                    });
+                    childCodexThreadId = asString(asRecord(asRecord(forkResponse)?.thread)?.id);
+                } else if (boundary.hasInProgressTurn) {
+                    const threadResponse = await appServerClient.startThread(buildThreadStartParams({
+                        cwd: session.path,
+                        mode,
+                        mcpServers,
+                        cliOverrides: session.codexCliOverrides
+                    }), {
+                        signal: this.abortController.signal
+                    });
+                    childCodexThreadId = asString(asRecord(asRecord(threadResponse)?.thread)?.id);
+                } else {
+                    const forkResponse = await appServerClient.forkThread({
+                        threadId: parentThreadId
+                    }, {
+                        signal: this.abortController.signal
+                    });
+                    childCodexThreadId = asString(asRecord(asRecord(forkResponse)?.thread)?.id);
+                }
+                if (!childCodexThreadId) {
+                    throw new Error('app-server did not return the side session thread.id');
+                }
                 return {
                     type: 'success',
-                    ...fork
+                    childCodexThreadId,
+                    parentCodexThreadId: parentThreadId
                 };
             } catch (error) {
-                rejectFork(error instanceof Error ? error : new Error(String(error)));
                 return {
                     type: 'error',
                     code: 'fork_failed',
                     message: errorMessage(error)
                 };
             } finally {
-                takePendingSideSessionFork(parentThreadId);
-                turnInFlight = false;
-                allowAnonymousTerminalEvent = false;
-                this.currentTurnId = null;
-                suppressReadyForAdminCommand = false;
-                session.onThinkingChange(false);
-                scheduleReadyAfterTurn?.();
+                sideSessionForkInFlight = false;
             }
         });
 
@@ -4347,7 +4395,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
         }
 
-        takePendingSideSessionFork()?.reject(new Error('Codex session ended before the side session was created'));
         failPendingAgentStarts('spawn_agent did not return an agent id before the Codex session ended');
         cancelAllPendingThrottledAgentRunUpdates();
         markAllActiveSubagents('canceled', 'Session ended');

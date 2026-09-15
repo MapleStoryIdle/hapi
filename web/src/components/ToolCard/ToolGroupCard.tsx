@@ -10,7 +10,7 @@ import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandSummary, joinTerminalSummaryParts } from '@/components/ToolCard/terminalCommandIntent'
 import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutationDetail'
 import { formatGroupedHeaderSubtitle, formatGroupedHeaderTitle } from '@/components/ToolCard/groupedPresentation'
-import { getCodexAgentEffectiveConfiguration, getCodexAgentSummary, parseCodexSpawnAgentResult } from '@/components/ToolCard/codexAgents'
+import { getCodexAgentActivity, getCodexAgentEffectiveConfiguration, getCodexAgentSummary, parseCodexSpawnAgentResult } from '@/components/ToolCard/codexAgents'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ChatDetailDialog } from '@/components/ui/ChatDetailDialog'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
@@ -237,7 +237,7 @@ function getToolGroupCompactLabel(
     if (runningTerminal) {
         const terminalIntent = getTerminalCommandIntent(runningTerminal.tool.input)
         const terminalLabel = terminalIntent?.kind === 'read-request' && terminalIntent.targets.length > 1
-            ? t('toolGroup.compact.row.readBatch')
+            ? t('toolGroup.compact.row.readBatch', { n: terminalIntent.targets.length })
             : terminalIntent
                 ? getTerminalCommandDisplayTitle(runningTerminal.tool.input, t)
                 : getTerminalCommandSummary(runningTerminal.tool.input)
@@ -282,7 +282,7 @@ function getToolGroupCompactLabel(
         if (isTerminalExecutionTool(displayTool.tool.name)) {
             const terminalIntent = getTerminalCommandIntent(displayTool.tool.input)
             const terminalLabel = terminalIntent?.kind === 'read-request' && terminalIntent.targets.length > 1
-                ? t('toolGroup.compact.row.readBatch')
+                ? t('toolGroup.compact.row.readBatch', { n: terminalIntent.targets.length })
                 : terminalIntent
                     ? getTerminalCommandDisplayTitle(displayTool.tool.input, t)
                     : getTerminalCommandSummary(displayTool.tool.input)
@@ -578,10 +578,14 @@ function getCodexSubagentCardMetadata(
     tool: ToolCallBlock
 ): string | null {
     const configuration = getCodexAgentEffectiveConfiguration(tool.tool.input, tool.model)
-    const values = [configuration.model, configuration.reasoningEffort]
-        .filter((value): value is string => value !== null)
-    if (values.length === 0) return null
-    return values.join(' · ')
+    if (configuration.model) {
+        return [configuration.model, configuration.reasoningEffort]
+            .filter((value): value is string => value !== null)
+            .join(' · ')
+    }
+
+    const activity = getCodexAgentActivity(tool.tool.input)
+    return activity ? formatLiveProcessText(activity) : null
 }
 
 function CodexSubagentCards(props: {
@@ -715,7 +719,7 @@ function CompactRowLabel(props: { block: ToolCallBlock; metadata: SessionMetadat
     const label = isUnknownTerminal
         ? t('terminal.execution.title')
         : isBatchRead
-        ? t('toolGroup.compact.row.readBatch')
+        ? t('toolGroup.compact.row.readBatch', { n: terminalIntent.targets.length })
         : terminalIntent
             ? getTerminalCommandIntentLabel(props.block.tool.input, terminalIntent, t)
             : terminalCommandSummary
@@ -735,7 +739,7 @@ function CompactRowLabel(props: { block: ToolCallBlock; metadata: SessionMetadat
         ? null
         : terminalIntent || terminalCommandSummary
         ? terminalIntent && !isBatchRead
-            ? getTerminalCommandIntentDetail(terminalIntent)
+            ? getTerminalCommandIntentDetail(terminalIntent, t)
             : null
         : presentation.subtitle ?? (kind === 'other' ? null : presentation.title)
 

@@ -190,11 +190,11 @@ function isLikelyFileName(name: string): boolean {
         || /^(?:Dockerfile|Makefile|README|LICENSE|AGENTS?|CHANGELOG)$/i.test(name)
 }
 
-function unique(values: Array<string | null>, limit = 4): string[] {
-    return values
+function unique(values: Array<string | null>, limit: number | null = 4): string[] {
+    const uniqueValues = values
         .filter((value): value is string => value !== null)
         .filter((value, index, all) => all.indexOf(value) === index)
-        .slice(0, limit)
+    return limit === null ? uniqueValues : uniqueValues.slice(0, limit)
 }
 
 function getInvocationArgs(invocation: ShellInvocation): string[] {
@@ -247,7 +247,7 @@ function getSearchFiles(invocation: ShellInvocation): string[] {
         const name = safeFileName(arg, true)
         return name && isLikelyFileName(name) ? name : null
     })
-    return unique([...namedPatterns, ...pathNames])
+    return unique([...namedPatterns, ...pathNames], null)
 }
 
 function getOutputFiles(invocation: ShellInvocation): string[] {
@@ -679,6 +679,13 @@ function formatNames(names: string[]): string | null {
     return remaining > 0 ? `${visible.join(' · ')} · +${remaining}` : visible.join(' · ')
 }
 
+function formatFileNamesOrCount(names: string[], t?: Translator): string | null {
+    if (names.length <= 1) return formatNames(names)
+    return t
+        ? t('toolGroup.compact.fileCount', { n: names.length })
+        : `${names.length} files`
+}
+
 function formatDatabaseDetail(intent: Extract<TerminalCommandIntent, { kind: 'query-database' }>): string | null {
     if (intent.tables.length === 0) return intent.database
     const database = intent.database
@@ -693,16 +700,16 @@ function formatDatabaseDetail(intent: Extract<TerminalCommandIntent, { kind: 'qu
     return `${database} · ${visible.join(', ')}${remaining > 0 ? ` +${remaining}` : ''}`
 }
 
-export function getTerminalCommandIntentDetail(intent: TerminalCommandIntent): string | null {
+export function getTerminalCommandIntentDetail(intent: TerminalCommandIntent, t?: Translator): string | null {
     if (intent.kind === 'read-request') {
-        return formatNames(intent.targets.map((target) => {
+        return formatFileNamesOrCount(intent.targets.map((target) => {
             const name = safeFileName(target.path, true)
             if (!name) return ''
             const range = formatFileLineRange(target.lineRange)
             return range ? `${name} · ${range}` : name
-        }).filter(Boolean))
+        }).filter(Boolean), t)
     }
-    if (intent.kind === 'search-files') return formatNames(intent.files)
+    if (intent.kind === 'search-files') return formatFileNamesOrCount(intent.files, t)
     if (intent.kind === 'request-url') {
         if (!intent.host) return null
         return `${intent.host}${intent.path ?? ''}`
@@ -884,7 +891,7 @@ export function getTerminalCommandDisplayTitle(input: unknown, t?: Translator): 
     const intent = getTerminalCommandIntent(input)
     if (intent) {
         const title = getTerminalCommandIntentLabel(input, intent, t)
-        const detail = getTerminalCommandIntentDetail(intent)
+        const detail = getTerminalCommandIntentDetail(intent, t)
         return detail ? `${title} · ${detail}` : title
     }
     return getTerminalCommandSummary(input)

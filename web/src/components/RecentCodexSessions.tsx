@@ -59,14 +59,13 @@ import {
     type NativeCodexSessionListUpdate
 } from '@/lib/native-codex-realtime-events'
 import {
-    initializeCodexKanbanLastSeen,
     markSessionSeen,
     useSessionLastSeenState
 } from '@/lib/sessionLastSeen'
 
 /** The sessions index intentionally stays focused on the last three days. */
 export const RECENT_CODEX_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
-export const RECENT_COMPLETED_WINDOW_MS = 30 * 60 * 1000
+export const RECENT_COMPLETED_WINDOW_MS = 15 * 60 * 1000
 const NATIVE_CODEX_LIST_FALLBACK_REFRESH_INTERVAL_MS = 5_000
 const NATIVE_CODEX_LIST_UPDATE_BATCH_MS = 100
 const HAPI_CODEX_ORIGINATOR = 'hapi-codex-client'
@@ -424,13 +423,17 @@ function getHapiSessionUpdatedAt(session: MergedCodexSession): number {
     return session.hapiSession?.updatedAt ?? session.modifiedAt
 }
 
-/** A completed managed Codex row stays unviewed only inside the recent completion window. */
+function getMergedCodexSessionSeenKey(session: MergedCodexSession): string {
+    return session.source === 'hapi' ? session.id : session.key
+}
+
+/** A completed row stays unviewed only inside the recent completion window. */
 export function isMergedCodexSessionUnviewed(
     session: MergedCodexSession,
     lastSeenAtBySession: Readonly<Record<string, number>>,
     now = Date.now()
 ): boolean {
-    if (session.source !== 'hapi' || getMergedCodexKanbanStatus(session) !== 'completed') {
+    if (getMergedCodexKanbanStatus(session) !== 'completed') {
         return false
     }
 
@@ -442,13 +445,13 @@ export function isMergedCodexSessionUnviewed(
         return false
     }
 
-    return completedAt > toEpochMilliseconds(lastSeenAtBySession[session.id] ?? 0)
+    return completedAt > toEpochMilliseconds(lastSeenAtBySession[getMergedCodexSessionSeenKey(session)] ?? 0)
 }
 
 export function groupMergedCodexSessionsForKanban(
     sessions: MergedCodexSession[],
     pinnedSessionKeys: ReadonlySet<string> = EMPTY_PINNED_SESSION_KEYS,
-    _lastSeenAtBySession: Readonly<Record<string, number>> | null = null,
+    lastSeenAtBySession: Readonly<Record<string, number>> = {},
     now = Date.now(),
     sessionGroups: ReadonlyMap<string, SessionGroup> = EMPTY_SESSION_GROUPS
 ): MergedCodexKanbanGroup[] {
@@ -467,17 +470,16 @@ export function groupMergedCodexSessionsForKanban(
     for (const session of sessions) {
         const status = getMergedCodexKanbanStatus(session)
         const customGroup = sessionGroups.get(session.key)
-        // List summaries expose activity time, not a separate completion time.
-        const age = now - toEpochMilliseconds(session.modifiedAt)
-        // User action and active thinking take precedence over a local pin.
-        // Unviewed is a card treatment, not a lane, so cards keep their normal location.
-        const groupId: MergedCodexKanbanGroupId = status === 'completed' && pinnedSessionKeys.has(session.key)
+        // A fresh completion temporarily outranks pin/group placement. Once the
+        // person opens it, the persisted seen watermark restores its normal lane.
+        const unviewed = isMergedCodexSessionUnviewed(session, lastSeenAtBySession, now)
+        const groupId: MergedCodexKanbanGroupId = status === 'completed' && unviewed
+                ? 'recent'
+                : status === 'completed' && pinnedSessionKeys.has(session.key)
                 ? 'pinned'
                 : status === 'completed' && customGroup
                     ? `custom:${customGroup.id}`
-                    : status === 'completed' && age >= 0 && age < RECENT_COMPLETED_WINDOW_MS
-                        ? 'recent'
-                        : status
+                    : status
         groupsById.get(groupId)!.sessions.push(session)
     }
 
@@ -603,6 +605,7 @@ export function mergeRecentCodexSessions(
     )
     const local = nativeSessions
         .filter((session) => isRecentCodexSession(session.modifiedAt, now, windowMs))
+        .filter((session) => !session.managedSessionId)
         .filter((session) => !managedThreadIds.has(session.id))
         .map((session): MergedCodexSession => ({
             key: `native:${session.id}`,
@@ -1225,8 +1228,6 @@ export function RecentCodexSessions(props: {
     const [manualRefreshFeedback, setManualRefreshFeedback] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const [archivedSessionKeys, setArchivedSessionKeys] = useState<Set<string>>(() => new Set())
     const sessionLastSeenState = useSessionLastSeenState()
-    const codexKanbanLastSeenScope = props.machineId ?? 'all-runners'
-    const isCodexKanbanLastSeenInitialized = sessionLastSeenState.codexKanbanInitializedScopes[codexKanbanLastSeenScope] === true
 
     useEffect(() => {
         const updateRelativeTime = () => setRelativeTimeNow(Date.now())
@@ -1335,12 +1336,6 @@ export function RecentCodexSessions(props: {
         }
         return labels
     }, [sessionLabelTargetsByKey, sessionLabelsQuery.data])
-    const completedHapiSessionsForKanbanBootstrap = useMemo(
-        () => mergedSessions
-            .filter((session) => session.source === 'hapi' && getMergedCodexKanbanStatus(session) === 'completed')
-            .map((session) => ({ id: session.id, updatedAt: getHapiSessionUpdatedAt(session) })),
-        [mergedSessions]
-    )
     const mergedDirectoryGroups = useMemo(
         () => groupMergedCodexSessionsByDirectory(mergedSessions),
         [mergedSessions]
@@ -1349,21 +1344,17 @@ export function RecentCodexSessions(props: {
         () => groupMergedCodexSessionsForKanban(
             mergedSessions,
             pinnedSessionKeys,
-            isCodexKanbanLastSeenInitialized
-                ? sessionLastSeenState.lastSeenAtBySession
-                : null,
-            Date.now(),
+            sessionLastSeenState.lastSeenAtBySession,
+            relativeTimeNow,
             sessionGroupsByKey
         ),
-        [isCodexKanbanLastSeenInitialized, mergedSessions, pinnedSessionKeys, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession, sessionGroupsByKey]
+        [mergedSessions, pinnedSessionKeys, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession, sessionGroupsByKey]
     )
     const unviewedSessionKeys = useMemo(() => new Set(
-        isCodexKanbanLastSeenInitialized
-            ? mergedSessions
-                .filter(session => isMergedCodexSessionUnviewed(session, sessionLastSeenState.lastSeenAtBySession, relativeTimeNow))
-                .map(session => session.key)
-            : []
-    ), [isCodexKanbanLastSeenInitialized, mergedSessions, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession])
+        mergedSessions
+            .filter(session => isMergedCodexSessionUnviewed(session, sessionLastSeenState.lastSeenAtBySession, relativeTimeNow))
+            .map(session => session.key)
+    ), [mergedSessions, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession])
     const completedTimelineGroups = useMemo(() => {
         const completed = kanbanGroups.find((group) => group.id === 'completed')?.sessions ?? []
         return groupMergedCodexCompletedTimeline(completed, new Date(), dateLocale, {
@@ -1380,13 +1371,6 @@ export function RecentCodexSessions(props: {
         const Icon = presentation.Icon
         return { id: group.id, label: group.customGroup?.name ?? t(presentation.labelKey), icon: group.customGroup ? <span>{group.customGroup.emoji}</span> : <Icon className="h-4 w-4" /> }
     })
-
-    useEffect(() => {
-        if (!isMerged || props.hapiIsLoading || isCodexKanbanLastSeenInitialized) {
-            return
-        }
-        initializeCodexKanbanLastSeen(completedHapiSessionsForKanbanBootstrap, codexKanbanLastSeenScope)
-    }, [codexKanbanLastSeenScope, completedHapiSessionsForKanbanBootstrap, isCodexKanbanLastSeenInitialized, isMerged, props.hapiIsLoading])
 
     const directoryGroupsForDisclosure = isMerged ? mergedDirectoryGroups : directoryGroups
 
@@ -1614,9 +1598,9 @@ export function RecentCodexSessions(props: {
     }, [refresh])
 
     const handleOpenMergedSession = useCallback((session: MergedCodexSession) => {
+        markSessionSeen(getMergedCodexSessionSeenKey(session), getHapiSessionUpdatedAt(session))
         if (session.source === 'hapi') {
             if (!session.hapiSession) return
-            markSessionSeen(session.id, getHapiSessionUpdatedAt(session))
             props.onOpenHapi?.(session.hapiSession)
             return
         }

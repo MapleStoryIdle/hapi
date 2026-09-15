@@ -94,6 +94,8 @@ type CodexLocalSessionSummary = {
     runState?: 'idle' | 'processing' | 'unknown'
     waitingForUserInput?: boolean
     controlledByCodexSsh?: boolean
+    /** Hub-resolved SHAPI owner for this native thread on the selected machine. */
+    managedSessionId?: string | null
 }
 
 type CodexTranscriptFileCandidate = {
@@ -956,14 +958,21 @@ function findHapiManagedCodexSession(
     machineId: string,
     codexSessionId: string
 ) {
-    return engine.getSessionsByNamespace(namespace).find((session) => (
-        session.metadata?.machineId === machineId
-        && session.metadata?.controlOwner !== 'external'
-        && (
-            session.id === codexSessionId
-            || session.metadata?.codexSessionId === codexSessionId
-        )
-    ))
+    return engine.getSessionsByNamespace(namespace)
+        .filter((session) => (
+            session.metadata?.flavor === 'codex'
+            && session.metadata.machineId === machineId
+            && session.metadata.controlOwner !== 'external'
+            && (
+                session.id === codexSessionId
+                || session.metadata.codexSessionId === codexSessionId
+            )
+        ))
+        .sort((left, right) => (
+            Number(right.active) - Number(left.active)
+            || right.updatedAt - left.updatedAt
+            || left.id.localeCompare(right.id)
+        ))[0]
 }
 
 function findActiveHapiManagedCodexSession(
@@ -972,14 +981,23 @@ function findActiveHapiManagedCodexSession(
     machineId: string,
     codexSessionId: string
 ) {
-    return engine.getSessionsByNamespace(namespace).find((session) => (
-        session.active
-        && session.metadata?.flavor === 'codex'
-        && session.metadata?.machineId === machineId
-        && session.metadata?.controlOwner !== 'external'
+    const session = findHapiManagedCodexSession(engine, namespace, machineId, codexSessionId)
+    return session?.active ? session : undefined
+}
+
+function hasReleasedHapiManagedCodexSession(
+    engine: SyncEngine,
+    namespace: string,
+    machineId: string,
+    codexSessionId: string
+): boolean {
+    return engine.getSessionsByNamespace(namespace).some((session) => (
+        session.metadata?.flavor === 'codex'
+        && session.metadata.machineId === machineId
+        && session.metadata.controlOwner === 'external'
         && (
             session.id === codexSessionId
-            || session.metadata?.codexSessionId === codexSessionId
+            || session.metadata.codexSessionId === codexSessionId
         )
     ))
 }
@@ -2050,15 +2068,21 @@ export function createCodexDesktopRoutes(options: {
             // older SHAPI Codex launches used Codex's desktop originator, so
             // originator alone is not enough to keep a regular SHAPI session
             // out of this native-session list.
-            const managedHapiSessionIds = new Set(engine.getSessionsByNamespace(c.get('namespace'))
-                .filter((session) => session.metadata?.machineId === machineId)
-                .map((session) => session.id))
+            const sessionsWithManagedTargets = result.sessions.map((session) => {
+                const managedSession = findHapiManagedCodexSession(
+                    engine,
+                    c.get('namespace'),
+                    machineId,
+                    session.id
+                )
+                return { ...session, managedSessionId: managedSession?.id ?? null }
+            })
             const sessions = excludeHapiInitiated
-                ? result.sessions.filter((session) => (
+                ? sessionsWithManagedTargets.filter((session) => (
                     !isHapiInitiatedCodexSession(session)
-                    && !managedHapiSessionIds.has(session.id)
+                    && !session.managedSessionId
                 ))
-                : result.sessions
+                : sessionsWithManagedTargets
             return c.json({ success: true, sessions } satisfies CodexLocalSessionsResponse)
         } catch (error) {
             return c.json({
@@ -2066,6 +2090,24 @@ export function createCodexDesktopRoutes(options: {
                 error: error instanceof Error ? error.message : 'Failed to list Codex sessions on the selected runner'
             }, 502)
         }
+    })
+
+    app.get('/codex/sessions/:id/managed-session', (c) => {
+        const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
+        if (!machineId) {
+            return c.json({ success: false, error: 'machineId is required' }, 400)
+        }
+        const engine = options.getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'SHAPI hub is not connected' }, 503)
+        }
+        const managedSession = findHapiManagedCodexSession(
+            engine,
+            c.get('namespace'),
+            machineId,
+            c.req.param('id')
+        )
+        return c.json({ success: true, sessionId: managedSession?.id ?? null })
     })
 
     app.get('/codex/sessions/:id/context', async (c) => {
@@ -2687,7 +2729,30 @@ export function createCodexDesktopRoutes(options: {
                 } satisfies SendCodexLocalSessionMessageRpcResponse, 202)
             }
 
-            const result = request.displayMessage === undefined && request.clientMessageId === undefined && request.forceRecovery === undefined && request.attachmentIds === undefined
+            // A locally handed-off SHAPI thread remains identifiable by its
+            // transcript originator. Authorize this exact external-owned row
+            // instead of making the Runner mistake it for an active SHAPI owner.
+            const allowHapiInitiated = hasReleasedHapiManagedCodexSession(
+                engine!,
+                c.get('namespace'),
+                target.machine.id,
+                c.req.param('id')
+            )
+
+            const result = allowHapiInitiated
+                ? await engine!.sendCodexLocalSessionMessage(
+                    target.machine.id,
+                    c.req.param('id'),
+                    request.message,
+                    request.displayMessage,
+                    request.clientMessageId,
+                    request.forceRecovery,
+                    undefined,
+                    undefined,
+                    request.attachmentIds,
+                    true
+                )
+                : request.displayMessage === undefined && request.clientMessageId === undefined && request.forceRecovery === undefined && request.attachmentIds === undefined
                 ? await engine!.sendCodexLocalSessionMessage(
                     target.machine.id,
                     c.req.param('id'),

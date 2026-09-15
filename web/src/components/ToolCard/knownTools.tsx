@@ -576,7 +576,7 @@ export function getToolPresentation(
                         ? <SearchIcon className={DEFAULT_ICON_CLASS} />
                         : <TerminalIcon className={DEFAULT_ICON_CLASS} />,
                 title: getTerminalCommandIntentLabel(opts.input, intent, t),
-                subtitle: getTerminalCommandIntentDetail(intent),
+                subtitle: getTerminalCommandIntentDetail(intent, t),
                 minimal: isCodexTerminalMinimal(opts.result)
             }
         }

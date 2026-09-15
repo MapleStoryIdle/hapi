@@ -648,6 +648,13 @@ function SessionsPage() {
 
     const handleOpenCodexSession = useCallback((session: CodexLocalSessionSummary) => {
         if (!selectedRunnerMachine) return
+        if (session.managedSessionId) {
+            navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId: session.managedSessionId }
+            })
+            return
+        }
         navigate({
             to: '/sessions/codex/$codexSessionId',
             params: { codexSessionId: session.id },
@@ -1463,10 +1470,56 @@ function CodexSessionContextRoute() {
     const navigate = useNavigate()
     const { codexSessionId } = useParams({ from: '/sessions/codex/$codexSessionId' })
     const { machineId } = useSearch({ from: '/sessions/codex/$codexSessionId' })
+    const resolutionKey = `${machineId ?? ''}:${codexSessionId}`
+    const latestResolutionKeyRef = useRef(resolutionKey)
+    latestResolutionKeyRef.current = resolutionKey
+    const [managedResolution, setManagedResolution] = useState<{
+        key: string
+        sessionId: string | null
+    } | null>(null)
     const { machines } = useMachines(api, Boolean(machineId))
     const selectedMachine = machines.find((machine) => machine.id === machineId)
     const realtimeAvailable = selectedMachine?.active === true
         && selectedMachine.metadata?.nativeCodexRealtime === true
+
+    useEffect(() => {
+        let cancelled = false
+        if (!machineId) {
+            setManagedResolution({ key: resolutionKey, sessionId: null })
+            return () => {
+                cancelled = true
+            }
+        }
+
+        setManagedResolution(null)
+        void api.getCodexManagedSessionTarget(codexSessionId, machineId)
+            .then((result) => {
+                if (cancelled || latestResolutionKeyRef.current !== resolutionKey) return
+                setManagedResolution({ key: resolutionKey, sessionId: result.sessionId })
+                if (result.sessionId) {
+                    navigate({
+                        to: '/sessions/$sessionId',
+                        params: { sessionId: result.sessionId },
+                        replace: true
+                    })
+                }
+            })
+            .catch(() => {
+                if (cancelled || latestResolutionKeyRef.current !== resolutionKey) return
+                setManagedResolution({ key: resolutionKey, sessionId: null })
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [api, codexSessionId, machineId, navigate, resolutionKey])
+
+    if (machineId && (
+        managedResolution?.key !== resolutionKey
+        || managedResolution.sessionId !== null
+    )) {
+        return <SessionEntryLoading onBack={() => navigate({ to: '/sessions' })} />
+    }
 
     return (
         <CodexSessionContextPage

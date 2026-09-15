@@ -15,6 +15,8 @@ const harness = vi.hoisted(() => ({
     startThreadIds: [] as string[],
     resumeThreadIds: [] as string[],
     forkThreadIds: [] as string[],
+    forkThreadParams: [] as Array<{ threadId?: string; lastTurnId?: string }>,
+    readThreadResponse: null as unknown,
     startTurnThreadIds: [] as string[],
     startTurnParams: [] as Array<Record<string, unknown>>,
     startTurnErrors: [] as Error[],
@@ -48,6 +50,8 @@ const harness = vi.hoisted(() => ({
     emitChildFailureSequence: false,
     emitLateChildCommandAfterParentTool: false,
     emitParentUsageEvents: false,
+    emitParentUsageModelSwitch: false,
+    parentUsageEmissionCount: 0,
     emitParentMessageSnapshots: false,
     emitParentSessionEvents: false,
     emitParentGoalDuplicateEvents: false,
@@ -122,18 +126,19 @@ vi.mock('./codexAppServerClient', () => {
             return { thread: { id }, model: 'gpt-5.4' };
         }
 
-        async readThread(params?: { threadId?: string }): Promise<{ thread: { id: string; turns: Array<{ status: string }> } }> {
-            return {
+        async readThread(params?: { threadId?: string }): Promise<unknown> {
+            return harness.readThreadResponse ?? {
                 thread: {
                     id: params?.threadId ?? 'thread-unknown',
-                    turns: [{ status: 'completed' }]
+                    turns: [{ id: 'turn-completed', status: 'completed' }]
                 }
             };
         }
 
-        async forkThread(params?: { threadId?: string }): Promise<{ thread: { id: string }; model: string; reasoningEffort: string; serviceTier: string }> {
+        async forkThread(params?: { threadId?: string; lastTurnId?: string }): Promise<{ thread: { id: string }; model: string; reasoningEffort: string; serviceTier: string }> {
             const sourceId = params?.threadId ?? 'thread-source';
             harness.forkThreadIds.push(sourceId);
+            harness.forkThreadParams.push(params ?? {});
             return {
                 thread: { id: `fork-${sourceId}` },
                 model: 'gpt-5.4',
@@ -405,14 +410,21 @@ vi.mock('./codexAppServerClient', () => {
                 }
 
                 if (harness.emitParentUsageEvents) {
+                    const isModelSwitchUpdate = harness.emitParentUsageModelSwitch && harness.parentUsageEmissionCount++ > 0;
+                    const usageSnapshot = isModelSwitchUpdate
+                        ? { input_tokens: 150, output_tokens: 20 }
+                        : { input_tokens: 100, output_tokens: 10 };
                     const parentUsage = {
                         tokenUsage: {
                             thread_id: threadId,
                             turn_id: turnId,
-                            last_token_usage: {
-                                input_tokens: 100,
-                                output_tokens: 10
-                            },
+                            ...(harness.emitParentUsageModelSwitch
+                                ? {
+                                    total_token_usage: usageSnapshot,
+                                    model: isModelSwitchUpdate ? 'gpt-B' : 'gpt-A',
+                                    reasoning_effort: isModelSwitchUpdate ? 'low' : 'high'
+                                }
+                                : { last_token_usage: usageSnapshot }),
                             model_context_window: 200_000
                         }
                     };
@@ -926,7 +938,8 @@ import {
     codexRemoteLauncher,
     isCodexAppServerTransportError,
     isExactIdleRecoveryThreadRead,
-    readRecoveredCodexThreadState
+    readRecoveredCodexThreadState,
+    readSideSessionForkBoundary
 } from './codexRemoteLauncher';
 
 type FakeAgentState = {
@@ -950,13 +963,14 @@ function createMode(): EnhancedMode {
     };
 }
 
-function createSessionStub(messages = ['hello from launcher test'], mode = createMode()) {
+function createSessionStub(messages = ['hello from launcher test'], mode = createMode(), messageModes?: EnhancedMode[]) {
     const queue = new MessageQueue2<EnhancedMode>((mode) => JSON.stringify(mode));
     messages.forEach((message, index) => {
+        const messageMode = messageModes?.[index] ?? mode;
         if (index === 0 && messages.length > 1) {
-            queue.pushIsolateAndClear(message, mode);
+            queue.pushIsolateAndClear(message, messageMode);
         } else {
-            queue.push(message, mode);
+            queue.push(message, messageMode);
         }
     });
     queue.close();
@@ -1104,6 +1118,30 @@ describe('codexRemoteLauncher', () => {
         expect(readRecoveredCodexThreadState({ thread: { id: 'thread-1', turns: [{ status: 'completed' }] } }, 'thread-1')).toBe('idle');
         expect(readRecoveredCodexThreadState({ thread: { id: 'thread-1', turns: [{ status: 'mystery' }] } }, 'thread-1')).toBe('unknown');
     });
+    it('selects the last completed side-session boundary before a running turn', () => {
+        expect(readSideSessionForkBoundary({
+            thread: {
+                id: 'thread-1',
+                turns: [
+                    { id: 'turn-1', status: 'completed' },
+                    { id: 'turn-2', status: 'failed' },
+                    { id: 'turn-3', status: 'inProgress' }
+                ]
+            }
+        }, 'thread-1')).toEqual({
+            lastTurnId: 'turn-2',
+            hasInProgressTurn: true
+        });
+        expect(readSideSessionForkBoundary({
+            thread: { id: 'thread-1', turns: [{ id: 'turn-1', status: 'inProgress' }] }
+        }, 'thread-1')).toEqual({
+            lastTurnId: null,
+            hasInProgressTurn: true
+        });
+        expect(readSideSessionForkBoundary({
+            thread: { id: 'thread-1', turns: [{ status: 'completed' }] }
+        }, 'thread-1')).toBeNull();
+    });
     afterEach(() => {
         harness.notifications = [];
         harness.registerRequestCalls = [];
@@ -1117,6 +1155,8 @@ describe('codexRemoteLauncher', () => {
         harness.startThreadIds = [];
         harness.resumeThreadIds = [];
         harness.forkThreadIds = [];
+        harness.forkThreadParams = [];
+        harness.readThreadResponse = null;
         harness.startTurnThreadIds = [];
         harness.startTurnParams = [];
         harness.startTurnErrors = [];
@@ -1150,6 +1190,8 @@ describe('codexRemoteLauncher', () => {
         harness.emitChildFailureSequence = false;
         harness.emitLateChildCommandAfterParentTool = false;
         harness.emitParentUsageEvents = false;
+        harness.emitParentUsageModelSwitch = false;
+        harness.parentUsageEmissionCount = 0;
         harness.emitParentMessageSnapshots = false;
         harness.emitParentSessionEvents = false;
         harness.emitParentGoalDuplicateEvents = false;
@@ -1216,6 +1258,70 @@ describe('codexRemoteLauncher', () => {
         expect(getModel()).toBe('gpt-5.4');
         expect(getModelReasoningEffort()).toBe('xhigh');
         expect(getServiceTier()).toBe('fast');
+    });
+
+    it('creates a side session from the last completed turn while the parent turn is running', async () => {
+        harness.suppressTurnCompletion = true;
+        harness.emitTurnAbortedOnInterrupt = true;
+        harness.readThreadResponse = {
+            thread: {
+                id: 'thread-1',
+                turns: [
+                    { id: 'turn-before-running', status: 'completed' },
+                    { id: 'turn-1', status: 'inProgress' }
+                ]
+            }
+        };
+        const { session, rpcHandlers } = createSessionStub(['keep running']);
+
+        const running = codexRemoteLauncher(session as never);
+        await vi.waitFor(() => {
+            expect(harness.startTurnThreadIds).toEqual(['thread-1']);
+            expect(rpcHandlers.has('forkCodexSideSession')).toBe(true);
+        });
+
+        await expect(rpcHandlers.get('forkCodexSideSession')?.({})).resolves.toEqual({
+            type: 'success',
+            childCodexThreadId: 'fork-thread-1',
+            parentCodexThreadId: 'thread-1'
+        });
+        expect(harness.forkThreadParams).toContainEqual({
+            threadId: 'thread-1',
+            lastTurnId: 'turn-before-running'
+        });
+        expect(harness.startTurnMessages).toEqual(['keep running']);
+
+        await rpcHandlers.get('abort')?.({});
+        await expect(running).resolves.toBe('exit');
+    });
+
+    it('starts an empty side thread when the first parent turn is still running', async () => {
+        harness.suppressTurnCompletion = true;
+        harness.emitTurnAbortedOnInterrupt = true;
+        harness.readThreadResponse = {
+            thread: {
+                id: 'thread-1',
+                turns: [{ id: 'turn-1', status: 'inProgress' }]
+            }
+        };
+        const { session, rpcHandlers } = createSessionStub(['first turn']);
+
+        const running = codexRemoteLauncher(session as never);
+        await vi.waitFor(() => {
+            expect(harness.startTurnThreadIds).toEqual(['thread-1']);
+            expect(rpcHandlers.has('forkCodexSideSession')).toBe(true);
+        });
+
+        await expect(rpcHandlers.get('forkCodexSideSession')?.({})).resolves.toEqual({
+            type: 'success',
+            childCodexThreadId: 'thread-2',
+            parentCodexThreadId: 'thread-1'
+        });
+        expect(harness.forkThreadParams).toEqual([]);
+        expect(harness.startThreadIds).toEqual(['thread-1', 'thread-2']);
+
+        await rpcHandlers.get('abort')?.({});
+        await expect(running).resolves.toBe('exit');
     });
 
     it('forwards parent agent message snapshots and final messages with the same stream id', async () => {
@@ -2306,6 +2412,78 @@ describe('codexRemoteLauncher', () => {
             type: 'context_compacted',
             thread_id: 'child-thread'
         }));
+    });
+
+    it('aggregates parent and child usage snapshots without forwarding child usage into chat', async () => {
+        harness.emitChildThreadEvents = true;
+        harness.emitChildThreadConfiguration = true;
+        harness.emitParentUsageEvents = true;
+        harness.emitChildUsageEvents = true;
+        const { session, codexMessages, getUsageMetadata } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(getUsageMetadata().codexTokenUsage).toMatchObject({
+            input: 130,
+            output: 13,
+            total: 143,
+            breakdown: expect.arrayContaining([
+                expect.objectContaining({
+                    model: 'gpt-5.4',
+                    reasoningEffort: null,
+                    input: 100,
+                    output: 10,
+                    total: 110
+                }),
+                expect.objectContaining({
+                    model: 'gpt-5.6',
+                    reasoningEffort: 'high',
+                    input: 30,
+                    output: 3,
+                    total: 33
+                })
+            ])
+        });
+        expect(codexMessages).not.toContainEqual(expect.objectContaining({
+            type: 'token_count',
+            thread_id: 'child-thread'
+        }));
+    });
+
+    it('attributes only a parent cumulative usage increment to its later model and effort', async () => {
+        harness.emitParentUsageEvents = true;
+        harness.emitParentUsageModelSwitch = true;
+        const firstMode: EnhancedMode = { ...createMode(), model: 'gpt-A', modelReasoningEffort: 'high' };
+        const secondMode: EnhancedMode = { ...createMode(), model: 'gpt-B', modelReasoningEffort: 'low' };
+        const { session, getUsageMetadata } = createSessionStub(
+            ['first turn', 'second turn'],
+            firstMode,
+            [firstMode, secondMode]
+        );
+
+        await codexRemoteLauncher(session as never);
+
+        expect(getUsageMetadata().codexTokenUsage).toMatchObject({
+            input: 150,
+            output: 20,
+            total: 170,
+            breakdown: expect.arrayContaining([
+                expect.objectContaining({
+                    model: 'gpt-A',
+                    reasoningEffort: 'high',
+                    input: 100,
+                    output: 10,
+                    total: 110
+                }),
+                expect.objectContaining({
+                    model: 'gpt-B',
+                    reasoningEffort: 'low',
+                    input: 50,
+                    output: 10,
+                    total: 60
+                })
+            ])
+        });
     });
 
     it('keeps child goal events out of the parent goal stream', async () => {

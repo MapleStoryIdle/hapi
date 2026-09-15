@@ -292,6 +292,22 @@ describe('ToolGroupCard', () => {
         expect(cards[0]).not.toHaveClass('flex-1')
     })
 
+    it('shows the current agent action when its model is unavailable', () => {
+        const actionAgent = makeToolBlock('action-agent', 'CodexAgent', {
+            summary: 'Inspect the queue',
+            activity: '**Running command: bun test**'
+        }, { state: 'running' })
+        const view = renderCard(makeGroup({
+            tools: [actionAgent],
+            forceCompact: true,
+            forceGenericCompactTitle: true,
+        }))
+        const card = view.container.querySelector<HTMLElement>('[data-codex-subagent-card]')
+
+        expect(card).toHaveTextContent('Running command: bun test')
+        expect(card).not.toHaveTextContent('unavailable')
+    })
+
     it.each([
         [{ agent_path: '/root/execution_scout', displayName: 'Ada' }, 'execution_scout'],
         [{ agentPath: ' /root/team/scout ', name: 'Ada' }, 'team/scout'],
@@ -793,10 +809,10 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const batchToggle = within(batchView.container).getByRole('button', { name: /^read a batch of files$/i })
+        const batchToggle = within(batchView.container).getByRole('button', { name: /^read 2 files$/i })
         fireEvent.click(batchToggle)
 
-        expect(within(batchView.container).getAllByText('Read a batch of files')).toHaveLength(2)
+        expect(within(batchView.container).getAllByText('Read 2 files')).toHaveLength(2)
         expect(within(batchView.container).queryByText('web/src/a.ts')).not.toBeInTheDocument()
         expect(within(batchView.container).queryByText('web/src/b.ts · L1–20')).not.toBeInTheDocument()
     })

@@ -598,6 +598,65 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('maps a native transcript to its exact managed SHAPI session and machine', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('team-runner', ['/runner/workspace'], 'team-a', '/runner/.codex')
+        const managedSession = {
+            id: 'managed-session-newest',
+            namespace: 'team-a',
+            active: true,
+            updatedAt: 200,
+            metadata: {
+                flavor: 'codex',
+                machineId: 'team-runner',
+                codexSessionId: 'native-thread'
+            }
+        }
+        const olderManagedSession = {
+            ...managedSession,
+            id: 'managed-session-older',
+            updatedAt: 100
+        }
+        const inactiveManagedSession = {
+            ...managedSession,
+            id: 'managed-session-inactive',
+            active: false,
+            updatedAt: 300
+        }
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            getSessionsByNamespace: () => [inactiveManagedSession, olderManagedSession, managedSession],
+            listCodexLocalSessions: async () => ({
+                success: true,
+                sessions: [createRunnerLocalSessionData('native-thread').session]
+            })
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('team-a', store, engine)
+
+        try {
+            const listResponse = await app.request('/api/codex/sessions?machineId=team-runner')
+            expect(listResponse.status).toBe(200)
+            expect(await listResponse.json()).toMatchObject({
+                success: true,
+                sessions: [{ id: 'native-thread', managedSessionId: 'managed-session-newest' }]
+            })
+
+            const targetResponse = await app.request(
+                '/api/codex/sessions/native-thread/managed-session?machineId=team-runner'
+            )
+            expect(targetResponse.status).toBe(200)
+            expect(await targetResponse.json()).toEqual({ success: true, sessionId: 'managed-session-newest' })
+
+            const wrongMachineResponse = await app.request(
+                '/api/codex/sessions/native-thread/managed-session?machineId=other-runner'
+            )
+            expect(wrongMachineResponse.status).toBe(200)
+            expect(await wrongMachineResponse.json()).toEqual({ success: true, sessionId: null })
+        } finally {
+            store.close()
+        }
+    })
+
     it('allows Codex transcript endpoints in the default namespace', async () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-route-test-'))
         process.env.CODEX_HOME = codexHome
@@ -1819,6 +1878,7 @@ describe('Codex Desktop import routes', () => {
             id: 'hapi-managed-session',
             active: true,
             metadata: {
+                flavor: 'codex',
                 machineId: 'mac-runner',
                 codexSessionId: sessionId
             }
@@ -1873,7 +1933,7 @@ describe('Codex Desktop import routes', () => {
             getSessionsByNamespace: () => [{
                 id: 'inactive-managed-session',
                 active: false,
-                metadata: { machineId: 'mac-runner', codexSessionId: nativeSessionId }
+                metadata: { flavor: 'codex', machineId: 'mac-runner', codexSessionId: nativeSessionId }
             }],
             reopenSession: async (...args: unknown[]) => {
                 reopenCalls.push(args)
@@ -1930,7 +1990,7 @@ describe('Codex Desktop import routes', () => {
             getSessionsByNamespace: () => [{
                 id: 'inactive-managed-session',
                 active: false,
-                metadata: { machineId: 'mac-runner', codexSessionId: nativeSessionId }
+                metadata: { flavor: 'codex', machineId: 'mac-runner', codexSessionId: nativeSessionId }
             }],
             reopenSession: async () => {
                 reopenCount += 1
@@ -1999,7 +2059,18 @@ describe('Codex Desktop import routes', () => {
             })
             expect(response.status).toBe(202)
             expect(await response.json()).toMatchObject({ success: true, status: 'processing' })
-            expect(nativeSendCalls).toEqual([['mac-runner', sessionId, 'Continue natively']])
+            expect(nativeSendCalls).toEqual([[
+                'mac-runner',
+                sessionId,
+                'Continue natively',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                true
+            ]])
         } finally {
             store.close()
         }
@@ -2028,7 +2099,7 @@ describe('Codex Desktop import routes', () => {
             ...createImportSyncEngine(store, [machine]),
             getSessionsByNamespace: () => [{
                 id: 'legacy-hapi-thread',
-                metadata: { machineId: 'mac-runner' }
+                metadata: { flavor: 'codex', machineId: 'mac-runner' }
             }],
             listCodexLocalSessions: async (...args: unknown[]) => {
                 listCalls.push(args)

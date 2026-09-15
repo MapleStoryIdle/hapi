@@ -104,7 +104,7 @@ describe('getToolPresentation — file access semantics', () => {
         expect(presentation.subtitle).toBeNull()
     })
 
-    it('lists explicit read targets from a sequential Codex shell request', () => {
+    it('counts explicit read targets from a sequential Codex shell request', () => {
         const presentation = getToolPresentation({
             toolName: 'CodexBash',
             input: {
@@ -117,7 +117,7 @@ describe('getToolPresentation — file access semantics', () => {
         })
 
         expect(presentation.title).toBe('Read file')
-        expect(presentation.subtitle).toBe('AGENT.md · App.tsx · L12–80')
+        expect(presentation.subtitle).toBe('2 files')
     })
 
     it('shows safe remote, SQL, request, and file targets without raw arguments', () => {

@@ -25,6 +25,30 @@ describe('ApiClient error mapping', () => {
         }))
     })
 
+    it('resolves a native Codex thread to its managed SHAPI session on the selected runner', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+            success: true,
+            sessionId: 'managed-session'
+        }), { status: 200 }))
+        const api = new ApiClient('test-token')
+
+        expect(await api.getCodexManagedSessionTarget('thread/1', 'runner 1')).toEqual({
+            success: true,
+            sessionId: 'managed-session'
+        })
+        expect(fetchMock).toHaveBeenCalledWith(
+            '/api/codex/sessions/thread%2F1/managed-session?machineId=runner+1',
+            expect.objectContaining({ headers: expect.any(Object) })
+        )
+    })
+
+    it('rejects an invalid managed-session target payload', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }))
+        const api = new ApiClient('test-token')
+
+        await expect(api.getCodexManagedSessionTarget('thread-1', 'runner-1')).rejects.toThrow()
+    })
+
     it('prefers the stable `code` field over the human-readable `error` message in ApiError.code', async () => {
         // Match the shape /sessions/:id/reopen actually returns on a 503.
         fetchMock.mockResolvedValueOnce(

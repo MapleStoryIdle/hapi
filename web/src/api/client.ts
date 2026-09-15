@@ -5,10 +5,11 @@ import type { SessionGroup, SessionGroupInput, SessionGroupSource, SessionGroups
 import type { SessionLabelSource, SessionLabelsResponse } from '@hapi/protocol/sessionLabels'
 import type { SessionPinSource, SessionPinsResponse } from '@hapi/protocol/sessionPins'
 import type { KanbanOrder, KanbanOrderInput } from '@hapi/protocol/kanbanOrder'
-import type { AttachmentMetadata, AuthResponse, CodexLocalSessionsResponse, CodexLocalSessionContextResponse, CodexLocalSessionComposerCapabilitiesResponse, CodexLocalSessionSnapshotReadResponse, CodexLocalSessionSnapshotVersion, CodexLocalSessionStatusResponse, ArchiveCodexLocalSessionResponse, DiscardCodexLocalSessionMessageResponse, ForkCodexLocalSessionResponse, SendCodexLocalSessionMessageResponse, CodexDuplicateSessionsResponse, CodexMergeDuplicateSessionsResponse, CodexDesktopScriptResponse, CodexDesktopSyncRequest, CodexDesktopStatusResponse, CodexControlRecoveryResponse, CodexCollaborationMode, FileSearchResponse, MachinesResponse, MessagesResponse, OpenVikingContextListResponse, OpenVikingContextReadResponse, OpenVikingStatusResponse, OpenVikingMetricsResponse, OpenVikingQualityResponse, OpenVikingSearchResponse, PermissionMode, PushSubscriptionPayload, PushUnsubscribePayload, PushVapidPublicKeyResponse, DeliverShareFeedbackResponse, RevokeShareResponse, ShareContentResponse, ShareFeedbackResponse, ShareResponse, SharesResponse, SlashCommandsResponse, SkillsResponse, SpawnResponse, VisibilityPayload, HapiSessionExport, SessionResponse, SessionsResponse } from '@/types/api'
+import type { AttachmentMetadata, AuthResponse, CodexLocalSessionsResponse, CodexLocalSessionContextResponse, CodexLocalSessionComposerCapabilitiesResponse, CodexLocalSessionSnapshotReadResponse, CodexLocalSessionSnapshotVersion, CodexLocalSessionStatusResponse, CodexManagedSessionTargetResponse, ArchiveCodexLocalSessionResponse, DiscardCodexLocalSessionMessageResponse, ForkCodexLocalSessionResponse, SendCodexLocalSessionMessageResponse, CodexDuplicateSessionsResponse, CodexMergeDuplicateSessionsResponse, CodexDesktopScriptResponse, CodexDesktopSyncRequest, CodexDesktopStatusResponse, CodexControlRecoveryResponse, CodexCollaborationMode, FileSearchResponse, MachinesResponse, MessagesResponse, OpenVikingContextListResponse, OpenVikingContextReadResponse, OpenVikingStatusResponse, OpenVikingMetricsResponse, OpenVikingQualityResponse, OpenVikingSearchResponse, PermissionMode, PushSubscriptionPayload, PushUnsubscribePayload, PushVapidPublicKeyResponse, DeliverShareFeedbackResponse, RevokeShareResponse, ShareContentResponse, ShareFeedbackResponse, ShareResponse, SharesResponse, SlashCommandsResponse, SkillsResponse, SpawnResponse, VisibilityPayload, HapiSessionExport, SessionResponse, SessionsResponse } from '@/types/api'
 import type { CodexSubscriptionLimitsResponse, CodexModelsResponse, CursorMigrateOutcome, CursorMigrateToAcpRequest, CursorModelsResponse, DeleteUploadResponse, FileReadResponse, GitBranchResponse, GitBranchesResponse, GitCommandResponse, ListDirectoryResponse, MachineListDirectoryResponse, MachinePathsExistsResponse, MachineGitBranchCreateRequest, MachineGitBranchCommitRequest, MachineGitBranchFetchRequest, MachineGitBranchPushRequest, MachineGitBranchSwitchRequest, MachineGitBranchUpdateRequest, OpencodeModelsResponse, OpencodeReasoningEffortResponse, CreateSideSessionResponse, ReopenSessionResponse, RenameNativeCodexSessionResponse, UploadFileResponse } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, ManagedSkillControlResponse, NativeCodexAttachmentDeleteResponse, NativeCodexAttachmentStageResponse } from '@hapi/protocol'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
+import { CodexManagedSessionTargetResponseSchema } from '@hapi/protocol/schemas'
 
 type ApiClientOptions = {
     baseUrl?: string
@@ -298,6 +299,14 @@ export class ApiClient {
         if (options?.forceRefresh) queryParams.set('forceRefresh', 'true')
         const query = queryParams.size > 0 ? `?${queryParams.toString()}` : ''
         return await this.request<CodexLocalSessionsResponse>(`/api/codex/sessions${query}`)
+    }
+
+    async getCodexManagedSessionTarget(sessionId: string, machineId: string): Promise<CodexManagedSessionTargetResponse> {
+        const query = new URLSearchParams({ machineId })
+        const response = await this.request<unknown>(
+            `/api/codex/sessions/${encodeURIComponent(sessionId)}/managed-session?${query.toString()}`
+        )
+        return CodexManagedSessionTargetResponseSchema.parse(response)
     }
 
     async getCodexSessionContext(sessionId: string, machineId: string, options: { before?: number; limit?: number } = {}): Promise<CodexLocalSessionContextResponse> {

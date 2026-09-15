@@ -1,7 +1,6 @@
-import { ArrowDownToLine, ArrowUpFromLine, Database, RefreshCw, Server, UserRound } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpFromLine, BrainCircuit, Database, RefreshCw, Server, UserRound } from 'lucide-react'
 import {
-    getCodexBlendedTotal,
-    getCodexNonCachedInput,
+    getCodexProcessedTotal,
     type CodexTokenUsage,
     type CodexUsageAccount
 } from '@hapi/protocol/codexUsage'
@@ -58,12 +57,19 @@ export function CodexUsageDrawer(props: {
     ].filter(Boolean).join(' · ')
     const number = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
     const exact = (value: number | null | undefined) => value == null ? undefined : new Intl.NumberFormat(locale).format(value)
-    const ratio = usage?.input && usage.cachedInput != null ? usage.cachedInput / usage.input * 100 : null
-    const nonCachedInput = usage ? getCodexNonCachedInput(usage) : null
-    const blendedTotal = usage ? getCodexBlendedTotal(usage) : null
-    const displayedInput = nonCachedInput ?? usage?.input
-    const displayedTotal = blendedTotal ?? usage?.total
-    const usesBlendedUsage = blendedTotal !== null
+    const processedTotal = usage ? getCodexProcessedTotal(usage) : null
+    const sessionLabel = usage?.breakdown ? t('usage.sessionWithSubagents') : t('usage.session')
+    const breakdown = usage?.breakdown?.length
+        ? usage.breakdown
+        : usage ? [{
+            input: usage.input,
+            output: usage.output,
+            cachedInput: usage.cachedInput,
+            reasoningOutput: usage.reasoningOutput,
+            total: processedTotal,
+            model: null,
+            reasoningEffort: null
+        }] : []
     const percent = (value: number) => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value) + '%'
     const group = 'rounded-2xl bg-[var(--app-bg)] p-4'
     const heading = 'mb-2 px-1 text-[13px] font-semibold text-[var(--app-hint)]'
@@ -81,6 +87,28 @@ export function CodexUsageDrawer(props: {
                     <span className="min-w-0 flex-1 truncate" title={accountDetails}>{accountDetails}</span>
                 </div>
             </section>
+            <section aria-label={sessionLabel}>
+                <h3 className={heading}>{sessionLabel}</h3>
+                <div className={group}>
+                    {usage ? <>
+                        {usage.scope === 'lastTurn' ? <p className="mb-3 text-[13px] text-[var(--app-hint)]">{t('usage.partial')}</p> : null}
+                        <div className="flex items-baseline justify-between gap-3"><span>{t('usage.total')}</span><span className="text-2xl font-semibold tabular-nums" title={exact(processedTotal)}>{number(processedTotal)}</span></div>
+                        <div className="my-4 grid grid-cols-2 gap-4">
+                            <div className="flex min-w-0 flex-col items-start text-left" data-testid="codex-usage-input-metric"><div className="flex items-center gap-1.5 text-[13px] text-[var(--app-link)]"><ArrowDownToLine className="h-4 w-4" aria-hidden="true" />{t('usage.input')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.input)}>{number(usage.input)}</div></div>
+                            <div className="flex min-w-0 flex-col items-end text-right" data-testid="codex-usage-output-metric"><div className="flex items-center justify-end gap-1.5 text-[13px] text-purple-700 dark:text-purple-300"><ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />{t('usage.output')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.output)}>{number(usage.output)}</div></div>
+                            <div className="flex min-w-0 flex-col items-start text-left" data-testid="codex-usage-cached-input-metric"><div className="flex items-center gap-1.5 text-[13px] text-teal-700 dark:text-teal-300"><Database className="h-4 w-4" aria-hidden="true" />{t('usage.cachedInput')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.cachedInput)}>{number(usage.cachedInput)}</div></div>
+                            <div className="flex min-w-0 flex-col items-end text-right" data-testid="codex-usage-reasoning-output-metric"><div className="flex items-center justify-end gap-1.5 text-[13px] text-amber-700 dark:text-amber-300"><BrainCircuit className="h-4 w-4" aria-hidden="true" />{t('usage.reasoningOutput')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.reasoningOutput)}>{number(usage.reasoningOutput)}</div></div>
+                        </div>
+                        <div className="space-y-2 border-t border-[var(--app-border)] pt-3" data-testid="codex-usage-breakdown">
+                            <h4 className="text-[13px] font-semibold text-[var(--app-hint)]">{t('usage.breakdown')}</h4>
+                            {breakdown.map((row) => <div key={`${row.model ?? 'unavailable'}-${row.reasoningEffort ?? 'unavailable'}`} className="flex justify-between gap-3 text-[13px]">
+                                <div className="min-w-0"><div className="truncate font-medium">{row.model ?? t('usage.unavailable')}</div><div className="truncate text-[var(--app-hint)]">{t('usage.reasoningEffort')}: {row.reasoningEffort ?? t('usage.unavailable')}</div></div>
+                                <div className="shrink-0 text-right tabular-nums"><div className="font-semibold" title={exact(row.total)}>{number(row.total)}</div><div className="max-w-48 text-[11px] text-[var(--app-hint)]">{t('usage.inputShort')} {number(row.input)} · {t('usage.cachedInputShort')} {number(row.cachedInput)} · {t('usage.outputShort')} {number(row.output)} · {t('usage.reasoningOutputShort')} {number(row.reasoningOutput)}</div></div>
+                            </div>)}
+                        </div>
+                    </> : <p className="text-[var(--app-hint)]">{t('usage.empty')}</p>}
+                </div>
+            </section>
             {mode !== 'api' && props.rows.length > 0 ? <section aria-label={t('usage.remaining')}>
                 <h3 className={heading}>{t('usage.remaining')}</h3>
                 <div className={`${group} space-y-3`}>
@@ -91,24 +119,6 @@ export function CodexUsageDrawer(props: {
                     </div>)}
                 </div>
             </section> : null}
-            <section aria-label={t('usage.session')}>
-                <h3 className={heading}>{t('usage.session')}</h3>
-                <div className={group}>
-                    {usage ? <>
-                        {usage.scope === 'lastTurn' ? <p className="mb-3 text-[13px] text-[var(--app-hint)]">{t('usage.partial')}</p> : null}
-                        <div className="flex items-baseline justify-between gap-3"><span>{t(usesBlendedUsage ? 'usage.effectiveTotal' : 'usage.total')}</span><span className="text-2xl font-semibold tabular-nums" title={exact(displayedTotal)}>{number(displayedTotal)}</span></div>
-                        <div className="my-4 grid grid-cols-2 gap-4">
-                            <div className="flex min-w-0 flex-col items-start text-left" data-testid="codex-usage-input-metric"><div className="flex items-center gap-1.5 text-[13px] text-[var(--app-link)]"><ArrowDownToLine className="h-4 w-4" aria-hidden="true" />{t(nonCachedInput !== null ? 'usage.uncachedInput' : 'usage.input')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(displayedInput)}>{number(displayedInput)}</div></div>
-                            <div className="flex min-w-0 flex-col items-end text-right" data-testid="codex-usage-output-metric"><div className="flex items-center justify-end gap-1.5 text-[13px] text-purple-700 dark:text-purple-300"><ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />{t('usage.output')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.output)}>{number(usage.output)}</div></div>
-                        </div>
-                        <div className="space-y-2 border-t border-[var(--app-border)] pt-3">
-                            <div className="flex items-center justify-between gap-3"><span className="flex items-center gap-1.5"><Database className="h-4 w-4 text-teal-700 dark:text-teal-300" aria-hidden="true" />{t('usage.cacheRatio')}</span><span className="font-semibold tabular-nums">{ratio === null ? '—' : percent(ratio)}</span></div>
-                            {ratio !== null ? <Bar value={ratio} color="bg-teal-600 dark:bg-teal-400" /> : null}
-                            <div className="flex justify-between gap-3 text-[13px] text-[var(--app-hint)]"><span>{t('usage.cachedInput')}</span><span className="tabular-nums" title={exact(usage.cachedInput)}>{number(usage.cachedInput)}</span></div>
-                        </div>
-                    </> : <p className="text-[var(--app-hint)]">{t('usage.empty')}</p>}
-                </div>
-            </section>
             <div className="flex min-h-11 items-center justify-between gap-3 px-1 text-[13px] text-[var(--app-hint)]">
                 <span>{props.error ? t('usage.refreshFailed') : props.isFetching ? t('session.header.codexLimits.updating') : props.updatedAt ? t('session.header.codexLimits.updatedAt', { time: props.updatedAt }) : ''}</span>
                 {props.onRefresh ? <button type="button" aria-label={t('usage.refresh')} disabled={props.isFetching} onClick={props.onRefresh} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-link)] disabled:opacity-40"><RefreshCw className={`h-4 w-4 ${props.isFetching ? 'animate-spin motion-reduce:animate-none' : ''}`} aria-hidden="true" /></button> : null}

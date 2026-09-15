@@ -2193,9 +2193,10 @@ export class SyncEngine {
         forceRecovery?: boolean,
         deliveryPolicy?: NativeCodexDeliveryPolicy,
         reviewGuard?: NativeKanbanFeedbackReviewGuard,
-        attachmentIds?: readonly string[]
+        attachmentIds?: readonly string[],
+        allowHapiInitiated = false
     ): Promise<RpcSendCodexLocalSessionMessageResponse> {
-        return await this.rpcGateway.sendCodexLocalSessionMessage(
+        const args = [
             machineId,
             sessionId,
             message,
@@ -2205,7 +2206,10 @@ export class SyncEngine {
             deliveryPolicy,
             reviewGuard,
             attachmentIds
-        )
+        ] as const
+        return allowHapiInitiated
+            ? await this.rpcGateway.sendCodexLocalSessionMessage(...args, true)
+            : await this.rpcGateway.sendCodexLocalSessionMessage(...args)
     }
 
     async discardCodexLocalSessionMessage(

@@ -5,6 +5,11 @@ import { NativeCodexSessionControlsSchema } from './codexSessionControl'
 
 export const PermissionModeSchema = z.enum(PERMISSION_MODES)
 export const CodexCollaborationModeSchema = z.enum(CODEX_COLLABORATION_MODES)
+export const CodexManagedSessionTargetResponseSchema = z.object({
+    success: z.literal(true),
+    sessionId: z.string().nullable()
+})
+export type CodexManagedSessionTargetResponse = z.infer<typeof CodexManagedSessionTargetResponseSchema>
 export const SessionEndReasonSchema = z.enum(['completed', 'terminated', 'error', 'handoff'])
 /** Browser-only handoff after a queued message has been cancelled for editing. */
 export const QueuedMessageEditSchema = z.object({

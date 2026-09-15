@@ -8,7 +8,16 @@ const counters = z.object({
     reasoningOutput: count,
     total: count
 })
+export const CodexUsageBreakdownSchema = counters.extend({
+    /** Resolved model for this parent or subagent thread, when Codex reports it. */
+    model: z.string().nullable(),
+    /** Resolved reasoning effort for this parent or subagent thread, when available. */
+    reasoningEffort: z.string().nullable()
+})
+export type CodexUsageBreakdown = z.infer<typeof CodexUsageBreakdownSchema>
 export const CodexTokenUsageSchema = counters.extend({
+    /** Aggregate rows, grouped by the resolved model and reasoning effort. */
+    breakdown: z.array(CodexUsageBreakdownSchema).optional(),
     /** Latest completed/request turn, kept separately from session totals. */
     lastTurn: counters.optional(),
     /** Tokens currently occupying the model context, when Codex reports it. */
@@ -30,17 +39,76 @@ export type CodexUsageAccount = {
     source: 'currentConnection'
 }
 
-/** Matches Codex TUI: cached input is reported separately from effective usage. */
-export function getCodexNonCachedInput(usage: CodexTokenUsage): number | null {
-    if (usage.input === null || usage.cachedInput === null) return null
-    return Math.max(0, usage.input - usage.cachedInput)
+/** All tokens processed by a model: raw input (including cache reads) plus output. */
+export function getCodexProcessedTotal(usage: Pick<CodexTokenUsage, 'input' | 'output'>): number | null {
+    if (usage.input === null || usage.output === null) return null
+    return usage.input + usage.output
 }
 
-/** Matches Codex TUI `blended_total`: non-cached input plus output. */
-export function getCodexBlendedTotal(usage: CodexTokenUsage): number | null {
-    const input = getCodexNonCachedInput(usage)
-    if (input === null || usage.output === null) return null
-    return input + Math.max(0, usage.output)
+type CodexUsageAggregateSource = {
+    usage: CodexTokenUsage
+    model?: string | null
+    reasoningEffort?: string | null
+}
+
+function sumCounter(sources: CodexTokenUsage[], key: keyof z.infer<typeof counters>): number | null {
+    if (sources.length === 0 || sources.some((usage) => usage[key] === null)) return null
+    return sources.reduce((sum, usage) => sum + (usage[key] as number), 0)
+}
+
+/**
+ * Combines independently tracked parent/subagent snapshots.  Do not feed a
+ * previously aggregated result back into this function: each thread must be
+ * selected with `selectCodexTokenUsage` first, so repeated snapshots cannot
+ * inflate its contribution.
+ */
+export function aggregateCodexTokenUsage(sources: Iterable<CodexUsageAggregateSource>, updatedAt: number): CodexTokenUsage | null {
+    const entries = Array.from(sources)
+    if (entries.length === 0) return null
+
+    const aggregateCounters = (usages: CodexTokenUsage[]) => {
+        const input = sumCounter(usages, 'input')
+        const output = sumCounter(usages, 'output')
+        return {
+            input,
+            output,
+            cachedInput: sumCounter(usages, 'cachedInput'),
+            reasoningOutput: sumCounter(usages, 'reasoningOutput'),
+            // Provider totals are not used here: input already includes cached
+            // reads, while reasoning output is a subset of output.
+            total: input === null || output === null ? null : input + output
+        }
+    }
+
+    const grouped = new Map<string, { model: string | null; reasoningEffort: string | null; usages: CodexTokenUsage[] }>()
+    for (const entry of entries) {
+        const model = entry.model?.trim() || null
+        const reasoningEffort = entry.reasoningEffort?.trim() || null
+        const key = JSON.stringify([model, reasoningEffort])
+        const group = grouped.get(key) ?? { model, reasoningEffort, usages: [] }
+        group.usages.push(entry.usage)
+        grouped.set(key, group)
+    }
+    const breakdown = Array.from(grouped.values())
+        .map((group) => ({ ...aggregateCounters(group.usages), model: group.model, reasoningEffort: group.reasoningEffort }))
+        .sort((left, right) => {
+            const totalDifference = (right.total ?? -1) - (left.total ?? -1)
+            if (totalDifference !== 0) return totalDifference
+            return `${left.model ?? ''}\u0000${left.reasoningEffort ?? ''}`.localeCompare(`${right.model ?? ''}\u0000${right.reasoningEffort ?? ''}`)
+        })
+    const usage = aggregateCounters(entries.map((entry) => entry.usage))
+    const scopes = entries.map((entry) => entry.usage.scope)
+    const scope = scopes.every((value) => value === 'session')
+        ? 'session'
+        : scopes.every((value) => value === 'lastTurn')
+            ? 'lastTurn'
+            : 'partial'
+    return {
+        ...usage,
+        breakdown,
+        scope,
+        updatedAt: Math.max(updatedAt, ...entries.map((entry) => entry.usage.updatedAt))
+    }
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -64,7 +132,9 @@ export function readCodexTokenUsage(info: unknown, updatedAt: number): CodexToke
         const output = numberFrom(source, 'output_tokens', 'outputTokens')
         const cachedInput = numberFrom(source, 'cached_input_tokens', 'cachedInputTokens', 'cache_read_input_tokens')
         const reasoningOutput = numberFrom(source, 'reasoning_output_tokens', 'reasoningOutputTokens')
-        const total = numberFrom(source, 'total_tokens', 'totalTokens') ?? (input !== null && output !== null ? input + output : null)
+        // `input` already includes cached input.  Do not use a provider-defined
+        // total here because it can have different accounting semantics.
+        const total = input !== null && output !== null ? input + output : null
         return {
             input,
             output,

@@ -3211,6 +3211,81 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
+    it('hands an exec-resume active-writer conflict to the shared FIFO without blocking later messages', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-exec-active-writer-workspace-'))
+        const sessionId = '81845678-1234-4234-8234-123456789099'
+        const child = new FakeChildProcess()
+        const privateClient = new FakeAppServerClient()
+        privateClient.resumeError = new Error('bridge unavailable')
+        const sharedClients = [new FakeAppServerClient(), new FakeAppServerClient()]
+        let sharedClientIndex = 0
+        let ownershipChecks = 0
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(() => child as never),
+            () => 123,
+            1_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Externally owned native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            () => privateClient,
+            null,
+            null,
+            async () => {
+                ownershipChecks += 1
+                return ownershipChecks > 1
+            },
+            () => sharedClients[sharedClientIndex++]!
+        )
+
+        try {
+            await expect(sender.sendWithExternalControlCheck(
+                sessionId,
+                '1-1',
+                undefined,
+                'native:exec-conflict-first'
+            )).resolves.toMatchObject({ success: true, status: 'processing' })
+            await flushMicrotasks()
+
+            child.stderr.emit('data', 'failed to initialize thread persistence: thread-store conflict: thread already has an active writer')
+            child.emit('exit', 1, null)
+            await flushAsyncWork()
+
+            expect(sharedClients[0]!.requestCalls).toEqual([expect.objectContaining({
+                method: 'thread/queue/add',
+                params: expect.objectContaining({
+                    threadId: sessionId,
+                    clientUserMessageId: 'native:exec-conflict-first'
+                })
+            })])
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('lastErrorCode')
+
+            await expect(sender.sendWithExternalControlCheck(
+                sessionId,
+                '1-2',
+                undefined,
+                'native:exec-conflict-second'
+            )).resolves.toMatchObject({ success: true, status: 'queued' })
+            expect(sharedClients[1]!.requestCalls).toEqual([])
+
+            sender.notifyTranscriptChanged(sessionId, [{ text: '1-1', createdAt: 124 }])
+            await flushAsyncWork()
+            expect(sharedClients[1]!.requestCalls).toEqual([expect.objectContaining({
+                method: 'thread/queue/add',
+                params: expect.objectContaining({ clientUserMessageId: 'native:exec-conflict-second' })
+            })])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('does not fall back after turn/start could already have accepted the prompt', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-bridge-ambiguous-workspace-'))
         const sessionId = '82345678-1234-4234-8234-123456789012'
@@ -3600,6 +3675,50 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
+    it('allows an explicitly authorized local handoff to resume a SHAPI-origin thread', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-released-direct-workspace-'))
+        const sessionId = '11345678-1234-4234-8234-123456789013'
+        const client = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            Date.now,
+            1_000,
+            { getSummary: () => ({
+                id: sessionId,
+                title: 'Locally handed-off SHAPI thread',
+                cwd,
+                file: '/not-read.jsonl',
+                modifiedAt: 0,
+                originator: 'hapi-codex-client',
+                runState: 'idle'
+            }) },
+            () => client,
+            null,
+            null,
+            async () => false
+        )
+
+        try {
+            await expect(sender.sendWithExternalControlCheck(
+                sessionId,
+                'continue after handoff',
+                undefined,
+                'native:released-handoff',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                true
+            )).resolves.toMatchObject({ success: true, status: 'processing' })
+            await flushMicrotasks()
+            expect(client.resumeCalls).toEqual([expect.objectContaining({ threadId: sessionId })])
+            expect(client.startTurnCalls).toHaveLength(1)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('releases a queued prompt immediately when the transcript watcher sees idle', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-watcher-workspace-'))
         const sessionId = '21345678-1234-4234-8234-123456789012'
@@ -3902,6 +4021,50 @@ describe('NativeCodexSessionDirectSender', () => {
             }
         } finally {
             rmSync(cwd, { recursive: true, force: true })
+            rmSync(storeDir, { recursive: true, force: true })
+        }
+    })
+
+    it('allows an exact queued receipt to be discarded after the transcript is recognized as SHAPI-managed', () => {
+        const storeDir = mkdtempSync(join(tmpdir(), 'hapi-managed-direct-discard-store-'))
+        const sessionId = '35445678-1234-4234-8234-123456789012'
+        const store = new FileNativeCodexSessionDirectSendStore(join(storeDir, 'native-outbox.json'))
+        store.save([{
+            sessionId,
+            id: 'native:discard-managed',
+            text: 'Do not retry this message',
+            deliveryText: 'Do not retry this message',
+            queuedAt: 600,
+            recoveryRequired: false
+        }])
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 701,
+            1_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'SHAPI-managed thread',
+                    cwd: '/workspace',
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    originator: 'hapi-codex-client',
+                    runState: 'processing'
+                })
+            },
+            null,
+            store
+        )
+
+        try {
+            expect(sender.discard(sessionId, 'native:discard-managed')).toEqual({
+                success: true,
+                discarded: true,
+                queuedMessages: []
+            })
+            expect(store.load()).toEqual([])
+        } finally {
+            sender.dispose()
             rmSync(storeDir, { recursive: true, force: true })
         }
     })
