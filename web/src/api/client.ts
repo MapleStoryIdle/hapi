@@ -824,6 +824,13 @@ export class ApiClient {
         await this.request(`/api/managed-skills/${encodeURIComponent(skillId)}/machines/${encodeURIComponent(machineId)}/cache`, { method: 'POST' })
     }
 
+    async setManagedSkillEnabled(skillId: string, enabled: boolean): Promise<void> {
+        await this.request(`/api/managed-skills/${encodeURIComponent(skillId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ enabled })
+        })
+    }
+
     async getShare(shareId: string): Promise<ShareResponse> {
         return await this.request<ShareResponse>(`/api/shares/${encodeURIComponent(shareId)}`)
     }

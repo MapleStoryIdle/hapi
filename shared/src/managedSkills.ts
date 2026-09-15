@@ -54,5 +54,5 @@ export type ManagedSkillMachineState = {
     error?: string
 }
 export type ManagedSkillControlResponse = {
-    skills: Array<ManagedSkillCatalogEntry & { machines: ManagedSkillMachineState[] }>
+    skills: Array<ManagedSkillCatalogEntry & { enabled: boolean; machines: ManagedSkillMachineState[] }>
 }

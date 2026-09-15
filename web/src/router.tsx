@@ -68,6 +68,7 @@ const TerminalPluginPage = lazy(() => import('@/routes/plugins/terminal'))
 const SettingsPage = lazy(() => import('@/routes/settings'))
 const SharePage = lazy(() => import('@/routes/share'))
 const SharesPage = lazy(() => import('@/routes/shares'))
+const SkillsPage = lazy(() => import('@/routes/skills'))
 const MonitorsPage = lazy(() => import('@/routes/monitors'))
 const MonitorCreatePage = lazy(() => import('@/routes/monitors').then((module) => ({ default: module.MonitorCreatePage })))
 const MonitorPage = lazy(() => import('@/routes/monitor'))
@@ -624,6 +625,9 @@ function SessionsPage() {
             case 'shares':
                 navigate({ to: '/shares' })
                 return
+            case 'skills':
+                navigate({ to: '/skills' })
+                return
             case 'monitors':
                 navigate({ to: '/monitors' })
                 return
@@ -932,6 +936,7 @@ function SessionsPage() {
                                 <option value="new">{t('sessions.new')}</option>
                                 <option value="browse">{t('browse.nav')}</option>
                                 <option value="plugins">{t('plugins.title')}</option>
+                                <option value="skills">{t('skills.nav')}</option>
                                 <option value="shares">{t('shares.nav')}</option>
                                 <option value="monitors">{t('monitors.nav')}</option>
                                 <option value="settings">{t('settings.title')}</option>
@@ -1921,6 +1926,12 @@ const sharesRoute = createRoute({
     component: Outlet,
 })
 
+const skillsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/skills',
+    component: SkillsPage,
+})
+
 const monitorsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/monitors',
@@ -2014,6 +2025,7 @@ export const routeTree = rootRoute.addChildren([
     voicePluginRoute,
     notificationsPluginRoute,
     terminalPluginRoute,
+    skillsRoute,
     sharesRoute.addChildren([
         sharesIndexRoute,
         kanbanTaskRoute,

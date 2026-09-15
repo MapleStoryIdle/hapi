@@ -10,6 +10,7 @@ import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { createMessagesRoutes } from './messages'
+import { Store } from '../../store'
 
 // TS note: engine is cast to unknown→SyncEngine so test helpers don't need to
 // satisfy the full SyncEngine shape (only the subset the route under test uses).
@@ -23,6 +24,7 @@ function createApp(opts: {
     sendMessage?: (sessionId: string, payload: unknown) => Promise<void>
     getMessagesPage?: () => unknown
     reconcileManagedSkill?: (machineId: string, payload: unknown) => Promise<unknown>
+    store?: Store
 }) {
     const sentMessages: Array<{ sessionId: string; payload: unknown }> = []
     const sendMessage = opts.sendMessage ?? (async (sessionId: string, payload: unknown) => {
@@ -51,7 +53,7 @@ function createApp(opts: {
         c.set('namespace', 'default')
         await next()
     })
-    app.route('/api', createMessagesRoutes(() => engine as SyncEngine))
+    app.route('/api', createMessagesRoutes(() => engine as SyncEngine, opts.store))
 
     return { app, sentMessages }
 }
@@ -168,6 +170,24 @@ describe('POST /api/sessions/:id/messages — SHAPI managed skill cache', () => 
         expect(calls[0]?.machineId).toBe('machine-1')
         expect(calls[0]?.payload).toMatchObject({ id: 'public-share', version: '1.0.0' })
         expect(sentMessages).toHaveLength(1)
+    })
+
+    it('rejects a disabled Hub Skill before it reaches the Runner', async () => {
+        const store = new Store(':memory:')
+        store.pluginSettings.setEnabled('default', 'managed-skill:public-share', false)
+        const { app, sentMessages } = createApp({ store })
+        try {
+            const response = await app.request('/api/sessions/session-1/messages', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ text: '$public-share publish report.md', localId: 'local-disabled' })
+            })
+
+            expect(response.status).toBe(409)
+            expect(sentMessages).toHaveLength(0)
+        } finally {
+            store.close()
+        }
     })
 })
 

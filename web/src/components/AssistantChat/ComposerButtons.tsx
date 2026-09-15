@@ -770,11 +770,12 @@ export function ContextUsageProgressRail(props: {
     )
 }
 
-type SkillPickerGroup = 'project' | 'user' | 'plugin' | 'system'
+type SkillPickerGroup = 'hub' | 'project' | 'user' | 'plugin' | 'system'
 const LARK_SKILL_PREFIX = 'lark-'
 
 function getSkillPickerGroup(skill: SkillSummary): SkillPickerGroup {
     switch (skill.scope) {
+        case 'hub':
         case 'project':
         case 'user':
         case 'plugin':
@@ -794,6 +795,8 @@ function getSkillScopeLabel(
     switch (skill.scope) {
         case 'project':
             return t('composer.skills.scope.project')
+        case 'hub':
+            return t('composer.skills.scope.hub')
         case 'user':
             return t('composer.skills.scope.user')
         case 'plugin':
@@ -1423,6 +1426,7 @@ export function ComposerButtons(props: {
         .sort((a, b) => a.name.localeCompare(b.name))
     const skillSections = [
         { key: 'project', label: t('composer.skills.scope.project') },
+        { key: 'hub', label: t('composer.skills.scope.hub') },
         { key: 'user', label: t('composer.skills.scope.user') },
         { key: 'plugin', label: t('composer.skills.scope.plugin') },
         { key: 'system', label: t('composer.skills.scope.system') },

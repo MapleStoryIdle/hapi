@@ -644,6 +644,7 @@ describe('ComposerButtons — skill picker', () => {
                 skills={[
                     { name: 'plugin-beta', description: 'Plugin skill', scope: 'plugin' },
                     { name: 'project-bravo', description: 'Project skill', scope: 'project' },
+                    { name: 'hub-share', description: 'Hub skill', scope: 'hub' },
                     { name: 'system-delta', description: 'System skill', scope: 'system' },
                     { name: 'global-alpha', description: 'Global skill', scope: 'user' },
                 ]}
@@ -670,15 +671,17 @@ describe('ComposerButtons — skill picker', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
 
         const projectSkill = screen.getByText('project-bravo')
+        const hubSkill = screen.getByText('hub-share')
         const globalSkill = screen.getByText('global-alpha')
         const pluginSkill = screen.getByText('plugin-beta')
         const systemSkill = screen.getByText('system-delta')
-        expect(projectSkill.compareDocumentPosition(globalSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(projectSkill.compareDocumentPosition(hubSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(hubSkill.compareDocumentPosition(globalSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         expect(globalSkill.compareDocumentPosition(pluginSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         expect(pluginSkill.compareDocumentPosition(systemSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         expect(screen.queryByRole('button', { name: /Custom\s+\d/ })).not.toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Other\s+\d/ })).not.toBeInTheDocument()
-        expect(screen.queryByText('4')).not.toBeInTheDocument()
+        expect(screen.queryByText('5')).not.toBeInTheDocument()
     })
 
     it('shows the last deliberately clicked skills for the current project only', () => {

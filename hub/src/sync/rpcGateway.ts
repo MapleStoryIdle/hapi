@@ -771,12 +771,12 @@ export class RpcGateway {
 
     async listSkills(sessionId: string, flavor?: string): Promise<{
         success: boolean
-        skills?: Array<{ name: string; description?: string; scope?: 'project' | 'user' | 'plugin' | 'system' | 'admin' }>
+        skills?: Array<{ name: string; description?: string; scope?: 'hub' | 'project' | 'user' | 'plugin' | 'system' | 'admin' }>
         error?: string
     }> {
         return await this.sessionRpc(sessionId, RPC_METHODS.ListSkills, { flavor }) as {
             success: boolean
-            skills?: Array<{ name: string; description?: string; scope?: 'project' | 'user' | 'plugin' | 'system' | 'admin' }>
+            skills?: Array<{ name: string; description?: string; scope?: 'hub' | 'project' | 'user' | 'plugin' | 'system' | 'admin' }>
             error?: string
         }
     }

@@ -8,6 +8,17 @@ import {
 } from '@hapi/protocol'
 import type { SyncEngine } from './sync/syncEngine'
 import { getManagedSkillDefinition, MANAGED_SKILL_LIBRARY } from './managedSkillCatalog'
+import type { Store } from './store'
+
+const SETTINGS_PREFIX = 'managed-skill:'
+
+export function isManagedSkillEnabled(store: Store, namespace: string, id: string): boolean {
+    return store.pluginSettings.isEnabled(namespace, `${SETTINGS_PREFIX}${id}`)
+}
+
+export function setManagedSkillEnabled(store: Store, namespace: string, id: string, enabled: boolean): void {
+    store.pluginSettings.setEnabled(namespace, `${SETTINGS_PREFIX}${id}`, enabled)
+}
 
 function sha256(content: string): string {
     return createHash('sha256').update(content, 'utf8').digest('hex')
@@ -64,9 +75,17 @@ export async function ensureManagedSkillCached(engine: SyncEngine, machine: Mach
     }
 }
 
-export async function ensureManagedSkillForSession(engine: SyncEngine, sessionId: string, text: string | undefined): Promise<void> {
+export async function ensureManagedSkillForSession(
+    engine: SyncEngine,
+    sessionId: string,
+    text: string | undefined,
+    options?: { store: Store; namespace: string }
+): Promise<void> {
     const id = findManagedSkillInvocation(text)
     if (!id) return
+    if (options && !isManagedSkillEnabled(options.store, options.namespace, id)) {
+        throw new Error(`SHAPI skill ${id} is disabled`)
+    }
     const machineId = engine.getSession(sessionId)?.metadata?.machineId?.trim()
     const machine = machineId ? engine.getMachine(machineId) : undefined
     if (!machine) throw new Error('Session Runner is unavailable')

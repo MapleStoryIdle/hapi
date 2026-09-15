@@ -1587,7 +1587,7 @@ describe('Codex Desktop import routes', () => {
                     {
                         name: 'public-share',
                         description: 'Create or revoke an expiring SHAPI public link, including feedback-enabled Kanban tasks.',
-                        scope: 'plugin'
+                        scope: 'hub'
                     }
                 ]
             })

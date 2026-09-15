@@ -92,6 +92,19 @@ describe('groupAssistantResultDetails', () => {
         expect(visible).toBe(blocks)
     })
 
+    it('keeps the latest completed tool group processing until the turn becomes idle', () => {
+        const tool = toolCall('tool-current')
+        const group: ToolGroupBlock = {
+            kind: 'tool-group', id: 'tool-group:current', createdAt: 2, invokedAt: 2,
+            firstToolId: tool.id, lastToolId: tool.id, tools: [tool], defaultOpen: false,
+            historyState: 'complete', needsOlderHistory: false, summary: summarizeToolGroup([tool])
+        }
+
+        const visible = groupAssistantResultDetails([userText('user-current'), group], { runActive: true })
+
+        expect(visible[1]).toMatchObject({ kind: 'tool-group', turnActive: true, defaultOpen: true })
+    })
+
     it('keeps context compaction events outside active process groups', () => {
         const firstTool = toolCall('tool-1', 'Read')
         const secondTool = toolCall('tool-2', 'Bash')

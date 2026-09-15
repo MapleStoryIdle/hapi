@@ -162,7 +162,7 @@ export type GitStatusFiles = {
 export type SkillSummary = {
     name: string
     description?: string
-    scope?: 'project' | 'user' | 'plugin' | 'system' | 'admin'
+    scope?: 'hub' | 'project' | 'user' | 'plugin' | 'system' | 'admin'
 }
 
 export type SkillsResponse = {

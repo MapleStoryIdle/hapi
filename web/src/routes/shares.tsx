@@ -16,7 +16,6 @@ import {
     FileText,
     Inbox,
     LoaderCircle,
-    PackageCheck,
     RefreshCw,
     Search
 } from 'lucide-react'
@@ -24,7 +23,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { article as MotionArticle, div as MotionDiv } from 'motion/react-m'
-import { ApiError, type ApiClient } from '@/api/client'
+import { ApiError } from '@/api/client'
 import {
     CopyIcon,
     RevokeLinkIcon,
@@ -46,86 +45,11 @@ import {
 } from '@/lib/shareTimeline'
 import { useShares } from '@/hooks/queries/useShares'
 import type { ShareSummary } from '@/types/api'
-import type { ManagedSkillControlResponse, ManagedSkillMachineState } from '@hapi/protocol'
 
 type Translate = (
     key: string,
     params?: Record<string, string | number>
 ) => string
-
-function skillStateLabel(state: ManagedSkillMachineState['state'], t: Translate): string {
-    if (state === 'ready') return t('shares.skills.ready')
-    if (state === 'outdated') return t('shares.skills.outdated')
-    if (state === 'missing') return t('shares.skills.firstUse')
-    if (state === 'offline') return t('shares.skills.offline')
-    if (state === 'unsupported') return t('shares.skills.upgrade')
-    return t('shares.skills.error')
-}
-
-function ManagedSkillPanel({ api, t }: { api: ApiClient; t: Translate }) {
-    const [data, setData] = useState<ManagedSkillControlResponse | null>(null)
-    const [pending, setPending] = useState<string | null>(null)
-
-    const load = useCallback(async () => {
-        try {
-            setData(await api.getManagedSkills())
-        } catch {
-            setData(null)
-        }
-    }, [api])
-
-    useEffect(() => {
-        void load()
-    }, [load])
-
-    const cache = useCallback(async (skillId: string, machineId: string) => {
-        const key = `${skillId}:${machineId}`
-        setPending(key)
-        try {
-            await api.cacheManagedSkill(skillId, machineId)
-            await load()
-        } catch {
-            // The next page refresh retries; message send still performs lazy caching.
-        } finally {
-            setPending(null)
-        }
-    }, [api, load])
-
-    if (!data?.skills.length) return null
-    return (
-        <section className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--app-fg)]">
-                <PackageCheck className="h-4 w-4" aria-hidden="true" />
-                {t('shares.skills.title')}
-            </div>
-            <div className="space-y-2">
-                {data.skills.flatMap((skill) => skill.machines.map((machine) => {
-                    const key = `${skill.id}:${machine.machineId}`
-                    const canCache = machine.active && machine.state !== 'ready' && machine.state !== 'unsupported'
-                    return (
-                        <div key={key} className="flex min-h-9 items-center gap-2 text-xs">
-                            <span className="min-w-0 flex-1 truncate text-[var(--app-fg)]">{machine.displayName}</span>
-                            <span className={machine.state === 'ready' ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--app-hint)]'}>
-                                {skillStateLabel(machine.state, t)}
-                            </span>
-                            {canCache ? (
-                                <button
-                                    type="button"
-                                    onClick={() => void cache(skill.id, machine.machineId)}
-                                    disabled={pending === key}
-                                    className="rounded-lg px-2 py-1 font-medium text-[var(--app-link)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50"
-                                >
-                                    {pending === key ? '…' : t('shares.skills.cache')}
-                                </button>
-                            ) : null}
-                        </div>
-                    )
-                }))}
-            </div>
-            <p className="mt-2 text-xs text-[var(--app-hint)]">{t('shares.skills.hint')}</p>
-        </section>
-    )
-}
 
 export type ShareFilter = 'all' | 'waiting' | 'feedback' | 'delivered'
 
@@ -901,7 +825,6 @@ export default function SharesPage() {
                 <MotionConfig reducedMotion="user">
                     <main className="app-scroll-y flex-1 px-3 pb-[calc(1rem+var(--app-safe-area-bottom))] pt-3">
                         <div className="mx-auto max-w-[760px] space-y-4">
-                            <ManagedSkillPanel api={api} t={t} />
                             <div>
                                 <label
                                     htmlFor="share-search"

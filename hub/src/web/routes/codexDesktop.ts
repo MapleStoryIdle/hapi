@@ -35,7 +35,7 @@ import { RenameNativeCodexSessionRequestSchema } from '@hapi/protocol/apiTypes'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { Store, StoredMessage } from '../../store'
 import type { WebAppEnv } from '../middleware/auth'
-import { ensureManagedSkillCached, findManagedSkillInvocation, managedSkillCatalog } from '../../managedSkills'
+import { ensureManagedSkillCached, findManagedSkillInvocation, isManagedSkillEnabled, managedSkillCatalog } from '../../managedSkills'
 
 type ScriptLogKind = 'sync' | 'restart'
 
@@ -2364,8 +2364,9 @@ export function createCodexDesktopRoutes(options: {
                 skills: [
                     ...result.skills,
                     ...managedSkillCatalog()
+                        .filter((skill) => isManagedSkillEnabled(options.store, c.get('namespace'), skill.id))
                         .filter((skill) => !names.has(skill.id))
-                        .map((skill) => ({ name: skill.id, description: skill.description, scope: 'plugin' as const }))
+                        .map((skill) => ({ name: skill.id, description: skill.description, scope: 'hub' as const }))
                 ]
             } satisfies CodexLocalSessionComposerCapabilitiesRpcResponse)
         } catch (error) {
@@ -2623,7 +2624,12 @@ export function createCodexDesktopRoutes(options: {
 
         try {
             const managedSkillId = findManagedSkillInvocation(request.message)
-            if (managedSkillId) await ensureManagedSkillCached(engine!, target.machine, managedSkillId)
+            if (managedSkillId) {
+                if (!isManagedSkillEnabled(options.store, c.get('namespace'), managedSkillId)) {
+                    return c.json({ success: false, error: `SHAPI skill ${managedSkillId} is disabled` }, 409)
+                }
+                await ensureManagedSkillCached(engine!, target.machine, managedSkillId)
+            }
             // A SHAPI session from an older runner can have a Codex Desktop
             // originator and therefore appear in the native transcript list.
             // Its app-server is already connected to SHAPI; sending through

@@ -2,12 +2,11 @@ import { access, readdir, readFile } from 'fs/promises';
 import { basename, dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
-import { managedSkillsRoot } from '@/managedSkills';
 
 export interface SkillSummary {
     name: string;
     description?: string;
-    scope: 'project' | 'user' | 'plugin' | 'system' | 'admin';
+    scope: 'hub' | 'project' | 'user' | 'plugin' | 'system' | 'admin';
 }
 
 export interface ListSkillsRequest {
@@ -244,22 +243,19 @@ export async function listSkills(workingDirectory?: string, options: { flavor?: 
     const userRoots = getUserSkillsRoots(flavor);
     const pluginRoots = await listPluginCacheSkillsRoots(flavor);
     const adminRoot = getAdminSkillsRoot();
-    const managedRoot = managedSkillsRoot();
     const includeAdminRoots = flavor === 'codex';
-    const [projectSkillDirs, userSkillDirs, pluginSkillDirs, adminSkillDirs, managedSkillDirs] = await Promise.all([
+    const [projectSkillDirs, userSkillDirs, pluginSkillDirs, adminSkillDirs] = await Promise.all([
         Promise.all(projectRoots.map(async (root) => await listTopLevelSkillDirs(root, { includeCodexSystem: shouldIncludeCodexSystem(root, flavor) }))).then((dirs) => dirs.flat()),
         Promise.all(userRoots.map(async (root) => await listTopLevelSkillDirs(root, { includeCodexSystem: shouldIncludeCodexSystem(root, flavor) }))).then((dirs) => dirs.flat()),
         Promise.all(pluginRoots.map(async (root) => await listTopLevelSkillDirs(root, { includeCodexSystem: false }))).then((dirs) => dirs.flat()),
         includeAdminRoots ? listTopLevelSkillDirs(adminRoot, { includeCodexSystem: true }) : [],
-        listTopLevelSkillDirs(managedRoot),
     ]);
 
-    const [projectSkills, userSkills, pluginSkills, adminSkills, managedSkills] = await Promise.all([
+    const [projectSkills, userSkills, pluginSkills, adminSkills] = await Promise.all([
         readSkillsFromDirs(projectSkillDirs, 'project'),
         readSkillsFromDirs(userSkillDirs, 'user'),
         readSkillsFromDirs(pluginSkillDirs, 'plugin'),
         readSkillsFromDirs(adminSkillDirs, 'admin'),
-        readSkillsFromDirs(managedSkillDirs, 'plugin'),
     ]);
 
     const dedupedSkills = new Map<string, SkillSummary>();
@@ -268,7 +264,6 @@ export async function listSkills(workingDirectory?: string, options: { flavor?: 
         ...userSkills,
         ...pluginSkills,
         ...adminSkills,
-        ...managedSkills,
     ]) {
         if (!dedupedSkills.has(skill.name)) {
             dedupedSkills.set(skill.name, skill);

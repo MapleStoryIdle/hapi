@@ -17,9 +17,7 @@ const testRuntime = vi.hoisted(() => ({
     mockApi: {
         getShare: vi.fn(),
         deliverShareFeedback: vi.fn(),
-        revokeShare: vi.fn(),
-        getManagedSkills: vi.fn(),
-        cacheManagedSkill: vi.fn()
+        revokeShare: vi.fn()
     },
     navigate: vi.fn(),
     goBack: vi.fn(),
@@ -181,10 +179,6 @@ beforeEach(() => {
     testRuntime.mockApi.getShare.mockReset()
     testRuntime.mockApi.deliverShareFeedback.mockReset()
     testRuntime.mockApi.revokeShare.mockReset()
-    testRuntime.mockApi.getManagedSkills.mockReset()
-    testRuntime.mockApi.getManagedSkills.mockResolvedValue({ skills: [] })
-    testRuntime.mockApi.cacheManagedSkill.mockReset()
-    testRuntime.mockApi.cacheManagedSkill.mockResolvedValue(undefined)
     testRuntime.navigate.mockReset()
     testRuntime.goBack.mockReset()
     testRuntime.addToast.mockReset()
@@ -364,26 +358,6 @@ describe('share list filters', () => {
 })
 
 describe('SharesPage', () => {
-    it('shows Runner cache state and can cache the Hub skill now', async () => {
-        testRuntime.mockApi.getManagedSkills.mockResolvedValue({
-            skills: [{
-                id: 'public-share', name: 'Public Share', description: 'Share', version: '1.0.0',
-                minimumRunnerVersion: '1.1.0', sha256: 'a'.repeat(64),
-                machines: [{
-                    machineId: 'runner-1', displayName: 'Mac Runner', active: true,
-                    runnerVersion: '1.1.0', desiredVersion: '1.0.0', installedVersion: null,
-                    state: 'missing'
-                }]
-            }]
-        })
-
-        renderSharesPage()
-
-        expect(await screen.findByText('Mac Runner')).toBeInTheDocument()
-        fireEvent.click(screen.getByRole('button', { name: 'Cache now' }))
-        await waitFor(() => expect(testRuntime.mockApi.cacheManagedSkill).toHaveBeenCalledWith('public-share', 'runner-1'))
-    })
-
     it('connects counted filters, search, timeline status, and empty results', () => {
         testRuntime.sharesState.shares = [
             makePageShare('published', 'published'),
