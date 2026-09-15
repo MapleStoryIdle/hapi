@@ -869,7 +869,7 @@ export class ApiMachineClient {
                     })
                     // Metadata-only API: do not resume a thread or acquire its writer.
                     await appServer.setThreadName({ threadId: sessionId, name: request.data.name })
-                    this.nativeCodexSessionTitleCache.resolve([sessionId], { forceRefresh: true })
+                    this.nativeCodexSessionTitleCache.set(sessionId, request.data.name)
                     this.nativeCodexSessionListCache.invalidate()
                     this.reportNativeCodexSessionUpdated(sessionId, summary.modifiedAt, undefined, { ...summary, title: request.data.name })
                     return { success: true, name: request.data.name }

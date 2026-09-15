@@ -764,7 +764,8 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
             JSON.stringify({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'task_started' } })
         ].join('\n'))
         let title = 'Original name'
-        const setThreadName = vi.fn(async (params: { threadId: string; name: string }) => { title = params.name })
+        const setThreadName = vi.fn(async (_params: { threadId: string; name: string }) => {})
+        const setCachedTitle = vi.fn((sessionId: string, name: string) => { title = name })
         const disconnect = vi.fn(async () => {})
         const client = new ApiMachineClient('cli-token', machine, undefined, undefined, undefined, () => ({
             connect: async () => {}, initialize: async () => ({}), setThreadName, disconnect
@@ -772,10 +773,11 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
         const resolveTitles = vi.fn(() => new Map([[sessionId, title]]))
         const emit = vi.fn()
         const internals = client as unknown as {
-            nativeCodexSessionTitleCache: { resolve: typeof resolveTitles }
+            nativeCodexSessionTitleCache: { resolve: typeof resolveTitles; set: typeof setCachedTitle }
             socket: { emit: typeof emit; close: () => void }
         }
         internals.nativeCodexSessionTitleCache.resolve = resolveTitles
+        internals.nativeCodexSessionTitleCache.set = setCachedTitle
         internals.socket = { emit, close: () => {} }
         try {
             await callMachineRpc(client, machine.id, 'readCodexLocalSessionSnapshot', { sessionId })
@@ -783,7 +785,7 @@ describe('ApiMachineClient Codex local transcript handlers', () => {
                 .toEqual({ success: true, name: '新名称' })
             expect(setThreadName).toHaveBeenCalledExactlyOnceWith({ threadId: sessionId, name: '新名称' })
             expect(disconnect).toHaveBeenCalledTimes(1)
-            expect(resolveTitles).toHaveBeenCalledWith([sessionId], { forceRefresh: true })
+            expect(setCachedTitle).toHaveBeenCalledWith(sessionId, '新名称')
             expect(emit).toHaveBeenCalledWith('codex-session-updated', expect.objectContaining({
                 codexSessionId: sessionId, summary: expect.objectContaining({ title: '新名称' })
             }))

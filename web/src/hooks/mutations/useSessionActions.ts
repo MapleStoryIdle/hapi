@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { isPermissionModeAllowedForFlavor } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
-import type { CodexCollaborationMode, PermissionMode } from '@/types/api'
+import type { CodexCollaborationMode, PermissionMode, SessionResponse, SessionsResponse } from '@/types/api'
 import type { ReopenSessionResponse } from '@hapi/protocol/apiTypes'
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow } from '@/lib/message-window-store'
@@ -185,7 +185,27 @@ export function useSessionActions(
             }
             await api.renameSession(sessionId, name)
         },
-        onSuccess: () => void invalidateSession(),
+        onSuccess: async (_result, name) => {
+            if (!sessionId) return
+            queryClient.setQueryData<SessionResponse | undefined>(queryKeys.session(sessionId), (current) => current
+                ? {
+                    ...current,
+                    session: {
+                        ...current.session,
+                        metadata: current.session.metadata ? { ...current.session.metadata, name } : null
+                    }
+                }
+                : current)
+            queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions, (current) => current
+                ? {
+                    ...current,
+                    sessions: current.sessions.map((session) => session.id === sessionId
+                        ? { ...session, metadata: session.metadata ? { ...session.metadata, name } : null }
+                        : session)
+                }
+                : current)
+            await invalidateSession()
+        },
     })
 
     const deleteMutation = useMutation({

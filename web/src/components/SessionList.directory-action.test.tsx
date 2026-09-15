@@ -47,6 +47,32 @@ function renderWithProviders(children: ReactNode) {
 }
 
 describe('SessionList directory action', () => {
+    it('keeps rename out of the session-list popup', () => {
+        const session = makeSession({
+            id: 'session-menu',
+            active: true,
+            metadata: { path: '/work/hapi', name: 'Menu task', flavor: 'codex' }
+        })
+
+        renderWithProviders(
+            <SessionList
+                sessions={[session]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        fireEvent.contextMenu(screen.getByText('Menu task').closest('button')!)
+
+        expect(screen.queryByRole('menuitem', { name: 'Rename' })).toBeNull()
+        expect(screen.getByRole('menuitem', { name: 'Archive' })).toBeInTheDocument()
+    })
+
     it('adds a breathing status dot to an active session', () => {
         const session = makeSession({
             id: 'session-active',

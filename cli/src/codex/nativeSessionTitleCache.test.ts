@@ -89,6 +89,21 @@ describe('NativeCodexSessionTitleCache', () => {
         expect(readTitles).toHaveBeenCalledTimes(2)
     })
 
+    it('keeps a confirmed rename while the Codex database still returns the old title', () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-codex-title-'))
+        cleanupPaths.push(codexHome)
+        const sessionId = '77777777-7777-4777-8777-777777777777'
+        createStateDatabaseFile(codexHome)
+        const readTitles = vi.fn(() => new Map([[sessionId, 'Old database title']]))
+        const cache = new NativeCodexSessionTitleCache({ getCodexHome: () => codexHome, readTitles })
+
+        expect(cache.resolve([sessionId]).get(sessionId)).toBe('Old database title')
+        cache.set(sessionId, 'Confirmed new title')
+
+        expect(cache.resolve([sessionId]).get(sessionId)).toBe('Confirmed new title')
+        expect(readTitles).toHaveBeenCalledTimes(1)
+    })
+
     it('retries a failed state database read instead of caching sessions as untitled', () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-native-codex-title-'))
         cleanupPaths.push(codexHome)

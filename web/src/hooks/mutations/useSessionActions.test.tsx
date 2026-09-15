@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { useSessionActions } from './useSessionActions'
 import { ApiError, type ApiClient } from '@/api/client'
+import { queryKeys } from '@/lib/query-keys'
+import type { SessionResponse, SessionsResponse } from '@/types/api'
 
 function createWrapper() {
     const queryClient = new QueryClient({
@@ -94,5 +96,36 @@ describe('useSessionActions - reopenSession', () => {
             // The hook should not get stuck pending after the failure.
             expect(result.current.isPending).toBe(false)
         })
+    })
+})
+
+describe('useSessionActions - renameSession', () => {
+    it('updates detail and list caches to the same confirmed name', async () => {
+        const queryClient = new QueryClient({
+            defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+        })
+        const session = {
+            id: 'session-A',
+            metadata: { name: 'Old name' }
+        }
+        queryClient.setQueryData(queryKeys.session('session-A'), { session } as unknown as SessionResponse)
+        queryClient.setQueryData(queryKeys.sessions, { sessions: [session] } as unknown as SessionsResponse)
+        const renameSession = vi.fn(async () => {})
+        const api = { renameSession } as unknown as ApiClient
+        const Wrapper = ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        )
+        const { result } = renderHook(
+            () => useSessionActions(api, 'session-A', 'codex'),
+            { wrapper: Wrapper },
+        )
+
+        await act(async () => {
+            await result.current.renameSession('New name')
+        })
+
+        expect(renameSession).toHaveBeenCalledWith('session-A', 'New name')
+        expect(queryClient.getQueryData<SessionResponse>(queryKeys.session('session-A'))?.session.metadata?.name).toBe('New name')
+        expect(queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)?.sessions[0]?.metadata?.name).toBe('New name')
     })
 })

@@ -27,6 +27,7 @@ export function RequestUserInputFooter(props: {
             }))}
             disabled={props.disabled}
             onDone={props.onDone}
+            autoOpenKey={JSON.stringify(['request-user-input', props.sessionId, props.tool.id, permission.id])}
             textPlaceholder={t('tool.requestUserInput.textPlaceholder')}
             onSubmit={(selections) => props.api.approvePermission(props.sessionId, permission.id, formatRequestUserInputAnswers(
                 Object.fromEntries(questions.map((question, index) => [question.id, {

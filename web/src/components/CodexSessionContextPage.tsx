@@ -2650,6 +2650,7 @@ export function CodexSessionContextPage(props: {
                     backLabel={t('recentCodex.back')}
                     title={title}
                     details={sessionDetails}
+                    onRename={props.machineId && context ? () => setRenameOpen(true) : undefined}
                     floating
                     actions={(
                         <div className="flex shrink-0 items-center gap-1">
@@ -2688,7 +2689,6 @@ export function CodexSessionContextPage(props: {
                     isOpen={menuOpen}
                     onClose={() => setMenuOpen(false)}
                     sessionActive={directStatus === 'processing'}
-                    onRename={props.machineId && context ? () => setRenameOpen(true) : undefined}
                     onGitBranches={isGitRepository ? () => setGitBranchesOpen(true) : undefined}
                     onToggleFiles={props.machineId && nativeGitProjectPath ? () => setFilesOpen(true) : undefined}
                     onFork={() => void fork()}

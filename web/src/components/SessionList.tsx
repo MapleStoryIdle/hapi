@@ -6,7 +6,6 @@ import { useLongPress } from '@/hooks/useLongPress'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
-import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CopyIcon, CheckIcon, ScheduleIcon } from '@/components/icons'
 import { cn } from '@/lib/utils'
@@ -690,11 +689,10 @@ const SessionItem = memo(function SessionItem(props: {
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-    const [renameOpen, setRenameOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
 
-    const { archiveSession, reopenSession, renameSession, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, deleteSession, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
@@ -857,7 +855,6 @@ const SessionItem = memo(function SessionItem(props: {
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionActive={s.active}
-                onRename={() => setRenameOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={handleReopen}
                 onDelete={() => setDeleteOpen(true)}
@@ -876,14 +873,6 @@ const SessionItem = memo(function SessionItem(props: {
                     isPending={false}
                 />
             ) : null}
-
-            <RenameSessionDialog
-                isOpen={renameOpen}
-                onClose={() => setRenameOpen(false)}
-                currentName={sessionName}
-                onRename={renameSession}
-                isPending={isPending}
-            />
 
             <ConfirmDialog
                 isOpen={archiveOpen}

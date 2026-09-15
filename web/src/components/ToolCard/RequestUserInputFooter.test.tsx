@@ -9,7 +9,10 @@ vi.mock('@/components/MarkdownRenderer', () => ({
     MarkdownRenderer: (props: { content: string }) => <>{props.content}</>
 }))
 
-afterEach(cleanup)
+afterEach(() => {
+    cleanup()
+    sessionStorage.clear()
+})
 
 function makeTool(input: unknown): ChatToolCall {
     return {
@@ -63,6 +66,19 @@ describe('RequestUserInputFooter', () => {
         expect(screen.getByRole('radio', { name: /Continue/ })).not.toBeChecked()
         expect(screen.getByRole('radio', { name: /Stop/ })).not.toBeChecked()
         expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    })
+
+    it('auto-opens only one drawer when the same pending question is mounted twice', () => {
+        const tool = makeTool(optionQuestion)
+        const api = { approvePermission: vi.fn() } as unknown as ApiClient
+        render(
+            <I18nProvider>
+                <RequestUserInputFooter api={api} sessionId="session-1" tool={tool} disabled={false} onDone={() => {}} />
+                <RequestUserInputFooter api={api} sessionId="session-1" tool={tool} disabled={false} onDone={() => {}} />
+            </I18nProvider>
+        )
+
+        expect(screen.getAllByRole('dialog', { name: 'Answer question' })).toHaveLength(1)
     })
 
     it('does not send until a deliberate option click, without a confirm button', async () => {

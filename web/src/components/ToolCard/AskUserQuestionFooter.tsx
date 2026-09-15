@@ -30,6 +30,7 @@ export function AskUserQuestionFooter(props: {
             questions={questions}
             disabled={props.disabled}
             onDone={props.onDone}
+            autoOpenKey={JSON.stringify(['ask-user-question', props.sessionId, props.tool.id, permission.id])}
             textPlaceholder={t('tool.askUserQuestion.otherPlaceholder')}
             onSubmit={(selections) => props.api.approvePermission(props.sessionId, permission.id, {
                 answers: Object.fromEntries(questions.map((question, index) => [question.id, [

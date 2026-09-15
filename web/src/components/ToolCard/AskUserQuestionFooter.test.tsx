@@ -6,7 +6,10 @@ import { I18nProvider } from '@/lib/i18n-context'
 import { AskUserQuestionFooter } from './AskUserQuestionFooter'
 
 vi.mock('@/components/MarkdownRenderer', () => ({ MarkdownRenderer: (props: { content: string }) => <>{props.content}</> }))
-afterEach(cleanup)
+afterEach(() => {
+    cleanup()
+    sessionStorage.clear()
+})
 
 function setup(multiSelect: boolean, cursor = false) {
     const approvePermission = vi.fn().mockResolvedValue(undefined)

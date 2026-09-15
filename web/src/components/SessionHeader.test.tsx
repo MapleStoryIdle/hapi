@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nContext, I18nProvider } from '@/lib/i18n-context'
 import { MOBILE_LAYOUT_CONTRACT } from '@/lib/mobileLayoutContract'
@@ -72,6 +72,18 @@ describe('mobile layout contract', () => {
         expect(onSetGroup).toHaveBeenCalledOnce()
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
         expect(screen.getByTitle('Task')).toHaveTextContent('Task')
+    })
+
+    it('opens rename from the title details popover', () => {
+        const onRename = vi.fn()
+        render(<I18nProvider><SessionTitleDetails title="Task" onRename={onRename} /></I18nProvider>)
+
+        fireEvent.click(screen.getByTitle('Task'))
+        expect(screen.queryByRole('button', { name: 'Copy Full name' })).toBeNull()
+        fireEvent.click(within(screen.getByRole('dialog', { name: 'Session details' })).getByRole('button', { name: 'Rename' }))
+
+        expect(onRename).toHaveBeenCalledOnce()
+        expect(screen.queryByRole('dialog', { name: 'Session details' })).toBeNull()
     })
 
     it('keeps the full title-bar shell transparent without changing the control surface', () => {

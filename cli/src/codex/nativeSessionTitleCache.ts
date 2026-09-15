@@ -148,6 +148,16 @@ export class NativeCodexSessionTitleCache {
 
     constructor(private readonly options: NativeCodexSessionTitleCacheOptions = {}) {}
 
+    set(sessionId: string, title: string): void {
+        const normalizedSessionId = sessionId.trim()
+        const normalizedTitle = normalizeTitle(title)
+        if (!normalizedSessionId || !normalizedTitle) return
+
+        const databasePath = findLatestCodexStateDatabase((this.options.getCodexHome ?? getCodexHomePath)())
+        this.stateFingerprint = databasePath ? getStateDatabaseFingerprint(databasePath) : null
+        this.titles.set(normalizedSessionId, normalizedTitle)
+    }
+
     resolve(
         sessionIds: readonly string[],
         options: NativeCodexSessionTitleResolveOptions = {}

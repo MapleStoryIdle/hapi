@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CS
 import type { CodexTokenUsage, CodexUsageAccount } from '@hapi/protocol/codexUsage'
 import { CodexUsageDrawer } from './CodexUsageDrawer'
 import { RefreshCw as RefreshIconNode, Wifi as WifiIconNode, WifiOff as WifiOffIconNode } from 'lucide'
-import { Bot, ChevronRight, Clock3, Folder, Hash, Tag, UsersRound, X } from 'lucide-react'
+import { Bot, ChevronRight, Clock3, Folder, Hash, Pencil, Tag, UsersRound, X } from 'lucide-react'
 import type { CodexSubscriptionLimits, CodexSubscriptionLimitWindow, Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -212,6 +212,7 @@ function formatHeaderDateTime(value: number): string {
 export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
     title: string
     sessionId?: string
+    onRename?: () => void
     details?: readonly SessionHeaderDetail[]
     /**
      * Normal SHAPI chats keep their latest details in this stable ref. A token
@@ -350,16 +351,14 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
                                     {titleDetail?.value ?? props.title}
                                 </span>
                             </span>
-                            <button
+                            {props.onRename ? <button
                                 type="button"
-                                onClick={() => copyDetail('title', titleDetail?.value ?? props.title)}
+                                onClick={() => { setDetailsOpen(false); props.onRename?.() }}
                                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                aria-label={t('session.header.details.copy', { label: titleDetail?.label ?? t('session.header.details.fullName') })}
+                                aria-label={t('session.action.rename')}
                             >
-                                {copiedDetailKey === 'title'
-                                    ? <CheckIcon className="h-4 w-4 text-green-500" />
-                                    : <CopyIcon className="h-4 w-4" />}
-                            </button>
+                                <Pencil className="h-4 w-4" aria-hidden="true" />
+                            </button> : null}
                         </div>
 
                         {detailGroups.map((group, groupIndex) => (
@@ -571,6 +570,7 @@ export function FloatingSessionHeader(props: {
     details?: readonly SessionHeaderDetail[]
     detailsRef?: SessionHeaderDetailsRef
     detailsRevision?: string
+    onRename?: () => void
     actions?: ReactNode
     floating?: boolean
 }) {
@@ -613,6 +613,7 @@ export function FloatingSessionHeader(props: {
                         details={props.details}
                         detailsRef={props.detailsRef}
                         detailsRevision={props.detailsRevision}
+                        onRename={props.onRename}
                     />
                 </div>
 
@@ -984,6 +985,7 @@ export const SessionHeader = memo(function SessionHeader(props: {
                 sessionId={session.id}
                 detailsRef={sessionDetailsRef}
                 detailsRevision={sessionDetailsRevision}
+                onRename={() => setRenameOpen(true)}
                 floating={props.floating}
                 actions={(
                     <>
@@ -1028,7 +1030,6 @@ export const SessionHeader = memo(function SessionHeader(props: {
                 onClose={() => setMenuOpen(false)}
                 sessionActive={session.active}
                 onGitBranches={isGitRepository ? () => setGitBranchesOpen(true) : undefined}
-                onRename={() => setRenameOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onReleaseControl={canReleaseControl ? () => setReleaseControlOpen(true) : undefined}
                 onReopen={handleReopen}

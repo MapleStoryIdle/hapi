@@ -30,7 +30,7 @@ export function QuestionAnswerForm(props: {
 }) {
     const { t } = useTranslation()
     const { haptic } = usePlatform()
-    const [open, setOpen] = useState(!props.messageCard)
+    const [open, setOpen] = useState(!props.messageCard && !props.autoOpenKey)
     const shownKey = useRef<string | null>(null)
     useEffect(() => {
         if (!props.autoOpenKey || props.disabled || shownKey.current === props.autoOpenKey) return
