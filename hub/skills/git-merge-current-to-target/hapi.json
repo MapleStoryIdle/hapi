@@ -1,0 +1,10 @@
+{
+    "id": "git-merge-current-to-target",
+    "name": "Git Merge Current To Target",
+    "description": "Commit and push the current branch, then safely merge it into a target branch with separate target-push confirmation.",
+    "descriptions": {
+        "zh-CN": "提交并推送当前分支，再安全合并到目标分支。"
+    },
+    "version": "1.0.1",
+    "minimumRunnerVersion": "1.1.2"
+}

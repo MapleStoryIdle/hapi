@@ -427,8 +427,12 @@ describe('ComposerButtons — permission mode button', () => {
         expect(screen.getByText('Full Access')).toBeInTheDocument()
         expect(screen.getByText('Full computer access (higher risk)')).toBeInTheDocument()
         const defaultRow = screen.getByText('Request Approval').closest('button')
+        const readOnlyRow = screen.getByText('Read Only').closest('button')
         const safeYoloRow = screen.getByText('Approve For Me').closest('button')
         const fullAccessRow = screen.getByText('Full Access').closest('button')
+        expect(readOnlyRow?.querySelector('.lucide-eye')).toBeInTheDocument()
+        expect(defaultRow?.querySelector('.lucide-eye')).not.toBeInTheDocument()
+        expect(readOnlyRow!.compareDocumentPosition(defaultRow!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         expect(defaultRow?.querySelector('span')?.className).toContain('text-black/55')
         expect(safeYoloRow?.querySelector('span')?.className).not.toContain('text-orange-500')
         expect(safeYoloRow?.querySelector('span')?.className).toContain('text-blue-500')
@@ -634,7 +638,7 @@ describe('ComposerButtons — skill picker', () => {
         document.documentElement.removeAttribute('data-app-keyboard-open')
     })
 
-    it('groups skills by scope without tab or count badges', () => {
+    it('puts Hub below Project and keeps scope groups collapsed with counts', () => {
         renderInProviders(
             <ComposerButtons
                 canSend={false}
@@ -670,18 +674,30 @@ describe('ComposerButtons — skill picker', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
 
-        const projectSkill = screen.getByText('project-bravo')
+        const hubSection = screen.getByTestId('composer-skill-section-hub')
+        const projectSection = screen.getByTestId('composer-skill-section-project')
+        expect(screen.getByTestId('composer-skill-total')).toHaveTextContent('5')
+        expect(screen.queryByPlaceholderText('Search skills')).not.toBeInTheDocument()
+        expect(hubSection).toHaveAttribute('aria-expanded', 'false')
+        expect(hubSection).toHaveTextContent('Hub')
+        expect(hubSection).toHaveTextContent('1')
+        expect(projectSection.compareDocumentPosition(hubSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(screen.queryByText('Public Share')).not.toBeInTheDocument()
+
+        fireEvent.click(hubSection)
         const hubSkill = screen.getByText('Public Share')
-        const globalSkill = screen.getByText('global-alpha')
-        const pluginSkill = screen.getByText('plugin-beta')
-        const systemSkill = screen.getByText('system-delta')
-        expect(projectSkill.compareDocumentPosition(hubSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-        expect(hubSkill.compareDocumentPosition(globalSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-        expect(globalSkill.compareDocumentPosition(pluginSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-        expect(pluginSkill.compareDocumentPosition(systemSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-        expect(screen.queryByRole('button', { name: /Custom\s+\d/ })).not.toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: /Other\s+\d/ })).not.toBeInTheDocument()
-        expect(screen.queryByText('5')).not.toBeInTheDocument()
+        expect(hubSection.compareDocumentPosition(hubSkill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+        for (const section of ['project', 'user', 'plugin', 'system']) {
+            const button = screen.getByTestId(`composer-skill-section-${section}`)
+            expect(button).toHaveAttribute('aria-expanded', 'false')
+            expect(button).toHaveTextContent('1')
+        }
+        expect(screen.queryByText('project-bravo')).not.toBeInTheDocument()
+        expect(screen.queryByText('global-alpha')).not.toBeInTheDocument()
+
+        fireEvent.click(screen.getByTestId('composer-skill-section-project'))
+        expect(screen.getByText('project-bravo')).toBeInTheDocument()
     })
 
     it('shows the last deliberately clicked skills for the current project only', () => {
@@ -716,11 +732,14 @@ describe('ComposerButtons — skill picker', () => {
 
         const view = renderInProviders(<ComposerButtons {...props} projectPath="/work/alpha" />)
         fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
+        fireEvent.click(screen.getByTestId('composer-skill-section-project'))
         fireEvent.click(screen.getByText('second'))
         fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
 
         const recent = screen.getByTestId('composer-recent-skills')
         expect(within(recent).getByText('Recent')).toBeInTheDocument()
+        expect(screen.getByTestId('composer-skill-section-recent')).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByTestId('composer-skill-section-recent')).toHaveTextContent('1')
         expect(within(recent).getByText('second')).toBeInTheDocument()
 
         view.rerender(
@@ -764,6 +783,8 @@ describe('ComposerButtons — skill picker', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
 
         const menu = screen.getByTestId('toolbar-menu')
+        expect(screen.queryByPlaceholderText('Search skills')).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Show skill filters' }))
         const search = screen.getByPlaceholderText('Search skills')
         expect(menu.parentElement).toBe(document.body)
         expect(search).not.toHaveFocus()

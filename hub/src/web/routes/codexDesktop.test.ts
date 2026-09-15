@@ -562,7 +562,7 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
-    it('rejects Codex transcript endpoints outside the default namespace', async () => {
+    it('rejects hub-local Codex transcripts outside the default namespace', async () => {
         const app = createRoutesApp('team-a')
         const response = await app.request('/api/codex/sessions')
 
@@ -571,6 +571,31 @@ describe('Codex Desktop import routes', () => {
             success: false,
             error: 'Codex transcript import is not available outside the default namespace'
         })
+    })
+
+    it('lists runner-owned Codex transcripts inside a non-default workspace', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('team-runner', ['/runner/workspace'], 'team-a', '/runner/.codex')
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            listCodexLocalSessions: async () => ({
+                success: true,
+                sessions: [createRunnerLocalSessionData('native-thread').session]
+            })
+        } as unknown as SyncEngine
+
+        try {
+            const response = await createRoutesAppWithEngine('team-a', store, engine)
+                .request('/api/codex/sessions?machineId=team-runner')
+
+            expect(response.status).toBe(200)
+            expect(await response.json()).toMatchObject({
+                success: true,
+                sessions: [{ id: 'native-thread' }]
+            })
+        } finally {
+            store.close()
+        }
     })
 
     it('allows Codex transcript endpoints in the default namespace', async () => {
@@ -1355,7 +1380,7 @@ describe('Codex Desktop import routes', () => {
                     method: 'POST', headers: { 'content-type': 'application/json' },
                     body: JSON.stringify({ machineId: 'mac-runner', action: 'stop', expectedTurnId: 'active-turn' })
                 })
-                expect(response.status).toBe(namespace === 'default' ? 409 : 403)
+                expect(response.status).toBe(409)
             }
             expect(calls).toBe(0)
         } finally { store.close() }
@@ -1423,7 +1448,7 @@ describe('Codex Desktop import routes', () => {
                     method: 'PATCH', headers: { 'content-type': 'application/json' },
                     body: JSON.stringify({ machineId: 'mac-runner', name: 'New name' })
                 })
-                expect(response.status).toBe(namespace === 'default' ? 409 : 403)
+                expect(response.status).toBe(409)
             }
             expect(calls).toBe(0)
         } finally { store.close() }
@@ -1558,6 +1583,7 @@ describe('Codex Desktop import routes', () => {
 
     it('returns native composer custom prompts and Skills from the selected runner', async () => {
         const store = new Store(':memory:')
+        store.pluginSettings.setEnabled('default', 'managed-skill:public-share', true)
         const sessionId = '56565656-5656-4656-8656-565656565657'
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
         const capabilityCalls: unknown[][] = []
@@ -1587,6 +1613,7 @@ describe('Codex Desktop import routes', () => {
                     {
                         name: 'public-share',
                         description: 'Create or revoke an expiring SHAPI public link, including feedback-enabled Kanban tasks.',
+                        descriptions: { 'zh-CN': '通过限时链接分享文件或收集反馈。' },
                         scope: 'hub'
                     }
                 ]

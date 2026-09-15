@@ -40,7 +40,7 @@ function createApp(opts: {
         getSession: () => ({ id: 'session-1', active: opts.active !== false, metadata: { machineId: 'machine-1' } }),
         getMachine: () => ({
             id: 'machine-1', active: true,
-            metadata: { host: 'runner', platform: 'test', happyCliVersion: '1.0.0', runnerVersion: '1.1.0' }
+            metadata: { host: 'runner', platform: 'test', happyCliVersion: '1.0.0', runnerVersion: '1.1.2' }
         }),
         reconcileManagedSkill: opts.reconcileManagedSkill,
         sendMessage,
@@ -168,7 +168,11 @@ describe('POST /api/sessions/:id/messages — SHAPI managed skill cache', () => 
         expect(response.status).toBe(200)
         expect(calls).toHaveLength(1)
         expect(calls[0]?.machineId).toBe('machine-1')
-        expect(calls[0]?.payload).toMatchObject({ id: 'public-share', version: '1.0.0' })
+        expect(calls[0]?.payload).toMatchObject({
+            id: 'public-share',
+            version: '1.1.0',
+            files: expect.arrayContaining([expect.objectContaining({ path: 'SKILL.md' })])
+        })
         expect(sentMessages).toHaveLength(1)
     })
 

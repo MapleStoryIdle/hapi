@@ -98,7 +98,19 @@ See `src/ui/doctor.ts`.
 - `shapi share publish <relative-file> [--expires <seconds>] [--session <session-id>] [--feedback] [--feedback-request <text>]` - Create an expiring public link / 中文看板任务 for one local file (5 minutes–7 days; default 24h). `--session` binds the task to its source SHAPI session; when run inside a managed SHAPI agent session, that source is filled in automatically. `--feedback` is Markdown-only and embeds a one-time, 10 MiB feedback contract in the public document; the external Agent must self-report its model and environment in the returned Markdown.
 - `shapi share revoke <share-id>` - Revoke a public link. Public links are bearer links; redact `/s/*` paths in reverse-proxy logs.
 
-The Hub exposes `public-share` as a SHAPI-only managed skill. On first use the Hub sends the current version to the selected Runner, which caches it under `$HAPI_HOME/managed-skills`; Agent skill directories are never modified. Later uses compare the Runner-reported version and SHA-256 with the Hub catalog and refresh only when they differ.
+The Hub exposes SHAPI-managed Skills such as `public-share`, `agent-team`, and `git-merge-current-to-target`. A managed Skill is a standard bundle with `SKILL.md` and optional `agents/`, `assets/`, `references/`, and `scripts/` directories. On first use the Hub sends the enabled bundle to the selected Runner, which caches it under `$HAPI_HOME/managed-skills`; Agent skill directories are never modified. Later uses compare the Runner-reported version and SHA-256 with the Hub catalog and refresh only when they differ.
+
+Hub operators can publish and roll back public Skill bundles directly against the running Hub database:
+
+```bash
+shapi hub skills publish ./my-skill
+shapi hub skills list [skill-id]
+shapi hub skills activate <skill-id> <version>
+```
+
+Publishing is immutable per `id@version`, activates the new version immediately, and does not require a Hub or Runner restart. Every new version must use a new semantic version in `hapi.json`.
+
+`shapi hub skills` is server-local and only manages public Skills shared by every workspace. The Hub database and its parent directory are owner-only, so remote workspace users cannot use this command. An authenticated workspace can publish a personal package through `POST /api/managed-skills/personal`; it is visible only in that workspace. A personal package with the same ID overrides the public package for that workspace only.
 
 The legacy `hapi` command remains supported as an alias; `hapi server` remains an alias for `shapi hub`.
 

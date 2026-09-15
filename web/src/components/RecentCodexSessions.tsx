@@ -732,6 +732,10 @@ function KanbanSessionCard(props: {
     const groupColor = props.sessionGroup ? getSessionGroupColor(props.sessionGroup.name) : null
     const borderColor = groupColor ?? completedDirectoryColor
     const modifiedAt = toEpochMilliseconds(session.modifiedAt)
+    const completedAge = now - modifiedAt
+    const recentlyCompleted = status === 'completed'
+        && completedAge >= 0
+        && completedAge < RECENT_COMPLETED_WINDOW_MS
     const directoryLabel = getKanbanDirectoryLabel(session.cwd) ?? t('recentCodex.noDirectory')
     const gitMachineId = session.hapiSession?.metadata?.machineId ?? machineId
     const gitCwd = session.hapiSession?.metadata?.path ?? session.cwd
@@ -771,12 +775,13 @@ function KanbanSessionCard(props: {
             <SwipeArchiveRow label={t('session.action.archive')} onArchive={() => setArchiveOpen(true)} disabled={isArchiving}>
             <div className="relative min-w-0">
                 <div
-                    className={`cupertino-session-card session-kanban-card flex min-h-[5.625rem] w-full min-w-0 flex-col rounded-[14px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[background-color,box-shadow,transform] hover:bg-[var(--app-subtle-bg)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${status === 'processing' ? 'session-kanban-card-thinking' : `border-l-[3px] ${presentation.borderClassName}`} ${props.unviewed ? 'session-kanban-card-unviewed' : ''} ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
+                    className={`cupertino-session-card session-kanban-card flex min-h-[5.625rem] w-full min-w-0 flex-col rounded-[14px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[background-color,box-shadow,transform] hover:bg-[var(--app-subtle-bg)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${status === 'processing' ? 'session-kanban-card-thinking' : `border-l-[3px] ${presentation.borderClassName}`} ${recentlyCompleted ? 'session-kanban-card-recent-completed' : ''} ${props.unviewed ? 'session-kanban-card-unviewed' : ''} ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
                     style={status !== 'processing' && borderColor ? { borderLeftColor: borderColor } : undefined}
                     data-kanban-card-status={status}
                     data-kanban-directory-color={!groupColor ? completedDirectoryColor ?? undefined : undefined}
                     data-kanban-group-color={groupColor ?? undefined}
                     data-kanban-subagent={isSubagent ? 'true' : undefined}
+                    data-kanban-recent-completed={recentlyCompleted || undefined}
                     data-kanban-unviewed={props.unviewed || undefined}
                 >
                     <button type="button" onClick={onOpen} aria-label={`${t('recentCodex.open', { title: session.title })}${props.unviewed ? ` · ${t('sessions.kanban.unviewed')}` : ''}`} aria-current={selected ? 'page' : undefined} className="absolute inset-0 rounded-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]" />

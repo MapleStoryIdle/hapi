@@ -42,8 +42,9 @@ export function useSkills(
             return await api.getSkills(sessionId)
         },
         enabled: Boolean(api && sessionId),
-        staleTime: Infinity,
+        staleTime: 15_000,
         gcTime: 30 * 60 * 1000,
+        refetchInterval: 30_000,
         retry: false,
     })
 

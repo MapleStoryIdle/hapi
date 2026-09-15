@@ -8,6 +8,12 @@ export const PLUGIN_SETTINGS_SCHEMA = `CREATE TABLE IF NOT EXISTS plugin_setting
     PRIMARY KEY(namespace, plugin_id)
 )`
 
+/** Settings that were implicitly enabled before missing rows became opt-in. */
+export const LEGACY_IMPLICITLY_ENABLED_PLUGIN_IDS = [
+    'openviking',
+    'managed-skill:public-share',
+] as const
+
 export class PluginSettingsStore {
     constructor(private readonly db: Database) {}
 
@@ -15,7 +21,7 @@ export class PluginSettingsStore {
         const row = this.db.query(
             'SELECT enabled FROM plugin_settings WHERE namespace=? AND plugin_id=?'
         ).get(namespace, pluginId) as { enabled: number } | null
-        return row?.enabled !== 0
+        return row?.enabled === 1
     }
 
     setEnabled(namespace: string, pluginId: string, enabled: boolean): void {

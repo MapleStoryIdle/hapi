@@ -162,6 +162,7 @@ export type GitStatusFiles = {
 export type SkillSummary = {
     name: string
     description?: string
+    descriptions?: Partial<Record<'en' | 'zh-CN', string>>
     scope?: 'hub' | 'project' | 'user' | 'plugin' | 'system' | 'admin'
 }
 

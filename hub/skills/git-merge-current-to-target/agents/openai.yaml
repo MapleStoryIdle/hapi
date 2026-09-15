@@ -1,0 +1,6 @@
+interface:
+  display_name: "Git Merge Current To Target"
+  short_description: "Safely merge current branch to target"
+  default_prompt: "Use $git-merge-current-to-target to commit current branch changes and merge them into a target branch safely."
+policy:
+  allow_implicit_invocation: true

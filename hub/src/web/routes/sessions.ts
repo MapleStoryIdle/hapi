@@ -24,7 +24,7 @@ import type { SyncEngine, Session } from '../../sync/syncEngine'
 import { RpcTargetMissingError } from '../../sync/rpcGateway'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
-import { isManagedSkillEnabled, managedSkillCatalog } from '../../managedSkills'
+import { mergeEnabledManagedSkills } from '../../managedSkills'
 import type { Store } from '../../store'
 
 function commandsFromMetadataSlashCommands(names: readonly string[] | undefined): SlashCommand[] {
@@ -904,14 +904,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null, sto
                 sessionResult.session.metadata?.flavor ?? 'claude'
             )
             if (result.success) {
-                const names = new Set((result.skills ?? []).map((skill) => skill.name))
-                result.skills = [
-                    ...(result.skills ?? []),
-                    ...managedSkillCatalog()
-                        .filter((skill) => !store || isManagedSkillEnabled(store, c.get('namespace'), skill.id))
-                        .filter((skill) => !names.has(skill.id))
-                        .map((skill) => ({ name: skill.id, description: skill.description, scope: 'hub' as const }))
-                ]
+                result.skills = mergeEnabledManagedSkills(result.skills ?? [], store, c.get('namespace'))
             }
             return c.json(result)
         } catch (error) {

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
 
@@ -25,7 +25,7 @@ beforeEach(() => {
     runtime.api.getManagedSkills.mockResolvedValue({
         skills: [{
             id: 'public-share', name: 'Public Share', description: 'Share one file.',
-            version: '1.0.0', minimumRunnerVersion: '1.1.0', sha256: 'a'.repeat(64), enabled: true,
+            version: '1.0.0', minimumRunnerVersion: '1.1.0', sha256: 'a'.repeat(64), visibility: 'public', enabled: true,
             machines: [{
                 machineId: 'runner-1', displayName: 'Mac Runner', active: true,
                 runnerVersion: '1.1.0', desiredVersion: '1.0.0', installedVersion: null, state: 'missing'
@@ -34,18 +34,24 @@ beforeEach(() => {
     })
 })
 
+afterEach(() => {
+    cleanup()
+})
+
 describe('SkillsPage', () => {
-    it('shows managed Skills, Runner connectivity, and supports disabling', async () => {
+    it('shows managed Skills without Runner details and supports disabling', async () => {
         const queryClient = new QueryClient()
         render(<QueryClientProvider client={queryClient}><I18nProvider><SkillsPage /></I18nProvider></QueryClientProvider>)
 
         expect(await screen.findByText('Public Share')).toBeInTheDocument()
-        expect(screen.getByText('Mac Runner')).toBeInTheDocument()
+        expect(screen.getByText('Share a file or collect feedback with an expiring link.')).toBeInTheDocument()
+        expect(screen.getByText('Public')).toBeInTheDocument()
+        expect(screen.queryByText('Mac Runner')).not.toBeInTheDocument()
         fireEvent.click(screen.getByRole('switch', { name: 'Enable or disable Public Share' }))
         await waitFor(() => expect(runtime.api.setManagedSkillEnabled).toHaveBeenCalledWith('public-share', false))
 
         expect(screen.queryByText('Share one file.')).not.toBeInTheDocument()
-        expect(screen.getByLabelText('Runner online')).toBeInTheDocument()
+        expect(screen.queryByLabelText('Runner online')).not.toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'Cache' })).not.toBeInTheDocument()
     })
 
@@ -54,8 +60,9 @@ describe('SkillsPage', () => {
         render(<QueryClientProvider client={new QueryClient()}><I18nProvider><SkillsPage /></I18nProvider></QueryClientProvider>)
 
         expect(await screen.findByRole('heading', { name: '技能' })).toBeInTheDocument()
-        expect(screen.getByText('公开分享')).toBeInTheDocument()
-        expect(screen.getByLabelText('Runner 在线')).toBeInTheDocument()
+        expect(screen.getByText('Public Share')).toBeInTheDocument()
+        expect(screen.getByText('通过限时链接分享文件或收集反馈。')).toBeInTheDocument()
+        expect(screen.queryByText('Mac Runner')).not.toBeInTheDocument()
         expect(screen.queryByText(/只供 SHAPI/)).not.toBeInTheDocument()
         expect(screen.queryByText('SHAPI 管理的技能')).not.toBeInTheDocument()
     })

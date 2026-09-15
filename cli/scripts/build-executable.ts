@@ -204,6 +204,21 @@ function ensureEmbeddedAssetsManifest(workspaceRoot: string, includeWebAssets: b
     writeStubEmbeddedAssets(workspaceRoot);
 }
 
+async function generateManagedSkillLibrary(workspaceRoot: string): Promise<void> {
+    const script = join(workspaceRoot, 'hub', 'scripts', 'generate-managed-skill-library.ts');
+    const child = Bun.spawn({
+        cmd: [process.execPath, 'run', script],
+        cwd: workspaceRoot,
+        env: process.env,
+        stdout: 'inherit',
+        stderr: 'inherit'
+    });
+    const exitCode = await child.exited;
+    if (exitCode !== 0) {
+        throw new Error(`Managed Skill catalog generation failed (exit ${exitCode})`);
+    }
+}
+
 async function buildTarget(projectRoot: string, target: string, outdir: string, name: string, runnerOnly: boolean): Promise<void> {
     const { platform, arch } = parseTarget(target);
     assertArchivesExist(projectRoot, platform, arch);
@@ -272,6 +287,7 @@ async function main(): Promise<void> {
         : [resolvedTarget!];
 
     if (!runnerOnly) {
+        await generateManagedSkillLibrary(workspaceRoot);
         ensureEmbeddedAssetsManifest(workspaceRoot, includeWebAssets);
     } else {
         rmSync(outdir, { recursive: true, force: true });

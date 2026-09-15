@@ -1,16 +1,26 @@
-import { createHash } from 'node:crypto'
 import {
     ManagedSkillReconcileResponseSchema,
     type Machine,
     type ManagedSkillCatalogEntry,
+    type ManagedSkillDefinition,
     type ManagedSkillMachineState,
     type ManagedSkillPayload
 } from '@hapi/protocol'
 import type { SyncEngine } from './sync/syncEngine'
-import { getManagedSkillDefinition, MANAGED_SKILL_LIBRARY } from './managedSkillCatalog'
+import { MANAGED_SKILL_LIBRARY } from './managedSkillCatalog'
+import { managedSkillDigest } from './managedSkillBundles'
 import type { Store } from './store'
 
 const SETTINGS_PREFIX = 'managed-skill:'
+
+type SkillScope = 'hub' | 'project' | 'user' | 'plugin' | 'system' | 'admin'
+type SkillSummary = {
+    name: string
+    description?: string
+    descriptions?: Partial<Record<'en' | 'zh-CN', string>>
+    scope?: SkillScope
+}
+type RequiredScopeSkillSummary = SkillSummary & { scope: SkillScope }
 
 export function isManagedSkillEnabled(store: Store, namespace: string, id: string): boolean {
     return store.pluginSettings.isEnabled(namespace, `${SETTINGS_PREFIX}${id}`)
@@ -20,8 +30,8 @@ export function setManagedSkillEnabled(store: Store, namespace: string, id: stri
     store.pluginSettings.setEnabled(namespace, `${SETTINGS_PREFIX}${id}`, enabled)
 }
 
-function sha256(content: string): string {
-    return createHash('sha256').update(content, 'utf8').digest('hex')
+function library(store?: Store, namespace?: string): readonly ManagedSkillDefinition[] {
+    return store?.managedSkillPackages.listActive(namespace).map((item) => item.definition) ?? MANAGED_SKILL_LIBRARY
 }
 
 function compareVersions(left: string, right: string): number {
@@ -34,32 +44,71 @@ function compareVersions(left: string, right: string): number {
     return 0
 }
 
-export function managedSkillCatalog(): ManagedSkillCatalogEntry[] {
-    return MANAGED_SKILL_LIBRARY.map(({ content, ...skill }) => ({
+export function managedSkillCatalog(store?: Store, namespace?: string): ManagedSkillCatalogEntry[] {
+    if (store) {
+        return store.managedSkillPackages.listActive(namespace).map(({ definition, visibility }) => {
+            const { files, ...skill } = definition
+            return { ...skill, sha256: managedSkillDigest(files), visibility }
+        })
+    }
+    return MANAGED_SKILL_LIBRARY.map(({ files, ...skill }) => ({
         ...skill,
-        sha256: sha256(content)
+        sha256: managedSkillDigest(files),
+        visibility: 'public'
     }))
 }
 
-export function findManagedSkillInvocation(text: string | undefined): string | null {
-    const id = text?.match(/^\$([a-z][a-z0-9-]{0,63})(?:\s+|$)/)?.[1]
-    return id && getManagedSkillDefinition(id) ? id : null
+/** Enabled Hub Skills replace a same-named Runner Skill; disabled Hub Skills do not hide local Skills. */
+export function mergeEnabledManagedSkills(
+    runnerSkills: readonly RequiredScopeSkillSummary[],
+    store: Store | undefined,
+    namespace: string
+): RequiredScopeSkillSummary[]
+export function mergeEnabledManagedSkills(
+    runnerSkills: readonly SkillSummary[],
+    store: Store | undefined,
+    namespace: string
+): SkillSummary[]
+export function mergeEnabledManagedSkills(
+    runnerSkills: readonly SkillSummary[],
+    store: Store | undefined,
+    namespace: string
+): SkillSummary[] {
+    const enabled = managedSkillCatalog(store, namespace)
+        .filter((skill) => !store || isManagedSkillEnabled(store, namespace, skill.id))
+    const enabledIds = new Set(enabled.map((skill) => skill.id))
+    return [
+        ...runnerSkills.filter((skill) => !enabledIds.has(skill.name)),
+        ...enabled.map((skill) => ({
+            name: skill.id,
+            description: skill.description,
+            descriptions: skill.descriptions,
+            scope: 'hub' as const
+        }))
+    ]
 }
 
-function payloadFor(id: string): ManagedSkillPayload | null {
-    const definition = getManagedSkillDefinition(id)
+export function findManagedSkillInvocation(text: string | undefined, store?: Store, namespace?: string): string | null {
+    const id = text?.match(/^\$([a-z][a-z0-9-]{0,63})(?:\s+|$)/)?.[1]
+    return id && library(store, namespace).some((skill) => skill.id === id) ? id : null
+}
+
+function payloadFor(id: string, store?: Store, namespace?: string): ManagedSkillPayload | null {
+    const definition = store?.managedSkillPackages.getActive(id, namespace)
+        ?? MANAGED_SKILL_LIBRARY.find((skill) => skill.id === id)
     if (!definition) return null
     return {
         id: definition.id,
         version: definition.version,
-        sha256: sha256(definition.content),
-        content: definition.content
+        sha256: managedSkillDigest(definition.files),
+        files: definition.files
     }
 }
 
-export async function ensureManagedSkillCached(engine: SyncEngine, machine: Machine, id: string): Promise<void> {
-    const definition = getManagedSkillDefinition(id)
-    const payload = payloadFor(id)
+export async function ensureManagedSkillCached(engine: SyncEngine, machine: Machine, id: string, store?: Store, namespace?: string): Promise<void> {
+    const definition = store?.managedSkillPackages.getActive(id, namespace)
+        ?? MANAGED_SKILL_LIBRARY.find((skill) => skill.id === id)
+    const payload = payloadFor(id, store, namespace)
     if (!definition || !payload) throw new Error(`Unknown SHAPI skill: ${id}`)
     if (!machine.active) throw new Error(`Runner ${machine.metadata?.displayName ?? machine.id} is offline`)
     const runnerVersion = machine.metadata?.runnerVersion
@@ -81,7 +130,7 @@ export async function ensureManagedSkillForSession(
     text: string | undefined,
     options?: { store: Store; namespace: string }
 ): Promise<void> {
-    const id = findManagedSkillInvocation(text)
+    const id = findManagedSkillInvocation(text, options?.store, options?.namespace)
     if (!id) return
     if (options && !isManagedSkillEnabled(options.store, options.namespace, id)) {
         throw new Error(`SHAPI skill ${id} is disabled`)
@@ -89,7 +138,7 @@ export async function ensureManagedSkillForSession(
     const machineId = engine.getSession(sessionId)?.metadata?.machineId?.trim()
     const machine = machineId ? engine.getMachine(machineId) : undefined
     if (!machine) throw new Error('Session Runner is unavailable')
-    await ensureManagedSkillCached(engine, machine, id)
+    await ensureManagedSkillCached(engine, machine, id, options?.store, options?.namespace)
 }
 
 export function managedSkillMachineState(machine: Machine, skill: ManagedSkillCatalogEntry): ManagedSkillMachineState {

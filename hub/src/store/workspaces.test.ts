@@ -83,6 +83,36 @@ describe('WorkspaceStore', () => {
 })
 
 describe('WorkspaceStore auth-v2 foundations', () => {
+    it('preserves existing implicit feature settings while new workspaces default to disabled', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'shapi-workspace-v32-'))
+        const path = join(dir, 'hapi.db')
+        try {
+            const initial = new Store(path)
+            const existing = initial.workspaces.create('Existing workspace')
+            initial.pluginSettings.setEnabled(existing.dataNamespace, 'managed-skill:public-share', false)
+            initial.close()
+
+            const old = new Database(path)
+            old.exec('PRAGMA user_version=31')
+            old.close()
+
+            const migrated = new Store(path)
+            expect(migrated.pluginSettings.isEnabled(existing.dataNamespace, 'openviking')).toBe(true)
+            expect(migrated.pluginSettings.isEnabled(existing.dataNamespace, 'managed-skill:public-share')).toBe(false)
+
+            const created = migrated.workspaces.createWithWebKey(
+                'New workspace',
+                `spw${opaque('w')}`,
+            ).workspace
+            expect(migrated.pluginSettings.isEnabled(created.dataNamespace, 'openviking')).toBe(false)
+            expect(migrated.pluginSettings.isEnabled(created.dataNamespace, 'managed-skill:public-share')).toBe(false)
+            expect(migrated.pluginSettings.isEnabled(created.dataNamespace, 'managed-skill:future')).toBe(false)
+            migrated.close()
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
     it('keeps fresh default and newly created workspaces legacy-ineligible', () => {
         const store = new Store(':memory:')
         const defaultWorkspace = store.workspaces.getByDataNamespace('default')!

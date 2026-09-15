@@ -5,8 +5,8 @@ import { getLocalPluginEnabled, useLocalPluginEnabled } from './useLocalPluginEn
 describe('useLocalPluginEnabled', () => {
     beforeEach(() => localStorage.clear())
 
-    it('keeps existing features enabled by default', () => {
-        expect(getLocalPluginEnabled('terminal')).toBe(true)
+    it('keeps plugins disabled by default', () => {
+        expect(getLocalPluginEnabled('terminal')).toBe(false)
     })
 
     it('persists plugin state', () => {

@@ -87,6 +87,7 @@ export function useNativeCodexSessionComposerCapabilities(
         enabled: Boolean(api && machineId && sessionId),
         staleTime: 60_000,
         gcTime: 30 * 60 * 1000,
+        refetchInterval: 30_000,
         retry: false
     })
 
