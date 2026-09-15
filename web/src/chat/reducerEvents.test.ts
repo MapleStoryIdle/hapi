@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { foldTaskStatusEvents, parseMessageAsEvent } from './reducerEvents'
-import type { AgentEvent, ChatBlock, NormalizedMessage } from './types'
+import type { AgentEvent, AgentEventBlock, ChatBlock, NormalizedMessage } from './types'
 
 function makeAgentTextMessage(text: string): NormalizedMessage {
     return {
@@ -13,7 +13,7 @@ function makeAgentTextMessage(text: string): NormalizedMessage {
     }
 }
 
-function makeTaskStatusBlock(id: string, event: AgentEvent): ChatBlock {
+function makeTaskStatusBlock(id: string, event: AgentEvent): AgentEventBlock {
     return {
         kind: 'agent-event',
         id,
@@ -137,6 +137,36 @@ describe('foldTaskStatusEvents', () => {
         })
 
         expect(foldTaskStatusEvents([usageLimit, genericFailure])).toEqual([usageLimit])
+    })
+
+    it('carries retry detail into a trailing generic terminal failure', () => {
+        const capacity = makeTaskStatusBlock('capacity-retry', {
+            type: 'task-status',
+            status: 'retrying',
+            source: 'codex',
+            code: 'model_capacity',
+            message: 'Selected model is at capacity. Please try a different model.',
+            retryAttempt: 2,
+            maxRetries: 3,
+            recoverable: true,
+        })
+        const genericFailure = makeTaskStatusBlock('generic-failure', {
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'unknown',
+            message: 'Task failed',
+            recoverable: false,
+        })
+
+        expect(foldTaskStatusEvents([capacity, genericFailure])).toEqual([{
+            ...genericFailure,
+            event: {
+                ...genericFailure.event,
+                code: 'model_capacity',
+                message: 'Selected model is at capacity. Please try a different model.',
+            }
+        }])
     })
 
     it('does not fold task statuses across normal messages', () => {

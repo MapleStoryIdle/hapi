@@ -54,6 +54,19 @@ export const CodexForkMetadataSchema = z.object({
 
 export type CodexForkMetadata = z.infer<typeof CodexForkMetadataSchema>
 
+export const MonitorSessionMetadataSchema = z.object({
+    monitorId: z.string(),
+    incidentId: z.string(),
+    sourceSession: z.object({
+        type: z.enum(['managed', 'native-codex']),
+        sessionId: z.string()
+    }),
+    createdAt: z.number(),
+    mode: z.literal('isolated-trigger')
+})
+
+export type MonitorSessionMetadata = z.infer<typeof MonitorSessionMetadataSchema>
+
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
@@ -105,6 +118,7 @@ export const MetadataSchema = z.object({
     worktree: WorktreeMetadataSchema.optional(),
     sideSession: SideSessionMetadataSchema.optional(),
     codexFork: CodexForkMetadataSchema.optional(),
+    monitorSession: MonitorSessionMetadataSchema.optional(),
     // Cached Pi model list — written by CLI, read by web (inactive session fallback).
     // Minimal shape: each entry must have modelId; other fields (provider, name, etc.) pass through.
     piAvailableModels: z.array(z.object({ modelId: z.string() }).passthrough()).optional(),
@@ -157,6 +171,8 @@ export const CodexSubagentStateSchema = z.object({
     statusText: z.string().optional(),
     activity: z.string().optional(),
     activityKind: z.string().optional(),
+    model: z.string().optional(),
+    modelReasoningEffort: z.string().optional(),
     startedAt: z.number(),
     updatedAt: z.number(),
     completedAt: z.number().optional()

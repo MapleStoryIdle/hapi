@@ -197,6 +197,25 @@ describe('getLocalCodexSessionData', () => {
         expect(accumulator.messages[0].content).toMatchObject({ data: { code: 'http_forbidden' } })
     })
 
+    it('imports nested native failures with their original provider message', () => {
+        const accumulator = createCodexTranscriptImportAccumulator()
+        appendCodexTranscriptImportLines(accumulator, [JSON.stringify({
+            type: 'event_msg',
+            payload: {
+                type: 'task_failed',
+                error: { detail: { message: 'Selected model is at capacity. Please try a different model.' } }
+            }
+        })])
+
+        expect(accumulator.messages).toHaveLength(1)
+        expect(accumulator.messages[0]?.content).toMatchObject({ data: {
+            type: 'task-status',
+            status: 'failed',
+            code: 'model_capacity',
+            message: 'Selected model is at capacity. Please try a different model.',
+        } })
+    })
+
     it.each([
         'HTTP 401 Unauthorized',
         'Authentication required; please run codex login',

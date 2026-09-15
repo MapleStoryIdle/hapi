@@ -75,7 +75,7 @@ describe('HappySystemMessage — quota events', () => {
         })
 
         expect(screen.getByText('taskStatus.usage.title')).toBeInTheDocument()
-        expect(screen.getByText('taskStatus.usage.bodyWithReset')).toBeInTheDocument()
+        expect(screen.getByText("You've hit your usage limit.")).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'taskStatus.usage.action' })).toHaveAttribute(
             'href',
             'https://chatgpt.com/codex/settings/usage'
@@ -128,6 +128,7 @@ describe('HappySystemMessage — quota events', () => {
 
         expect(screen.queryByTestId('usage-limit-event')).not.toBeInTheDocument()
         expect(screen.getByText('taskStatus.modelCapacity.title')).toBeInTheDocument()
+        expect(screen.getByText('Selected model is at capacity.')).toBeInTheDocument()
     })
 
     it('shows a network-specific task failure card', () => {
@@ -141,6 +142,19 @@ describe('HappySystemMessage — quota events', () => {
         })
 
         expect(screen.getByText('taskStatus.network.title')).toBeInTheDocument()
-        expect(screen.getByText('taskStatus.network.body')).toBeInTheDocument()
+        expect(screen.getByText('Network error: request timed out')).toBeInTheDocument()
+    })
+
+    it('uses localized fallback copy only when Codex supplied no useful detail', () => {
+        renderEvent({
+            type: 'task-status',
+            status: 'failed',
+            source: 'codex',
+            code: 'unknown',
+            message: 'Task failed',
+            recoverable: false,
+        })
+
+        expect(screen.getByText('taskStatus.failed.body')).toBeInTheDocument()
     })
 })

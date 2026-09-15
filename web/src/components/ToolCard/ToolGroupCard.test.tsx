@@ -944,10 +944,77 @@ describe('ToolGroupCard', () => {
         }), { terminalToolDisplayMode: 'compact' })
 
         const toggle = within(view.container)
-            .getAllByRole('button', { name: /bun test; \d+s/i })
+            .getAllByRole('button', { name: /Running · bun test; \d+s/i })
             .find((button) => button.hasAttribute('aria-expanded'))
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
         expect(screen.queryByText(/Processing; \d+s/i)).not.toBeInTheDocument()
+    })
+
+    it('keeps a running terminal visible when a later process detail exists', () => {
+        const startedAt = Date.now() - 8_000
+        const terminal = makeToolBlock('bash-1', 'CodexBash', { command: 'bun test' }, {
+            state: 'running',
+            createdAt: startedAt,
+            startedAt,
+            completedAt: null,
+            result: null,
+        })
+        const view = renderCard(makeGroup({
+            createdAt: startedAt,
+            invokedAt: startedAt,
+            tools: [terminal],
+            turnActive: true,
+            forceGenericCompactTitle: true,
+            detailBlocks: [terminal, {
+                kind: 'agent-reasoning',
+                id: 'reasoning-later',
+                localId: null,
+                createdAt: startedAt + 1_000,
+                text: 'Checking results',
+            }],
+            summary: {
+                totalTools: 1,
+                countsByKind: { read: 0, search: 0, command: 1, mutation: 0, web: 0, other: 0 },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 1,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        expect(within(view.container).getByRole('button', { name: /Running · bun test; \d+s/i }))
+            .toHaveAttribute('aria-expanded', 'true')
+        expect(screen.queryByText(/Checking results; \d+s/i)).not.toBeInTheDocument()
+    })
+
+    it('shows the latest terminal state instead of generic processing while the turn continues', () => {
+        const terminal = makeToolBlock('bash-1', 'CodexBash', { command: 'bun test' })
+        const view = renderCard(makeGroup({
+            tools: [terminal],
+            turnActive: true,
+            forceGenericCompactTitle: true,
+            detailBlocks: [],
+            summary: {
+                totalTools: 1,
+                countsByKind: { read: 0, search: 0, command: 1, mutation: 0, web: 0, other: 0 },
+                fileTargets: [],
+                commandTargets: ['bun test'],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        expect(within(view.container).getByRole('button', { name: /Completed · bun test/i }))
+            .toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /Processing/i })).not.toBeInTheDocument()
     })
 
     it('uses the latest active action instead of Processing for aggregated groups', () => {
@@ -1526,10 +1593,10 @@ describe('ToolGroupCard', () => {
 
         const view = render(<Harness />)
         let toggle = within(view.container)
-            .getAllByRole('button', { name: /pwd/i })
+            .getAllByRole('button', { name: /Running · pwd/i })
             .find((button) => button.hasAttribute('aria-expanded'))!
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
-        expect(screen.getAllByText('pwd')).toHaveLength(2)
+        expect(screen.getByText('pwd')).toBeInTheDocument()
         expect(view.container.querySelector('svg.animate-spin')).not.toBeNull()
 
         fireEvent.click(screen.getByRole('button', { name: 'finish quick' }))

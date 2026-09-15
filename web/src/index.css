@@ -1480,8 +1480,12 @@ html[data-theme="oled"] .shiki span {
     padding-left: var(--app-safe-area-left);
     padding-right: var(--app-safe-area-right);
     transform: translateY(var(--drawer-drag, 0px));
-    transition: transform var(--app-detail-sheet-settle-duration) var(--app-detail-sheet-ease);
+    /* The entrance keyframe owns transform until it finishes. Enabling the
+       drag-settle transition at the same time makes some WebKit builds play a
+       second rise when the keyframe is removed. */
+    transition: none;
 }
+.question-drawer[data-entered='true'] { transition: transform var(--app-detail-sheet-settle-duration) var(--app-detail-sheet-ease); }
 .question-drawer[data-expanded='true'] { max-height: var(--drawer-expanded-height); }
 .question-drawer[data-state='open']:not([data-entered='true']) { animation: question-drawer-in var(--app-detail-sheet-duration) var(--app-detail-sheet-ease); }
 .question-drawer[data-state='closed'] { animation: question-drawer-out var(--app-detail-sheet-exit-duration) ease-in; }

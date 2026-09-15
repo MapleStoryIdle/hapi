@@ -299,6 +299,37 @@ describe('MessageService message pagination', () => {
         expect(third.id).toBeDefined()
     })
 
+    it('returns the immediately newer page with a composite after cursor', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'page-newer')
+        const first = store.messages.addMessage(session.id, 'first', 'local-first')
+        const second = store.messages.addMessage(session.id, 'second', 'local-second')
+        const third = store.messages.addMessage(session.id, 'third', 'local-third')
+        const fourth = store.messages.addMessage(session.id, 'fourth', 'local-fourth')
+        store.messages.markMessagesInvoked(session.id, ['local-first'], 1_000)
+        store.messages.markMessagesInvoked(session.id, ['local-second'], 2_000)
+        store.messages.markMessagesInvoked(session.id, ['local-third'], 3_000)
+        store.messages.markMessagesInvoked(session.id, ['local-fourth'], 4_000)
+
+        const service = makeService(store)
+        const newer = service.getMessagesPage(session.id, {
+            limit: 2,
+            after: { at: 1_000, seq: first.seq },
+        })
+
+        expect(newer.messages.map(message => message.id)).toEqual([second.id, third.id])
+        expect(newer.page.nextAfterAt).toBe(3_000)
+        expect(newer.page.nextAfterSeq).toBe(third.seq)
+        expect(newer.page.hasMoreAfter).toBe(true)
+
+        const newest = service.getMessagesPage(session.id, {
+            limit: 2,
+            after: { at: newer.page.nextAfterAt!, seq: newer.page.nextAfterSeq! },
+        })
+        expect(newest.messages.map(message => message.id)).toEqual([fourth.id])
+        expect(newest.page.hasMoreAfter).toBe(false)
+    })
+
     it('breaks equal timestamp ties by seq', () => {
         const store = makeStore()
         const session = makeSession(store, 'page-tie')
@@ -793,6 +824,34 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         // scheduledAt must be null in DB
         const msgs = store.messages.getMessages(session.id)
         expect(msgs[0].scheduledAt).toBeNull()
+    })
+
+    it('generates a localId so legacy callers still dispatch one distinct turn', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'generated-local-id')
+        const publisher = makePublisher()
+        const cliEmitted: Array<{ body?: { message?: { localId?: string | null } } }> = []
+        const io = {
+            of: (ns: string) => ({
+                to: (_room: string) => ({
+                    emit: (_event: string, data: unknown) => {
+                        if (ns === '/cli') {
+                            cliEmitted.push(data as { body?: { message?: { localId?: string | null } } })
+                        }
+                    },
+                    timeout: (_ms: number) => ({ emit: () => {} })
+                }),
+                adapter: { rooms: { get: () => undefined } }
+            })
+        } as unknown as Server
+
+        const service = new MessageService(store, io, publisher as any)
+        await service.sendMessage(session.id, { text: 'legacy caller' })
+
+        const [stored] = store.messages.getMessages(session.id)
+        expect(stored.localId).toBeTruthy()
+        expect(stored.invokedAt).toBeNull()
+        expect(cliEmitted[0]?.body?.message?.localId).toBe(stored.localId)
     })
 
     it('past scheduledAt (already mature): emits to /cli immediately', async () => {

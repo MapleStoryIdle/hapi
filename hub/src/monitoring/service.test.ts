@@ -13,6 +13,7 @@ function setup(kind: 'http' | 'webhook' = 'webhook') {
     const store = new Store(':memory:')
     const sessions = new Map<string, Session>()
     const calls: unknown[][] = []
+    let spawnCount = 0
     const config = MonitorConfigSchema.parse({ name: 'API', kind, machineId: 'm', directory: '/work', prompt: 'Find cause',
         request: kind === 'http' ? { url: 'https://example.com', intervalSeconds: 60 } : null })
     const created = store.monitors.create('a', config)
@@ -20,9 +21,19 @@ function setup(kind: 'http' | 'webhook' = 'webhook') {
         getOnlineMachinesByNamespace: (ns: string) => ns === 'a' ? [{ id: 'm' }] : [],
         getSessionByNamespace: (id: string, ns: string) => ns === 'a' ? sessions.get(id) : undefined,
         waitForSessionActive: async () => true,
+        setMonitorSessionMetadata: async (id: string, monitorSession: NonNullable<Session['metadata']>['monitorSession']) => {
+            const session = sessions.get(id)
+            if (!session?.metadata) throw new Error('fixture session missing')
+            session.metadata.monitorSession = monitorSession
+        },
+        applySessionConfig: async (id: string, next: { permissionMode?: Session['permissionMode'] }) => {
+            const session = sessions.get(id)
+            if (!session) throw new Error('fixture session missing')
+            if (next.permissionMode) session.permissionMode = next.permissionMode
+        },
         spawnSession: async (...args: unknown[]) => {
             calls.push(args)
-            const record = store.sessions.getOrCreateSession('s' + calls.length, { path: '/work' }, null, 'a')
+            const record = store.sessions.getOrCreateSession('s' + ++spawnCount, { path: '/work' }, null, 'a')
             sessions.set(record.id, {
                 id: record.id, namespace: 'a', seq: 1, createdAt: 1, updatedAt: 1, active: true, activeAt: 1,
                 metadata: { path: '/work', host: 'localhost', flavor: 'codex' }, metadataVersion: 1,
@@ -100,6 +111,76 @@ describe('monitor dispatch and confirmation', () => {
             s.store.messages.addMessage(source.sessionId, complete.content)
             await s.service.tick()
             expect(s.store.monitors.getIncident(incident.id)?.state).toBe('needs_attention')
+        } finally { await s.service.stop(); s.store.close() }
+    })
+    it('creates one isolated session from a bound source and keeps approved repair in it', async () => {
+        const s = setup()
+        try {
+            const source = await s.engine.spawnSession('m', '/work', 'codex')
+            if (source.type !== 'success') throw new Error('fixture failed')
+            const sourceSession = s.sessions.get(source.sessionId)!
+            sourceSession.metadata!.machineId = 'm'
+            sourceSession.model = 'gpt-source'
+            sourceSession.modelReasoningEffort = 'high'
+            s.calls.length = 0
+            s.store.monitors.update(s.created.id, 'a', {
+                ...s.config,
+                targetSession: { type: 'managed', sessionId: source.sessionId },
+                deliveryMode: 'new-session',
+                model: 'gpt-source',
+                reasoningEffort: 'high'
+            })
+
+            s.service.accept(s.created.token!, { eventId: 'isolated', summary: 'bad', details: '' })
+            await s.service.tick()
+            let incident = s.store.monitors.openForMonitor(s.created.id)!
+            expect(incident.sessionId).not.toBe(source.sessionId)
+            expect(s.calls).toHaveLength(1)
+            expect(s.calls[0]?.[1]).toBe('/work')
+            expect(s.calls[0]?.[3]).toBe('gpt-source')
+            expect(s.calls[0]?.[4]).toBe('high')
+            const isolatedSession = s.sessions.get(incident.sessionId!)!
+            expect(isolatedSession.metadata?.monitorSession).toMatchObject({
+                monitorId: s.created.id,
+                incidentId: incident.id,
+                sourceSession: { type: 'managed', sessionId: source.sessionId },
+                mode: 'isolated-trigger'
+            })
+            expect(s.store.monitors.detail(s.created.id, 'a')).toMatchObject({
+                relatedSession: { type: 'managed', sessionId: incident.sessionId },
+                incident: { deliverySession: { type: 'managed', sessionId: incident.sessionId } }
+            })
+            expect(s.store.messages.countMessages(source.sessionId)).toBe(0)
+
+            s.store.messages.addMessage(incident.sessionId!, agent({ type: 'message', message: 'Repair it.', final: true }).content)
+            s.store.messages.addMessage(incident.sessionId!, complete.content)
+            await s.service.tick()
+            incident = s.store.monitors.getIncident(incident.id)!
+            expect(incident.state).toBe('review')
+            expect(s.service.approve(s.store.monitors.get(s.created.id)!, incident.id, incident.planHash!)).toBe(true)
+            await s.service.tick()
+            incident = s.store.monitors.getIncident(incident.id)!
+            expect(s.calls).toHaveLength(1)
+            expect(incident.repairSessionId).toBe(incident.sessionId)
+            expect(incident.state).toBe('repairing')
+            expect(isolatedSession.permissionMode).toBe('default')
+            expect(s.store.messages.countMessages(source.sessionId)).toBe(0)
+        } finally { await s.service.stop(); s.store.close() }
+    })
+    it('passes source Claude effort through the Claude spawn field', async () => {
+        const s = setup()
+        try {
+            s.store.monitors.update(s.created.id, 'a', {
+                ...s.config,
+                agent: 'claude',
+                reasoningEffort: 'high',
+                permissionMode: 'plan'
+            })
+            s.service.accept(s.created.token!, { eventId: 'claude', summary: 'bad', details: '' })
+            await s.service.tick()
+            expect(s.calls[0]?.[4]).toBeUndefined()
+            expect(s.calls[0]?.[9]).toBe('high')
+            expect(s.calls[0]?.[10]).toBe('plan')
         } finally { await s.service.stop(); s.store.close() }
     })
     it('delivers to the bound native thread read-only and correlates its terminal response', async () => {

@@ -4,7 +4,12 @@ import { createCliOutputBlock, isCliOutputText, mergeCliOutputBlocks } from '@/c
 import { parseMessageAsEvent } from '@/chat/reducerEvents'
 import { collectTitleChanges, ensureToolBlock, extractTitleFromChangeTitleInput, isChangeTitleToolName, type PermissionEntry } from '@/chat/reducerTools'
 import { isSubagentToolName } from '@/chat/subagentTool'
-import { asString, isObject } from '@hapi/protocol'
+import {
+    asString,
+    extractCodexFailureMessage,
+    isObject,
+    selectPreferredCodexFailureMessage,
+} from '@hapi/protocol'
 
 function getEventString(event: Record<string, unknown>, key: string): string | null {
     return asString(event[key])
@@ -590,11 +595,23 @@ export function reduceTimeline(
                     ) {
                         continue
                     }
+                    const incomingFailure = nextState === 'error'
+                        ? extractCodexFailureMessage([event.error, event.message, event.result])
+                        : null
+                    const preferredFailure = nextState === 'error'
+                        ? selectPreferredCodexFailureMessage(
+                            block.tool.state === 'error' ? extractCodexFailureMessage(block.tool.result) : null,
+                            incomingFailure
+                        )
+                        : null
+                    const displayEvent = preferredFailure && preferredFailure !== incomingFailure
+                        ? { ...event, error: preferredFailure, activity: `Failed: ${preferredFailure}` }
+                        : event
                     patchAgentRunInput(block, {
                         agentId,
                         agentStatus: status,
                         statusText: getEventString(event, 'statusText') ?? getEventString(event, 'status_text') ?? status,
-                        ...getAgentRunDisplayPatch(event)
+                        ...getAgentRunDisplayPatch(displayEvent)
                     })
                     block.tool = { ...block.tool, state: nextState }
                     if (nextState === 'running') {
@@ -607,7 +624,7 @@ export function reduceTimeline(
                     if ('result' in event) {
                         block.tool = { ...block.tool, result: event.result }
                     } else if ('error' in event) {
-                        block.tool = { ...block.tool, result: event.error }
+                        block.tool = { ...block.tool, result: preferredFailure ?? event.error }
                     } else if ('spawnResult' in event) {
                         block.tool = { ...block.tool, result: event.spawnResult }
                     }

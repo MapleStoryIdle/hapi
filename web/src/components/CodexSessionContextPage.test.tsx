@@ -1949,6 +1949,31 @@ describe('CodexSessionContextPage', () => {
         expect(screen.queryByTestId('codex-native-recovery')).not.toBeInTheDocument()
     })
 
+    it('opens the managed SHAPI session after the Hub reroutes the message', async () => {
+        const api = createApi()
+        const onRecovered = vi.fn()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'idle'
+        })
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            managedSessionId: 'managed-session-1'
+        })
+        renderPage({ api, onRecovered })
+
+        await screen.findByText('Original response')
+        const input = screen.getByRole('textbox')
+        await waitFor(() => expect(input).not.toBeDisabled())
+        fireEvent.change(input, { target: { value: 'Continue in SHAPI' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+        await waitFor(() => expect(onRecovered).toHaveBeenCalledWith('managed-session-1'))
+        expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1)
+        expect(screen.queryByText('Continue in SHAPI')).not.toBeInTheDocument()
+    })
+
     it('keeps a confirmed queue visible while a status refresh has not published it yet', async () => {
         const api = createApi()
         ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockImplementation(async () => ({
@@ -2348,6 +2373,42 @@ describe('CodexSessionContextPage', () => {
                 forceRecovery: true
             }, { signal: expect.any(AbortSignal) })
         })
+    })
+
+    it('opens the managed session when a manual recovery is rerouted by the Hub', async () => {
+        const createdAt = Date.now() - 20_000
+        localStorage.setItem('hapi:native-codex-direct-messages:v1', JSON.stringify({
+            [JSON.stringify(['machine-1', 'codex-thread-1'])]: [{
+                id: 'native:managed-recovery',
+                text: 'Recover into managed',
+                createdAt,
+                status: 'queued',
+                deliveryPhase: 'queued',
+                phaseStartedAt: createdAt,
+                queueId: 'queue-before-restart',
+                observedTranscriptMessageIds: [],
+                observedThroughPosition: null
+            }]
+        }))
+        const api = createApi()
+        const onRecovered = vi.fn()
+        ;(api.getCodexSessionStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'idle',
+            queuedMessages: []
+        })
+        ;(api.sendCodexSessionMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+            success: true,
+            status: 'processing',
+            managedSessionId: 'managed-session-from-recovery'
+        })
+        renderPage({ api, onRecovered })
+
+        expect(await waitForQuietRecoveryNotice()).toHaveTextContent('Message saved. Delivery is not confirmed yet')
+        fireEvent.click(screen.getByRole('button', { name: 'Send again (may duplicate)' }))
+
+        await waitFor(() => expect(onRecovered).toHaveBeenCalledWith('managed-session-from-recovery'))
+        expect(api.sendCodexSessionMessage).toHaveBeenCalledTimes(1)
     })
 
     it('does not silently retry an old unconfirmed native receipt', async () => {

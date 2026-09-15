@@ -107,6 +107,19 @@ describe('AppServerEventConverter', () => {
 
         const failed = converter.handleNotification('turn/completed', { turn: { id: 'turn-1' }, status: 'Failed', message: 'boom' });
         expect(failed).toEqual([{ type: 'task_failed', turn_id: 'turn-1', error: 'boom' }]);
+
+        const nestedFailure = converter.handleNotification('turn/completed', {
+            turn: {
+                id: 'turn-2',
+                status: 'Failed',
+                error: { detail: { message: 'Selected model is at capacity.' } }
+            }
+        });
+        expect(nestedFailure).toEqual([{
+            type: 'task_failed',
+            turn_id: 'turn-2',
+            error: 'Selected model is at capacity.'
+        }]);
     });
 
     it('accumulates agent message deltas', () => {

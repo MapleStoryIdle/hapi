@@ -1963,6 +1963,25 @@ export function createCodexDesktopRoutes(options: {
     getSyncEngine: () => SyncEngine | null
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
+    const managedSessionReopens = new Map<string, ReturnType<SyncEngine['reopenSession']>>()
+
+    const reopenManagedSession = (
+        engine: SyncEngine,
+        namespace: string,
+        sessionId: string
+    ): ReturnType<SyncEngine['reopenSession']> => {
+        const key = `${namespace}:${sessionId}`
+        const existing = managedSessionReopens.get(key)
+        if (existing) return existing
+
+        const pending = engine.reopenSession(sessionId, namespace)
+        managedSessionReopens.set(key, pending)
+        const clear = () => {
+            if (managedSessionReopens.get(key) === pending) managedSessionReopens.delete(key)
+        }
+        pending.then(clear, clear)
+        return pending
+    }
 
     app.get('/codex/status', (c) => {
         if (c.get('namespace') !== 'default') {
@@ -2644,20 +2663,27 @@ export function createCodexDesktopRoutes(options: {
                         error: 'Open the SHAPI-managed session to send attachments.'
                     } satisfies SendCodexLocalSessionMessageRpcResponse, 409)
                 }
+                let managedSessionId = managedSession.id
                 if (!managedSession.active) {
-                    return c.json({
-                        success: false,
-                        code: 'not_native_session',
-                        error: 'This Codex session is managed by SHAPI. Open it from the SHAPI session list before sending a message.'
-                    } satisfies SendCodexLocalSessionMessageRpcResponse, 409)
+                    const reopened = await reopenManagedSession(engine!, c.get('namespace'), managedSession.id)
+                    if (reopened.type !== 'success') {
+                        return c.json({
+                            success: false,
+                            code: 'launch_failed',
+                            error: reopened.message
+                        } satisfies SendCodexLocalSessionMessageRpcResponse, 502)
+                    }
+                    managedSessionId = reopened.sessionId
                 }
-                await engine!.sendMessage(managedSession.id, {
+                await engine!.sendMessage(managedSessionId, {
                     text: request.message,
+                    ...(request.clientMessageId ? { localId: request.clientMessageId } : {}),
                     sentFrom: 'webapp'
                 })
                 return c.json({
                     success: true,
-                    status: 'processing'
+                    status: 'processing',
+                    managedSessionId
                 } satisfies SendCodexLocalSessionMessageRpcResponse, 202)
             }
 

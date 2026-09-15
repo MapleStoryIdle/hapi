@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Activity, ArrowLeft, CircleAlert, ClipboardList, RefreshCw, Settings2, SwitchCamera, Waves } from 'lucide-react'
+import { Activity, ArrowLeft, CircleAlert, ClipboardList, RefreshCw, Send, Settings2, SwitchCamera, Waves } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import type { MonitorActivity, MonitorCallStats, MonitorConfig, MonitorIncident } from '@hapi/protocol/monitoring'
@@ -20,6 +20,7 @@ import { getMonitorAggregate, getMonitorDisplayHealth } from '@/monitoring/prese
 import { RelatedSessionLink } from './monitors'
 
 type Tab = 'overview' | 'events' | 'configuration'
+type ActivityTab = 'triggers' | 'deliveries'
 
 function formatPercent(value: number | null): string {
     if (value === null || !Number.isFinite(value)) return '—'
@@ -97,6 +98,7 @@ export default function MonitorDetailPage() {
     const { monitor, isLoading, error, refetch } = useMonitor(api, monitorId)
     const { machines } = useMachines(api, Boolean(monitor))
     const [tab, setTab] = useState<Tab>('overview')
+    const [activityTab, setActivityTab] = useState<ActivityTab>('triggers')
     const [isRefreshing, setIsRefreshing] = useState(false)
     const [isChecking, setIsChecking] = useState(false)
     const [isRotating, setIsRotating] = useState(false)
@@ -229,8 +231,6 @@ export default function MonitorDetailPage() {
                 .slice(0, 10),
         [incidents]
     )
-    const deliveredIncidentIds = useMemo(() => new Set(deliveredIncidents.map((incident) => incident.id)), [deliveredIncidents])
-    const triggerActivities = useMemo(() => monitor?.activities.filter((activity) => !activity.incidentId || !deliveredIncidentIds.has(activity.incidentId)) ?? [], [deliveredIncidentIds, monitor])
 
     if (isLoading) {
         return <div className="flex h-full items-center justify-center bg-[var(--app-bg)] px-4 text-sm text-[var(--app-hint)]">{t('monitors.loading')}</div>
@@ -281,12 +281,12 @@ export default function MonitorDetailPage() {
 
             <main className="app-scroll-y flex-1 px-3 pb-[calc(1rem+var(--app-safe-area-bottom))] pt-3">
                 <div className="mx-auto max-w-[760px] space-y-4">
-                    <div role="tablist" aria-label={t('monitors.tabs.label')} className="grid grid-cols-3 gap-1 rounded-2xl border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-1">
+                    <div role="tablist" aria-label={t('monitors.tabs.label')} className="grid grid-cols-3 gap-1 rounded-[14px] bg-[var(--app-secondary-bg)] p-1 shadow-inner ring-1 ring-inset ring-[var(--app-border)]">
                         {(['overview', 'events', 'configuration'] as const).map((item) => {
                             const selected = tab === item
                             const Icon = item === 'overview' ? Activity : item === 'events' ? ClipboardList : Settings2
                             return (
-                                <button key={item} type="button" role="tab" aria-selected={selected} aria-controls={`monitor-${item}`} onClick={() => selectTab(item)} className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${selected ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm' : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'}`}>
+                                <button key={item} type="button" role="tab" aria-selected={selected} aria-controls={`monitor-${item}`} onClick={() => selectTab(item)} className={`flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-[11px] px-2 text-xs font-semibold transition-[background-color,color,box-shadow] active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${selected ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_1px_3px_rgba(0,0,0,0.12)]' : 'text-[var(--app-hint)] hover:bg-[var(--app-bg)]/50 hover:text-[var(--app-fg)]'}`}>
                                     <Icon className="h-4 w-4" aria-hidden="true" />
                                     {t(`monitors.tabs.${item}`)}
                                 </button>
@@ -301,7 +301,7 @@ export default function MonitorDetailPage() {
                                     <span className={`rounded-full border px-2.5 py-1.5 text-xs font-semibold ${healthTone}`}>{healthLabel}</span>
                                     <div className="flex flex-wrap items-center justify-end gap-1">
                                         <RelatedSessionLink monitor={monitor} t={t} />
-                                        <button type="button" onClick={() => void runCheck()} disabled={isChecking} className="inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm font-medium text-[var(--app-link)] transition-colors hover:bg-[var(--app-subtle-bg)] active:bg-[var(--app-subtle-bg)] disabled:cursor-wait disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-[var(--app-link)]">
+                                        <button type="button" onClick={() => void runCheck()} disabled={isChecking} className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full bg-[var(--app-link)]/10 px-4 text-sm font-semibold text-[var(--app-link)] transition-[background-color,opacity] hover:bg-[var(--app-link)]/15 active:opacity-65 disabled:cursor-wait disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]">
                                             <Waves className="h-4 w-4" aria-hidden="true" />
                                             {isChecking ? t('monitors.overview.checking') : t('monitors.overview.testNow')}
                                         </button>
@@ -367,7 +367,7 @@ export default function MonitorDetailPage() {
                                     <h2 id="monitor-recent-activity" className="text-sm font-semibold text-[var(--app-fg)]">
                                         {t('monitors.activity.recent')}
                                     </h2>
-                                    <button type="button" onClick={() => selectTab('events')} className="min-h-11 px-2 text-sm font-medium text-[var(--app-link)]">
+                                    <button type="button" onClick={() => selectTab('events')} className="min-h-11 cursor-pointer rounded-full px-3 text-sm font-semibold text-[var(--app-link)] transition-colors hover:bg-[var(--app-link)]/10 active:bg-[var(--app-link)]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]">
                                         {t('monitors.activity.viewAll')}
                                     </button>
                                 </div>
@@ -377,37 +377,46 @@ export default function MonitorDetailPage() {
                     ) : null}
 
                     {tab === 'events' ? (
-                        <section id="monitor-events" role="tabpanel" className="space-y-4">
-                            {isWebhook ? (
-                                <>
-                                    <section>
-                                        <h2 className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">{t('monitors.delivery.recent')}</h2>
-                                        {deliveredIncidents.length === 0 ? (
-                                            <div className="rounded-2xl border border-dashed border-[var(--app-border)] p-6 text-center text-sm text-[var(--app-hint)]">{t('monitors.delivery.empty')}</div>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                {deliveredIncidents.map((incident) => (
-                                                    <MonitorIncidentCard key={incident.id} api={api} monitorId={monitor.id} incident={incident} locale={displayLocale} t={t} onChanged={refreshMonitor} compact />
-                                                ))}
-                                            </div>
-                                        )}
-                                    </section>
-                                    <section>
-                                        <h2 className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">{t('monitors.trigger.recent')}</h2>
-                                        <MonitorActivityList activities={triggerActivities} locale={displayLocale} t={t} retryingId={retryingActivityId} onRetrigger={(activity) => void retriggerActivity(activity)} />
-                                    </section>
-                                </>
+                        <section id="monitor-events" role="tabpanel" className="space-y-3">
+                            <div className="rounded-[22px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
+                                <div className="px-1 pb-3 pt-1">
+                                    <h2 className="text-lg font-semibold tracking-[-0.01em] text-[var(--app-fg)]">{t('monitors.activity.pageTitle')}</h2>
+                                    <p className="mt-1 text-sm leading-5 text-[var(--app-hint)]">{t('monitors.activity.pageHint')}</p>
+                                </div>
+                                <div role="tablist" aria-label={t('monitors.activity.tabsLabel')} className="grid grid-cols-2 gap-1 rounded-[13px] bg-[var(--app-secondary-bg)] p-1 shadow-inner ring-1 ring-inset ring-[var(--app-border)]">
+                                    {([
+                                        { id: 'triggers' as const, icon: Activity, label: t('monitors.trigger.recent'), count: monitor.activities.length },
+                                        { id: 'deliveries' as const, icon: Send, label: t('monitors.delivery.recent'), count: deliveredIncidents.length }
+                                    ]).map((item) => {
+                                        const selected = activityTab === item.id
+                                        const Icon = item.icon
+                                        return (
+                                            <button key={item.id} type="button" role="tab" aria-selected={selected} aria-controls={`monitor-activity-${item.id}`} onClick={() => setActivityTab(item.id)} className={`flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-[10px] px-3 text-sm font-semibold transition-[background-color,color,box-shadow] active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${selected ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-[0_1px_3px_rgba(0,0,0,0.12)]' : 'text-[var(--app-hint)] hover:bg-[var(--app-bg)]/50 hover:text-[var(--app-fg)]'}`}>
+                                                <Icon className="h-4 w-4" aria-hidden="true" />
+                                                <span>{item.label}</span>
+                                                <span className={`min-w-5 rounded-full px-1.5 py-0.5 text-center text-[11px] tabular-nums ${selected ? 'bg-[var(--app-link)]/10 text-[var(--app-link)]' : 'bg-[var(--app-bg)]/70 text-[var(--app-hint)]'}`}>{item.count}</span>
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+
+                            {activityTab === 'triggers' ? (
+                                <section id="monitor-activity-triggers" role="tabpanel" aria-label={t('monitors.trigger.recent')}>
+                                    <MonitorActivityList activities={monitor.activities} locale={displayLocale} t={t} retryingId={retryingActivityId} onRetrigger={(activity) => void retriggerActivity(activity)} />
+                                </section>
                             ) : (
-                                <>
-                                    <section>
-                                        <h2 className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">{t('monitors.activity.title')}</h2>
-                                        <MonitorActivityList activities={monitor.activities} locale={displayLocale} t={t} retryingId={retryingActivityId} onRetrigger={(activity) => void retriggerActivity(activity)} />
-                                    </section>
-                                    <section>
-                                        <h2 className="mb-2 px-1 text-sm font-semibold text-[var(--app-fg)]">{t('monitors.events.history')}</h2>
-                                        {incidents.filter((incident) => incident.id !== monitor.incident?.id).length === 0 ? <div className="rounded-2xl border border-dashed border-[var(--app-border)] p-6 text-center text-sm text-[var(--app-hint)]">{t('monitors.events.empty')}</div> : incidents.filter((incident) => incident.id !== monitor.incident?.id).map((incident) => <MonitorIncidentCard key={incident.id} api={api} monitorId={monitor.id} incident={incident} locale={displayLocale} t={t} onChanged={refreshMonitor} compact />)}
-                                    </section>
-                                </>
+                                <section id="monitor-activity-deliveries" role="tabpanel" aria-label={t('monitors.delivery.recent')}>
+                                    {deliveredIncidents.length === 0 ? (
+                                        <div className="rounded-[22px] border border-dashed border-[var(--app-border)] bg-[var(--app-bg)] px-6 py-10 text-center"><span className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-[var(--app-subtle-bg)] text-[var(--app-hint)]" aria-hidden="true"><Send className="h-5 w-5" /></span><p className="mt-3 text-sm font-medium text-[var(--app-fg)]">{t('monitors.delivery.empty')}</p></div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {deliveredIncidents.map((incident) => (
+                                                <MonitorIncidentCard key={incident.id} api={api} monitorId={monitor.id} incident={incident} locale={displayLocale} t={t} onChanged={refreshMonitor} compact />
+                                            ))}
+                                        </div>
+                                    )}
+                                </section>
                             )}
                         </section>
                     ) : null}

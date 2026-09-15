@@ -1,3 +1,5 @@
+import { extractCodexFailureMessage } from '@hapi/protocol';
+
 type WrappedRecord = Record<string, unknown>;
 
 type WrappedNotification = {
@@ -169,6 +171,6 @@ export function buildWrappedErrorEvent(msg: WrappedRecord): WrappedRecord | null
         return null;
     }
 
-    const error = asString(msg.message ?? msg.reason ?? errorRecord?.message);
+    const error = extractCodexFailureMessage([msg.error, msg.message, msg.reason, errorRecord]);
     return error ? { type: 'task_failed', error } : null;
 }

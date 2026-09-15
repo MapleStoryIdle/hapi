@@ -397,7 +397,33 @@ describe('scroll anchor helpers', () => {
 
         expect(captureScrollAnchor(viewport)).toEqual({
             id: 'second-message',
-            topOffset: 20
+            topOffset: 20,
+            element: second,
+        })
+
+        viewport.remove()
+    })
+
+    it('captures the last visible message bottom for older-page restoration', () => {
+        const viewport = document.createElement('div')
+        const first = document.createElement('div')
+        const second = document.createElement('div')
+        first.id = 'first-message'
+        second.id = 'second-message'
+        const messages = document.createElement('div')
+        messages.className = 'happy-thread-messages'
+        messages.append(first, second)
+        viewport.append(messages)
+        document.body.append(viewport)
+
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ top: 100, bottom: 500 }))
+        vi.spyOn(first, 'getBoundingClientRect').mockReturnValue(rect({ top: 80, bottom: 180 }))
+        vi.spyOn(second, 'getBoundingClientRect').mockReturnValue(rect({ top: 180, bottom: 540 }))
+
+        expect(captureScrollAnchor(viewport, 'bottom')).toEqual({
+            id: 'second-message',
+            bottomOffset: 40,
+            element: second,
         })
 
         viewport.remove()
@@ -472,6 +498,23 @@ describe('scroll anchor helpers', () => {
 
         expect(restoreScrollAnchor(viewport, { id: 'anchored-message', topOffset: 30 })).toBe(true)
         expect(viewport.scrollTop).toBe(250)
+
+        viewport.remove()
+    })
+
+    it('restores a bottom anchor when older content expands a joined message', () => {
+        const viewport = document.createElement('div')
+        const message = document.createElement('div')
+        message.id = 'anchored-message'
+        viewport.append(message)
+        document.body.append(viewport)
+        viewport.scrollTop = 200
+
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ top: 100, bottom: 500 }))
+        vi.spyOn(message, 'getBoundingClientRect').mockReturnValue(rect({ top: 40, bottom: 700 }))
+
+        expect(restoreScrollAnchor(viewport, { id: 'anchored-message', bottomOffset: 40 })).toBe(true)
+        expect(viewport.scrollTop).toBe(360)
 
         viewport.remove()
     })

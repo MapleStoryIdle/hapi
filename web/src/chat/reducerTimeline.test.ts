@@ -970,6 +970,43 @@ describe('reduceTimeline', () => {
         expect(agentBlocks[0].children.some((child: any) => child.kind === 'tool-call' && child.tool.id === 'codex-agent:agent-1:call:cmd-1')).toBe(true)
     })
 
+    it('keeps a detailed child failure when a generic terminal update follows it', () => {
+        const messages: TracedMessage[] = [
+            {
+                id: 'agent-start', localId: null, createdAt: 1, role: 'event', isSidechain: false,
+                content: { type: 'agent-run-start', cardId: 'spawn-1', input: {}, status: 'starting' }
+            } as TracedMessage,
+            ...[
+                ['system_error', 'Codex thread entered systemError'],
+                ['model_capacity', 'Selected model is at capacity. Please try a different model.'],
+                ['unknown', 'Task failed'],
+            ].map(([code, error], index) => ({
+                id: `agent-failure-${index}`,
+                localId: null,
+                createdAt: index + 2,
+                role: 'event',
+                isSidechain: false,
+                content: {
+                    type: 'agent-run-update',
+                    cardId: 'spawn-1',
+                    agentId: 'agent-1',
+                    status: 'failed',
+                    statusText: 'Failed',
+                    activity: `Failed: ${error}`,
+                    activityKind: 'failed',
+                    code,
+                    error,
+                }
+            } as TracedMessage))
+        ]
+
+        const { blocks } = reduceTimeline(messages, makeContext())
+        const agent = blocks.find((block: any) => block.kind === 'tool-call' && block.tool.name === 'CodexAgent') as any
+
+        expect(agent.tool.result).toBe('Selected model is at capacity. Please try a different model.')
+        expect(agent.tool.input.activity).toBe('Failed: Selected model is at capacity. Please try a different model.')
+    })
+
     it('does not create an orphan Codex agent card for fallback notFound updates', () => {
         const messages: TracedMessage[] = [
             {

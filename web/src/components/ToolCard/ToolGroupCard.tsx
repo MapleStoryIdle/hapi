@@ -228,6 +228,24 @@ function getToolGroupCompactLabel(
     t: (key: string, params?: Record<string, string | number>) => string
 ): string {
     const active = isToolGroupActive(block)
+    const runningTerminal = active
+        ? block.tools.findLast((tool) => (
+            isTerminalExecutionTool(tool.tool.name)
+            && (tool.tool.state === 'running' || tool.tool.state === 'pending')
+        )) ?? null
+        : null
+    if (runningTerminal) {
+        const terminalIntent = getTerminalCommandIntent(runningTerminal.tool.input)
+        const terminalLabel = terminalIntent?.kind === 'read-request' && terminalIntent.targets.length > 1
+            ? t('toolGroup.compact.row.readBatch')
+            : terminalIntent
+                ? getTerminalCommandDisplayTitle(runningTerminal.tool.input, t)
+                : getTerminalCommandSummary(runningTerminal.tool.input)
+        const stateLabel = t(runningTerminal.tool.state === 'pending'
+            ? 'terminal.execution.pending'
+            : 'terminal.execution.running')
+        return terminalLabel ? `${stateLabel} · ${terminalLabel}` : stateLabel
+    }
     const latestLiveBlock = getLatestLiveProcessBlock(block)
     if (latestLiveBlock?.kind === 'agent-text' || latestLiveBlock?.kind === 'agent-reasoning') {
         const activity = formatLiveProcessText(latestLiveBlock.text)
@@ -249,9 +267,12 @@ function getToolGroupCompactLabel(
     const latestActiveTool = active
         ? block.tools.findLast((tool) => tool.tool.state === 'running' || tool.tool.state === 'pending') ?? null
         : null
+    const latestTerminal = active
+        ? block.tools.findLast((tool) => isTerminalExecutionTool(tool.tool.name)) ?? null
+        : null
     const displayTool = liveTool ?? (!block.forceGenericCompactTitle && block.tools.length === 1
         ? block.tools[0]
-        : latestActiveTool)
+        : latestActiveTool ?? latestTerminal)
     if (displayTool) {
         const invocationTitle = getInputStringAny(displayTool.tool.input, ['title'])?.trim()
         if (invocationTitle) {
@@ -265,7 +286,12 @@ function getToolGroupCompactLabel(
                 : terminalIntent
                     ? getTerminalCommandDisplayTitle(displayTool.tool.input, t)
                     : getTerminalCommandSummary(displayTool.tool.input)
-            return terminalLabel || t('terminal.execution.title')
+            const state = getTerminalExecutionToolState(displayTool)
+            const stateLabel = active
+                ? t(state === 'error' ? 'terminal.execution.failed' : 'terminal.execution.completed')
+                : null
+            const label = terminalLabel || t('terminal.execution.title')
+            return stateLabel ? `${stateLabel} · ${label}` : label
         }
 
         const status = active ? 'processing' : 'processed'

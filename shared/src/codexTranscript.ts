@@ -13,6 +13,7 @@ export type { CodexLocalSessionSnapshotVersion } from './codexSnapshot'
 import { parseAutomationHeartbeatMessageContent } from './messages'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
 import { isCodexAuthenticationError, isHttpForbiddenError } from './utils'
+import { classifyCodexFailureMessage, extractCodexFailureMessage } from './codexFailure'
 import type { SlashCommand } from './apiTypes'
 import type { NativeCodexSessionControls } from './codexSessionControl'
 import {
@@ -455,6 +456,8 @@ export type NativeKanbanFeedbackReviewGuard = {
 export type SendCodexLocalSessionMessageRpcResponse = {
     success: true
     status: 'processing' | 'queued'
+    /** Present when the Hub delivered through the matching SHAPI-managed session. */
+    managedSessionId?: string
     /** Present when the request started a Codex child immediately. */
     startedAt?: number
     /** Present when the runner started a direct native app-server bridge. */
@@ -1666,7 +1669,14 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
         }
         // Native Codex can end a failed turn with task_complete + error.
         if (eventType === 'task_complete' || eventType === 'task_failed') {
-            const error = asString(payload.error) ?? asString(asRecord(payload.error)?.message)
+            const error = extractCodexFailureMessage([
+                payload.error,
+                payload.message,
+                payload.reason,
+                payload.detail,
+                payload.output,
+                payload.result,
+            ])
             if (isCodexAuthenticationError(error)) {
                 return buildImportedAgentMessage({
                     type: 'task-status',
@@ -1684,6 +1694,16 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
                     source: 'codex',
                     code: 'http_forbidden',
                     message: 'HTTP 403 Forbidden',
+                    recoverable: false
+                }, createdAt)
+            }
+            if (eventType === 'task_failed' || error) {
+                return buildImportedAgentMessage({
+                    type: 'task-status',
+                    status: 'failed',
+                    source: 'codex',
+                    code: classifyCodexFailureMessage(error),
+                    message: error ?? 'Task failed',
                     recoverable: false
                 }, createdAt)
             }

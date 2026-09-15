@@ -3,6 +3,7 @@ import type { ApiClient } from '@/api/client'
 import type { DecryptedMessage } from '@/types/api'
 import {
     fetchLatestMessages,
+    fetchNewerMessages,
     fetchOlderMessages,
     flushPendingMessages,
     getMessageWindowState,
@@ -17,10 +18,12 @@ export const EMPTY_STATE: MessageWindowState = {
     pending: [],
     pendingCount: 0,
     hasMore: false,
+    hasNewer: false,
     oldestSeq: null,
     newestSeq: null,
     isLoading: false,
     isLoadingMore: false,
+    isLoadingNewer: false,
     warning: null,
     atBottom: true,
     messagesVersion: 0,
@@ -32,10 +35,13 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     warning: string | null
     isLoading: boolean
     isLoadingMore: boolean
+    isLoadingNewer: boolean
     hasMore: boolean
+    hasNewer: boolean
     pendingCount: number
     messagesVersion: number
     loadMore: () => Promise<unknown>
+    loadNewer: () => Promise<unknown>
     refetch: () => Promise<unknown>
     flushPending: () => Promise<void>
     setAtBottom: (atBottom: boolean) => void
@@ -74,6 +80,12 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         await fetchLatestMessages(api, sessionId)
     }, [api, sessionId])
 
+    const loadNewer = useCallback(async () => {
+        if (!api || !sessionId) return
+        if (!state.hasNewer || state.isLoadingNewer) return
+        await fetchNewerMessages(api, sessionId)
+    }, [api, sessionId, state.hasNewer, state.isLoadingNewer])
+
     const flushPending = useCallback(async () => {
         if (!sessionId) return
         const needsRefresh = flushPendingMessages(sessionId)
@@ -93,10 +105,13 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         warning: state.warning,
         isLoading: state.isLoading,
         isLoadingMore: state.isLoadingMore,
+        isLoadingNewer: state.isLoadingNewer,
         hasMore: state.hasMore,
+        hasNewer: state.hasNewer,
         pendingCount: state.pendingCount,
         messagesVersion: state.messagesVersion,
         loadMore,
+        loadNewer,
         refetch,
         flushPending,
         setAtBottom,

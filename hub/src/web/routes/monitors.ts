@@ -444,7 +444,7 @@ async function resolveMonitorTarget(body: unknown, namespace: string, store: Sto
             directory: session.metadata.path,
             agent,
             model: session.model ?? '',
-            reasoningEffort: session.modelReasoningEffort ?? '',
+            reasoningEffort: agent === 'claude' ? session.effort ?? '' : session.modelReasoningEffort ?? '',
             permissionMode: session.permissionMode === 'read-only' && agent === 'codex' ? 'read-only' : session.permissionMode === 'plan' && agent === 'claude' ? 'plan' : 'default',
             prompt
         }

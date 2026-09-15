@@ -193,6 +193,7 @@ export function createDefaultMonitorConfig(machineId = '', directory = ''): Moni
     return {
         name: '',
         kind: 'http',
+        deliveryMode: 'current-session',
         machineId,
         directory,
         agent: 'codex',

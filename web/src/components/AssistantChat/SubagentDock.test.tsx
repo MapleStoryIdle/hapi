@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import type { CodexSubagentState, DecryptedMessage } from '@/types/api'
-import { getSortedCodexSubagents, getSubagentEvents, isCodexSubagentActive } from './SubagentDock'
+import {
+    getCodexSubagentConfigurationLabel,
+    getSortedCodexSubagents,
+    getSubagentEvents,
+    isCodexSubagentActive
+} from './SubagentDock'
 
 function makeSubagent(overrides: Partial<CodexSubagentState> & { id: string }): CodexSubagentState {
     return {
@@ -76,5 +81,14 @@ describe('SubagentDock helpers', () => {
         ], subagent)
 
         expect(events.map((event) => event.text)).toEqual(['Reading files', 'found the bug'])
+    })
+
+    it('formats the persisted model and reasoning effort', () => {
+        expect(getCodexSubagentConfigurationLabel(makeSubagent({
+            id: 'agent-1',
+            model: 'gpt-5.6-luna',
+            modelReasoningEffort: 'max'
+        }))).toBe('gpt-5.6-luna · max')
+        expect(getCodexSubagentConfigurationLabel(makeSubagent({ id: 'agent-2' }))).toBeNull()
     })
 })

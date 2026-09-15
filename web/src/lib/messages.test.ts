@@ -35,12 +35,21 @@ describe('mergeMessages', () => {
         expect(merged[0]?.invokedAt).toBe(invokedAt)
     })
 
-    it('keeps persisted history in sequence order when acknowledgement timestamps disagree', () => {
+    it('moves an acknowledged queued message to its actual invocation position', () => {
         const merged = mergeMessages([], [
             userMessage({ id: 'later', seq: 2, createdAt: 2_000, invokedAt: 1_000 }),
             userMessage({ id: 'earlier', seq: 1, createdAt: 1_000, invokedAt: 3_000 })
         ])
 
-        expect(merged.map((message) => message.id)).toEqual(['earlier', 'later'])
+        expect(merged.map((message) => message.id)).toEqual(['later', 'earlier'])
+    })
+
+    it('uses sequence as the stable tie-breaker for equal invocation times', () => {
+        const merged = mergeMessages([], [
+            userMessage({ id: 'second', seq: 2, createdAt: 1_000, invokedAt: 2_000 }),
+            userMessage({ id: 'first', seq: 1, createdAt: 1_000, invokedAt: 2_000 })
+        ])
+
+        expect(merged.map((message) => message.id)).toEqual(['first', 'second'])
     })
 })

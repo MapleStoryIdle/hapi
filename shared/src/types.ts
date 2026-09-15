@@ -17,6 +17,7 @@ export type {
     SessionPatch,
     SessionUpdatedData,
     SideSessionMetadata,
+    MonitorSessionMetadata,
     CodexForkMetadata,
     SyncEvent,
     TeamMember,

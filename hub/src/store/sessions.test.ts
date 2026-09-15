@@ -11,6 +11,33 @@ function getMetadata(store: Store, id: string): Record<string, unknown> | null {
 }
 
 describe('updateSessionMetadata: protocol resume token preservation', () => {
+    it('preserves a Hub-authored monitor origin marker across CLI metadata updates', () => {
+        const store = makeStore()
+        const monitorSession = {
+            monitorId: 'monitor-1',
+            incidentId: 'incident-1',
+            sourceSession: { type: 'managed', sessionId: 'source-1' },
+            createdAt: 1,
+            mode: 'isolated-trigger'
+        }
+        const session = store.sessions.getOrCreateSession(
+            'monitor-session',
+            { path: '/tmp/project', host: 'example', flavor: 'codex', monitorSession },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', flavor: 'codex', lifecycleState: 'running' },
+            session.metadataVersion,
+            'default'
+        )
+
+        expect(result.result).toBe('success')
+        expect(getMetadata(store, session.id)?.monitorSession).toEqual(monitorSession)
+    })
+
     it('preserves external control ownership through a stale CLI cleanup payload, unless explicitly cleared', () => {
         const store = makeStore()
         const session = store.sessions.getOrCreateSession(

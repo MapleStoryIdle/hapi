@@ -129,7 +129,11 @@ export class MessageService {
 
     getMessagesPage(
         sessionId: string,
-        options: { limit: number; before?: { at: number; seq: number } | null }
+        options: {
+            limit: number
+            before?: { at: number; seq: number } | null
+            after?: { at: number; seq: number } | null
+        }
     ): {
         messages: DecryptedMessage[]
         page: {
@@ -137,17 +141,27 @@ export class MessageService {
             nextBeforeSeq: number | null
             nextBeforeAt: number | null
             hasMore: boolean
+            nextAfterSeq?: number | null
+            nextAfterAt?: number | null
+            hasMoreAfter?: boolean
         }
     } {
         let before = options.before ?? undefined
-        let pageRows = this.store.messages.getMessagesByPosition(sessionId, options.limit, before)
+        let after = options.after ?? undefined
+        if (before && after) {
+            throw new Error('before and after cursors are mutually exclusive')
+        }
+        const pagingForward = after !== undefined
+        let pageRows = pagingForward
+            ? this.store.messages.getMessagesAfterPosition(sessionId, options.limit, after!)
+            : this.store.messages.getMessagesByPosition(sessionId, options.limit, before)
 
         // Latest-page request (no cursor): also include uninvoked local user messages
         // out-of-band, so refresh / secondary clients can still see queued rows even
         // when their position key (createdAt) places them outside the latest page.
         // The cursor stays anchored to pageRows so out-of-band rows don't affect
         // pagination of older pages.
-        let queuedRows = before === undefined
+        let queuedRows = before === undefined && after === undefined
             ? this.store.messages.getUninvokedLocalMessages(sessionId)
             : []
 
@@ -178,9 +192,35 @@ export class MessageService {
                 { at: oldestPositionAt, seq: oldestSeq }
             ).length > 0
 
-        while (messages.length === 0 && hasMore && oldestSeq !== null && oldestPositionAt !== null) {
-            before = { at: oldestPositionAt, seq: oldestSeq }
-            pageRows = this.store.messages.getMessagesByPosition(sessionId, options.limit, before)
+        // For an after cursor, the last row is the cursor for the next
+        // strictly-newer page. The normal latest/before response deliberately
+        // keeps its existing page contract unchanged.
+        let newest = pageRows[pageRows.length - 1] ?? null
+        let newestSeq: number | null = newest?.seq ?? null
+        let newestPositionAt: number | null = newest
+            ? newest.invokedAt ?? newest.createdAt
+            : null
+        let hasMoreAfter = pagingForward && newestSeq !== null && newestPositionAt !== null
+            && this.store.messages.getMessagesAfterPosition(
+                sessionId,
+                1,
+                { at: newestPositionAt, seq: newestSeq }
+            ).length > 0
+
+        while (
+            messages.length === 0
+            && (pagingForward ? hasMoreAfter : hasMore)
+            && (pagingForward
+                ? newestSeq !== null && newestPositionAt !== null
+                : oldestSeq !== null && oldestPositionAt !== null)
+        ) {
+            if (pagingForward) {
+                after = { at: newestPositionAt!, seq: newestSeq! }
+                pageRows = this.store.messages.getMessagesAfterPosition(sessionId, options.limit, after)
+            } else {
+                before = { at: oldestPositionAt!, seq: oldestSeq! }
+                pageRows = this.store.messages.getMessagesByPosition(sessionId, options.limit, before)
+            }
             queuedRows = []
 
             byId = new Map<string, typeof pageRows[number]>()
@@ -204,6 +244,18 @@ export class MessageService {
                     1,
                     { at: oldestPositionAt, seq: oldestSeq }
                 ).length > 0
+
+            newest = pageRows[pageRows.length - 1] ?? null
+            newestSeq = newest?.seq ?? null
+            newestPositionAt = newest
+                ? newest.invokedAt ?? newest.createdAt
+                : null
+            hasMoreAfter = pagingForward && newestSeq !== null && newestPositionAt !== null
+                && this.store.messages.getMessagesAfterPosition(
+                    sessionId,
+                    1,
+                    { at: newestPositionAt, seq: newestSeq }
+                ).length > 0
         }
 
         return {
@@ -212,7 +264,12 @@ export class MessageService {
                 limit: options.limit,
                 nextBeforeSeq: oldestSeq,
                 nextBeforeAt: oldestPositionAt,
-                hasMore
+                hasMore,
+                ...(pagingForward ? {
+                    nextAfterSeq: newestSeq,
+                    nextAfterAt: newestPositionAt,
+                    hasMoreAfter,
+                } : {})
             }
         }
     }
@@ -475,10 +532,15 @@ export class MessageService {
             }
         }
 
+        // Every Hub-dispatched user message is a distinct turn. Older/internal
+        // callers may omit localId, but the Runner uses it both for consume acks
+        // and to prevent adjacent queued turns from being merged into one prompt.
+        const localId = payload.localId ?? randomUUID()
+
         const msg = this.store.messages.addMessage(
             sessionId,
             content,
-            payload.localId ?? undefined,
+            localId,
             payload.scheduledAt ?? null
         )
         this.onSessionActivity?.(sessionId, msg.createdAt)

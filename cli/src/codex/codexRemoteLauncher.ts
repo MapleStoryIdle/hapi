@@ -1,6 +1,11 @@
 import React from 'react';
 import { readCodexTokenUsage, selectCodexTokenUsage } from '@hapi/protocol/codexUsage';
-import { isCodexAuthenticationError, isHttpForbiddenError } from '@hapi/protocol';
+import {
+    extractCodexFailureMessage,
+    isCodexAuthenticationError,
+    isHttpForbiddenError,
+    selectPreferredCodexFailureMessage
+} from '@hapi/protocol';
 import { randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 
@@ -115,6 +120,8 @@ type CodexSubagentSnapshot = {
     statusText?: string;
     activity?: string;
     activityKind?: string;
+    model?: string;
+    modelReasoningEffort?: string;
     startedAt: number;
     updatedAt: number;
     completedAt?: number;
@@ -123,6 +130,13 @@ type CodexSubagentSnapshot = {
 type CodexSubagentConfiguration = {
     childModel?: string;
     childReasoningEffort?: string;
+};
+
+type CodexSubagentCardConfiguration = {
+    requestedModel?: string;
+    requestedReasoningEffort?: string;
+    parentModel?: string;
+    parentReasoningEffort?: string;
 };
 
 const AGENT_RUN_UPDATE_THROTTLE_MS = 300;
@@ -886,6 +900,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const agentSummaryByCardId = new Map<string, string>();
         const agentSummaryByAgentId = new Map<string, string>();
         const agentStatusByAgentId = new Map<string, string>();
+        const agentFailureByAgentId = new Map<string, string>();
         const agentStartedAtByCardId = new Map<string, number>();
         const agentStartedAtByAgentId = new Map<string, number>();
         const agentTypeByCardId = new Map<string, string>();
@@ -896,6 +911,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const pendingAgentToolInputByCallId = new Map<string, { name: string; input: unknown }>();
         const childAgentRuntimeById = new Map<string, ChildAgentRuntime>();
         const childAgentConfigurationById = new Map<string, CodexSubagentConfiguration>();
+        const subagentCardConfigurationById = new Map<string, CodexSubagentCardConfiguration>();
         const subagentSnapshotById = new Map<string, CodexSubagentSnapshot>();
         const lastAgentRunUpdateAtByAgentId = new Map<string, number>();
         const lastAgentRunUpdateSignatureByAgentId = new Map<string, string>();
@@ -1014,6 +1030,23 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             const activityKind = asString(event.activityKind ?? event.activity_kind) ?? existing?.activityKind;
             const threadId = asString(event.threadId ?? event.thread_id) ?? existing?.threadId ?? agentId;
             const turnId = asString(event.turnId ?? event.turn_id) ?? existing?.turnId ?? this.activeChildTurns.get(threadId);
+            const eventConfiguration = asRecord(event.hapiSubagentConfig);
+            const childConfiguration = childAgentConfigurationById.get(agentId);
+            const cardConfiguration = cardId ? subagentCardConfigurationById.get(cardId) : undefined;
+            const model = cardConfiguration?.requestedModel
+                ?? asString(eventConfiguration?.childModel ?? eventConfiguration?.child_model)
+                ?? childConfiguration?.childModel
+                ?? existing?.model
+                ?? asString(eventConfiguration?.parentModel ?? eventConfiguration?.parent_model)
+                ?? cardConfiguration?.parentModel
+                ?? asString(session.getModel());
+            const modelReasoningEffort = cardConfiguration?.requestedReasoningEffort
+                ?? asString(eventConfiguration?.childReasoningEffort ?? eventConfiguration?.child_reasoning_effort)
+                ?? childConfiguration?.childReasoningEffort
+                ?? existing?.modelReasoningEffort
+                ?? asString(eventConfiguration?.parentReasoningEffort ?? eventConfiguration?.parent_reasoning_effort)
+                ?? cardConfiguration?.parentReasoningEffort
+                ?? asString(session.getModelReasoningEffort());
 
             subagentSnapshotById.set(agentId, {
                 id: agentId,
@@ -1026,6 +1059,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 ...(statusText ? { statusText } : {}),
                 ...(activity ? { activity } : {}),
                 ...(activityKind ? { activityKind } : {}),
+                ...(model ? { model } : {}),
+                ...(modelReasoningEffort ? { modelReasoningEffort } : {}),
                 startedAt,
                 updatedAt: now,
                 ...(completedAt ? { completedAt } : {})
@@ -1160,6 +1195,20 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             childAgentActivityInCurrentTurn = true;
             const startedAt = Date.now();
             const cardInput = addParentSubagentConfiguration(input);
+            const cardInputRecord = asRecord(cardInput);
+            const cardInputConfiguration = asRecord(cardInputRecord?.hapiSubagentConfig);
+            const requestedModel = asString(cardInputRecord?.model);
+            const requestedReasoningEffort = asString(cardInputRecord?.reasoning_effort ?? cardInputRecord?.reasoningEffort);
+            const parentModel = asString(cardInputConfiguration?.parentModel ?? cardInputConfiguration?.parent_model);
+            const parentReasoningEffort = asString(
+                cardInputConfiguration?.parentReasoningEffort ?? cardInputConfiguration?.parent_reasoning_effort
+            );
+            subagentCardConfigurationById.set(cardId, {
+                ...(requestedModel ? { requestedModel } : {}),
+                ...(requestedReasoningEffort ? { requestedReasoningEffort } : {}),
+                ...(parentModel ? { parentModel } : {}),
+                ...(parentReasoningEffort ? { parentReasoningEffort } : {})
+            });
             agentStartedAtByCardId.set(cardId, startedAt);
             const agentType = extractAgentType(cardInput);
             if (agentType) {
@@ -1432,26 +1481,49 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             cardIdOverride?: string | null
         ): void => {
             const nextStatus = asString(update.status);
+            let effectiveUpdate = update;
+            if (nextStatus === 'failed' || nextStatus === 'error') {
+                const previousFailure = agentFailureByAgentId.get(agentId);
+                const incomingFailure = extractCodexFailureMessage([
+                    update.error,
+                    update.message,
+                    update.result,
+                ]);
+                const preferredFailure = selectPreferredCodexFailureMessage(
+                    previousFailure,
+                    incomingFailure
+                );
+                if (preferredFailure) {
+                    agentFailureByAgentId.set(agentId, preferredFailure);
+                    if (previousFailure && preferredFailure !== incomingFailure) {
+                        effectiveUpdate = {
+                            ...update,
+                            error: preferredFailure,
+                            activity: formatActivity('Failed', preferredFailure)
+                        };
+                    }
+                }
+            }
             const terminal = isTerminalAgentRunStatus(nextStatus);
             if (terminal) {
                 cancelPendingThrottledAgentRunUpdate(agentId);
-                emitAgentRunUpdateNow(agentId, update, cardIdOverride);
+                emitAgentRunUpdateNow(agentId, effectiveUpdate, cardIdOverride);
                 return;
             }
 
-            const activityKind = asString(update.activityKind ?? update.activity_kind);
+            const activityKind = asString(effectiveUpdate.activityKind ?? effectiveUpdate.activity_kind);
             if (!activityKind || !THROTTLED_AGENT_RUN_ACTIVITY_KINDS.has(activityKind)) {
-                emitAgentRunUpdateNow(agentId, update, cardIdOverride);
+                emitAgentRunUpdateNow(agentId, effectiveUpdate, cardIdOverride);
                 return;
             }
 
             const lastAt = lastAgentRunUpdateAtByAgentId.get(agentId);
             if (lastAt === undefined || Date.now() - lastAt >= AGENT_RUN_UPDATE_THROTTLE_MS) {
-                emitAgentRunUpdateNow(agentId, update, cardIdOverride);
+                emitAgentRunUpdateNow(agentId, effectiveUpdate, cardIdOverride);
                 return;
             }
 
-            scheduleThrottledAgentRunUpdate(agentId, update, cardIdOverride);
+            scheduleThrottledAgentRunUpdate(agentId, effectiveUpdate, cardIdOverride);
         };
 
         const getFirstChildConfigurationValue = (
@@ -1974,6 +2046,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 runtime.finalMessage = null;
                 runtime.terminal = false;
                 agentStatusByAgentId.delete(agentId);
+                agentFailureByAgentId.delete(agentId);
                 updateActivity('Starting task', 'starting');
                 return;
             }

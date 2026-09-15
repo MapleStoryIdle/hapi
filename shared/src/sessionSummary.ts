@@ -1,4 +1,4 @@
-import type { Session, SideSessionMetadata, WorktreeMetadata } from './schemas'
+import type { MonitorSessionMetadata, Session, SideSessionMetadata, WorktreeMetadata } from './schemas'
 
 export type PendingRequestKind = 'permission' | 'input'
 
@@ -40,6 +40,7 @@ export type SessionSummaryMetadata = {
     controlOwner?: 'shapi' | 'external'
     lifecycleState?: string
     sideSession?: SideSessionMetadata
+    monitorSession?: MonitorSessionMetadata
 }
 
 export type SessionSummary = {
@@ -128,7 +129,8 @@ export function toSessionSummary(session: Session): SessionSummary {
             ?? undefined,
         controlOwner: session.metadata.controlOwner,
         lifecycleState: session.metadata.lifecycleState,
-        sideSession: session.metadata.sideSession
+        sideSession: session.metadata.sideSession,
+        monitorSession: session.metadata.monitorSession
     } : null
 
     const todoProgress = session.todos?.length ? {

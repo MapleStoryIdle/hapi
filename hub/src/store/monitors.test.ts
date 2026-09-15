@@ -12,6 +12,7 @@ const config = () => MonitorConfigSchema.parse({ name: 'API', kind: 'webhook', d
 describe('monitor store', () => {
     it('defaults webhook ignore keywords for existing configurations', () => {
         expect(config().webhookIgnoreKeywords).toBe('')
+        expect(config().deliveryMode).toBe('current-session')
     })
     it('persists encrypted tokens, migrates legacy hashes without rotation and fails closed without the key', () => {
         const dir = mkdtempSync(join(tmpdir(), 'monitor-token-'))

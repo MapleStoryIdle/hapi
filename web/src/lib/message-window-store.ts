@@ -10,10 +10,12 @@ export type MessageWindowState = {
     pending: DecryptedMessage[]
     pendingCount: number
     hasMore: boolean
+    hasNewer: boolean
     oldestSeq: number | null
     newestSeq: number | null
     isLoading: boolean
     isLoadingMore: boolean
+    isLoadingNewer: boolean
     warning: string | null
     atBottom: boolean
     messagesVersion: number
@@ -22,13 +24,9 @@ export type MessageWindowState = {
 // The thread renderer mounts one DOM subtree per message.  Keep the live
 // window comfortably below the point where a long tool-heavy run makes mobile
 // controls sluggish; older history remains pageable from the hub.
-export const VISIBLE_WINDOW_SIZE = 240
+export const VISIBLE_WINDOW_SIZE = 600
 export const PENDING_WINDOW_SIZE = 200
-const AGENT_RUN_WINDOW_SIZE = 240
 const PAGE_SIZE = 50
-// Browsing upward gets one modest extra page, rather than re-mounting a second
-// full live window in one update.
-const OLDER_LOAD_WINDOW_SIZE = VISIBLE_WINDOW_SIZE + PAGE_SIZE
 const COLD_LOAD_BACKFILL_PAGE_SIZE = 200
 const COLD_LOAD_REGULAR_TARGET = PAGE_SIZE
 const PENDING_OVERFLOW_WARNING = 'New messages arrived while you were away. Scroll to bottom to refresh.'
@@ -39,6 +37,7 @@ type InternalState = MessageWindowState & {
     pendingOverflowVisibleCount: number
     latestGeneration: number
     olderGeneration: number
+    newerGeneration: number
     // Set only after an authoritative latest-page read succeeds. Streaming
     // rows can arrive before that first read, but they must not turn every
     // later reconciliation into another cold-history backfill.
@@ -54,6 +53,8 @@ type InternalState = MessageWindowState & {
     // a recomputed minimum `seq` from the local window (those can refer to
     // different rows after a low-seq message is invoked late).
     oldestPositionSeq: number | null
+    newestPositionAt: number | null
+    newestPositionSeq: number | null
 }
 
 type PendingVisibilityCacheEntry = {
@@ -61,7 +62,7 @@ type PendingVisibilityCacheEntry = {
     visible: boolean
 }
 
-type AsyncGenerationKind = 'latest' | 'older'
+type AsyncGenerationKind = 'latest' | 'older' | 'newer'
 
 export type FetchLatestMessagesOptions = {
     /**
@@ -81,8 +82,11 @@ type PersistedMessageWindowState = {
     pendingOverflowCount: number
     pendingOverflowVisibleCount: number
     hasMore: boolean
+    hasNewer: boolean
     oldestPositionAt: number | null
     oldestPositionSeq: number | null
+    newestPositionAt: number | null
+    newestPositionSeq: number | null
     warning: string | null
     atBottom: boolean
     hasLoadedLatest: boolean
@@ -313,6 +317,7 @@ function shouldPersistState(state: InternalState): boolean {
         || state.pendingOverflowCount > 0
         || state.pendingOverflowVisibleCount > 0
         || state.hasMore
+        || state.hasNewer
         || state.warning !== null
 }
 
@@ -331,8 +336,11 @@ function persistState(sessionId: string, state: InternalState): void {
             pendingOverflowCount: state.pendingOverflowCount,
             pendingOverflowVisibleCount: state.pendingOverflowVisibleCount,
             hasMore: state.hasMore,
+            hasNewer: state.hasNewer,
             oldestPositionAt: state.oldestPositionAt,
             oldestPositionSeq: state.oldestPositionSeq,
+            newestPositionAt: state.newestPositionAt,
+            newestPositionSeq: state.newestPositionSeq,
             warning: state.warning,
             atBottom: state.atBottom,
             hasLoadedLatest: state.hasLoadedLatest,
@@ -455,18 +463,23 @@ function createState(sessionId: string): InternalState {
         pendingVisibleCount: 0,
         pendingOverflowVisibleCount: 0,
         hasMore: false,
+        hasNewer: false,
         oldestSeq: null,
         oldestPositionAt: null,
         oldestPositionSeq: null,
         newestSeq: null,
+        newestPositionAt: null,
+        newestPositionSeq: null,
         isLoading: false,
         isLoadingMore: false,
+        isLoadingNewer: false,
         warning: null,
         atBottom: true,
         messagesVersion: 0,
         pendingOverflowCount: 0,
         latestGeneration: 0,
         olderGeneration: 0,
+        newerGeneration: 0,
         hasLoadedLatest: false,
         sequenceFrontier: null,
     }
@@ -496,8 +509,11 @@ function hydrateState(sessionId: string): InternalState | null {
                 pendingOverflowCount: typeof parsed.pendingOverflowCount === 'number' ? parsed.pendingOverflowCount : 0,
                 pendingOverflowVisibleCount: typeof parsed.pendingOverflowVisibleCount === 'number' ? parsed.pendingOverflowVisibleCount : 0,
                 hasMore: parsed.hasMore === true,
+                hasNewer: parsed.hasNewer === true,
                 oldestPositionAt: toNullableNumber(parsed.oldestPositionAt),
                 oldestPositionSeq: toNullableNumber(parsed.oldestPositionSeq),
+                newestPositionAt: toNullableNumber(parsed.newestPositionAt),
+                newestPositionSeq: toNullableNumber(parsed.newestPositionSeq),
                 warning: typeof parsed.warning === 'string' ? parsed.warning : null,
                 atBottom: parsed.atBottom !== false,
                 sequenceFrontier: persistedFrontier,
@@ -568,13 +584,15 @@ function beginAsyncGeneration(
 }
 
 function getGeneration(state: InternalState, kind: AsyncGenerationKind): number {
-    return kind === 'latest' ? state.latestGeneration : state.olderGeneration
+    if (kind === 'latest') return state.latestGeneration
+    return kind === 'older' ? state.olderGeneration : state.newerGeneration
 }
 
 function setGeneration(state: InternalState, kind: AsyncGenerationKind, generation: number): InternalState {
-    return kind === 'latest'
-        ? { ...state, latestGeneration: generation }
-        : { ...state, olderGeneration: generation }
+    if (kind === 'latest') return { ...state, latestGeneration: generation }
+    return kind === 'older'
+        ? { ...state, olderGeneration: generation }
+        : { ...state, newerGeneration: generation }
 }
 
 function isCurrentGeneration(sessionId: string, kind: AsyncGenerationKind, generation: number): boolean {
@@ -664,6 +682,25 @@ function deriveOldestPosition(messages: DecryptedMessage[]): { at: number; seq: 
     }
     return oldest && typeof oldest.seq === 'number'
         ? { at: getMessagePositionAt(oldest), seq: oldest.seq }
+        : null
+}
+
+function deriveNewestPosition(messages: DecryptedMessage[]): { at: number; seq: number } | null {
+    let newest: DecryptedMessage | null = null
+    for (const message of messages) {
+        if (typeof message.seq !== 'number') continue
+        if (!newest) {
+            newest = message
+            continue
+        }
+        const at = getMessagePositionAt(message)
+        const newestAt = getMessagePositionAt(newest)
+        if (at > newestAt || (at === newestAt && message.seq > newest.seq!)) {
+            newest = message
+        }
+    }
+    return newest && typeof newest.seq === 'number'
+        ? { at: getMessagePositionAt(newest), seq: newest.seq }
         : null
 }
 
@@ -780,10 +817,14 @@ function buildState(
         pendingVisibleCount?: number
         pendingOverflowVisibleCount?: number
         hasMore?: boolean
+        hasNewer?: boolean
         oldestPositionAt?: number | null
         oldestPositionSeq?: number | null
+        newestPositionAt?: number | null
+        newestPositionSeq?: number | null
         isLoading?: boolean
         isLoadingMore?: boolean
+        isLoadingNewer?: boolean
         warning?: string | null
         atBottom?: boolean
         hasLoadedLatest?: boolean
@@ -823,8 +864,12 @@ function buildState(
         oldestPositionSeq: updates.oldestPositionSeq !== undefined ? updates.oldestPositionSeq : prev.oldestPositionSeq,
         newestSeq,
         hasMore: updates.hasMore !== undefined ? updates.hasMore : prev.hasMore,
+        hasNewer: updates.hasNewer !== undefined ? updates.hasNewer : prev.hasNewer,
         isLoading: updates.isLoading !== undefined ? updates.isLoading : prev.isLoading,
         isLoadingMore: updates.isLoadingMore !== undefined ? updates.isLoadingMore : prev.isLoadingMore,
+        isLoadingNewer: updates.isLoadingNewer !== undefined ? updates.isLoadingNewer : prev.isLoadingNewer,
+        newestPositionAt: updates.newestPositionAt !== undefined ? updates.newestPositionAt : prev.newestPositionAt,
+        newestPositionSeq: updates.newestPositionSeq !== undefined ? updates.newestPositionSeq : prev.newestPositionSeq,
         warning: updates.warning !== undefined ? updates.warning : prev.warning,
         atBottom: updates.atBottom !== undefined ? updates.atBottom : prev.atBottom,
         hasLoadedLatest: updates.hasLoadedLatest ?? prev.hasLoadedLatest,
@@ -833,43 +878,26 @@ function buildState(
     }
 }
 
-/** Trim `messages` down to `limit` while preserving every queued user message.
- *  Queued rows must survive trimming on both windows: the `messages-consumed`
- *  SSE only carries localIds, so a dropped queued row cannot be restored or
- *  repositioned without a full refetch.  Returns the kept slice plus the list
- *  of regular (non-queued) rows that were dropped, so the pending-overflow
- *  warning counter can be advanced symmetrically. */
-function trimPreservingQueued(
+/** Keep the rendered history as one contiguous, strictly bounded slice.
+ *  Anything outside this slice remains recoverable through directional
+ *  pagination (or the separate pending queue). */
+function trimWindow(
     messages: DecryptedMessage[],
     limit: number,
     mode: 'append' | 'prepend'
 ): { kept: DecryptedMessage[]; dropped: DecryptedMessage[] } {
-    if (messages.length <= limit) {
-        return { kept: messages, dropped: [] }
-    }
-    const queued = messages.filter(isQueuedForInvocation)
-    const queuedIds = new Set(queued.map((message) => message.id))
-    const nonQueued = messages.filter((message) => !queuedIds.has(message.id))
-    const agentRun = nonQueued.filter(isCodexAgentRunMessage)
-    const regular = nonQueued.filter((message) => !isCodexAgentRunMessage(message))
-    const budget = Math.max(0, limit - queued.length)
-    const regularTrim = sliceForTrim(regular, budget, mode)
-    const agentRunTrim = sliceForTrim(agentRun, AGENT_RUN_WINDOW_SIZE, mode)
-    return {
-        kept: mergeMessages([...regularTrim.kept, ...agentRunTrim.kept], queued),
-        dropped: [...regularTrim.dropped, ...agentRunTrim.dropped]
-    }
+    return sliceForTrim(messages, limit, mode)
 }
 
 function trimVisible(messages: DecryptedMessage[], mode: 'append' | 'prepend'): DecryptedMessage[] {
-    return trimPreservingQueued(messages, VISIBLE_WINDOW_SIZE, mode).kept
+    return trimWindow(messages, VISIBLE_WINDOW_SIZE, mode).kept
 }
 
 function trimVisibleWithDropped(
     messages: DecryptedMessage[],
     mode: 'append' | 'prepend'
 ): { kept: DecryptedMessage[]; dropped: DecryptedMessage[] } {
-    return trimPreservingQueued(messages, VISIBLE_WINDOW_SIZE, mode)
+    return trimWindow(messages, VISIBLE_WINDOW_SIZE, mode)
 }
 
 function cursorUpdatesAfterAppendTrim(
@@ -879,13 +907,24 @@ function cursorUpdatesAfterAppendTrim(
     hasMore?: boolean
     oldestPositionAt?: number | null
     oldestPositionSeq?: number | null
+    newestPositionAt?: number | null
+    newestPositionSeq?: number | null
+    hasNewer?: boolean
 } {
+    const newest = deriveNewestPosition(kept)
     if (dropped.length === 0) {
-        return {}
+        return {
+            newestPositionAt: newest?.at ?? null,
+            newestPositionSeq: newest?.seq ?? null,
+            hasNewer: false,
+        }
     }
     const oldest = deriveOldestPosition(kept)
     return {
         hasMore: true,
+        hasNewer: false,
+        newestPositionAt: newest?.at ?? null,
+        newestPositionSeq: newest?.seq ?? null,
         ...(oldest ? {
             oldestPositionAt: oldest.at,
             oldestPositionSeq: oldest.seq
@@ -900,10 +939,7 @@ function trimPending(
     if (messages.length <= PENDING_WINDOW_SIZE) {
         return { pending: messages, dropped: 0, droppedVisible: 0 }
     }
-    // Symmetric with trimVisible: agents that overflow the pending window
-    // (200) must not evict queued user messages — the floating bar holds the
-    // only client-visible reference to them until the CLI ack arrives.
-    const { kept, dropped } = trimPreservingQueued(messages, PENDING_WINDOW_SIZE, 'append')
+    const { kept, dropped } = trimWindow(messages, PENDING_WINDOW_SIZE, 'append')
     const droppedVisible = countVisiblePendingMessages(sessionId, dropped)
     return { pending: kept, dropped: dropped.length, droppedVisible }
 }
@@ -929,7 +965,7 @@ function isOptimisticMessage(message: DecryptedMessage): boolean {
  * the signal is lost forever. On reload the row is restored from sessionStorage
  * still carrying invokedAt: null, but the server's invoked copy is too old to
  * appear in the latest window, so mergeMessages never corrects it and
- * trimPreservingQueued pins it — a ghost card above the composer that never
+ * the local window retains it — a ghost card above the composer that never
  * clears.
  *
  * The latest at-bottom page is authoritative for the newest slice of history: a
@@ -1055,6 +1091,7 @@ export function clearMessageWindow(sessionId: string): void {
         ...createState(sessionId),
         latestGeneration: previous.latestGeneration + 1,
         olderGeneration: previous.olderGeneration + 1,
+        newerGeneration: previous.newerGeneration + 1,
     }, true)
 }
 
@@ -1070,12 +1107,16 @@ export function seedMessageWindowFromSession(fromSessionId: string, toSessionId:
         pendingOverflowCount: source.pendingOverflowCount,
         pendingOverflowVisibleCount: source.pendingOverflowVisibleCount,
         hasMore: source.hasMore,
+        hasNewer: source.hasNewer,
         oldestPositionAt: source.oldestPositionAt,
         oldestPositionSeq: source.oldestPositionSeq,
+        newestPositionAt: source.newestPositionAt,
+        newestPositionSeq: source.newestPositionSeq,
         warning: source.warning,
         atBottom: source.atBottom,
         isLoading: false,
         isLoadingMore: false,
+        isLoadingNewer: false,
         hasLoadedLatest: source.hasLoadedLatest,
         sequenceFrontier: source.sequenceFrontier,
     })
@@ -1083,6 +1124,7 @@ export function seedMessageWindowFromSession(fromSessionId: string, toSessionId:
         ...next,
         latestGeneration: source.latestGeneration,
         olderGeneration: source.olderGeneration,
+        newerGeneration: source.newerGeneration,
     })
 }
 
@@ -1099,6 +1141,15 @@ export async function fetchLatestMessages(
         }
         return
     }
+    // A latest snapshot replaces the browsing window. Invalidate either page
+    // direction first so a late response cannot splice old history back in.
+    updateState(sessionId, (prev) => ({
+        ...prev,
+        olderGeneration: prev.olderGeneration + 1,
+        newerGeneration: prev.newerGeneration + 1,
+        isLoadingMore: false,
+        isLoadingNewer: false,
+    }))
     // Snapshot the queued rows that exist now, before awaiting the HTTP fetch.
     // Only these are eligible for ghost reconciliation — a queued row inserted by
     // a concurrent message-received SSE must not be filtered against the older
@@ -1123,13 +1174,15 @@ export async function fetchLatestMessages(
 
         updateStateForGeneration(sessionId, 'latest', generation, (prev) => {
             if (prev.atBottom) {
-                const merged = mergeMessages(prev.messages, [...prev.pending, ...response.messages])
+                const visibleBase = prev.hasNewer ? [] : prev.messages
+                const merged = mergeMessages(visibleBase, [...prev.pending, ...response.messages])
                 // Reconcile against the authoritative latest page before trimming:
-                // trimVisible preserves every queued row, so a ghost (queued locally
-                // but already invoked server-side, missed messages-consumed while
-                // offline) would otherwise be pinned forever.
+                // a ghost queued locally but already invoked server-side may have
+                // missed messages-consumed while offline.
                 const reconciled = reconcileQueuedAgainstLatest(merged, response.messages, reconcileCandidateIds)
                 const trimmed = trimVisible(reconciled, 'append')
+                const oldest = deriveOldestPosition(trimmed)
+                const newest = deriveNewestPosition(trimmed)
                 return buildState(prev, {
                     messages: trimmed,
                     pending: [],
@@ -1137,8 +1190,11 @@ export async function fetchLatestMessages(
                     pendingVisibleCount: 0,
                     pendingOverflowVisibleCount: 0,
                     hasMore: response.page.hasMore,
-                    oldestPositionAt: nextBeforeAt,
-                    oldestPositionSeq: nextBeforeSeq,
+                    hasNewer: false,
+                    oldestPositionAt: oldest?.at ?? nextBeforeAt,
+                    oldestPositionSeq: oldest?.seq ?? nextBeforeSeq,
+                    newestPositionAt: newest?.at ?? null,
+                    newestPositionSeq: newest?.seq ?? null,
                     isLoading: false,
                     warning: null,
                     hasLoadedLatest: true,
@@ -1151,11 +1207,6 @@ export async function fetchLatestMessages(
                 pendingVisibleCount: pendingResult.pendingVisibleCount,
                 pendingOverflowCount: pendingResult.pendingOverflowCount,
                 pendingOverflowVisibleCount: pendingResult.pendingOverflowVisibleCount,
-                // Persist the cursor pair on the non-at-bottom path too. Without this
-                // a refresh while scrolled up drops the composite cursor and prevents
-                // the next older-page load.
-                oldestPositionAt: nextBeforeAt,
-                oldestPositionSeq: nextBeforeSeq,
                 isLoading: false,
                 warning: pendingResult.warning,
                 hasLoadedLatest: true,
@@ -1183,12 +1234,17 @@ export async function fetchLatestMessages(
 export async function fetchOlderMessages(api: ApiClient, sessionId: string): Promise<void> {
     flushQueuedIncomingMessagesForSession(sessionId)
     const initial = getState(sessionId)
-    if (initial.isLoadingMore || !initial.hasMore) {
+    if (initial.isLoading || initial.isLoadingMore || initial.isLoadingNewer || !initial.hasMore) {
         return
     }
     if (initial.oldestPositionAt === null || initial.oldestPositionSeq === null) {
         return
     }
+    updateState(sessionId, (prev) => ({
+        ...prev,
+        newerGeneration: prev.newerGeneration + 1,
+        isLoadingNewer: false,
+    }))
     const generation = beginAsyncGeneration(sessionId, 'older', { isLoadingMore: true })
 
     try {
@@ -1203,13 +1259,24 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
 
         updateStateForGeneration(sessionId, 'older', generation, (prev) => {
             const merged = mergeMessages(response.messages, prev.messages)
-            const trimmed = trimPreservingQueued(merged, OLDER_LOAD_WINDOW_SIZE, 'prepend').kept
+            const { kept: trimmed, dropped } = trimWindow(merged, VISIBLE_WINDOW_SIZE, 'prepend')
+            const newest = deriveNewestPosition(trimmed)
+            const pendingResult = mergeIntoPending(prev, dropped.filter(isQueuedForInvocation))
             return buildState(prev, {
                 messages: trimmed,
+                pending: pendingResult.pending,
+                pendingVisibleCount: pendingResult.pendingVisibleCount,
+                pendingOverflowCount: pendingResult.pendingOverflowCount,
+                pendingOverflowVisibleCount: pendingResult.pendingOverflowVisibleCount,
+                warning: pendingResult.warning,
                 hasMore: response.page.hasMore,
+                hasNewer: prev.hasNewer || dropped.length > 0,
                 oldestPositionAt: nextBeforeAt,
                 oldestPositionSeq: nextBeforeSeq,
+                newestPositionAt: newest?.at ?? prev.newestPositionAt,
+                newestPositionSeq: newest?.seq ?? prev.newestPositionSeq,
                 isLoadingMore: false,
+                atBottom: dropped.length > 0 ? false : prev.atBottom,
             })
         })
     } catch (error) {
@@ -1218,6 +1285,50 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
         }
         const message = error instanceof Error ? error.message : 'Failed to load messages'
         updateStateForGeneration(sessionId, 'older', generation, (prev) => buildState(prev, { isLoadingMore: false, warning: message }))
+    }
+}
+
+export async function fetchNewerMessages(api: ApiClient, sessionId: string): Promise<void> {
+    flushQueuedIncomingMessagesForSession(sessionId)
+    const initial = getState(sessionId)
+    if (initial.isLoading || initial.isLoadingMore || initial.isLoadingNewer || !initial.hasNewer) return
+    if (initial.newestPositionAt === null || initial.newestPositionSeq === null) return
+
+    updateState(sessionId, (prev) => ({
+        ...prev,
+        olderGeneration: prev.olderGeneration + 1,
+        isLoadingMore: false,
+    }))
+    const generation = beginAsyncGeneration(sessionId, 'newer', { isLoadingNewer: true })
+    try {
+        const response = await api.getMessages(sessionId, {
+            afterAt: initial.newestPositionAt,
+            afterSeq: initial.newestPositionSeq,
+            limit: PAGE_SIZE,
+        })
+        updateStateForGeneration(sessionId, 'newer', generation, (prev) => {
+            const merged = mergeMessages(prev.messages, response.messages)
+            const { kept, dropped } = trimWindow(merged, VISIBLE_WINDOW_SIZE, 'append')
+            const oldest = deriveOldestPosition(kept)
+            const newest = deriveNewestPosition(kept)
+            return buildState(prev, {
+                messages: kept,
+                hasMore: prev.hasMore || dropped.length > 0,
+                hasNewer: response.page.hasMoreAfter === true,
+                oldestPositionAt: oldest?.at ?? prev.oldestPositionAt,
+                oldestPositionSeq: oldest?.seq ?? prev.oldestPositionSeq,
+                newestPositionAt: response.page.nextAfterAt ?? newest?.at ?? prev.newestPositionAt,
+                newestPositionSeq: response.page.nextAfterSeq ?? newest?.seq ?? prev.newestPositionSeq,
+                isLoadingNewer: false,
+            })
+        })
+    } catch (error) {
+        if (!isCurrentGeneration(sessionId, 'newer', generation)) return
+        const message = error instanceof Error ? error.message : 'Failed to load newer messages'
+        updateStateForGeneration(sessionId, 'newer', generation, (prev) => buildState(prev, {
+            isLoadingNewer: false,
+            warning: message,
+        }))
     }
 }
 
@@ -1230,6 +1341,36 @@ function ingestIncomingMessagesNow(
         return
     }
     updateState(sessionId, (prev) => {
+        const visibleIds = new Set(prev.messages.map((message) => message.id))
+        const visibleLocalIds = new Set(
+            prev.messages.flatMap((message) => message.localId ? [message.localId] : [])
+        )
+        const visibleUpdates: DecryptedMessage[] = []
+        const additions: DecryptedMessage[] = []
+        for (const message of incoming) {
+            if (
+                visibleIds.has(message.id)
+                || (message.localId != null && visibleLocalIds.has(message.localId))
+            ) {
+                visibleUpdates.push(message)
+            } else {
+                additions.push(message)
+            }
+        }
+        if (prev.hasNewer || (!prev.atBottom && prev.messages.length + additions.length > VISIBLE_WINDOW_SIZE)) {
+            const messages = visibleUpdates.length > 0
+                ? mergeMessages(prev.messages, visibleUpdates)
+                : prev.messages
+            const stateWithUpdates = messages === prev.messages ? prev : buildState(prev, { messages })
+            const pendingResult = mergeIntoPending(stateWithUpdates, additions)
+            return buildState(stateWithUpdates, {
+                pending: pendingResult.pending,
+                pendingVisibleCount: pendingResult.pendingVisibleCount,
+                pendingOverflowCount: pendingResult.pendingOverflowCount,
+                pendingOverflowVisibleCount: pendingResult.pendingOverflowVisibleCount,
+                warning: pendingResult.warning,
+            })
+        }
         if (prev.atBottom) {
             const merged = mergeMessages(prev.messages, incoming)
             const { kept, dropped } = trimVisibleWithDropped(merged, 'append')
@@ -1307,7 +1448,10 @@ export function flushPendingMessages(sessionId: string): boolean {
     if (current.pending.length === 0 && current.pendingOverflowVisibleCount === 0) {
         return false
     }
-    const needsRefresh = current.pendingOverflowVisibleCount > 0
+    const needsRefresh = current.pendingOverflowVisibleCount > 0 || current.hasNewer
+    if (current.hasNewer) {
+        return true
+    }
     updateState(sessionId, (prev) => {
         const merged = mergeMessages(prev.messages, prev.pending)
         const { kept, dropped } = trimVisibleWithDropped(merged, 'append')
@@ -1337,6 +1481,17 @@ export function setAtBottom(sessionId: string, atBottom: boolean): void {
 export function appendOptimisticMessage(sessionId: string, message: DecryptedMessage): void {
     flushQueuedIncomingMessagesForSession(sessionId)
     updateState(sessionId, (prev) => {
+        if (prev.hasNewer) {
+            const pendingResult = mergeIntoPending(prev, [message])
+            return buildState(prev, {
+                pending: pendingResult.pending,
+                pendingVisibleCount: pendingResult.pendingVisibleCount,
+                pendingOverflowCount: pendingResult.pendingOverflowCount,
+                pendingOverflowVisibleCount: pendingResult.pendingOverflowVisibleCount,
+                atBottom: true,
+                warning: pendingResult.warning,
+            })
+        }
         const merged = mergeMessages(prev.messages, [message])
         const { kept, dropped } = trimVisibleWithDropped(merged, 'append')
         const pending = filterPendingAgainstVisible(prev.pending, kept)

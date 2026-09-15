@@ -1,4 +1,4 @@
-import { AgentStateSchema, MetadataSchema, TeamStateSchema, type SideSessionMetadata } from '@hapi/protocol/schemas'
+import { AgentStateSchema, MetadataSchema, TeamStateSchema, type MonitorSessionMetadata, type SideSessionMetadata } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
@@ -733,6 +733,32 @@ export class SessionCache {
         throw new Error('Session was modified concurrently. Please try again.')
     }
 
+    async setMonitorSessionMetadata(
+        sessionId: string,
+        monitorSession: MonitorSessionMetadata
+    ): Promise<Session> {
+        for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session?.metadata) throw new Error('Session metadata missing')
+
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                { ...session.metadata, monitorSession },
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+            if (result.result === 'error') throw new Error('Failed to update monitor session metadata')
+            if (result.result === 'success') {
+                const refreshed = this.refreshSession(sessionId)
+                if (!refreshed) throw new Error('Session not found after metadata update')
+                return refreshed
+            }
+            this.refreshSession(sessionId)
+        }
+        throw new Error('Session was modified concurrently. Please try again.')
+    }
+
     /**
      * Clear archive-related metadata on an archived session so it can be resumed.
      * - Removes `lifecycleState`, `archivedBy`, `archiveReason`, and stamps
@@ -1087,6 +1113,11 @@ export class SessionCache {
 
         if (oldObj.worktree && !newObj.worktree) {
             merged.worktree = oldObj.worktree
+            changed = true
+        }
+
+        if (oldObj.monitorSession && !newObj.monitorSession) {
+            merged.monitorSession = oldObj.monitorSession
             changed = true
         }
 

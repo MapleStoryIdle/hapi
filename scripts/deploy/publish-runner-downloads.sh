@@ -7,6 +7,7 @@ VERSION="${3:-$(bun -e "console.log(require('$REPO_ROOT/cli/runner-version.json'
 REPOSITORY="${SHAPI_GITHUB_REPOSITORY:-MapleStoryIdle/hapi}"
 KEEP_RELEASES="${SHAPI_KEEP_RUNNER_RELEASES:-3}"
 TAG="runner-v${VERSION}"
+RELEASE_TARGET="${SHAPI_RUNNER_RELEASE_TARGET:-$(git -C "$REPO_ROOT" rev-parse HEAD)}"
 DOWNLOAD_BASE_URL="https://github.com/${REPOSITORY}/releases/download/${TAG}"
 LOCAL_OUTPUT="$(mktemp -d "${TMPDIR:-/tmp}/shapi-runner-release.XXXXXX")"
 REMOTE_STAGE="/opt/hapi/downloads/.staging-${VERSION}-$$"
@@ -45,7 +46,7 @@ if gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
 else
     gh release create "$TAG" "$RELEASE_DIR"/* \
         --repo "$REPOSITORY" \
-        --target "$(git -C "$REPO_ROOT" rev-parse HEAD)" \
+        --target "$RELEASE_TARGET" \
         --title "SHAPI Runner $VERSION" \
         --notes "Runner-only binaries for SHAPI $VERSION. Install or update with: curl -fsSL https://hapi.ye2moe.fun/install.sh | sh"
 fi

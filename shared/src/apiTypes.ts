@@ -80,6 +80,12 @@ export type MessagesResponse = {
         nextBeforeSeq: number | null
         nextBeforeAt: number | null
         hasMore: boolean
+        /** Present for an `afterAt`/`afterSeq` request. */
+        nextAfterSeq?: number | null
+        /** Present for an `afterAt`/`afterSeq` request. */
+        nextAfterAt?: number | null
+        /** Present for an `afterAt`/`afterSeq` request. */
+        hasMoreAfter?: boolean
     }
 }
 
@@ -329,9 +335,35 @@ export const MessagesQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(200).optional(),
     beforeSeq: z.coerce.number().int().min(1).optional(),
     beforeAt: z.coerce.number().int().min(0).optional(),
-}).refine((data) => (data.beforeAt === undefined) === (data.beforeSeq === undefined), {
-    message: 'beforeAt and beforeSeq must be provided together',
-    path: ['beforeAt'],
+    afterSeq: z.coerce.number().int().min(1).optional(),
+    afterAt: z.coerce.number().int().min(0).optional(),
+}).superRefine((data, ctx) => {
+    const hasBeforeAt = data.beforeAt !== undefined
+    const hasBeforeSeq = data.beforeSeq !== undefined
+    const hasAfterAt = data.afterAt !== undefined
+    const hasAfterSeq = data.afterSeq !== undefined
+
+    if (hasBeforeAt !== hasBeforeSeq) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'beforeAt and beforeSeq must be provided together',
+            path: ['beforeAt'],
+        })
+    }
+    if (hasAfterAt !== hasAfterSeq) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'afterAt and afterSeq must be provided together',
+            path: ['afterAt'],
+        })
+    }
+    if (hasBeforeAt && hasAfterAt) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'before and after cursors are mutually exclusive',
+            path: ['afterAt'],
+        })
+    }
 })
 
 export type MessagesQuery = z.infer<typeof MessagesQuerySchema>

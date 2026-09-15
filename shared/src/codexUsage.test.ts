@@ -1,8 +1,24 @@
 import { describe, expect, it } from 'bun:test'
-import { readCodexTokenUsage, selectCodexTokenUsage } from './codexUsage'
+import {
+    getCodexBlendedTotal,
+    getCodexNonCachedInput,
+    readCodexTokenUsage,
+    selectCodexTokenUsage
+} from './codexUsage'
 import { appendCodexTranscriptImportLines, createCodexTranscriptImportAccumulator } from './codexTranscript'
 
 describe('Codex usage snapshots', () => {
+    it('matches the Codex TUI blended usage calculation', () => {
+        const usage = readCodexTokenUsage({ total_token_usage: {
+            input_tokens: 1_000,
+            cached_input_tokens: 800,
+            output_tokens: 200
+        } }, 1)!
+        expect(getCodexNonCachedInput(usage)).toBe(200)
+        expect(getCodexBlendedTotal(usage)).toBe(400)
+        expect(getCodexBlendedTotal({ ...usage, cachedInput: null })).toBeNull()
+    })
+
     it('replaces cumulative counters and does not count cached/reasoning subsets twice', () => {
         const first = readCodexTokenUsage({ total_token_usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 20, reasoning_output_tokens: 15 } }, 1)
         const latest = readCodexTokenUsage({ total: { inputTokens: 200, cachedInputTokens: 150, outputTokens: 40, reasoningOutputTokens: 25, totalTokens: 240 } }, 2)

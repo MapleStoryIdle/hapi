@@ -1,4 +1,5 @@
 import { logger } from '@/ui/logger';
+import { extractCodexFailureMessage } from '@hapi/protocol';
 
 type ConvertedEvent = {
     type: string;
@@ -597,7 +598,7 @@ export class AppServerEventConverter {
                 event.thread_id = threadId;
             }
             if (msgType === 'task_failed') {
-                const error = asString(msg.error ?? msg.message ?? asRecord(msg.error)?.message);
+                const error = extractCodexFailureMessage([msg.error, msg.message, msg.reason]);
                 if (error) {
                     event.error = error;
                 }
@@ -646,7 +647,7 @@ export class AppServerEventConverter {
             if (willRetry) {
                 return [];
             }
-            const error = asString(msg.message ?? msg.reason ?? errorRecord?.message);
+            const error = extractCodexFailureMessage([msg.error, msg.message, msg.reason, errorRecord]);
             return error ? addEventScope([{ type: 'task_failed', error }], msgScope) : [];
         }
 
@@ -780,7 +781,12 @@ export class AppServerEventConverter {
             const status = asRecord(paramsRecord.status ?? thread.status);
             const statusType = asString(status?.type ?? paramsRecord.statusType ?? paramsRecord.status_type);
             if (statusType === 'systemError') {
-                const error = asString(status?.message ?? status?.error ?? paramsRecord.message ?? paramsRecord.error)
+                const error = extractCodexFailureMessage([
+                    status?.error,
+                    status?.message,
+                    paramsRecord.error,
+                    paramsRecord.message,
+                ])
                     ?? 'Codex thread entered systemError';
                 events.push(scoped({
                     type: 'task_failed',
@@ -818,7 +824,14 @@ export class AppServerEventConverter {
             const statusRaw = asString(paramsRecord.status ?? turn.status);
             const status = statusRaw?.toLowerCase();
             const turnId = asString(turn.turnId ?? turn.turn_id ?? turn.id);
-            const errorMessage = asString(paramsRecord.error ?? paramsRecord.message ?? paramsRecord.reason);
+            const errorMessage = extractCodexFailureMessage([
+                paramsRecord.error,
+                turn.error,
+                paramsRecord.message,
+                turn.message,
+                paramsRecord.reason,
+                turn.reason,
+            ]);
 
             if (status === 'interrupted' || status === 'cancelled' || status === 'canceled') {
                 events.push(scoped({ type: 'turn_aborted', ...(turnId ? { turn_id: turnId } : {}) }));
@@ -851,7 +864,7 @@ export class AppServerEventConverter {
         if (method === 'error') {
             const willRetry = asBoolean(paramsRecord.will_retry ?? paramsRecord.willRetry) ?? false;
             if (willRetry) return events;
-            const message = asString(paramsRecord.message) ?? asString(asRecord(paramsRecord.error)?.message);
+            const message = extractCodexFailureMessage([paramsRecord.error, paramsRecord.message, paramsRecord.reason]);
             if (message) {
                 events.push(scoped({ type: 'task_failed', error: message }));
             }

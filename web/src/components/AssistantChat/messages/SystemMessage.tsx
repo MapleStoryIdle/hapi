@@ -9,6 +9,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { getConversationMessageAnchorId } from '@/chat/outline'
 import { MessageTimestamp } from '@/components/AssistantChat/messages/MessageTimestamp'
 import { previewableWebUrl, useChatPreview } from '@/components/ChatPreviewContext'
+import { isGenericCodexFailureMessage } from '@hapi/protocol'
 
 type TaskStatusEvent = Extract<AgentEvent, { type: 'task-status' }>
 type AutomationHeartbeatEvent = Extract<AgentEvent, { type: 'automation-heartbeat' }>
@@ -188,6 +189,12 @@ function TaskStatusCard(props: { event: TaskStatusEvent; messageId: string }) {
     const preview = useChatPreview()
     const visual = taskStatusVisual(props.event)
     const Icon = visual.Icon
+    const originalFailure = props.event.status === 'failed'
+        && !isAuthenticationTaskStatus(props.event)
+        && !isForbiddenTaskStatus(props.event)
+        && !isGenericCodexFailureMessage(props.event.message)
+        ? props.event.message
+        : null
 
     return (
         <MessagePrimitive.Root id={getConversationMessageAnchorId(props.messageId)} className="scroll-mt-4 py-1">
@@ -204,8 +211,8 @@ function TaskStatusCard(props: { event: TaskStatusEvent; messageId: string }) {
                                 </div>
                                 <MessageTimestamp className="shrink-0 text-[10px] text-[var(--app-hint)]" />
                             </div>
-                            <p className="mt-0.5 text-xs leading-5 text-[var(--app-hint)]">
-                                {t(visual.bodyKey, visual.bodyParams)}
+                            <p className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5 text-[var(--app-hint)]">
+                                {originalFailure ?? t(visual.bodyKey, visual.bodyParams)}
                             </p>
                             {visual.actionKey && props.event.actionUrl ? (
                                 <a

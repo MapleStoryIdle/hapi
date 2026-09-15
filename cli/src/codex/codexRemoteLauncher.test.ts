@@ -45,6 +45,7 @@ const harness = vi.hoisted(() => ({
     emitChildTaskCompleteBeforeMessage: false,
     suppressChildTaskCompleteEvent: false,
     emitSecondChildMessage: false,
+    emitChildFailureSequence: false,
     emitLateChildCommandAfterParentTool: false,
     emitParentUsageEvents: false,
     emitParentMessageSnapshots: false,
@@ -573,6 +574,25 @@ vi.mock('./codexAppServerClient', () => {
                     this.notificationHandler?.('item/completed', secondChildMessageCompleted);
                 }
 
+                if (harness.emitChildFailureSequence) {
+                    for (const error of [
+                        'Codex thread entered systemError',
+                        'Selected model is at capacity. Please try a different model.',
+                        'Task failed',
+                    ]) {
+                        const failed = {
+                            msg: {
+                                type: 'task_failed',
+                                thread_id: childThreadId,
+                                turn_id: childTurnId,
+                                error,
+                            }
+                        };
+                        harness.notifications.push({ method: 'codex/event/task_failed', params: failed });
+                        this.notificationHandler?.('codex/event/task_failed', failed);
+                    }
+                }
+
                 if (
                     harness.emitChildDoneStatusWithoutMessage
                     && !harness.emitChildTaskCompleteBeforeMessage
@@ -912,6 +932,14 @@ import {
 type FakeAgentState = {
     requests: Record<string, unknown>;
     completedRequests: Record<string, unknown>;
+    codex?: {
+        activeSubagentId?: string | null;
+        subagents?: Record<string, {
+            model?: string;
+            modelReasoningEffort?: string;
+        }>;
+        updatedAt?: number;
+    };
 };
 
 function createMode(): EnhancedMode {
@@ -1032,6 +1060,9 @@ function createSessionStub(messages = ['hello from launcher test'], mode = creat
         },
         sendUserMessage(text: string) {
             client.sendUserMessage(text);
+        },
+        updateAgentState(handler: (state: FakeAgentState) => FakeAgentState) {
+            agentState = handler(agentState);
         }
     };
 
@@ -1116,6 +1147,7 @@ describe('codexRemoteLauncher', () => {
         harness.emitChildTaskCompleteBeforeMessage = false;
         harness.suppressChildTaskCompleteEvent = false;
         harness.emitSecondChildMessage = false;
+        harness.emitChildFailureSequence = false;
         harness.emitLateChildCommandAfterParentTool = false;
         harness.emitParentUsageEvents = false;
         harness.emitParentMessageSnapshots = false;
@@ -1919,7 +1951,7 @@ describe('codexRemoteLauncher', () => {
             model: 'gpt-5.6-parent',
             modelReasoningEffort: 'xhigh'
         };
-        const { session, codexMessages } = createSessionStub(['hello from launcher test'], mode);
+        const { session, codexMessages, getAgentState } = createSessionStub(['hello from launcher test'], mode);
 
         await codexRemoteLauncher(session as never);
 
@@ -1942,6 +1974,10 @@ describe('codexRemoteLauncher', () => {
                 childReasoningEffort: 'high'
             }
         }));
+        expect(getAgentState().codex?.subagents?.['child-thread']).toMatchObject({
+            model: 'gpt-5.6',
+            modelReasoningEffort: 'medium'
+        });
     });
 
     it('routes child thread messages into agent-run trace while keeping them out of the parent timeline', async () => {
@@ -2026,6 +2062,26 @@ describe('codexRemoteLauncher', () => {
             result: expect.objectContaining({
                 status: 'done'
             })
+        }));
+    });
+
+    it('does not let a trailing generic child failure erase the provider error', async () => {
+        harness.emitChildThreadEvents = true;
+        harness.emitChildFailureSequence = true;
+        const { session, codexMessages } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        const failedUpdates = codexMessages.filter((message): message is Record<string, unknown> => {
+            return typeof message === 'object'
+                && message !== null
+                && (message as Record<string, unknown>).type === 'agent-run-update'
+                && (message as Record<string, unknown>).agentId === 'child-thread'
+                && (message as Record<string, unknown>).status === 'failed';
+        });
+        expect(failedUpdates.at(-1)).toEqual(expect.objectContaining({
+            error: 'Selected model is at capacity. Please try a different model.',
+            activity: 'Failed: Selected model is at capacity. Please try a different model.'
         }));
     });
 

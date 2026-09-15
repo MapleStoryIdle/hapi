@@ -774,8 +774,9 @@ const SessionItem = memo(function SessionItem(props: {
                         statusClassName="bg-[#34C759] motion-safe:animate-pulse"
                     />
                     <div className="min-w-0 flex-1">
-                        <div className={`truncate font-medium tracking-normal text-[var(--app-fg)] ${nested ? 'text-[13px] leading-[17px]' : 'text-sm leading-5'}`}>
-                            {sessionName}
+                        <div className={`flex min-w-0 items-center gap-1.5 font-medium tracking-normal text-[var(--app-fg)] ${nested ? 'text-[13px] leading-[17px]' : 'text-sm leading-5'}`}>
+                            <span className="truncate">{sessionName}</span>
+                            {s.metadata?.monitorSession ? <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-amber-800 dark:bg-amber-950/50 dark:text-amber-200" title={t('sessions.monitor.badgeTitle')}>{t('sessions.monitor.badge')}</span> : null}
                         </div>
                         {sessionSubtitle ? (
                             <div className="mt-0.5 truncate text-xs leading-4 text-[var(--app-hint)]">

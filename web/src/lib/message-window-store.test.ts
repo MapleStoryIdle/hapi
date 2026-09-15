@@ -6,6 +6,7 @@ import {
     clearMessageWindow,
     enqueueIncomingMessages,
     fetchLatestMessages,
+    fetchNewerMessages,
     fetchOlderMessages,
     getMessageSequenceFrontier,
     getMessageWindowState,
@@ -567,7 +568,7 @@ describe('message-window-store async generations', () => {
         reloadedStore.clearMessageWindow(SESSION_ID)
     })
 
-    it('does not let a latest refresh wedge an in-flight older load', async () => {
+    it('cancels an in-flight older page when a latest refresh replaces the window', async () => {
         const latestPage = makeAgentMessagePage({
             idPrefix: 'latest',
             startSeq: 101,
@@ -642,17 +643,18 @@ describe('message-window-store async generations', () => {
 
         const recoveredState = getMessageWindowState(SESSION_ID)
         expect(recoveredState.isLoadingMore).toBe(false)
-        expect(recoveredState.messages.some((message) => message.id === 'older-0')).toBe(true)
+        expect(recoveredState.messages.some((message) => message.id === 'older-0')).toBe(false)
 
         await fetchOlderMessages(api as unknown as ApiClient, SESSION_ID)
 
         const finalState = getMessageWindowState(SESSION_ID)
         expect(finalState.isLoadingMore).toBe(false)
+        expect(finalState.messages.some((message) => message.id === 'oldest-0')).toBe(true)
         expect(callLog).toEqual([
             { limit: 50 },
             { beforeAt: 1_700_000_400_000, beforeSeq: 101, limit: 50 },
             { limit: 50 },
-            { beforeAt: 1_700_000_300_000, beforeSeq: 51, limit: 50 },
+            { beforeAt: 1_700_000_400_000, beforeSeq: 101, limit: 50 },
         ])
     })
 
@@ -744,6 +746,33 @@ describe('message-window-store status updates', () => {
         const message = getMessageWindowState(SESSION_ID).messages.find((entry) => entry.id === 'server-queued')
         expect(message?.status).toBe('sent')
     })
+
+    it('moves a consumed queued message to its actual invocation position', () => {
+        ingestIncomingMessages(SESSION_ID, [
+            {
+                ...makeUserMessage({
+                    id: 'queued-first',
+                    seq: 1,
+                    localId: 'queued-first',
+                    createdAt: 1_000,
+                    status: 'queued',
+                }),
+                invokedAt: null,
+            },
+            makeAgentMessage({
+                id: 'agent-later',
+                seq: 2,
+                createdAt: 2_000,
+            }),
+        ])
+
+        markMessagesConsumed(SESSION_ID, ['queued-first'], 3_000)
+
+        expect(getMessageWindowState(SESSION_ID).messages.map((message) => message.id)).toEqual([
+            'agent-later',
+            'queued-first',
+        ])
+    })
 })
 
 describe('message-window-store visible trimming', () => {
@@ -753,7 +782,7 @@ describe('message-window-store visible trimming', () => {
         clearMessageWindow(SESSION_ID)
     })
 
-    it('keeps the main conversation and caps mounted Codex subagent history during a flood', () => {
+    it('keeps a contiguous hard-capped window during a Codex subagent flood', () => {
         const baseTime = 1_700_000_000_000
         const messages: DecryptedMessage[] = [
             makeUserMessage({
@@ -775,12 +804,10 @@ describe('message-window-store visible trimming', () => {
         ingestIncomingMessages(SESSION_ID, messages)
 
         const state = getMessageWindowState(SESSION_ID)
-        expect(state.messages.some((message) => message.id === 'main-user')).toBe(true)
-        // Agent-run traffic has its own bounded budget, so a noisy child
-        // agent cannot turn the mobile thread into hundreds of mounted cards.
+        expect(state.messages.some((message) => message.id === 'main-user')).toBe(false)
         expect(state.messages.some((message) => message.id === 'agent-run-0')).toBe(false)
         expect(state.messages.some((message) => message.id === `agent-run-${VISIBLE_WINDOW_SIZE}`)).toBe(true)
-        expect(state.messages).toHaveLength(VISIBLE_WINDOW_SIZE + 1)
+        expect(state.messages).toHaveLength(VISIBLE_WINDOW_SIZE)
     })
 
     it('marks the window as pageable when regular live messages are trimmed', () => {
@@ -801,6 +828,79 @@ describe('message-window-store visible trimming', () => {
         expect(state.messages.some((message) => message.id === 'agent-message-0')).toBe(false)
         expect(state.hasMore).toBe(true)
         expect(state.oldestSeq).toBe(2)
+    })
+
+    it('pages in both directions without exceeding the 600-message window', async () => {
+        const baseTime = 1_700_000_150_000
+        const messages = Array.from({ length: VISIBLE_WINDOW_SIZE + 1 }, (_, index) => makeAgentMessage({
+            id: `message-${index + 1}`,
+            seq: index + 1,
+            createdAt: baseTime + index,
+        }))
+        ingestIncomingMessages(SESSION_ID, messages)
+
+        const api = {
+            getMessages: vi.fn(async (_sessionId: string, options: {
+                beforeAt?: number | null
+                beforeSeq?: number | null
+                afterAt?: number | null
+                afterSeq?: number | null
+                limit?: number
+            }) => options.afterSeq !== undefined
+                ? {
+                    messages: [messages[VISIBLE_WINDOW_SIZE]],
+                    page: {
+                        limit: 50,
+                        nextBeforeSeq: null,
+                        nextBeforeAt: null,
+                        hasMore: false,
+                        nextAfterSeq: VISIBLE_WINDOW_SIZE + 1,
+                        nextAfterAt: baseTime + VISIBLE_WINDOW_SIZE,
+                        hasMoreAfter: false,
+                    }
+                }
+                : {
+                    messages: [messages[0]],
+                    page: {
+                        limit: 50,
+                        nextBeforeSeq: null,
+                        nextBeforeAt: null,
+                        hasMore: false,
+                    }
+                })
+        }
+
+        await fetchOlderMessages(api as unknown as ApiClient, SESSION_ID)
+        let state = getMessageWindowState(SESSION_ID)
+        expect(state.messages).toHaveLength(VISIBLE_WINDOW_SIZE)
+        expect(state.messages[0]?.id).toBe('message-1')
+        expect(state.messages.at(-1)?.id).toBe(`message-${VISIBLE_WINDOW_SIZE}`)
+        expect(state.hasNewer).toBe(true)
+
+        ingestIncomingMessages(SESSION_ID, [makeAgentMessage({
+            id: 'message-300',
+            seq: 300,
+            createdAt: baseTime + 299,
+            text: 'streamed update while browsing history',
+        })])
+        state = getMessageWindowState(SESSION_ID)
+        expect(state.messages.find((message) => message.id === 'message-300')?.content).toMatchObject({
+            content: { data: { message: 'streamed update while browsing history' } },
+        })
+        expect(state.pendingCount).toBe(0)
+
+        await fetchNewerMessages(api as unknown as ApiClient, SESSION_ID)
+        state = getMessageWindowState(SESSION_ID)
+        expect(state.messages).toHaveLength(VISIBLE_WINDOW_SIZE)
+        expect(state.messages[0]?.id).toBe('message-2')
+        expect(state.messages.at(-1)?.id).toBe(`message-${VISIBLE_WINDOW_SIZE + 1}`)
+        expect(state.hasMore).toBe(true)
+        expect(state.hasNewer).toBe(false)
+        expect(api.getMessages).toHaveBeenLastCalledWith(SESSION_ID, {
+            afterAt: baseTime + VISIBLE_WINDOW_SIZE - 1,
+            afterSeq: VISIBLE_WINDOW_SIZE,
+            limit: 50,
+        })
     })
 
     it('backfills cold latest load when the newest page is filled by Codex subagent events', async () => {

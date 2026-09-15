@@ -1,5 +1,10 @@
 import { ArrowDownToLine, ArrowUpFromLine, Database, RefreshCw, Server, UserRound } from 'lucide-react'
-import type { CodexTokenUsage, CodexUsageAccount } from '@hapi/protocol/codexUsage'
+import {
+    getCodexBlendedTotal,
+    getCodexNonCachedInput,
+    type CodexTokenUsage,
+    type CodexUsageAccount
+} from '@hapi/protocol/codexUsage'
 import { BottomDrawer } from './ui/BottomDrawer'
 import { AgentFlavorIcon } from './AgentFlavorIcon'
 import { useTranslation } from '@/lib/use-translation'
@@ -54,6 +59,11 @@ export function CodexUsageDrawer(props: {
     const number = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
     const exact = (value: number | null | undefined) => value == null ? undefined : new Intl.NumberFormat(locale).format(value)
     const ratio = usage?.input && usage.cachedInput != null ? usage.cachedInput / usage.input * 100 : null
+    const nonCachedInput = usage ? getCodexNonCachedInput(usage) : null
+    const blendedTotal = usage ? getCodexBlendedTotal(usage) : null
+    const displayedInput = nonCachedInput ?? usage?.input
+    const displayedTotal = blendedTotal ?? usage?.total
+    const usesBlendedUsage = blendedTotal !== null
     const percent = (value: number) => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value) + '%'
     const group = 'rounded-2xl bg-[var(--app-bg)] p-4'
     const heading = 'mb-2 px-1 text-[13px] font-semibold text-[var(--app-hint)]'
@@ -86,9 +96,9 @@ export function CodexUsageDrawer(props: {
                 <div className={group}>
                     {usage ? <>
                         {usage.scope === 'lastTurn' ? <p className="mb-3 text-[13px] text-[var(--app-hint)]">{t('usage.partial')}</p> : null}
-                        <div className="flex items-baseline justify-between gap-3"><span>{t('usage.total')}</span><span className="text-2xl font-semibold tabular-nums" title={exact(usage.total)}>{number(usage.total)}</span></div>
+                        <div className="flex items-baseline justify-between gap-3"><span>{t(usesBlendedUsage ? 'usage.effectiveTotal' : 'usage.total')}</span><span className="text-2xl font-semibold tabular-nums" title={exact(displayedTotal)}>{number(displayedTotal)}</span></div>
                         <div className="my-4 grid grid-cols-2 gap-4">
-                            <div className="flex min-w-0 flex-col items-start text-left" data-testid="codex-usage-input-metric"><div className="flex items-center gap-1.5 text-[13px] text-[var(--app-link)]"><ArrowDownToLine className="h-4 w-4" aria-hidden="true" />{t('usage.input')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.input)}>{number(usage.input)}</div></div>
+                            <div className="flex min-w-0 flex-col items-start text-left" data-testid="codex-usage-input-metric"><div className="flex items-center gap-1.5 text-[13px] text-[var(--app-link)]"><ArrowDownToLine className="h-4 w-4" aria-hidden="true" />{t(nonCachedInput !== null ? 'usage.uncachedInput' : 'usage.input')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(displayedInput)}>{number(displayedInput)}</div></div>
                             <div className="flex min-w-0 flex-col items-end text-right" data-testid="codex-usage-output-metric"><div className="flex items-center justify-end gap-1.5 text-[13px] text-purple-700 dark:text-purple-300"><ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />{t('usage.output')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.output)}>{number(usage.output)}</div></div>
                         </div>
                         <div className="space-y-2 border-t border-[var(--app-border)] pt-3">

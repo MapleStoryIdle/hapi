@@ -335,6 +335,42 @@ describe('Store V8 byPosition pagination', () => {
         expect(page1Ids.size + page2Ids.size).toBe(5)
     })
 
+    it('getMessagesAfterPosition returns the immediately newer page in ascending order', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')
+        const messages = Array.from({ length: 5 }, (_, index) =>
+            store.messages.addMessage(session.id, `msg-${index}`, `local-${index}`)
+        )
+        for (const [index, message] of messages.entries()) {
+            store.messages.markMessagesInvoked(session.id, [`local-${index}`], (index + 1) * 1_000)
+            expect(message.seq).toBe(index + 1)
+        }
+
+        const page = store.messages.getMessagesAfterPosition(session.id, 2, {
+            at: 2_000,
+            seq: messages[1]!.seq,
+        })
+
+        expect(page.map(message => message.id)).toEqual([messages[2]!.id, messages[3]!.id])
+    })
+
+    it('getMessagesAfterPosition breaks equal display-position ties by seq', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')
+        const first = store.messages.addMessage(session.id, 'first', 'local-first')
+        const second = store.messages.addMessage(session.id, 'second', 'local-second')
+        const third = store.messages.addMessage(session.id, 'third', 'local-third')
+        store.messages.markMessagesInvoked(session.id, ['local-first', 'local-second', 'local-third'], 1_000)
+
+        const page = store.messages.getMessagesAfterPosition(session.id, 10, {
+            at: 1_000,
+            seq: second.seq,
+        })
+
+        expect(page.map(message => message.id)).toEqual([third.id])
+        expect(first.seq).toBeLessThan(second.seq)
+    })
+
     it('long session: low-seq late-invokedAt message appears in first page', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')

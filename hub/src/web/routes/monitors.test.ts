@@ -93,6 +93,34 @@ describe('monitor routes', () => {
             expect((await app.request('/monitors/session-target?type=managed&sessionId=other')).status).toBe(404)
         } finally { store.close() }
     })
+    it('copies Claude effort into a source-bound Monitor configuration', async () => {
+        const store = new Store(':memory:')
+        const engine = {
+            getSessionByNamespace: () => ({
+                metadata: { path: '/claude-workspace', machineId: 'm', flavor: 'claude' },
+                model: 'claude-model',
+                modelReasoningEffort: null,
+                effort: 'high',
+                permissionMode: 'plan'
+            })
+        } as unknown as SyncEngine
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => { c.set('namespace', 'a'); await next() })
+        app.route('/', createMonitorRoutes(store, () => engine, () => null))
+        try {
+            const response = await app.request('/monitors/session-target?type=managed&sessionId=claude-source')
+            expect(response.status).toBe(200)
+            expect(await response.json()).toMatchObject({
+                config: {
+                    directory: '/claude-workspace',
+                    agent: 'claude',
+                    model: 'claude-model',
+                    reasoningEffort: 'high',
+                    permissionMode: 'plan'
+                }
+            })
+        } finally { store.close() }
+    })
     it('switches future deliveries using either a managed SHAPI ID or a native Codex ID without changing an open incident', async () => {
         const store = new Store(':memory:')
         store.machines.getOrCreateMachine('m', {}, {}, 'default')

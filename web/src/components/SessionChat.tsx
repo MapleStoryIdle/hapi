@@ -690,14 +690,17 @@ type SessionChatProps = {
     pendingMessages?: DecryptedMessage[]
     messagesWarning: string | null
     hasMoreMessages: boolean
+    hasNewerMessages: boolean
     isLoadingMessages: boolean
     isLoadingMoreMessages: boolean
+    isLoadingNewerMessages: boolean
     isSending: boolean
     pendingCount: number
     messagesVersion: number
     onBack: () => void
     onRefresh: () => void
     onLoadMore: () => Promise<unknown>
+    onLoadNewer: () => Promise<unknown>
     // Resolves true when the send was accepted by the underlying mutation, false when
     // pre-mutation guards (no-api / no-session / pending) rejected the call OR async
     // inactive-session resume failed. Composer state that should only be cleared on
@@ -2014,8 +2017,11 @@ function SessionChatInner(props: SessionChatProps) {
                         isLoadingMessages={props.isLoadingMessages}
                         messagesWarning={props.messagesWarning}
                         hasMoreMessages={props.hasMoreMessages}
+                        hasNewerMessages={props.hasNewerMessages}
                         isLoadingMoreMessages={props.isLoadingMoreMessages}
+                        isLoadingNewerMessages={props.isLoadingNewerMessages}
                         onLoadMore={props.onLoadMore}
+                        onLoadNewer={props.onLoadNewer}
                         pendingCount={props.pendingCount}
                         rawMessagesCount={visibleMessages.length}
                         normalizedMessagesCount={normalizedMessages.length}

@@ -30,6 +30,7 @@ export const MonitorConfigSchema = z.object({
     name: z.string().trim().min(1).max(100),
     kind: z.enum(['webhook', 'http', 'scheduled']),
     targetSession: MonitorTargetSessionSchema.optional(),
+    deliveryMode: z.enum(['current-session', 'new-session']).default('current-session'),
     schedule: MonitorScheduleSchema.optional(),
     machineId: z.string().min(1).max(256),
     directory: z.string().trim().min(1).max(2048),

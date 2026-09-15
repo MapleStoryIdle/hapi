@@ -24,7 +24,9 @@ import { SessionDetailStatusNotice } from '@/components/SessionDetailStatusNotic
 
 type ScrollAnchor = {
     id: string
-    topOffset: number
+    topOffset?: number
+    bottomOffset?: number
+    element?: HTMLElement
 }
 
 type PendingScrollRestore = {
@@ -32,12 +34,14 @@ type PendingScrollRestore = {
     scrollTop: number
     scrollHeight: number
     restored: boolean
+    direction: 'older' | 'newer'
 }
 
 type PendingLoadBaseline = {
     messagesVersion: number
     sourceMessagesVersion: number
     hasMoreMessages: boolean
+    hasNewerMessages: boolean
 }
 
 const MESSAGE_ANCHOR_SELECTOR = '.happy-thread-messages > [id]'
@@ -215,29 +219,43 @@ export function getPullToLoadOlderIndicator(params: {
     }
 }
 
-export function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor | null {
+export function captureScrollAnchor(
+    viewport: HTMLElement,
+    edge: 'top' | 'bottom' = 'top'
+): ScrollAnchor | null {
     const viewportRect = viewport.getBoundingClientRect()
     const messages = Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR))
-    for (const message of messages) {
+    const visibleMessages = messages.filter((message) => {
         const rect = message.getBoundingClientRect()
-        if (rect.bottom > viewportRect.top && rect.top < viewportRect.bottom) {
-            return {
-                id: message.id,
-                topOffset: rect.top - viewportRect.top
-            }
-        }
+        return rect.bottom > viewportRect.top && rect.top < viewportRect.bottom
+    })
+    const message = edge === 'bottom' ? visibleMessages.at(-1) : visibleMessages[0]
+    if (!message) {
+        return null
     }
-    return null
+    const rect = message.getBoundingClientRect()
+    return {
+        id: message.id,
+        ...(edge === 'bottom'
+            ? { bottomOffset: rect.bottom - viewportRect.bottom }
+            : { topOffset: rect.top - viewportRect.top }),
+        element: message,
+    }
 }
 
 export function restoreScrollAnchor(viewport: HTMLElement, anchor: ScrollAnchor): boolean {
-    const target = document.getElementById(anchor.id)
+    const target = anchor.element?.isConnected && viewport.contains(anchor.element)
+        ? anchor.element
+        : Array.from(viewport.querySelectorAll<HTMLElement>('[id]'))
+            .find((element) => element.id === anchor.id) ?? null
     if (!target || !viewport.contains(target)) {
         return false
     }
     const viewportRect = viewport.getBoundingClientRect()
     const targetRect = target.getBoundingClientRect()
-    viewport.scrollTop += targetRect.top - viewportRect.top - anchor.topOffset
+    viewport.scrollTop += anchor.bottomOffset !== undefined
+        ? targetRect.bottom - viewportRect.bottom - anchor.bottomOffset
+        : targetRect.top - viewportRect.top - (anchor.topOffset ?? 0)
     return true
 }
 
@@ -517,8 +535,11 @@ export function HappyThread(props: {
     isLoadingMessages: boolean
     messagesWarning: string | null
     hasMoreMessages: boolean
+    hasNewerMessages: boolean
     isLoadingMoreMessages: boolean
+    isLoadingNewerMessages: boolean
     onLoadMore: () => Promise<unknown>
+    onLoadNewer: () => Promise<unknown>
     pendingCount: number
     rawMessagesCount: number
     normalizedMessagesCount: number
@@ -551,15 +572,20 @@ export function HappyThread(props: {
     const prevLoadingMoreRef = useRef(false)
     const loadStartedRef = useRef(false)
     const isLoadingMoreRef = useRef(props.isLoadingMoreMessages)
+    const isLoadingNewerRef = useRef(props.isLoadingNewerMessages)
     const hasMoreMessagesRef = useRef(props.hasMoreMessages)
+    const hasNewerMessagesRef = useRef(props.hasNewerMessages)
     const isLoadingMessagesRef = useRef(props.isLoadingMessages)
     const messagesVersionRef = useRef(props.messagesVersion)
     const sourceMessagesVersionRef = useRef(props.sourceMessagesVersion ?? props.messagesVersion)
     const onLoadMoreRef = useRef(props.onLoadMore)
+    const onLoadNewerRef = useRef(props.onLoadNewer)
     const handleLoadMoreRef = useRef<() => void>(() => {})
+    const handleLoadNewerRef = useRef<() => void>(() => {})
     const pendingLoadPromiseRef = useRef<Promise<boolean> | null>(null)
     const pendingLoadResolveRef = useRef<((value: boolean) => void) | null>(null)
     const pendingLoadBaselineRef = useRef<PendingLoadBaseline | null>(null)
+    const pendingLoadDirectionRef = useRef<'older' | 'newer'>('older')
     const pendingLoadSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const scrollRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const restoredNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -633,6 +659,9 @@ export function HappyThread(props: {
         hasMoreMessagesRef.current = props.hasMoreMessages
     }, [props.hasMoreMessages])
     useEffect(() => {
+        hasNewerMessagesRef.current = props.hasNewerMessages
+    }, [props.hasNewerMessages])
+    useEffect(() => {
         isLoadingMessagesRef.current = props.isLoadingMessages
     }, [props.isLoadingMessages])
     useEffect(() => {
@@ -644,6 +673,9 @@ export function HappyThread(props: {
     useEffect(() => {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
+    useEffect(() => {
+        onLoadNewerRef.current = props.onLoadNewer
+    }, [props.onLoadNewer])
 
     useEffect(() => {
         sessionIdRef.current = props.sessionId
@@ -676,6 +708,7 @@ export function HappyThread(props: {
         resolve(
             messagesVersionRef.current !== baseline.messagesVersion
             || hasMoreMessagesRef.current !== baseline.hasMoreMessages
+            || hasNewerMessagesRef.current !== baseline.hasNewerMessages
         )
     }, [])
 
@@ -719,8 +752,9 @@ export function HappyThread(props: {
         if (!pending) return false
         const restoredByAnchor = pending.anchor ? restoreScrollAnchor(viewport, pending.anchor) : false
         if (!restoredByAnchor) {
-            const delta = viewport.scrollHeight - pending.scrollHeight
-            viewport.scrollTop = pending.scrollTop + delta
+            viewport.scrollTop = pending.direction === 'older'
+                ? pending.scrollTop + viewport.scrollHeight - pending.scrollHeight
+                : pending.scrollTop
         }
         lastScrollTopRef.current = viewport.scrollTop
         pending.restored = true
@@ -796,6 +830,14 @@ export function HappyThread(props: {
             }
 
             if (intent.isAtBottom) {
+                if (hasNewerMessagesRef.current) {
+                    setAutoScrollMode(false)
+                    setAtBottomMode(false)
+                    if (userInitiated && !intent.isScrollingUp) {
+                        handleLoadNewerRef.current()
+                    }
+                    return
+                }
                 setAutoScrollMode(true)
                 setAtBottomMode(true)
                 return
@@ -982,15 +1024,15 @@ export function HappyThread(props: {
         scrollToBottomInstant()
     }, [props.toolGroupRunActive, scrollToBottomInstant])
 
-    const loadOlderPreservingScroll = useCallback((): Promise<boolean> => {
+    const loadPagePreservingScroll = useCallback((direction: 'older' | 'newer'): Promise<boolean> => {
         if (pendingLoadPromiseRef.current) {
             return pendingLoadPromiseRef.current
         }
         if (
             isInitialScrollSettling()
             || isLoadingMessagesRef.current
-            || !hasMoreMessagesRef.current
-            || isLoadingMoreRef.current
+            || (direction === 'older' ? !hasMoreMessagesRef.current : !hasNewerMessagesRef.current)
+            || (direction === 'older' ? isLoadingMoreRef.current : isLoadingNewerRef.current)
             || loadLockRef.current
         ) {
             return Promise.resolve(false)
@@ -1000,11 +1042,16 @@ export function HappyThread(props: {
             return Promise.resolve(false)
         }
         pendingScrollRef.current = {
-            anchor: captureScrollAnchor(viewport),
+            // Older pages can be inserted into the same joined assistant block.
+            // Anchoring its bottom preserves the visible source content even
+            // when the root element itself does not move.
+            anchor: captureScrollAnchor(viewport, direction === 'older' ? 'bottom' : 'top'),
             scrollTop: viewport.scrollTop,
             scrollHeight: viewport.scrollHeight,
-            restored: false
+            restored: false,
+            direction,
         }
+        pendingLoadDirectionRef.current = direction
         clearRestoredNoticeTimer()
         setShowHistoryRestoredNotice(false)
         autoScrollEnabledRef.current = false
@@ -1013,18 +1060,20 @@ export function HappyThread(props: {
         pendingLoadBaselineRef.current = {
             messagesVersion: messagesVersionRef.current,
             sourceMessagesVersion: sourceMessagesVersionRef.current,
-            hasMoreMessages: hasMoreMessagesRef.current
+            hasMoreMessages: hasMoreMessagesRef.current,
+            hasNewerMessages: hasNewerMessagesRef.current,
         }
         const loadPromise = new Promise<boolean>((resolve) => {
             pendingLoadResolveRef.current = resolve
         })
         pendingLoadPromiseRef.current = loadPromise
         try {
-            void onLoadMoreRef.current().catch((error) => {
+            const load = direction === 'older' ? onLoadMoreRef.current : onLoadNewerRef.current
+            void load().catch((error) => {
                 finishPendingScrollRestore(false)
-                console.error('Failed to load older messages:', error)
+                console.error(`Failed to load ${direction} messages:`, error)
             }).finally(() => {
-                if (!loadStartedRef.current && !isLoadingMoreRef.current) {
+                if (!loadStartedRef.current && !isLoadingMoreRef.current && !isLoadingNewerRef.current) {
                     clearPendingLoadSettleTimer()
                     pendingLoadSettleTimerRef.current = setTimeout(() => {
                         pendingLoadSettleTimerRef.current = null
@@ -1060,6 +1109,15 @@ export function HappyThread(props: {
         return loadPromise
     }, [clearPendingLoadSettleTimer, clearRestoredNoticeTimer, finishPendingScrollRestore,
         isInitialScrollSettling, restorePendingScrollPosition, schedulePendingScrollFinish, settlePendingLoad])
+
+    const loadOlderPreservingScroll = useCallback(
+        () => loadPagePreservingScroll('older'),
+        [loadPagePreservingScroll]
+    )
+    const loadNewerPreservingScroll = useCallback(
+        () => loadPagePreservingScroll('newer'),
+        [loadPagePreservingScroll]
+    )
 
     const canStartPullToLoadOlder = useCallback(() => {
         return (
@@ -1217,6 +1275,12 @@ export function HappyThread(props: {
     }, [loadOlderPreservingScroll])
 
     useEffect(() => {
+        handleLoadNewerRef.current = () => {
+            void loadNewerPreservingScroll()
+        }
+    }, [loadNewerPreservingScroll])
+
+    useEffect(() => {
         const viewport = viewportRef.current
         if (!viewport) {
             return
@@ -1338,11 +1402,14 @@ export function HappyThread(props: {
 
     useEffect(() => {
         isLoadingMoreRef.current = props.isLoadingMoreMessages
-        if (props.isLoadingMoreMessages) {
+        isLoadingNewerRef.current = props.isLoadingNewerMessages
+        const isLoadingPage = props.isLoadingMoreMessages || props.isLoadingNewerMessages
+        const wasLoadingPage = prevLoadingMoreRef.current
+        if (isLoadingPage) {
             clearPendingLoadSettleTimer()
             loadStartedRef.current = true
         }
-        if (prevLoadingMoreRef.current && !props.isLoadingMoreMessages) {
+        if (wasLoadingPage && !isLoadingPage) {
             const baseline = pendingLoadBaselineRef.current
             const waitForDeferredRender = shouldWaitForDeferredHistoryRender({
                 hasPendingRestore: pendingScrollRef.current !== null,
@@ -1364,8 +1431,8 @@ export function HappyThread(props: {
                 settlePendingLoad(true)
             }
         }
-        prevLoadingMoreRef.current = props.isLoadingMoreMessages
-    }, [clearPendingLoadSettleTimer, finishPendingScrollRestore, props.isLoadingMoreMessages, props.messagesVersion,
+        prevLoadingMoreRef.current = isLoadingPage
+    }, [clearPendingLoadSettleTimer, finishPendingScrollRestore, props.isLoadingMoreMessages, props.isLoadingNewerMessages, props.messagesVersion,
         props.sourceMessagesVersion, restorePendingScrollPosition, schedulePendingScrollFinish, settlePendingLoad])
 
     const showSkeleton = props.isLoadingMessages && props.rawMessagesCount === 0 && props.pendingCount === 0
@@ -1374,7 +1441,7 @@ export function HappyThread(props: {
         loading: pullToLoadLoading,
         distancePx: pullToLoadDistance
     })
-    const showHistoryLoadingNotice = props.isLoadingMoreMessages
+    const showHistoryLoadingNotice = props.isLoadingMoreMessages || props.isLoadingNewerMessages
         || (loadLockRef.current && !showHistoryRestoredNotice)
     const historyNoticeTop = `calc(var(${MOBILE_LAYOUT_CONTRACT.thread.topSafeAreaVariable}) + ${(props.topInset ?? 0) + 8}px)`
 
@@ -1443,6 +1510,22 @@ export function HappyThread(props: {
                                 <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
                                 {props.trailingMessage}
                             </div>
+                            {props.hasNewerMessages ? (
+                                <div className="flex justify-center py-3" data-testid="load-newer-messages">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={props.isLoadingNewerMessages}
+                                        onClick={() => { void loadNewerPreservingScroll() }}
+                                    >
+                                        {props.isLoadingNewerMessages ? <Spinner size="sm" label={null} /> : null}
+                                        {t(props.isLoadingNewerMessages
+                                            ? 'session.history.loadingNewer'
+                                            : 'session.history.loadNewer')}
+                                    </Button>
+                                </div>
+                            ) : null}
                         </div>
                     </div>
                 </ThreadPrimitive.Viewport>
@@ -1456,7 +1539,9 @@ export function HappyThread(props: {
                         <span className="flex items-center gap-1.5 whitespace-nowrap">
                             {showHistoryLoadingNotice ? <Spinner size="sm" label={null} /> : null}
                             {t(showHistoryLoadingNotice
-                                ? 'session.history.loadingOlder'
+                                ? pendingLoadDirectionRef.current === 'newer'
+                                    ? 'session.history.loadingNewer'
+                                    : 'session.history.loadingOlder'
                                 : 'session.history.positionRestored')}
                         </span>
                     </div>

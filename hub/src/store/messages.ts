@@ -245,6 +245,33 @@ export function getMessagesByPosition(
     return rows.reverse().map(toStoredMessage)
 }
 
+/** Paginate messages strictly newer than a composite display-position cursor.
+ *  Results are returned in ascending display order, so the first result is
+ *  adjacent to the supplied cursor. */
+export function getMessagesAfterPosition(
+    db: Database,
+    sessionId: string,
+    limit: number,
+    after: { at: number; seq: number }
+): StoredMessage[] {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 200
+    const rows = db.prepare(`
+        SELECT *, COALESCE(invoked_at, created_at) AS position_at
+        FROM messages
+        WHERE session_id = @sessionId
+          AND (COALESCE(invoked_at, created_at) > @afterAt OR (COALESCE(invoked_at, created_at) = @afterAt AND seq > @afterSeq))
+        ORDER BY position_at ASC, seq ASC
+        LIMIT @limit
+    `).all({
+        sessionId,
+        afterAt: after.at,
+        afterSeq: after.seq,
+        limit: safeLimit
+    }) as DbMessageRow[]
+
+    return rows.map(toStoredMessage)
+}
+
 /** Returns user messages that have a localId but no invoked_at.
  *  Includes future scheduled messages — used to surface all queued messages
  *  (including scheduled) for the Web floating bar on refresh / secondary clients. */

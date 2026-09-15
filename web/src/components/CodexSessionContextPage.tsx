@@ -989,8 +989,11 @@ function NativeCodexThread(props: {
                     isLoadingMessages={false}
                     messagesWarning={null}
                     hasMoreMessages={props.hasMoreMessages}
+                    hasNewerMessages={false}
                     isLoadingMoreMessages={props.isLoadingMoreMessages}
+                    isLoadingNewerMessages={false}
                     onLoadMore={props.onLoadMore}
+                    onLoadNewer={async () => {}}
                     pendingCount={0}
                     rawMessagesCount={props.messages.length + props.directMessageEchoes.length}
                     normalizedMessagesCount={ungroupedBlocks.length}
@@ -2302,6 +2305,15 @@ export function CodexSessionContextPage(props: {
             if (response.success !== true) {
                 throw new ApiError(response.error, 409, response.code)
             }
+            if (response.managedSessionId) {
+                updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => (
+                    current.filter((message) => message.id !== candidate.id)
+                ))
+                if (pageScopeRef.current === requestScope) {
+                    props.onRecovered?.(response.managedSessionId)
+                }
+                return
+            }
             updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
                 message.id !== candidate.id || message.deliveryState
                     ? message
@@ -2374,6 +2386,7 @@ export function CodexSessionContextPage(props: {
         pageScope,
         props.api,
         props.machineId,
+        props.onRecovered,
         props.sessionId,
         refetchNativeSnapshot,
         t,
@@ -2510,6 +2523,15 @@ export function CodexSessionContextPage(props: {
                 if (response.success !== true) {
                     throw new ApiError(response.error, 409, response.code)
                 }
+                if (response.managedSessionId) {
+                    updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => (
+                        current.filter((message) => message.id !== echoId)
+                    ))
+                    if (pageScopeRef.current === requestScope) {
+                        props.onRecovered?.(response.managedSessionId)
+                    }
+                    return
+                }
                 updateNativeDirectMessageEchoes(requestNativeDirectMessageScope, (current) => current.map((message) => (
                     message.id !== echoId || message.deliveryState
                         ? message
@@ -2550,7 +2572,9 @@ export function CodexSessionContextPage(props: {
                     && error.code === 'external_writer_active'
                 const rejectedByUnknownStatus = error instanceof ApiError
                     && error.code === 'session_status_unknown'
-                if (!needsVerification && attachments.length > 0) {
+                const rejectedAsManagedSession = error instanceof ApiError
+                    && error.code === 'not_native_session'
+                if (!needsVerification && !rejectedAsManagedSession && attachments.length > 0) {
                     void Promise.all(attachments.map((attachment) => (
                         props.api.deleteCodexSessionAttachment(props.sessionId, props.machineId!, attachment.id)
                     ))).catch(() => {})
@@ -2606,6 +2630,7 @@ export function CodexSessionContextPage(props: {
         pageScope,
         props.api,
         props.machineId,
+        props.onRecovered,
         props.sessionId,
         refetchNativeSnapshot,
         t,

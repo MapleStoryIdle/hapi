@@ -22,7 +22,7 @@ import { Store } from '../../store'
 function createApp(opts: {
     active?: boolean
     sendMessage?: (sessionId: string, payload: unknown) => Promise<void>
-    getMessagesPage?: () => unknown
+    getMessagesPage?: (sessionId: string, options: unknown) => unknown
     reconcileManagedSkill?: (machineId: string, payload: unknown) => Promise<unknown>
     store?: Store
 }) {
@@ -70,6 +70,38 @@ describe('GET /api/sessions/:id/messages freshness', () => {
         expect(response.headers.get('cache-control')).toBe('no-store, no-cache, must-revalidate')
         expect(response.headers.get('pragma')).toBe('no-cache')
         expect(await response.json()).toEqual({ messages: [{ id: 'latest' }], page: {} })
+    })
+
+    it('accepts a paired after cursor and forwards it to the sync engine', async () => {
+        let received: unknown
+        const { app } = createApp({
+            getMessagesPage: (_sessionId, options) => {
+                received = options
+                return { messages: [], page: {} }
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/messages?limit=20&afterAt=1000&afterSeq=8')
+
+        expect(response.status).toBe(200)
+        expect(received).toEqual({
+            limit: 20,
+            before: null,
+            after: { at: 1000, seq: 8 },
+        })
+    })
+
+    it('rejects partial or mixed before/after cursors', async () => {
+        const { app } = createApp({})
+
+        for (const query of [
+            '?beforeAt=1000',
+            '?afterSeq=8',
+            '?beforeAt=1000&beforeSeq=8&afterAt=2000&afterSeq=9',
+        ]) {
+            const response = await app.request(`/api/sessions/session-1/messages${query}`)
+            expect(response.status).toBe(400)
+        }
     })
 })
 

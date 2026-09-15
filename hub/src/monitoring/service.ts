@@ -14,6 +14,10 @@ export function monitorEnabled(config: MonitorConfig, now = Date.now()): boolean
     return config.enabled && (config.expiresAt === null || config.expiresAt > now)
 }
 
+function deliversToSourceSession(config: Pick<MonitorConfig, 'targetSession' | 'deliveryMode'>): boolean {
+    return Boolean(config.targetSession) && config.deliveryMode !== 'new-session'
+}
+
 /** Only assistant output is eligible; never webhook text, reasoning or tool output. */
 export function extractMonitorPlan(messages: Pick<StoredMessage, 'content'>[]): { text: string | null; completed: boolean; failed: boolean } {
     let text: string | null = null,
@@ -230,7 +234,7 @@ export class MonitoringService {
         })
         for (const { monitor, event } of pending) {
             if (event.state === 'investigating' || event.state === 'repairing') {
-                if (event.config.targetSession?.type === 'native-codex') await this.reconcileNative(monitor, event)
+                if (deliversToSourceSession(event.config) && event.config.targetSession?.type === 'native-codex') await this.reconcileNative(monitor, event)
                 else this.reconcile(monitor, event)
             }
         }
@@ -257,7 +261,7 @@ export class MonitoringService {
                     .some((m) => m.id === event.config.machineId)
             )
                 continue
-            const target = event.config.targetSession
+            const target = deliversToSourceSession(event.config) ? event.config.targetSession : undefined
             if (target?.type === 'managed') {
                 const session = this.getEngine()?.getSessionByNamespace(target.sessionId, monitor.namespace)
                 if (session?.thinking || (session && Object.keys(session.agentState?.requests ?? {}).length)) continue
@@ -281,27 +285,60 @@ export class MonitoringService {
         const claimedState = repairing ? 'repair_starting' : 'starting'
         try {
             const config = event.config
-            const result = config.targetSession
+            const directTarget = deliversToSourceSession(config)
+            const isolatedTarget = Boolean(config.targetSession) && !directTarget
+            const reuseIsolatedSession = isolatedTarget && repairing
+            if (reuseIsolatedSession && !event.sessionId) throw new Error('Investigation session is unavailable')
+            const result = directTarget
                 ? {
                       type: 'success' as const,
-                      sessionId: config.targetSession.sessionId
+                      sessionId: config.targetSession!.sessionId
                   }
-                : await engine.spawnSession(config.machineId, config.directory, config.agent, config.model || undefined, config.reasoningEffort || undefined, false, 'simple', undefined, undefined, undefined, repairing ? config.permissionMode : config.agent === 'codex' ? 'read-only' : 'plan', undefined, undefined, false)
+                : reuseIsolatedSession
+                    ? { type: 'success' as const, sessionId: event.sessionId! }
+                : await engine.spawnSession(
+                      config.machineId,
+                      config.directory,
+                      config.agent,
+                      config.model || undefined,
+                      config.agent === 'codex' ? config.reasoningEffort || undefined : undefined,
+                      false,
+                      'simple',
+                      undefined,
+                      undefined,
+                      config.agent === 'claude' ? config.reasoningEffort || undefined : undefined,
+                      repairing ? config.permissionMode : config.agent === 'codex' ? 'read-only' : 'plan',
+                      undefined,
+                      undefined,
+                      false
+                  )
             if (result.type !== 'success') throw new Error('Session dispatch could not be confirmed. Check the session list before retrying.')
             // Persist identity before sending. If anything fails, keep this ID for recovery.
             if (!this.store.monitors.transition(event.id, claimedState, claimedState, repairing ? { repairSessionId: result.sessionId } : { sessionId: result.sessionId })) throw new Error('Unable to save the spawned session identity')
-            const native = config.targetSession?.type === 'native-codex'
+            const native = directTarget && config.targetSession?.type === 'native-codex'
             if (!native) {
                 if (!(await engine.waitForSessionActive(result.sessionId))) throw new Error('Session did not connect. Open it before retrying.')
                 const session = engine.getSessionByNamespace(result.sessionId, monitor.namespace)
                 if (!session || (session.metadata?.machineId && session.metadata.machineId !== config.machineId)) throw new Error('Session is not available in this workspace')
-                if (config.targetSession && (session.metadata?.machineId !== config.machineId || session.metadata?.flavor !== config.agent)) throw new Error('The source environment changed; recreate this monitor from the session')
-                if (config.targetSession && session.metadata?.path !== config.directory) throw new Error('The source directory changed; recreate this monitor from the session')
-                if (config.targetSession && (session.thinking || Object.keys(session.agentState?.requests ?? {}).length)) {
+                if (directTarget && (session.metadata?.machineId !== config.machineId || session.metadata?.flavor !== config.agent)) throw new Error('The source environment changed; recreate this monitor from the session')
+                if (directTarget && session.metadata?.path !== config.directory) throw new Error('The source directory changed; recreate this monitor from the session')
+                if ((directTarget || reuseIsolatedSession) && (session.thinking || Object.keys(session.agentState?.requests ?? {}).length)) {
                     this.store.monitors.transition(event.id, claimedState, event.state)
                     return
                 }
                 if (config.targetSession && repairing) assertUnchangedBoundPlan(event, this.store.messages.getMessages(result.sessionId, 50))
+                if (isolatedTarget && !repairing) {
+                    await engine.setMonitorSessionMetadata(result.sessionId, {
+                        monitorId: monitor.id,
+                        incidentId: event.id,
+                        sourceSession: config.targetSession!,
+                        createdAt: Date.now(),
+                        mode: 'isolated-trigger'
+                    })
+                }
+                if (reuseIsolatedSession) {
+                    await engine.applySessionConfig(result.sessionId, { permissionMode: config.permissionMode })
+                }
             }
             const latest = this.store.monitors.get(monitor.id, monitor.namespace)
             if (this.abort.signal.aborted || !latest || !monitorEnabled(latest.config)) throw new Error('Rule stopped before the message was sent. The empty session is available for inspection.')

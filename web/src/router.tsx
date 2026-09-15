@@ -1123,8 +1123,11 @@ function SessionPage() {
         warning: messagesWarning,
         isLoading: messagesLoading,
         isLoadingMore: messagesLoadingMore,
+        isLoadingNewer: messagesLoadingNewer,
         hasMore: messagesHasMore,
+        hasNewer: messagesHasNewer,
         loadMore: loadMoreMessages,
+        loadNewer: loadNewerMessages,
         refetch: refetchMessages,
         pendingCount,
         messagesVersion,
@@ -1426,14 +1429,17 @@ function SessionPage() {
                 pendingMessages={pendingMessages}
                 messagesWarning={messagesWarning}
                 hasMoreMessages={messagesHasMore}
+                hasNewerMessages={messagesHasNewer}
                 isLoadingMessages={messagesLoading}
                 isLoadingMoreMessages={messagesLoadingMore}
+                isLoadingNewerMessages={messagesLoadingNewer}
                 isSending={isSending}
                 pendingCount={pendingCount}
                 messagesVersion={messagesVersion}
                 onBack={goBack}
                 onRefresh={refreshSelectedSession}
                 onLoadMore={loadMoreMessages}
+                onLoadNewer={loadNewerMessages}
                 onSend={sendMessage}
                 onFlushPending={flushPending}
                 onAtBottomChange={setAtBottom}

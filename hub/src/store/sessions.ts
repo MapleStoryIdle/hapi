@@ -53,7 +53,7 @@ const PARSE_IDENTITY_FIELDS = ['path', 'host'] as const
 
 const ROUTING_FIELDS = ['flavor', 'machineId'] as const
 
-const RELATION_FIELDS = ['sideSession'] as const
+const RELATION_FIELDS = ['sideSession', 'monitorSession'] as const
 
 // Ownership is Hub-authored state. A stale CLI cleanup payload must not
 // silently reclaim a session that Hub already released from SHAPI control.

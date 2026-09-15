@@ -408,6 +408,7 @@ export type SendCodexLocalSessionMessageResponse =
     | {
         success: true
         status: 'processing' | 'queued'
+        managedSessionId?: string
         startedAt?: number
         progress?: CodexLocalSessionDirectSendProgress
         queuedAt?: number

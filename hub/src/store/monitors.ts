@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import type { Monitor, MonitorActivity, MonitorActivityOutcome, MonitorActivitySource, MonitorBucket, MonitorCallStats, MonitorConfig, MonitorDetail, MonitorHealth, MonitorIncident, MonitorIncidentState, MonitorWebhook } from '@hapi/protocol/monitoring'
+import { MonitorConfigSchema, type Monitor, type MonitorActivity, type MonitorActivityOutcome, type MonitorActivitySource, type MonitorBucket, type MonitorCallStats, type MonitorConfig, type MonitorDetail, type MonitorHealth, type MonitorIncident, type MonitorIncidentState, type MonitorWebhook } from '@hapi/protocol/monitoring'
 import { nextMonitorRun } from '../monitoring/schedule'
 import { MonitorTokenCipher } from './monitorTokenCipher'
 
@@ -65,7 +65,7 @@ type MonitorRow = {
     next_check_at: number
     consecutive_failures: number
 }
-export type MonitorDispatchConfig = Pick<MonitorConfig, 'machineId' | 'directory' | 'agent' | 'model' | 'reasoningEffort' | 'permissionMode' | 'prompt' | 'targetSession'>
+export type MonitorDispatchConfig = Pick<MonitorConfig, 'machineId' | 'directory' | 'agent' | 'model' | 'reasoningEffort' | 'permissionMode' | 'prompt' | 'targetSession' | 'deliveryMode'>
 type IncidentData = Omit<MonitorIncident, 'id' | 'monitorId' | 'createdAt' | 'updatedAt' | 'state'> & { details: string; config: MonitorDispatchConfig }
 type IncidentRow = {
     id: string
@@ -101,11 +101,15 @@ function incident(row: IncidentRow): StoredMonitorIncident {
         updatedAt: row.updated_at
     }
 }
+
+function monitorConfig(value: string): MonitorConfig {
+    return MonitorConfigSchema.parse(JSON.parse(value))
+}
 function publicIncident(value: StoredMonitorIncident): MonitorIncident {
     const { details: _details, config, ...result } = value
     const sessionId = value.repairSessionId ?? value.sessionId
     const deliverySession =
-        config.targetSession
+        config.targetSession && config.deliveryMode !== 'new-session'
             ? {
                   type: config.targetSession.type,
                   sessionId: config.targetSession.sessionId,
@@ -181,7 +185,7 @@ export class MonitorStore {
         return {
             id: row.id,
             namespace: row.namespace,
-            config: JSON.parse(row.config) as MonitorConfig,
+            config: monitorConfig(row.config),
             health: row.health,
             nextCheckAt: row.next_check_at,
             consecutiveFailures: row.consecutive_failures
@@ -231,10 +235,16 @@ export class MonitorStore {
         if (!row) return null
         const buckets = this.db.query('SELECT at,total,ok,failures,latency_ms AS latencyMs FROM monitor_buckets WHERE monitor_id = ? AND at >= ? ORDER BY at').all(id, Math.floor((now - MONITOR_WEEK_MS) / 3600_000) * 3600_000) as MonitorBucket[]
         const open = this.openForMonitor(id)
-        const config = JSON.parse(row.config) as MonitorConfig
+        const config = monitorConfig(row.config)
         const recent = this.db.query("SELECT * FROM monitor_incidents WHERE monitor_id=? AND json_extract(data,'$.sessionId') IS NOT NULL ORDER BY created_at DESC LIMIT 1").get(id) as IncidentRow | null
         const last = recent ? incident(recent) : null
-        const relatedSession: Monitor['relatedSession'] = config.targetSession ? { ...config.targetSession, machineId: config.machineId } : last?.sessionId ? { type: 'managed', sessionId: last.repairSessionId ?? last.sessionId } : undefined
+        const relatedSession: Monitor['relatedSession'] = config.targetSession && config.deliveryMode !== 'new-session'
+            ? { ...config.targetSession, machineId: config.machineId }
+            : last?.sessionId
+                ? { type: 'managed', sessionId: last.repairSessionId ?? last.sessionId }
+                : config.targetSession
+                    ? { ...config.targetSession, machineId: config.machineId }
+                    : undefined
         // List screens must not read every historical plan or copy credentials.
         const incidents = includeHistory
             ? (
@@ -270,7 +280,7 @@ export class MonitorStore {
         }
         return {
             id,
-            config: JSON.parse(row.config) as MonitorConfig,
+            config,
             createdAt: row.created_at,
             updatedAt: row.updated_at,
             health: row.health,
@@ -424,7 +434,7 @@ export class MonitorStore {
         if (existing) return { incidentId: existing.id, created: false }
         // One open incident per rule; repeats update metrics, never spawn an agent storm.
         const id = randomUUID()
-        const { machineId, directory, agent, model, reasoningEffort, permissionMode, prompt, targetSession } = monitor.config
+        const { machineId, directory, agent, model, reasoningEffort, permissionMode, prompt, targetSession, deliveryMode } = monitor.config
         const config: MonitorDispatchConfig = {
             machineId,
             directory,
@@ -433,7 +443,8 @@ export class MonitorStore {
             reasoningEffort,
             permissionMode,
             prompt,
-            targetSession
+            targetSession,
+            deliveryMode
         }
         const data: IncidentData = {
             summary,

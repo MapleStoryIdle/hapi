@@ -30,6 +30,19 @@ export type CodexUsageAccount = {
     source: 'currentConnection'
 }
 
+/** Matches Codex TUI: cached input is reported separately from effective usage. */
+export function getCodexNonCachedInput(usage: CodexTokenUsage): number | null {
+    if (usage.input === null || usage.cachedInput === null) return null
+    return Math.max(0, usage.input - usage.cachedInput)
+}
+
+/** Matches Codex TUI `blended_total`: non-cached input plus output. */
+export function getCodexBlendedTotal(usage: CodexTokenUsage): number | null {
+    const input = getCodexNonCachedInput(usage)
+    if (input === null || usage.output === null) return null
+    return input + Math.max(0, usage.output)
+}
+
 function record(value: unknown): Record<string, unknown> | null {
     return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 }

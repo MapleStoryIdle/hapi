@@ -1840,15 +1840,127 @@ describe('Codex Desktop import routes', () => {
             const response = await app.request(`/api/codex/sessions/${sessionId}/messages`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ machineId: 'mac-runner', message: 'Use the connected SHAPI session' })
+                body: JSON.stringify({
+                    machineId: 'mac-runner',
+                    message: 'Use the connected SHAPI session',
+                    clientMessageId: 'native:handoff-active'
+                })
             })
             expect(response.status).toBe(202)
-            expect(await response.json()).toMatchObject({ success: true, status: 'processing' })
+            expect(await response.json()).toMatchObject({
+                success: true,
+                status: 'processing',
+                managedSessionId: 'hapi-managed-session'
+            })
             expect(normalSendCalls).toEqual([[
                 'hapi-managed-session',
-                { text: 'Use the connected SHAPI session', sentFrom: 'webapp' }
+                { text: 'Use the connected SHAPI session', localId: 'native:handoff-active', sentFrom: 'webapp' }
             ]])
             expect(nativeSendCalls).toEqual([])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('reopens an inactive managed Codex session before routing the message', async () => {
+        const store = new Store(':memory:')
+        const nativeSessionId = '59575757-5757-4757-8757-575656565657'
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const normalSendCalls: unknown[][] = []
+        const reopenCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            getSessionsByNamespace: () => [{
+                id: 'inactive-managed-session',
+                active: false,
+                metadata: { machineId: 'mac-runner', codexSessionId: nativeSessionId }
+            }],
+            reopenSession: async (...args: unknown[]) => {
+                reopenCalls.push(args)
+                return { type: 'success' as const, sessionId: 'resumed-managed-session', resumed: true }
+            },
+            sendMessage: async (...args: unknown[]) => {
+                normalSendCalls.push(args)
+            },
+            sendCodexLocalSessionMessage: async () => {
+                throw new Error('native transport must not be used')
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${nativeSessionId}/messages`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    machineId: 'mac-runner',
+                    message: 'Resume and continue',
+                    clientMessageId: 'native:handoff-1'
+                })
+            })
+
+            expect(response.status).toBe(202)
+            expect(await response.json()).toMatchObject({
+                success: true,
+                status: 'processing',
+                managedSessionId: 'resumed-managed-session'
+            })
+            expect(reopenCalls).toEqual([['inactive-managed-session', 'default']])
+            expect(normalSendCalls).toEqual([[
+                'resumed-managed-session',
+                { text: 'Resume and continue', localId: 'native:handoff-1', sentFrom: 'webapp' }
+            ]])
+        } finally {
+            store.close()
+        }
+    })
+
+    it('coalesces concurrent sends while an inactive managed Codex session reopens', async () => {
+        const store = new Store(':memory:')
+        const nativeSessionId = '59575757-5757-4757-8757-575656565658'
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        let resolveReopen!: (result: { type: 'success'; sessionId: string; resumed: true }) => void
+        const reopenPromise = new Promise<{ type: 'success'; sessionId: string; resumed: true }>((resolve) => {
+            resolveReopen = resolve
+        })
+        let reopenCount = 0
+        const normalSendCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            getSessionsByNamespace: () => [{
+                id: 'inactive-managed-session',
+                active: false,
+                metadata: { machineId: 'mac-runner', codexSessionId: nativeSessionId }
+            }],
+            reopenSession: async () => {
+                reopenCount += 1
+                return await reopenPromise
+            },
+            sendMessage: async (...args: unknown[]) => {
+                normalSendCalls.push(args)
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+        const send = (message: string, clientMessageId: string) => app.request(`/api/codex/sessions/${nativeSessionId}/messages`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ machineId: 'mac-runner', message, clientMessageId })
+        })
+
+        try {
+            const first = send('First queued handoff', 'native:handoff-concurrent-1')
+            const second = send('Second queued handoff', 'native:handoff-concurrent-2')
+            await Bun.sleep(0)
+            expect(reopenCount).toBe(1)
+
+            resolveReopen({ type: 'success', sessionId: 'one-resumed-session', resumed: true })
+            const responses = await Promise.all([first, second])
+            expect(responses.map((response) => response.status)).toEqual([202, 202])
+            expect(reopenCount).toBe(1)
+            expect(normalSendCalls).toEqual([
+                ['one-resumed-session', { text: 'First queued handoff', localId: 'native:handoff-concurrent-1', sentFrom: 'webapp' }],
+                ['one-resumed-session', { text: 'Second queued handoff', localId: 'native:handoff-concurrent-2', sentFrom: 'webapp' }]
+            ])
         } finally {
             store.close()
         }

@@ -1,4 +1,8 @@
 import type { AgentEvent, AgentEventBlock, ChatBlock, NormalizedMessage } from '@/chat/types'
+import {
+    getCodexFailureMessageSpecificity,
+    selectPreferredCodexFailureMessage,
+} from '@hapi/protocol'
 
 function parseClaudeUsageLimit(text: string): AgentEvent | null {
     const reachedMatch = text.match(/^Claude AI usage limit reached\|(\d+)(?:\|([^|]*))?$/)
@@ -162,7 +166,7 @@ export function foldTaskStatusEvents(blocks: ChatBlock[]): ChatBlock[] {
             continue
         }
 
-        const event = block.event as { type: string; status?: unknown; code?: unknown }
+        const event = block.event as AgentEvent & { type: string; status?: unknown; code?: unknown; message?: unknown }
         if (event.type !== 'task-status') {
             result.push(block)
             continue
@@ -170,14 +174,31 @@ export function foldTaskStatusEvents(blocks: ChatBlock[]): ChatBlock[] {
 
         const prev = result[result.length - 1] as AgentEventBlock | undefined
         const previousEvent = prev?.kind === 'agent-event'
-            ? prev.event as { type: string; status?: unknown; code?: unknown }
+            ? prev.event as AgentEvent & { type: string; status?: unknown; code?: unknown; message?: unknown }
             : null
         if (previousEvent?.type === 'task-status') {
-            const preserveSpecificFailure = previousEvent.status === 'failed'
-                && previousEvent.code !== 'unknown'
-                && event.status === 'failed'
-                && event.code === 'unknown'
-            if (preserveSpecificFailure) {
+            const previousMessage = typeof previousEvent.message === 'string' ? previousEvent.message : null
+            const incomingMessage = typeof event.message === 'string' ? event.message : null
+            const preferredMessage = selectPreferredCodexFailureMessage(previousMessage, incomingMessage)
+            if (
+                preferredMessage === previousMessage
+                && getCodexFailureMessageSpecificity(previousMessage) > getCodexFailureMessageSpecificity(incomingMessage)
+            ) {
+                if (previousEvent.status === 'failed' && event.status === 'failed') {
+                    continue
+                }
+                const previousTaskStatus = previousEvent as Extract<AgentEvent, { type: 'task-status' }>
+                const currentTaskStatus = event as Extract<AgentEvent, { type: 'task-status' }>
+                result[result.length - 1] = {
+                    ...block,
+                    event: {
+                        ...currentTaskStatus,
+                        code: previousTaskStatus.code,
+                        message: previousTaskStatus.message,
+                        ...(previousTaskStatus.actionUrl ? { actionUrl: previousTaskStatus.actionUrl } : {}),
+                        ...(previousTaskStatus.resetAtText ? { resetAtText: previousTaskStatus.resetAtText } : {}),
+                    }
+                }
                 continue
             }
             result[result.length - 1] = block

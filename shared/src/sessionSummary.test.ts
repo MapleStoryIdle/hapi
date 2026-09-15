@@ -100,6 +100,21 @@ describe('toSessionSummary', () => {
         expect(summary.metadata?.lifecycleState).toBe('archived')
     })
 
+    it('includes the Monitor origin marker for session-list badges', () => {
+        const monitorSession = {
+            monitorId: 'monitor-1',
+            incidentId: 'incident-1',
+            sourceSession: { type: 'managed' as const, sessionId: 'source-1' },
+            createdAt: 1,
+            mode: 'isolated-trigger' as const
+        }
+        const summary = toSessionSummary(makeSession({
+            metadata: { path: '/proj', host: 'local', monitorSession }
+        }))
+
+        expect(summary.metadata?.monitorSession).toEqual(monitorSession)
+    })
+
     it('includes structured pendingRequests for hover-tooltip copy', () => {
         const summary = toSessionSummary(makeSession({
             updatedAt: 5000,

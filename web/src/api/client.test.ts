@@ -193,6 +193,7 @@ describe('ApiClient error mapping', () => {
         const config = {
             name: 'API health',
             kind: 'http' as const,
+            deliveryMode: 'current-session' as const,
             machineId: 'machine / one',
             directory: '/work/project',
             agent: 'codex' as const,

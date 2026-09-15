@@ -40,6 +40,7 @@ import type {
     PermissionMode,
     Session,
     SideSessionMetadata,
+    MonitorSessionMetadata,
     SyncEvent
 } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
@@ -440,7 +441,11 @@ export class SyncEngine {
 
     getMessagesPage(
         sessionId: string,
-        options: { limit: number; before?: { at: number; seq: number } | null }
+        options: {
+            limit: number
+            before?: { at: number; seq: number } | null
+            after?: { at: number; seq: number } | null
+        }
     ): {
         messages: DecryptedMessage[]
         page: {
@@ -448,6 +453,9 @@ export class SyncEngine {
             nextBeforeSeq: number | null
             nextBeforeAt: number | null
             hasMore: boolean
+            nextAfterSeq?: number | null
+            nextAfterAt?: number | null
+            hasMoreAfter?: boolean
         }
     } {
         return this.messageService.getMessagesPage(sessionId, options)
@@ -950,6 +958,10 @@ export class SyncEngine {
             forkSessionId,
             approvedNewDirectoryCreation
         )
+    }
+
+    async setMonitorSessionMetadata(sessionId: string, monitorSession: MonitorSessionMetadata): Promise<void> {
+        await this.sessionCache.setMonitorSessionMetadata(sessionId, monitorSession)
     }
 
     async createSideSession(sessionId: string, namespace: string): Promise<CreateSideSessionResponse> {

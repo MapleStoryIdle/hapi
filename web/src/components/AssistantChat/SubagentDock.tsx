@@ -70,6 +70,13 @@ export function getSortedCodexSubagents(subagents: Record<string, CodexSubagentS
     })
 }
 
+export function getCodexSubagentConfigurationLabel(subagent: CodexSubagentState): string | null {
+    const values = [subagent.model, subagent.modelReasoningEffort]
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value))
+    return values.length > 0 ? values.join(' · ') : null
+}
+
 function extractAgentPayload(message: DecryptedMessage): Record<string, unknown> | null {
     const wrapped = unwrapRoleWrappedRecordEnvelope(message.content)
     if (wrapped?.role !== 'agent') return null
@@ -209,6 +216,7 @@ function SubagentDrawer(props: {
     const events = useMemo(() => getSubagentEvents(props.messages, props.subagent), [props.messages, props.subagent])
     const active = isCodexSubagentActive(props.subagent)
     const duration = formatDuration((props.subagent.completedAt ?? Date.now()) - props.subagent.startedAt)
+    const configuration = getCodexSubagentConfigurationLabel(props.subagent)
 
     return (
         <div className="fixed inset-0 z-[80] flex justify-end bg-black/35 backdrop-blur-[2px]" onClick={props.onClose}>
@@ -226,6 +234,9 @@ function SubagentDrawer(props: {
                         <div className="text-xs text-[var(--app-hint)]">
                             {props.subagent.statusText ?? props.subagent.status} · {duration}
                         </div>
+                        {configuration ? (
+                            <div className="mt-0.5 truncate text-xs text-[var(--app-hint)]">{configuration}</div>
+                        ) : null}
                     </div>
                     <button
                         type="button"
@@ -293,6 +304,7 @@ export function SubagentDock(props: {
                         {subagents.map((subagent) => {
                             const active = isCodexSubagentActive(subagent)
                             const duration = formatDuration((subagent.completedAt ?? Date.now()) - subagent.startedAt)
+                            const configuration = getCodexSubagentConfigurationLabel(subagent)
                             return (
                                 <button
                                     key={subagent.id}
@@ -322,6 +334,11 @@ export function SubagentDock(props: {
                                         <span className="mt-0.5 block truncate text-xs text-[var(--app-hint)]">
                                             {subagent.activity ?? subagent.statusText ?? subagent.status} · {duration}
                                         </span>
+                                        {configuration ? (
+                                            <span className="mt-0.5 block truncate text-[11px] text-[var(--app-hint)]">
+                                                {configuration}
+                                            </span>
+                                        ) : null}
                                     </span>
                                 </button>
                             )
