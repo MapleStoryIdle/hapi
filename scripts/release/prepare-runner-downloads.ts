@@ -52,12 +52,13 @@ async function main(): Promise<void> {
         const binary = join(binariesDir, artifact.target, 'hapi')
         if (!existsSync(binary)) throw new Error(`Missing runner binary: ${binary}`)
         const archive = join(releaseDir, artifact.fileName)
-        const process = Bun.spawnSync({
+        const archiveProcess = Bun.spawnSync({
             cmd: ['tar', '-czf', archive, '-C', join(binariesDir, artifact.target), 'hapi'],
+            env: { ...process.env, COPYFILE_DISABLE: '1' },
             stdout: 'inherit',
             stderr: 'inherit',
         })
-        if (process.exitCode !== 0) throw new Error(`Unable to package ${artifact.target}`)
+        if (archiveProcess.exitCode !== 0) throw new Error(`Unable to package ${artifact.target}`)
         const digest = sha256(archive)
         checksumLines.push(`${digest}  ${artifact.fileName}`)
         manifestArtifacts.push({

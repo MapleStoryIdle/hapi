@@ -83,6 +83,20 @@ fi
 [[ "$("$TMP_ROOT/bin/shapi" --version)" == "SHAPI 1.2.3" ]]
 [[ "$(cat "$TMP_ROOT/home/.hapi/credentials/runner.json")" == "keep-me" ]]
 
+# The small manifest is fetched first, but an already-current binary skips the
+# large archive entirely.
+for archive in "$TMP_ROOT/public/runner/1.2.3"/*.tar.gz; do
+    mv "$archive" "$archive.unavailable"
+done
+HOME="$TMP_ROOT/home" SHAPI_INSTALL_DIR="$TMP_ROOT/bin" \
+    sh "$REPO_ROOT/scripts/install.sh" --base-url "http://127.0.0.1:$PORT" >"$TMP_ROOT/current-version.log"
+grep -Fqx 'SHAPI is already up to date: SHAPI 1.2.3' "$TMP_ROOT/current-version.log"
+grep -Fqx 'Skipping Runner download. Checking workspace setup...' "$TMP_ROOT/current-version.log"
+if grep -Fq 'Downloading Runner' "$TMP_ROOT/current-version.log"; then
+    echo "Current Runner unexpectedly downloaded its archive" >&2
+    exit 1
+fi
+
 prepare 1.2.4
 HOME="$TMP_ROOT/home" SHAPI_INSTALL_DIR="$TMP_ROOT/bin" \
     sh "$REPO_ROOT/scripts/install.sh" --base-url "http://127.0.0.1:$PORT" >/dev/null

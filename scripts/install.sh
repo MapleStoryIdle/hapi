@@ -234,75 +234,91 @@ case "$release_url" in
     *) echo "Invalid latest.json: downloadBaseUrl must use HTTPS" >&2; exit 1 ;;
 esac
 release_url="${release_url%/}"
-echo "Downloading Runner $version ($artifact)"
-download "$release_url/$artifact" "$tmp_dir/$artifact" yes
-echo "Download complete. Verifying Runner package..."
-download "$release_url/checksums.txt" "$tmp_dir/checksums.txt"
-
-expected="$(awk -v file="$artifact" '$2 == file || $2 == "*" file { print $1; exit }' "$tmp_dir/checksums.txt")"
-[ -n "$expected" ] || { echo "No checksum published for $artifact" >&2; exit 1; }
-manifest_expected="$(awk -v file="\"file\": \"$artifact\"" '
-    index($0, file) { found = 1; next }
-    found && /"sha256"[[:space:]]*:/ {
-        line = $0
-        sub(/^.*"sha256"[[:space:]]*:[[:space:]]*"/, "", line)
-        sub(/".*$/, "", line)
-        print line
-        exit
-    }
-' "$tmp_dir/latest.json")"
-printf '%s\n' "$manifest_expected" | grep -Eq '^[0-9a-f]{64}$' \
-    || { echo "Invalid latest.json: artifact SHA-256 is missing" >&2; exit 1; }
-[ "$expected" = "$manifest_expected" ] \
-    || { echo "Release checksum does not match the Hub manifest" >&2; exit 1; }
-
-if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "$tmp_dir/$artifact" | awk '{ print $1 }')"
-elif command -v shasum >/dev/null 2>&1; then
-    actual="$(shasum -a 256 "$tmp_dir/$artifact" | awk '{ print $1 }')"
-else
-    echo "sha256sum or shasum is required" >&2
-    exit 1
-fi
-
-[ "$actual" = "$expected" ] || { echo "SHA-256 verification failed" >&2; exit 1; }
-
-echo "Verification complete. Unpacking Runner..."
-mkdir "$tmp_dir/unpacked"
-archive_entries="$(tar -tzf "$tmp_dir/$artifact")"
-[ "$archive_entries" = "hapi" ] || { echo "Release archive contains unexpected paths" >&2; exit 1; }
-tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir/unpacked"
-[ -f "$tmp_dir/unpacked/hapi" ] || { echo "Release archive does not contain hapi" >&2; exit 1; }
-chmod 755 "$tmp_dir/unpacked/hapi"
-
-reported_version="$("$tmp_dir/unpacked/hapi" --version)"
-case "$reported_version" in
-    "SHAPI version: $version"|"SHAPI $version") ;;
-    *) echo "Downloaded binary reported an unexpected version: $reported_version" >&2; exit 1 ;;
-esac
-
-echo "Runner package ready. Installing and configuring..."
 mkdir -p "$INSTALL_DIR"
 target="$INSTALL_DIR/shapi"
-if [ -f "$target" ]; then
-    current_version="$("$target" --version 2>/dev/null || echo unknown)"
-    if [ "$current_version" = "$reported_version" ]; then
-        echo "SHAPI is already up to date: $reported_version"
-        install_required="no"
-    else
-        install_required="yes"
-        cp "$target" "$INSTALL_DIR/shapi.previous"
-        echo "Updating $current_version -> $reported_version"
-    fi
-else
-    install_required="yes"
-    echo "Installing $reported_version"
-fi
+current_version="unknown"
+[ ! -x "$target" ] || current_version="$("$target" --version 2>/dev/null || echo unknown)"
+case "$current_version" in
+    "SHAPI version: $version"|"SHAPI $version")
+        echo "SHAPI is already up to date: $current_version"
+        echo "Skipping Runner download. Checking workspace setup..."
+        ;;
+    *)
+        echo "Downloading Runner $version ($artifact)"
+        download "$release_url/$artifact" "$tmp_dir/$artifact" yes
+        echo "Download complete. Verifying Runner package..."
+        download "$release_url/checksums.txt" "$tmp_dir/checksums.txt"
 
-if [ "$install_required" = "yes" ]; then
-    install -m 755 "$tmp_dir/unpacked/hapi" "$INSTALL_DIR/.shapi.next"
-    mv -f "$INSTALL_DIR/.shapi.next" "$target"
-fi
+        expected="$(awk -v file="$artifact" '$2 == file || $2 == "*" file { print $1; exit }' "$tmp_dir/checksums.txt")"
+        [ -n "$expected" ] || { echo "No checksum published for $artifact" >&2; exit 1; }
+        manifest_expected="$(awk -v file="\"file\": \"$artifact\"" '
+            index($0, file) { found = 1; next }
+            found && /"sha256"[[:space:]]*:/ {
+                line = $0
+                sub(/^.*"sha256"[[:space:]]*:[[:space:]]*"/, "", line)
+                sub(/".*$/, "", line)
+                print line
+                exit
+            }
+        ' "$tmp_dir/latest.json")"
+        printf '%s\n' "$manifest_expected" | grep -Eq '^[0-9a-f]{64}$' \
+            || { echo "Invalid latest.json: artifact SHA-256 is missing" >&2; exit 1; }
+        [ "$expected" = "$manifest_expected" ] \
+            || { echo "Release checksum does not match the Hub manifest" >&2; exit 1; }
+
+        if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "$tmp_dir/$artifact" | awk '{ print $1 }')"
+        elif command -v shasum >/dev/null 2>&1; then
+            actual="$(shasum -a 256 "$tmp_dir/$artifact" | awk '{ print $1 }')"
+        else
+            echo "sha256sum or shasum is required" >&2
+            exit 1
+        fi
+        [ "$actual" = "$expected" ] || { echo "SHA-256 verification failed" >&2; exit 1; }
+
+        echo "Verification complete. Unpacking Runner..."
+        mkdir "$tmp_dir/unpacked"
+        if ! archive_entries="$(tar -tzf "$tmp_dir/$artifact" 2>"$tmp_dir/tar-list.log")"; then
+            cat "$tmp_dir/tar-list.log" >&2
+            exit 1
+        fi
+        archive_valid="yes"
+        archive_has_runner="no"
+        while IFS= read -r entry; do
+            case "$entry" in
+                hapi|./hapi) archive_has_runner="yes" ;;
+                ._hapi|./._hapi) ;;
+                *) archive_valid="no" ;;
+            esac
+        done <<EOF
+$archive_entries
+EOF
+        [ "$archive_valid" = "yes" ] && [ "$archive_has_runner" = "yes" ] \
+            || { echo "Release archive contains unexpected paths" >&2; exit 1; }
+        if ! tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir/unpacked" 2>"$tmp_dir/tar-extract.log"; then
+            cat "$tmp_dir/tar-extract.log" >&2
+            exit 1
+        fi
+        [ -f "$tmp_dir/unpacked/hapi" ] || { echo "Release archive does not contain hapi" >&2; exit 1; }
+        chmod 755 "$tmp_dir/unpacked/hapi"
+
+        reported_version="$("$tmp_dir/unpacked/hapi" --version)"
+        case "$reported_version" in
+            "SHAPI version: $version"|"SHAPI $version") ;;
+            *) echo "Downloaded binary reported an unexpected version: $reported_version" >&2; exit 1 ;;
+        esac
+
+        echo "Runner package ready. Installing and configuring..."
+        if [ -f "$target" ]; then
+            cp "$target" "$INSTALL_DIR/shapi.previous"
+            echo "Updating $current_version -> $reported_version"
+        else
+            echo "Installing $reported_version"
+        fi
+        install -m 755 "$tmp_dir/unpacked/hapi" "$INSTALL_DIR/.shapi.next"
+        mv -f "$INSTALL_DIR/.shapi.next" "$target"
+        ;;
+esac
 ln -sf shapi "$INSTALL_DIR/hapi"
 
 echo "Installed: $target"
