@@ -40,7 +40,7 @@ it('uses the available viewport height for the desktop file browser', async () =
     show({ browseCodexSessionFiles: vi.fn().mockResolvedValue({ success: true, isGitRepository: false, entries: [] }) })
     const drawer = screen.getByTestId('session-files-drawer')
     expect(drawer).toHaveAttribute('data-desktop-dialog', 'true')
-    expect(drawer).toHaveClass('h-[calc(100dvh-3rem)]')
+    expect(drawer).toHaveStyle({ height: 'calc(100dvh - 3rem)' })
 })
 it('hides tabs for non-Git directories and returns from preview in the same sheet', async () => {
     const browse = vi.fn().mockResolvedValue({ success: true, isGitRepository: false, entries: [{ name: 'note.md', type: 'file' }] })

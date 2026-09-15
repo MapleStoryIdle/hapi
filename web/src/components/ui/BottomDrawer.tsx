@@ -34,6 +34,8 @@ export function BottomDrawer(props: {
      */
     inputDialog?: boolean
     desktopClassName?: string
+    /** Explicit desktop dialog height; inline so app-safe-dialog cannot collapse it. */
+    desktopHeight?: CSSProperties['height']
     /** Fill 70% of the visible viewport, including header and safe-area padding. */
     fixedHeight?: boolean
     header?: ReactNode
@@ -370,6 +372,7 @@ export function BottomDrawer(props: {
                     style={{
                         zIndex: layer + 1,
                         left: 'calc(50% + (var(--app-safe-area-left) - var(--app-safe-area-right)) / 2)',
+                        ...(props.desktopHeight ? { height: props.desktopHeight } : {}),
                         ...style
                     }}
                     data-chat-overlay
