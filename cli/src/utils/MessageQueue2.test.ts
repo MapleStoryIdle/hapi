@@ -448,7 +448,7 @@ describe('MessageQueue2', () => {
         expect(batch3?.mode.type).toBe('A');
     });
 
-    it('should call onBatchConsumed with collected localIds', async () => {
+    it('should consume Hub messages one turn at a time', async () => {
         const queue = new MessageQueue2<string>(mode => mode);
         const received: string[][] = [];
         queue.onBatchConsumed = (localIds) => { received.push(localIds); };
@@ -456,13 +456,38 @@ describe('MessageQueue2', () => {
         queue.push('message1', 'local', 'id1');
         queue.push('message2', 'local', 'id2');
 
-        await queue.waitForMessagesAndGetAsString();
-        expect(received).toEqual([['id1', 'id2']]);
+        const first = await queue.waitForMessagesAndGetAsString();
+        expect(first?.message).toBe('message1');
+        expect(first?.isolate).toBe(false);
+        expect(received).toEqual([['id1']]);
+        expect(queue.size()).toBe(1);
+
+        const second = await queue.waitForMessagesAndGetAsString();
+        expect(second?.message).toBe('message2');
+        expect(second?.isolate).toBe(false);
+        expect(received).toEqual([['id1'], ['id2']]);
+        expect(queue.size()).toBe(0);
 
         // Push more with a different mode and consume again
         queue.push('message3', 'remote', 'id3');
         await queue.waitForMessagesAndGetAsString();
-        expect(received).toEqual([['id1', 'id2'], ['id3']]);
+        expect(received).toEqual([['id1'], ['id2'], ['id3']]);
+    });
+
+    it('should stop an internal batch before a Hub message', async () => {
+        const queue = new MessageQueue2<string>(mode => mode);
+
+        queue.push('internal1', 'local');
+        queue.push('internal2', 'local');
+        queue.push('user turn', 'local', 'id1');
+
+        const internal = await queue.waitForMessagesAndGetAsString();
+        expect(internal?.message).toBe('internal1\ninternal2');
+        expect(queue.size()).toBe(1);
+
+        const userTurn = await queue.waitForMessagesAndGetAsString();
+        expect(userTurn?.message).toBe('user turn');
+        expect(queue.size()).toBe(0);
     });
 
     it('should report localIds batch-by-batch when modes differ', async () => {
