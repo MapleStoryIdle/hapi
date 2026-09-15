@@ -35,7 +35,7 @@ beforeEach(() => {
 })
 
 describe('SkillsPage', () => {
-    it('shows managed Skills and supports disable and cache actions', async () => {
+    it('shows managed Skills, Runner connectivity, and supports disabling', async () => {
         const queryClient = new QueryClient()
         render(<QueryClientProvider client={queryClient}><I18nProvider><SkillsPage /></I18nProvider></QueryClientProvider>)
 
@@ -45,8 +45,8 @@ describe('SkillsPage', () => {
         await waitFor(() => expect(runtime.api.setManagedSkillEnabled).toHaveBeenCalledWith('public-share', false))
 
         expect(screen.queryByText('Share one file.')).not.toBeInTheDocument()
-        fireEvent.click(screen.getByRole('button', { name: 'Cache' }))
-        await waitFor(() => expect(runtime.api.cacheManagedSkill).toHaveBeenCalledWith('public-share', 'runner-1'))
+        expect(screen.getByLabelText('Runner online')).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Cache' })).not.toBeInTheDocument()
     })
 
     it('uses concise Chinese copy', async () => {
@@ -55,7 +55,7 @@ describe('SkillsPage', () => {
 
         expect(await screen.findByRole('heading', { name: '技能' })).toBeInTheDocument()
         expect(screen.getByText('公开分享')).toBeInTheDocument()
-        expect(screen.getByText('未缓存')).toBeInTheDocument()
+        expect(screen.getByLabelText('Runner 在线')).toBeInTheDocument()
         expect(screen.queryByText(/只供 SHAPI/)).not.toBeInTheDocument()
         expect(screen.queryByText('SHAPI 管理的技能')).not.toBeInTheDocument()
     })

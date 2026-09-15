@@ -168,6 +168,8 @@ export default {
   'skills.saveFailed': '保存设置失败',
   'skills.cacheFailed': '缓存技能失败',
   'skills.noOnlineRunners': '没有在线 Runner',
+  'skills.runnerOnline': 'Runner 在线',
+  'skills.runnerOffline': 'Runner 离线',
   'skills.toggle': '启用或关闭 {name}',
   'skills.cacheNow': '缓存',
   'skills.state.ready': '可用',

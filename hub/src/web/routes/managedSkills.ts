@@ -22,10 +22,7 @@ export function createManagedSkillsRoutes(getSyncEngine: () => SyncEngine | null
     app.get('/managed-skills', (c) => {
         const engine = getSyncEngine()
         if (!engine) return c.json({ error: 'Not connected' }, 503)
-        // Historical machine rows remain in the Hub database after a Runner
-        // goes away. They are not actionable here and look like broken
-        // Runners, so the control panel lists only currently connected ones.
-        const machines = engine.getOnlineMachinesByNamespace(c.get('namespace'))
+        const machines = engine.getMachinesByNamespace(c.get('namespace'))
         return c.json({
             skills: managedSkillCatalog().map((skill) => ({
                 ...skill,

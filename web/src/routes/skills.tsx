@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { PackageCheck, RefreshCw } from 'lucide-react'
+import { CircleCheck, CircleOff, PackageCheck, RefreshCw } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
-import type { ManagedSkillControlResponse, ManagedSkillMachineState } from '@hapi/protocol'
+import type { ManagedSkillControlResponse } from '@hapi/protocol'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { managedSkillCopy } from '@/lib/managed-skill-copy'
@@ -13,15 +13,6 @@ function BackIcon() {
             <polyline points="15 18 9 12 15 6" />
         </svg>
     )
-}
-
-function stateLabel(state: ManagedSkillMachineState['state'], t: ReturnType<typeof useTranslation>['t']): string {
-    if (state === 'ready') return t('skills.state.ready')
-    if (state === 'outdated') return t('skills.state.outdated')
-    if (state === 'missing') return t('skills.state.firstUse')
-    if (state === 'offline') return t('skills.state.offline')
-    if (state === 'unsupported') return t('skills.state.upgrade')
-    return t('skills.state.error')
 }
 
 export default function SkillsPage() {
@@ -63,18 +54,6 @@ export default function SkillsPage() {
             setPending(null)
         }
     }, [api, load, queryClient, t])
-
-    const cacheNow = useCallback(async (skillId: string, machineId: string) => {
-        setPending(`cache:${skillId}:${machineId}`)
-        try {
-            await api.cacheManagedSkill(skillId, machineId)
-            await load()
-        } catch (reason) {
-            setError(reason instanceof Error ? reason.message : t('skills.cacheFailed'))
-        } finally {
-            setPending(null)
-        }
-    }, [api, load, t])
 
     return (
         <div className="flex h-full min-h-0 flex-col bg-[var(--app-bg)]">
@@ -121,13 +100,13 @@ export default function SkillsPage() {
                             {skill.enabled && skill.machines.length > 0 ? (
                                 <div className="mt-3 border-t border-[var(--app-divider)] pt-2">
                                     {skill.machines.map((machine) => {
-                                        const key = `cache:${skill.id}:${machine.machineId}`
-                                        const canCache = machine.active && machine.state !== 'ready' && machine.state !== 'unsupported'
+                                        const statusLabel = machine.active ? t('skills.runnerOnline') : t('skills.runnerOffline')
                                         return (
                                             <div key={machine.machineId} className="flex min-h-9 items-center gap-2 text-xs">
                                                 <span className="min-w-0 flex-1 truncate text-[var(--app-fg)]">{machine.displayName}</span>
-                                                <span className={machine.state === 'ready' ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--app-hint)]'}>{stateLabel(machine.state, t)}</span>
-                                                {canCache ? <button type="button" onClick={() => void cacheNow(skill.id, machine.machineId)} disabled={pending === key} className="rounded-lg px-2 py-1 font-medium text-[var(--app-link)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50">{pending === key ? '…' : t('skills.cacheNow')}</button> : null}
+                                                <span aria-label={statusLabel} title={statusLabel} className={machine.active ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--app-hint)]'}>
+                                                    {machine.active ? <CircleCheck className="h-4 w-4" aria-hidden="true" /> : <CircleOff className="h-4 w-4" aria-hidden="true" />}
+                                                </span>
                                             </div>
                                         )
                                     })}

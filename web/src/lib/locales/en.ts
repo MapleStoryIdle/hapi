@@ -168,6 +168,8 @@ export default {
   'skills.saveFailed': 'Failed to save setting',
   'skills.cacheFailed': 'Failed to cache Skill',
   'skills.noOnlineRunners': 'No online Runner',
+  'skills.runnerOnline': 'Runner online',
+  'skills.runnerOffline': 'Runner offline',
   'skills.toggle': 'Enable or disable {name}',
   'skills.cacheNow': 'Cache',
   'skills.state.ready': 'Ready',
