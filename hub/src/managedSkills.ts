@@ -1,0 +1,96 @@
+import { createHash } from 'node:crypto'
+import {
+    ManagedSkillReconcileResponseSchema,
+    type Machine,
+    type ManagedSkillCatalogEntry,
+    type ManagedSkillMachineState,
+    type ManagedSkillPayload
+} from '@hapi/protocol'
+import type { SyncEngine } from './sync/syncEngine'
+import { getManagedSkillDefinition, MANAGED_SKILL_LIBRARY } from './managedSkillCatalog'
+
+function sha256(content: string): string {
+    return createHash('sha256').update(content, 'utf8').digest('hex')
+}
+
+function compareVersions(left: string, right: string): number {
+    const a = left.split('.').map(Number)
+    const b = right.split('.').map(Number)
+    for (let index = 0; index < 3; index += 1) {
+        const difference = (a[index] ?? 0) - (b[index] ?? 0)
+        if (difference !== 0) return difference
+    }
+    return 0
+}
+
+export function managedSkillCatalog(): ManagedSkillCatalogEntry[] {
+    return MANAGED_SKILL_LIBRARY.map(({ content, ...skill }) => ({
+        ...skill,
+        sha256: sha256(content)
+    }))
+}
+
+export function findManagedSkillInvocation(text: string | undefined): string | null {
+    const id = text?.match(/^\$([a-z][a-z0-9-]{0,63})(?:\s+|$)/)?.[1]
+    return id && getManagedSkillDefinition(id) ? id : null
+}
+
+function payloadFor(id: string): ManagedSkillPayload | null {
+    const definition = getManagedSkillDefinition(id)
+    if (!definition) return null
+    return {
+        id: definition.id,
+        version: definition.version,
+        sha256: sha256(definition.content),
+        content: definition.content
+    }
+}
+
+export async function ensureManagedSkillCached(engine: SyncEngine, machine: Machine, id: string): Promise<void> {
+    const definition = getManagedSkillDefinition(id)
+    const payload = payloadFor(id)
+    if (!definition || !payload) throw new Error(`Unknown SHAPI skill: ${id}`)
+    if (!machine.active) throw new Error(`Runner ${machine.metadata?.displayName ?? machine.id} is offline`)
+    const runnerVersion = machine.metadata?.runnerVersion
+    if (!runnerVersion || compareVersions(runnerVersion, definition.minimumRunnerVersion) < 0) {
+        throw new Error(`Runner must be upgraded to ${definition.minimumRunnerVersion} before using ${definition.name}`)
+    }
+    const cached = machine.metadata?.managedSkills?.[id]
+    if (cached?.state === 'ready' && cached.version === payload.version && cached.sha256 === payload.sha256) return
+
+    const result = ManagedSkillReconcileResponseSchema.parse(await engine.reconcileManagedSkill(machine.id, payload))
+    if (!result.success || result.status.state !== 'ready') {
+        throw new Error(result.status.error ?? `Could not cache ${definition.name}`)
+    }
+}
+
+export async function ensureManagedSkillForSession(engine: SyncEngine, sessionId: string, text: string | undefined): Promise<void> {
+    const id = findManagedSkillInvocation(text)
+    if (!id) return
+    const machineId = engine.getSession(sessionId)?.metadata?.machineId?.trim()
+    const machine = machineId ? engine.getMachine(machineId) : undefined
+    if (!machine) throw new Error('Session Runner is unavailable')
+    await ensureManagedSkillCached(engine, machine, id)
+}
+
+export function managedSkillMachineState(machine: Machine, skill: ManagedSkillCatalogEntry): ManagedSkillMachineState {
+    const installed = machine.metadata?.managedSkills?.[skill.id]
+    const runnerVersion = machine.metadata?.runnerVersion ?? null
+    let state: ManagedSkillMachineState['state']
+    if (!machine.active) state = 'offline'
+    else if (!runnerVersion || compareVersions(runnerVersion, skill.minimumRunnerVersion) < 0) state = 'unsupported'
+    else if (!installed) state = 'missing'
+    else if (installed.state === 'conflict') state = 'conflict'
+    else if (installed.state === 'error') state = 'error'
+    else if (installed.version !== skill.version || installed.sha256 !== skill.sha256) state = 'outdated'
+    else state = 'ready'
+    return {
+        machineId: machine.id,
+        displayName: machine.metadata?.displayName ?? machine.metadata?.host ?? machine.id,
+        active: machine.active,
+        runnerVersion,
+        desiredVersion: skill.version,
+        installedVersion: installed?.version ?? null,
+        state
+    }
+}

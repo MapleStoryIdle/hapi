@@ -7,7 +7,7 @@ import type { SessionPinSource, SessionPinsResponse } from '@hapi/protocol/sessi
 import type { KanbanOrder, KanbanOrderInput } from '@hapi/protocol/kanbanOrder'
 import type { AttachmentMetadata, AuthResponse, CodexLocalSessionsResponse, CodexLocalSessionContextResponse, CodexLocalSessionComposerCapabilitiesResponse, CodexLocalSessionSnapshotReadResponse, CodexLocalSessionSnapshotVersion, CodexLocalSessionStatusResponse, ArchiveCodexLocalSessionResponse, DiscardCodexLocalSessionMessageResponse, ForkCodexLocalSessionResponse, SendCodexLocalSessionMessageResponse, CodexDuplicateSessionsResponse, CodexMergeDuplicateSessionsResponse, CodexDesktopScriptResponse, CodexDesktopSyncRequest, CodexDesktopStatusResponse, CodexControlRecoveryResponse, CodexCollaborationMode, FileSearchResponse, MachinesResponse, MessagesResponse, OpenVikingContextListResponse, OpenVikingContextReadResponse, OpenVikingStatusResponse, OpenVikingMetricsResponse, OpenVikingQualityResponse, OpenVikingSearchResponse, PermissionMode, PushSubscriptionPayload, PushUnsubscribePayload, PushVapidPublicKeyResponse, DeliverShareFeedbackResponse, RevokeShareResponse, ShareContentResponse, ShareFeedbackResponse, ShareResponse, SharesResponse, SlashCommandsResponse, SkillsResponse, SpawnResponse, VisibilityPayload, HapiSessionExport, SessionResponse, SessionsResponse } from '@/types/api'
 import type { CodexSubscriptionLimitsResponse, CodexModelsResponse, CursorMigrateOutcome, CursorMigrateToAcpRequest, CursorModelsResponse, DeleteUploadResponse, FileReadResponse, GitBranchResponse, GitBranchesResponse, GitCommandResponse, ListDirectoryResponse, MachineListDirectoryResponse, MachinePathsExistsResponse, MachineGitBranchCreateRequest, MachineGitBranchCommitRequest, MachineGitBranchFetchRequest, MachineGitBranchPushRequest, MachineGitBranchSwitchRequest, MachineGitBranchUpdateRequest, OpencodeModelsResponse, OpencodeReasoningEffortResponse, CreateSideSessionResponse, ReopenSessionResponse, RenameNativeCodexSessionResponse, UploadFileResponse } from '@hapi/protocol/apiTypes'
-import type { AgentFlavor, NativeCodexAttachmentDeleteResponse, NativeCodexAttachmentStageResponse } from '@hapi/protocol'
+import type { AgentFlavor, ManagedSkillControlResponse, NativeCodexAttachmentDeleteResponse, NativeCodexAttachmentStageResponse } from '@hapi/protocol'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
 
 type ApiClientOptions = {
@@ -814,6 +814,14 @@ export class ApiClient {
 
     async getShares(): Promise<SharesResponse> {
         return await this.request<SharesResponse>('/api/shares')
+    }
+
+    async getManagedSkills(): Promise<ManagedSkillControlResponse> {
+        return await this.request<ManagedSkillControlResponse>('/api/managed-skills')
+    }
+
+    async cacheManagedSkill(skillId: string, machineId: string): Promise<void> {
+        await this.request(`/api/managed-skills/${encodeURIComponent(skillId)}/machines/${encodeURIComponent(machineId)}/cache`, { method: 'POST' })
     }
 
     async getShare(shareId: string): Promise<ShareResponse> {

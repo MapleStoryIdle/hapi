@@ -35,6 +35,7 @@ import { RenameNativeCodexSessionRequestSchema } from '@hapi/protocol/apiTypes'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { Store, StoredMessage } from '../../store'
 import type { WebAppEnv } from '../middleware/auth'
+import { ensureManagedSkillCached, findManagedSkillInvocation, managedSkillCatalog } from '../../managedSkills'
 
 type ScriptLogKind = 'sync' | 'restart'
 
@@ -2357,7 +2358,16 @@ export function createCodexDesktopRoutes(options: {
             if (result.success !== true) {
                 return c.json(result, 404)
             }
-            return c.json(result satisfies CodexLocalSessionComposerCapabilitiesRpcResponse)
+            const names = new Set(result.skills.map((skill) => skill.name))
+            return c.json({
+                ...result,
+                skills: [
+                    ...result.skills,
+                    ...managedSkillCatalog()
+                        .filter((skill) => !names.has(skill.id))
+                        .map((skill) => ({ name: skill.id, description: skill.description, scope: 'plugin' as const }))
+                ]
+            } satisfies CodexLocalSessionComposerCapabilitiesRpcResponse)
         } catch (error) {
             return c.json({
                 success: false,
@@ -2612,6 +2622,8 @@ export function createCodexDesktopRoutes(options: {
         }
 
         try {
+            const managedSkillId = findManagedSkillInvocation(request.message)
+            if (managedSkillId) await ensureManagedSkillCached(engine!, target.machine, managedSkillId)
             // A SHAPI session from an older runner can have a Codex Desktop
             // originator and therefore appear in the native transcript list.
             // Its app-server is already connected to SHAPI; sending through

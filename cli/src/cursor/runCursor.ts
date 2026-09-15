@@ -13,6 +13,7 @@ import {
     resolveSessionConfigPermissionMode
 } from '@/agent/sessionConfigRpc';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
+import { expandManagedSkillInvocation } from '@/managedSkills';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { enqueueCursorUserMessage } from './cursorUserMessageQueue';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
@@ -100,7 +101,7 @@ export async function runCursor(opts: {
             permissionMode: currentPermissionMode ?? 'default',
             model: currentModel
         };
-        const formattedText = formatMessageWithAttachments(message.content.text, message.content.attachments);
+        const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
         enqueueCursorUserMessage(messageQueue, formattedText, enhancedMode, localId);
     });
 

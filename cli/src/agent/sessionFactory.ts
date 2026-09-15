@@ -48,7 +48,7 @@ function resolveCodexHome(): string {
     return resolve(value)
 }
 
-export function buildMachineMetadata(options?: { workspaceRoots?: string[] }): MachineMetadata {
+export function buildMachineMetadata(options?: { workspaceRoots?: string[]; managedSkills?: MachineMetadata['managedSkills'] }): MachineMetadata {
     return {
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),
@@ -59,7 +59,8 @@ export function buildMachineMetadata(options?: { workspaceRoots?: string[] }): M
         nativeCodexRealtime: true,
         happyHomeDir: configuration.happyHomeDir,
         happyLibDir: runtimePath(),
-        workspaceRoots: options?.workspaceRoots
+        workspaceRoots: options?.workspaceRoots,
+        managedSkills: options?.managedSkills
     }
 }
 

@@ -51,6 +51,8 @@ export const RPC_METHODS = {
     Bash: 'bash',
     ListSlashCommands: 'listSlashCommands',
     ListSkills: 'listSkills',
+    ManagedSkillReconcile: 'managedSkill.reconcile',
+    ManagedSkillRemove: 'managedSkill.remove',
     ListCodexModels: 'listCodexModels',
     GetCodexSubscriptionLimits: 'getCodexSubscriptionLimits',
     ForkCodexSideSession: 'forkCodexSideSession',

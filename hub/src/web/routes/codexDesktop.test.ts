@@ -1582,7 +1582,14 @@ describe('Codex Desktop import routes', () => {
             expect(await response.json()).toEqual({
                 success: true,
                 commands: [{ name: 'review', source: 'project', content: 'Review the requested code.' }],
-                skills: [{ name: 'repo-rules', description: 'Repository rules', scope: 'project' }]
+                skills: [
+                    { name: 'repo-rules', description: 'Repository rules', scope: 'project' },
+                    {
+                        name: 'public-share',
+                        description: 'Create or revoke an expiring SHAPI public link, including feedback-enabled Kanban tasks.',
+                        scope: 'plugin'
+                    }
+                ]
             })
             expect(capabilityCalls).toEqual([['mac-runner', sessionId]])
         } finally {

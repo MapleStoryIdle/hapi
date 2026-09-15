@@ -3,6 +3,7 @@ import { MessagesQuerySchema, SendMessageRequestSchema } from '@hapi/protocol'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+import { ensureManagedSkillForSession } from '../../managedSkills'
 
 export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
@@ -76,6 +77,7 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         try {
+            await ensureManagedSkillForSession(engine, sessionId, parsed.data.text)
             await engine.sendMessage(sessionId, {
                 text: parsed.data.text,
                 localId: parsed.data.localId,

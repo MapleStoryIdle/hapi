@@ -30,6 +30,7 @@ import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken } from './runnerIdentity';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { NativeControlRecoveryCoordinator } from '@/codex/nativeControlRecovery';
+import { listManagedSkillInventory } from '@/managedSkills';
 
 export async function startRunner(options: { workspaceRoots?: string[] } = {}): Promise<void> {
   // We don't have cleanup function at the time of server construction
@@ -819,7 +820,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
     // Get or create machine (with retry for transient connection errors)
-    const machineMetadata = buildMachineMetadata({ workspaceRoots });
+    const machineMetadata = buildMachineMetadata({
+      workspaceRoots,
+      managedSkills: await listManagedSkillInventory()
+    });
     const machine = await withRetry(
       () => api.getOrCreateMachine({
         machineId,

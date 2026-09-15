@@ -17,6 +17,7 @@ import { createBindRoutes } from './routes/bind'
 import { createEventsRoutes } from './routes/events'
 import { createSessionsRoutes } from './routes/sessions'
 import { createMessagesRoutes } from './routes/messages'
+import { createManagedSkillsRoutes } from './routes/managedSkills'
 import { createPermissionsRoutes } from './routes/permissions'
 import { createMachinesRoutes } from './routes/machines'
 import { createGitRoutes } from './routes/git'
@@ -331,6 +332,7 @@ export function createWebApp(options: {
     app.route('/api', createSessionPinRoutes(options.store, options.getSseManager))
     app.route('/api', createKanbanOrderRoutes(options.store, options.getSseManager))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
+    app.route('/api', createManagedSkillsRoutes(options.getSyncEngine))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine))
     app.route('/api', createGitRoutes(options.getSyncEngine))

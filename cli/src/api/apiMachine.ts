@@ -131,6 +131,7 @@ import { asHubAuth, type HubAuth } from '@/authV2/runnerAuth'
 import { collectMachineHealth } from '@/utils/machineHealth'
 import { readGeneratedImageFileBytes, readSessionFileBytes } from '@/modules/common/handlers/files'
 import { readUploadFileBytes } from '@/modules/common/handlers/uploads'
+import { expandManagedSkillInvocation, listManagedSkillInventory, reconcileManagedSkill, removeManagedSkill } from '@/managedSkills'
 
 const CODEX_SSH_OWNERSHIP_MONITOR_INTERVAL_MS = 1_000
 const NATIVE_CODEX_ATTACHMENT_CLEANUP_INTERVAL_MS = 60 * 60 * 1_000
@@ -741,9 +742,12 @@ export class ApiMachineClient {
                 if (summary) {
                     this.observeNativeCodexSession(sessionId)
                 }
+                const expandedMessage = typeof params?.message === 'string'
+                    ? expandManagedSkillInvocation(params.message)
+                    : params?.message
                 return await this.nativeCodexSessionDirectSender.sendWithExternalControlCheck(
                     sessionId,
-                    params?.message,
+                    expandedMessage,
                     params?.displayMessage,
                     params?.clientMessageId,
                     params?.forceRecovery,
@@ -1137,6 +1141,25 @@ export class ApiMachineClient {
     }
 
     setRPCHandlers({ spawnSession, stopSession, requestShutdown, recoverCodexControl, getCodexRecovery }: MachineRpcHandlers): void {
+        const publishManagedSkillInventory = async () => {
+            const managedSkills = await listManagedSkillInventory()
+            await this.updateMachineMetadata((metadata) => ({
+                ...(metadata ?? this.machine.metadata ?? {
+                    host: 'unknown', platform: process.platform, happyCliVersion: 'unknown'
+                }),
+                managedSkills
+            }))
+        }
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.ManagedSkillReconcile, async (params: unknown) => {
+            const result = await reconcileManagedSkill(params)
+            await publishManagedSkillInventory()
+            return result
+        })
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.ManagedSkillRemove, async (params: unknown) => {
+            const result = await removeManagedSkill(params)
+            await publishManagedSkillInventory()
+            return result
+        })
         this.nativeControlRecoveryStatus = getCodexRecovery ?? null
         this.rpcHandlerManager.registerHandler<RecoverCodexLocalSessionControlRpcRequest, CodexLocalSessionRecoveryResponse>(
             RPC_METHODS.RecoverCodexLocalSessionControl,

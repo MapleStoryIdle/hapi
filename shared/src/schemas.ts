@@ -328,7 +328,12 @@ export const MachineMetadataSchema = z.object({
     nativeCodexRealtime: z.boolean().optional(),
     happyHomeDir: z.string().optional(),
     happyLibDir: z.string().optional(),
-    workspaceRoots: z.array(z.string()).optional()
+    workspaceRoots: z.array(z.string()).optional(),
+    managedSkills: z.record(z.string(), z.object({
+        version: z.string(),
+        sha256: z.string(),
+        state: z.enum(['ready', 'missing', 'outdated', 'conflict', 'error'])
+    }).strict()).optional()
 })
 
 export type MachineMetadata = z.infer<typeof MachineMetadataSchema>

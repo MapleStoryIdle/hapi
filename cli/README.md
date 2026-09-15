@@ -98,6 +98,8 @@ See `src/ui/doctor.ts`.
 - `shapi share publish <relative-file> [--expires <seconds>] [--session <session-id>] [--feedback] [--feedback-request <text>]` - Create an expiring public link / 中文看板任务 for one local file (5 minutes–7 days; default 24h). `--session` binds the task to its source SHAPI session; when run inside a managed SHAPI agent session, that source is filled in automatically. `--feedback` is Markdown-only and embeds a one-time, 10 MiB feedback contract in the public document; the external Agent must self-report its model and environment in the returned Markdown.
 - `shapi share revoke <share-id>` - Revoke a public link. Public links are bearer links; redact `/s/*` paths in reverse-proxy logs.
 
+The Hub exposes `public-share` as a SHAPI-only managed skill. On first use the Hub sends the current version to the selected Runner, which caches it under `$HAPI_HOME/managed-skills`; Agent skill directories are never modified. Later uses compare the Runner-reported version and SHA-256 with the Hub catalog and refresh only when they differ.
+
 The legacy `hapi` command remains supported as an alias; `hapi server` remains an alias for `shapi hub`.
 
 ## Configuration

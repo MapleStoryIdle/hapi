@@ -781,6 +781,14 @@ export class RpcGateway {
         }
     }
 
+    async reconcileManagedSkill(machineId: string, payload: unknown): Promise<unknown> {
+        return await this.machineRpc(machineId, RPC_METHODS.ManagedSkillReconcile, payload, 30_000)
+    }
+
+    async removeManagedSkill(machineId: string, id: string): Promise<unknown> {
+        return await this.machineRpc(machineId, RPC_METHODS.ManagedSkillRemove, { id }, 30_000)
+    }
+
     async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
     }

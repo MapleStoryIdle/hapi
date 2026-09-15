@@ -22,6 +22,7 @@ function createApp(opts: {
     active?: boolean
     sendMessage?: (sessionId: string, payload: unknown) => Promise<void>
     getMessagesPage?: () => unknown
+    reconcileManagedSkill?: (machineId: string, payload: unknown) => Promise<unknown>
 }) {
     const sentMessages: Array<{ sessionId: string; payload: unknown }> = []
     const sendMessage = opts.sendMessage ?? (async (sessionId: string, payload: unknown) => {
@@ -32,8 +33,14 @@ function createApp(opts: {
         resolveSessionAccess: () => ({
             ok: true,
             sessionId: 'session-1',
-            session: { id: 'session-1', active: opts.active !== false }
+            session: { id: 'session-1', active: opts.active !== false, metadata: { machineId: 'machine-1' } }
         }),
+        getSession: () => ({ id: 'session-1', active: opts.active !== false, metadata: { machineId: 'machine-1' } }),
+        getMachine: () => ({
+            id: 'machine-1', active: true,
+            metadata: { host: 'runner', platform: 'test', happyCliVersion: '1.0.0', runnerVersion: '1.1.0' }
+        }),
+        reconcileManagedSkill: opts.reconcileManagedSkill,
         sendMessage,
         cancelQueuedMessage: async () => ({ status: 'cancelled' }),
         getMessagesPage: opts.getMessagesPage ?? (() => ({ messages: [], page: {} })),
@@ -127,6 +134,39 @@ describe('POST /api/sessions/:id/messages — #2 scheduledAt upper bound', () =>
         })
 
         expect(response.status).toBe(200)
+        expect(sentMessages).toHaveLength(1)
+    })
+})
+
+describe('POST /api/sessions/:id/messages — SHAPI managed skill cache', () => {
+    it('caches a selected Hub skill before delivering its token to the Runner', async () => {
+        const calls: Array<{ machineId: string; payload: Record<string, unknown> }> = []
+        const { app, sentMessages } = createApp({
+            reconcileManagedSkill: async (machineId, rawPayload) => {
+                const payload = rawPayload as Record<string, unknown>
+                calls.push({ machineId, payload })
+                return {
+                    success: true,
+                    status: {
+                        id: payload.id,
+                        version: payload.version,
+                        sha256: payload.sha256,
+                        state: 'ready'
+                    }
+                }
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/messages', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: '$public-share publish report.md', localId: 'local-skill' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls).toHaveLength(1)
+        expect(calls[0]?.machineId).toBe('machine-1')
+        expect(calls[0]?.payload).toMatchObject({ id: 'public-share', version: '1.0.0' })
         expect(sentMessages).toHaveLength(1)
     })
 })
