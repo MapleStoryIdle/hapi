@@ -68,6 +68,9 @@ done
 HOME="$TMP_ROOT/home" SHAPI_INSTALL_DIR="$TMP_ROOT/bin" \
     sh "$REPO_ROOT/scripts/install.sh" --base-url "http://127.0.0.1:$PORT" >"$TMP_ROOT/install.log"
 grep -Fq 'Downloading Runner 1.2.3 (' "$TMP_ROOT/install.log"
+grep -Fqx 'Download complete. Verifying Runner package...' "$TMP_ROOT/install.log"
+grep -Fqx 'Verification complete. Unpacking Runner...' "$TMP_ROOT/install.log"
+grep -Fqx 'Runner package ready. Installing and configuring...' "$TMP_ROOT/install.log"
 grep -Fqx 'SHAPI setup complete' "$TMP_ROOT/install.log"
 grep -Fqx "Hub: http://127.0.0.1:$PORT" "$TMP_ROOT/install.log"
 grep -Fqx 'Token: preserved locally by you; SHAPI does not store it' "$TMP_ROOT/install.log"
@@ -110,6 +113,14 @@ SHAPI_DOWNLOAD_BASE_URL="http://127.0.0.1:$PORT" \
     sh "$REPO_ROOT/scripts/install.sh" --no-register >/dev/null
 [[ "$("$TMP_ROOT/fresh-home/.local/bin/shapi" --version)" == "SHAPI 1.2.5" ]]
 grep -Fqx 'export PATH="$HOME/.local/bin:$PATH"' "$TMP_ROOT/fresh-home/.zshrc"
+
+mkdir -p "$TMP_ROOT/fresh-nontty-home"
+HOME="$TMP_ROOT/fresh-nontty-home" SHELL=/bin/zsh PATH=/usr/bin:/bin \
+SHAPI_DOWNLOAD_BASE_URL="http://127.0.0.1:$PORT" \
+    sh "$REPO_ROOT/scripts/install.sh" >"$TMP_ROOT/fresh-nontty.log"
+grep -Fqx 'Runner: not started' "$TMP_ROOT/fresh-nontty.log"
+grep -Fqx 'No interactive terminal was available, so workspace setup was skipped.' "$TMP_ROOT/fresh-nontty.log"
+grep -Fqx "Create: curl -fsSL http://127.0.0.1:$PORT/install.sh | sh -s -- --register" "$TMP_ROOT/fresh-nontty.log"
 
 checksum="$TMP_ROOT/public/downloads/runner/1.2.5/checksums.txt"
 printf '%064d  %s\n' 0 "$(awk 'NR == 1 { print $2 }' "$checksum")" > "$checksum"

@@ -127,7 +127,9 @@ choose_setup() {
         printf '%s\n' "$SETUP_MODE"
         return
     fi
-    if [ "$fresh_install" != "yes" ] || [ ! -t 1 ] || [ ! -r /dev/tty ]; then
+    # stdout is often captured by terminals, launchers, or remote-control UIs.
+    # Interaction only needs a usable controlling terminal, not a TTY stdout.
+    if [ "$fresh_install" != "yes" ] || ! ( : </dev/tty >/dev/tty ) 2>/dev/null; then
         printf 'none\n'
         return
     fi
@@ -217,6 +219,7 @@ esac
 release_url="${release_url%/}"
 echo "Downloading Runner $version ($artifact)"
 download "$release_url/$artifact" "$tmp_dir/$artifact" yes
+echo "Download complete. Verifying Runner package..."
 download "$release_url/checksums.txt" "$tmp_dir/checksums.txt"
 
 expected="$(awk -v file="$artifact" '$2 == file || $2 == "*" file { print $1; exit }' "$tmp_dir/checksums.txt")"
@@ -247,6 +250,7 @@ fi
 
 [ "$actual" = "$expected" ] || { echo "SHA-256 verification failed" >&2; exit 1; }
 
+echo "Verification complete. Unpacking Runner..."
 mkdir "$tmp_dir/unpacked"
 archive_entries="$(tar -tzf "$tmp_dir/$artifact")"
 [ "$archive_entries" = "hapi" ] || { echo "Release archive contains unexpected paths" >&2; exit 1; }
@@ -260,6 +264,7 @@ case "$reported_version" in
     *) echo "Downloaded binary reported an unexpected version: $reported_version" >&2; exit 1 ;;
 esac
 
+echo "Runner package ready. Installing and configuring..."
 mkdir -p "$INSTALL_DIR"
 target="$INSTALL_DIR/shapi"
 if [ -f "$target" ]; then
@@ -292,6 +297,7 @@ setup="$(choose_setup)"
 web_token=""
 web_token_file="$tmp_dir/web-token"
 if [ "$setup" = "new" ]; then
+    echo "Next: create a workspace, pair this Runner, and start it."
     echo "Creating a workspace on $BASE_URL"
     if [ -n "$WORKSPACE_NAME" ]; then
         "$target" workspace register --name "$WORKSPACE_NAME" --hub "$BASE_URL" --output-token-file "$web_token_file"
@@ -300,6 +306,7 @@ if [ "$setup" = "new" ]; then
     fi
     web_token="$(cat "$web_token_file")"
 elif [ "$setup" = "join" ]; then
+    echo "Next: enter the workspace credential, pair this Runner, and start it."
     web_token="$(read_web_token)"
     umask 077
     printf '%s\n' "$web_token" > "$web_token_file"
@@ -332,5 +339,8 @@ else
 fi
 
 if [ "$fresh_install" = "yes" ] && [ "$setup" = "none" ]; then
-    echo "Runner was not started because no workspace was selected."
+    echo "No interactive terminal was available, so workspace setup was skipped."
+    echo "Next: rerun with --register to create a workspace, or --join to use an existing spw credential."
+    echo "Create: curl -fsSL $BASE_URL/install.sh | sh -s -- --register"
+    echo "Join:   curl -fsSL $BASE_URL/install.sh | SHAPI_WEB_TOKEN='spw...' sh -s -- --join"
 fi
