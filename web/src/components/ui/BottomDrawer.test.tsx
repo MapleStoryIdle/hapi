@@ -86,6 +86,19 @@ describe('BottomDrawer', () => {
         expect(dialog.style.getPropertyValue('--drawer-viewport-height')).toBe('400px')
         expect(dialog).not.toHaveAttribute('aria-describedby')
     })
+    it('does not replay its entrance animation when layout props change while open', () => {
+        function ChangingDrawer() {
+            const [detail, setDetail] = useState(false)
+            return <I18nProvider><BottomDrawer open desktopDialog={detail} onOpenChange={() => {}} title="Question">
+                <button type="button" onClick={() => setDetail(true)}>Change layout</button>
+            </BottomDrawer></I18nProvider>
+        }
+        render(<ChangingDrawer />)
+        fireEvent.animationEnd(screen.getByRole('dialog'))
+        expect(screen.getByRole('dialog')).toHaveAttribute('data-entered', 'true')
+        fireEvent.click(screen.getByRole('button', { name: 'Change layout' }))
+        expect(screen.getByRole('dialog')).toHaveAttribute('data-entered', 'true')
+    })
     it('springs back after short/upward drags; closes on long downward drags or flicks', () => {
         expect(shouldDismissDrawer(30, 0.1, 400)).toBe(false)
         expect(shouldDismissDrawer(-150, -1, 400)).toBe(false)

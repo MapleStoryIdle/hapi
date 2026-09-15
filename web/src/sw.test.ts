@@ -85,8 +85,9 @@ function installServiceWorker(cacheEntries: Array<{ url: string }> = []): { dele
     }
 
     vi.stubGlobal('caches', {
-        keys: vi.fn(async () => ['static-assets']),
+        keys: vi.fn(async () => ['static-assets', 'api-sessions', 'api-session-detail', 'api-machines']),
         open: vi.fn(async () => cache),
+        delete: vi.fn(async () => true),
     })
     vi.stubGlobal('self', {
         __WB_MANIFEST: [],
@@ -121,12 +122,29 @@ afterEach(() => {
 })
 
 describe('local-service preview service-worker bypass', () => {
+    it('never caches workspace-scoped API responses', async () => {
+        installServiceWorker()
+        await loadServiceWorker()
+
+        for (const pathname of [
+            '/api/sessions',
+            '/api/sessions/session-1',
+            '/api/machines',
+            '/downloads/runner/latest.json',
+        ]) {
+            const route = state.routes.find((candidate) => candidate.handler instanceof state.NetworkOnly
+                && routeMatch(candidate, pathname) === true)
+            expect(route, pathname).toBeDefined()
+        }
+        expect(state.routes.some((route) => route.handler instanceof state.NetworkFirst)).toBe(false)
+    })
+
     it('registers every preview method as NetworkOnly before precache and runtime cache routes', async () => {
         installServiceWorker()
         await loadServiceWorker()
 
         const previewMethods = ['DELETE', 'GET', 'HEAD', 'PATCH', 'POST', 'PUT']
-        const previewRoutes = state.routes.filter((route) => route.handler instanceof state.NetworkOnly)
+        const previewRoutes = state.routes.filter((route) => route.handler instanceof state.NetworkOnly && route.method !== undefined)
         expect(previewRoutes.map((route) => route.method)).toEqual(previewMethods)
         expect(previewRoutes.every((route) => routeMatch(route, '/preview/lease/grant/assets/app.js') === true)).toBe(true)
         expect(previewRoutes.every((route) => routeMatch(route, '/assets/app.js') === false)).toBe(true)
@@ -158,5 +176,8 @@ describe('local-service preview service-worker bypass', () => {
 
         expect(deleted).toEqual([preview])
         expect(deleted).not.toContain(ordinaryAsset)
+        expect(caches.delete).toHaveBeenCalledWith('api-sessions')
+        expect(caches.delete).toHaveBeenCalledWith('api-session-detail')
+        expect(caches.delete).toHaveBeenCalledWith('api-machines')
     })
 })

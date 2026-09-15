@@ -3,8 +3,9 @@
  *
  * Handles CLI_API_TOKEN initialization with priority:
  * 1. Environment variable (highest - allows temporary override)
- * 2. Settings file (~/.hapi/settings.json)
- * 3. Interactive prompt (only when both above are missing)
+ * 2. Approved auth-v2 runner credential for the configured Hub
+ * 3. Legacy settings file token (~/.hapi/settings.json)
+ * 4. Interactive prompt (only when all above are missing)
  */
 
 import * as readline from 'node:readline/promises'
@@ -14,6 +15,7 @@ import { exportHapiHubApiUrl } from '@/agent/hapiSessionEnv'
 import { configuration } from '@/configuration'
 import { readSettings, updateSettings } from '@/persistence'
 import { initializeApiUrl } from '@/ui/apiUrlInit'
+import { readRunnerCredential } from '@/authV2/credentials'
 
 /**
  * Initialize CLI API token
@@ -30,8 +32,17 @@ export async function initializeToken(): Promise<void> {
         return
     }
 
-    // 2. Read from settings file
+    // 2. Read auth-v2 and legacy credentials from local storage
     const settings = await readSettings()
+    const runnerCredential = await readRunnerCredential(configuration.apiUrl)
+    if (runnerCredential?.status === 'approved') {
+        configuration._setCliApiToken(runnerCredential.runnerToken)
+        if (settings.machineId !== runnerCredential.machineId) {
+            await updateSettings(current => ({ ...current, machineId: runnerCredential.machineId }))
+        }
+        exportHapiHubApiUrl({ exportApiUrl })
+        return
+    }
     if (settings.cliApiToken) {
         configuration._setCliApiToken(settings.cliApiToken)
         exportHapiHubApiUrl({ exportApiUrl })
@@ -40,7 +51,7 @@ export async function initializeToken(): Promise<void> {
 
     // 3. Non-TTY environment cannot prompt, fail with clear error
     if (!process.stdin.isTTY) {
-        throw new Error('CLI_API_TOKEN is required. Set it via environment variable or run `shapi auth login`.')
+        throw new Error('Runner credentials are required. Run `shapi runner pair` or set CLI_API_TOKEN.')
     }
 
     // 4. Interactive prompt

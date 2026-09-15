@@ -139,8 +139,15 @@ class GeminiLiveVoiceSessionImpl implements VoiceSession {
         const promptParam = `&systemPrompt=${encodeURIComponent(encodedPrompt)}`
         const prefs = loadVoicePersonalityFromStorage()
         const affectiveParam = prefs.gemini?.affective_dialog ? '&affectiveDialog=1' : ''
+        const proxyParams = [
+            authToken === '__cookie_session__' ? '' : `token=${encodeURIComponent(authToken)}`,
+            languageParam.replace(/^&/, ''),
+            voiceParam.replace(/^&/, ''),
+            promptParam.replace(/^&/, ''),
+            affectiveParam.replace(/^&/, '')
+        ].filter(Boolean).join('&')
         const wsUrl = isProxy
-            ? `${wsBase}${wsBase.includes('?') ? '&' : '?'}token=${encodeURIComponent(authToken)}${languageParam}${voiceParam}${promptParam}${affectiveParam}`
+            ? `${wsBase}${wsBase.includes('?') ? '&' : '?'}${proxyParams}`
             : `${wsBase}?key=${encodeURIComponent(state.apiKey)}`
         console.log('[GeminiLive] Connecting WebSocket to:', wsBase, isProxy ? '(proxied)' : '(direct)')
         const ws = new WebSocket(wsUrl)

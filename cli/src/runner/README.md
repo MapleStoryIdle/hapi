@@ -1,550 +1,196 @@
-# SHAPI CLI Runner: Control Flow and Lifecycle
+# SHAPI Runner
 
-The runner is a persistent background process that manages SHAPI sessions, enables remote control from the mobile app, and handles auto-updates when the CLI version changes.
+Agent-facing guide to the background process that connects one machine to one Hub workspace and manages remotely started coding sessions.
 
-## 1. Runner Lifecycle
+## Invariants
 
-### Starting the Runner
+- One live Runner process per `$HAPI_HOME`; `runner.state.json.lock` enforces ownership.
+- One paired Runner identity per Hub URL: `spr...` credential + P-256 private key.
+- One Runner belongs to one workspace. One workspace may contain many Runners.
+- Workspace roots scope file-tree browsing only. They do not sandbox agent processes or restrict explicitly requested session directories.
+- Runner downloads are never triggered by Hub Web. A user updates by rerunning the Hub's installer.
 
-Command: `shapi runner start`
+## Entry points
 
-Control Flow:
-1. `src/index.ts` receives `runner start` command
-2. Spawns detached process via `spawnHappyCLI(['runner', 'start-sync'], { detached: true })`
-3. New process calls `startRunner()` from `src/runner/run.ts`
-4. `startRunner()` performs startup:
-   - Sets up shutdown promise and handlers (SIGINT, SIGTERM, uncaughtException, unhandledRejection)
-   - Version check: `isRunnerRunningCurrentlyInstalledHappyVersion()` compares CLI binary mtime
-   - If version mismatch: calls `stopRunner()` to kill old runner before proceeding
-   - If same version running: exits with "Runner already running"
-   - Lock acquisition: `acquireRunnerLock()` creates exclusive lock file to prevent multiple runners
-   - Direct-connect setup: `authAndSetupMachineIfNeeded()` ensures `CLI_API_TOKEN` is set and `machineId` exists
-   - State persistence: writes PID, version, HTTP port, mtime to runner.state.json
-   - HTTP server: starts Fastify on random port for local CLI control (list, stop, spawn)
-   - WebSocket: establishes persistent connection to backend via `ApiMachineClient`
-   - RPC registration: exposes `spawn-happy-session`, `stop-session`, `stop-runner` handlers
-   - Heartbeat loop: every 60s (or `HAPI_RUNNER_HEARTBEAT_INTERVAL`) checks for version updates, prunes dead sessions, verifies PID ownership
-5. Awaits shutdown promise which resolves when:
-   - OS signal received (SIGINT/SIGTERM) - source: `os-signal`
-   - HTTP `/stop` endpoint called - source: `hapi-cli`
-   - RPC `stop-runner` invoked - source: `hapi-app`
-   - Uncaught exception occurs - source: `exception`
-6. On shutdown, `cleanupAndShutdown()` performs:
-   - Clears heartbeat interval
-   - Updates runner state to "shutting-down" on backend with shutdown source
-   - Disconnects WebSocket
-   - Stops HTTP server
-   - Deletes runner.state.json
-   - Releases lock file
-   - Exits process
+- `src/commands/runner.ts` - `pair`, `start`, `start-sync`, `stop`, `status`, `list`, `logs`.
+- `src/runnerBootstrap.ts` - small Runner-only executable entry.
+- `src/runner/run.ts` - lifecycle, process tracking, Hub connection, RPC handlers.
+- `src/runner/controlServer.ts` - loopback-only local control HTTP server.
+- `src/runner/controlClient.ts` - CLI calls into the local control server and handles stale state.
 
-### Version Detection & Auto-Update
+`shapi runner start` launches a detached `start-sync` process. `start-sync` owns the long-running event loop.
 
-The runner detects when the installed SHAPI executable changes:
-1. At startup, records `startedWithCliMtimeMs` (file modification time of CLI binary)
-2. Heartbeat compares current CLI mtime with recorded mtime via `getInstalledCliMtimeMs()`
-3. If mtime changed:
-   - Clears heartbeat interval
-   - Spawns new runner via `spawnHappyCLI(['runner', 'start'])`
-   - Waits 10 seconds to be killed by new runner
-4. New runner starts, sees old runner running with different mtime
-5. New runner calls `stopRunner()` which tries HTTP `/stop`, falls back to SIGKILL
-6. New runner takes over
+## Install and pair
 
-### Heartbeat System
+Preferred user path:
 
-Every 60 seconds (configurable via `HAPI_RUNNER_HEARTBEAT_INTERVAL`):
-1. **Guard**: Skips if previous heartbeat still running (prevents concurrent heartbeats)
-2. **Session Pruning**: Checks each tracked PID with `isProcessAlive(pid)`, removes dead sessions
-3. **Version Check**: Compares CLI binary mtime, triggers self-restart if changed
-4. **PID Ownership**: Verifies runner still owns state file, self-terminates if another runner took over
-5. **State Update**: Writes `lastHeartbeat` timestamp to runner.state.json
-
-### Stopping the Runner
-
-Command: `shapi runner stop`
-
-Control Flow:
-1. `stopRunner()` in `controlClient.ts` reads runner.state.json
-2. Attempts graceful shutdown via HTTP POST to `/stop`
-3. Runner receives request, triggers shutdown with source `hapi-cli`
-4. `cleanupAndShutdown()` executes:
-   - Updates backend status to "shutting-down"
-   - Closes WebSocket connection
-   - Stops HTTP server
-   - Deletes runner.state.json
-   - Releases lock file
-5. If HTTP fails, falls back to `killProcess(pid, true)` (uses `taskkill /T /F` on Windows)
-
-## 2. Multi-Agent Support
-
-The runner supports spawning sessions with different AI agents:
-
-| Agent | Command | Token Environment |
-|-------|---------|-------------------|
-| `claude` (default) | `shapi claude` | `CLAUDE_CODE_OAUTH_TOKEN` |
-| `codex` | `shapi codex` | `CODEX_HOME` (temp directory with `auth.json`) |
-| `gemini` | `shapi gemini` | - |
-| `opencode` | `shapi opencode` | OpenCode config (no token injection) |
-
-### Token Authentication
-
-When spawning a session with a token:
-- **Claude**: Sets `CLAUDE_CODE_OAUTH_TOKEN` environment variable
-- **Codex**: Creates temp directory at `os.tmpdir()/hapi-codex-*`, writes token to `auth.json`, sets `CODEX_HOME`
-- **OpenCode**: No token injection; relies on OpenCode's own configuration
-
-## 3. Session Management
-
-### Runner-Spawned Sessions (Remote)
-
-Initiated by mobile app via backend RPC:
-1. Backend forwards RPC `spawn-happy-session` to runner via WebSocket
-2. `ApiMachineClient` invokes `spawnSession()` handler
-3. `spawnSession()`:
-   - Validates/creates directory (with approval flow)
-   - Configures agent-specific token environment
-   - Spawns detached SHAPI process with `--hapi-starting-mode remote --started-by runner`
-   - Adds to `pidToTrackedSession` map
-   - Sets up 15-second awaiter for session webhook
-4. New SHAPI process:
-   - Creates session with backend, receives `happySessionId`
-   - Calls `notifyRunnerSessionStarted()` to POST to runner's `/session-started`
-5. Runner updates tracking with `happySessionId`, resolves awaiter
-6. RPC returns session info to mobile app
-
-### Terminal-Spawned Sessions
-
-User runs `shapi` directly:
-1. CLI auto-starts runner if configured
-2. SHAPI process calls `notifyRunnerSessionStarted()`
-3. Runner receives webhook, creates `TrackedSession` with `startedBy: 'hapi directly - likely by user from terminal'`
-4. Session tracked for health monitoring
-
-### Directory Creation Approval
-
-When spawning a session, directory handling:
-1. Check if directory exists with `fs.access()`
-2. If missing and `approvedNewDirectoryCreation = false`: returns `requestToApproveDirectoryCreation` (HTTP 409)
-3. If missing and approved: creates directory with `fs.mkdir({ recursive: true })`
-4. Error handling for directory creation:
-   - `EACCES`: Permission denied
-   - `ENOTDIR`: File exists at path
-   - `ENOSPC`: Disk full
-   - `EROFS`: Read-only filesystem
-
-### Session Termination
-
-Via RPC `stop-session` or HTTP `/stop-session`:
-1. `stopSession()` finds session by `happySessionId` or `PID-{pid}` format
-2. Sends termination request via `killProcessByChildProcess()` or `killProcess()` (Windows uses `taskkill /T`)
-3. `on('exit')` handler removes from tracking map
-
-## 4. HTTP Control Server (Fastify)
-
-Local HTTP server using Fastify with `fastify-type-provider-zod` for type-safe request/response validation.
-
-**Host:** 127.0.0.1 (localhost only)
-**Port:** Dynamic (system-assigned)
-
-### Endpoints
-
-#### POST `/session-started`
-Session webhook - reports itself after creation.
-
-**Request:**
-```json
-{ "sessionId": "string", "metadata": { ... } }
-```
-**Response (200):**
-```json
-{ "status": "ok" }
+```bash
+curl -fsSL https://hub.example.com/install.sh | sh -s -- --base-url https://hub.example.com
 ```
 
-#### POST `/list`
-Returns all tracked sessions.
+The installer:
 
-**Response (200):**
-```json
-{
-  "children": [
-    { "startedBy": "runner", "happySessionId": "uuid", "pid": 12345 }
-  ]
-}
+1. Downloads or replaces the Runner-only binary.
+2. Adds `$HOME/.local/bin` to the user's shell startup file when needed.
+3. Interactively creates a workspace or joins an existing one.
+4. Pairs this machine.
+5. Starts the Runner.
+6. Prints the Hub URL, `spw...` Web credential, and Runner status.
+
+Manual primitives:
+
+```bash
+shapi workspace register --hub https://hub.example.com [--name <workspace>] [--registration-secret <secret>]
+shapi runner pair --hub https://hub.example.com [--name <machine>] [--web-token-file <path>]
+shapi runner start [--workspace-root <path>]...
 ```
 
-#### POST `/stop-session`
-Terminates a specific session.
+`--name` is a display name. Workspace registration defaults it to the operating-system username; Runner pairing defaults to the machine hostname.
 
-**Request:**
-```json
-{ "sessionId": "string" }
-```
-**Response (200):**
-```json
-{ "success": true }
-```
+## Identity and authentication
 
-#### POST `/spawn-session`
-Creates a new session.
+Current flow:
 
-**Request:**
-```json
-{ "directory": "/path/to/dir", "sessionId": "optional-uuid" }
-```
-**Response (200) - Success:**
-```json
-{
-  "success": true,
-  "sessionId": "uuid",
-  "approvedNewDirectoryCreation": true
-}
-```
-**Response (409) - Requires Approval:**
-```json
-{
-  "success": false,
-  "requiresUserApproval": true,
-  "actionRequired": "CREATE_DIRECTORY",
-  "directory": "/path/to/dir"
-}
-```
-**Response (500) - Error:**
-```json
-{ "success": false, "error": "Error message" }
+1. `workspace register` generates an `spw...` credential locally, sends it over HTTPS while creating the workspace, and the Hub stores only its hash.
+2. `runner pair` generates `spr...` plus a P-256 key pair in `src/authV2/credentials.ts`.
+3. Hub creates a short-lived device authorization and returns a human code plus `/pair` URL.
+4. A signed-in browser approves the code, or the installer approves it with a temporary `spw...` file.
+5. Runner stores the approved workspace/access-key binding locally.
+6. `src/authV2/runnerAuth.ts` exchanges `spr...` + an ES256 DPoP proof at `/api/v2/runner/token` for a short-lived access token.
+7. Each authenticated REST request uses a fresh DPoP proof. Socket.IO first obtains a one-time socket ticket.
+
+Security boundaries:
+
+- Never send or store `spw...` as a Runner credential.
+- Never copy one Runner's `spr...` or private key to another machine.
+- Hub binds `spr...`, machine ID, workspace, and public-key thumbprint.
+- Hub rejects stale/replayed DPoP proofs and Runner socket access without Runner-compatible credentials.
+- `CLI_API_TOKEN:<namespace>` is legacy migration compatibility only.
+
+Credential file:
+
+```text
+$HAPI_HOME/credentials-v2/runner-<sha256(normalized-hub-url)>.json
 ```
 
-#### POST `/stop`
-Graceful runner shutdown.
+The directory is mode `0700`; files are mode `0600`. The CLI intentionally does not persist `spw...`.
 
-**Response (200):**
-```json
-{ "status": "stopping" }
+## Startup lifecycle
+
+`startRunner()` performs these stages:
+
+1. Install signal and fatal-error shutdown handlers.
+2. Inspect state/process identity; stop stale or incompatible Runner state.
+3. Acquire the exclusive Runner lock.
+4. Load paired auth and establish/confirm the machine ID.
+5. Start Fastify on a random `127.0.0.1` port.
+6. Persist `runner.state.json` with PID, port, Runner version, identity fingerprint, argv, log path, and heartbeat data.
+7. Register/update machine metadata and Runner state with the Hub.
+8. Connect the machine Socket.IO client and register RPC handlers.
+9. Track child sessions and heartbeat until shutdown.
+
+Transient machine-registration failures retry with bounded exponential backoff. Shutdown updates Hub state, closes Socket.IO/control server, removes local state, and releases the lock.
+
+## Local control server
+
+Loopback-only endpoints; not a public Hub API:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /session-started` | Child reports its SHAPI session ID and metadata |
+| `POST /list` | List tracked live sessions |
+| `POST /stop-session` | Stop one tracked session |
+| `POST /spawn-session` | Start/resume a simple or worktree session |
+| `POST /stop` | Request graceful Runner shutdown |
+| `POST /codex-recovery-*` | Coordinate native Codex control recovery |
+| `POST /codex-external-*` | Forward reduced native Codex request/lifecycle signals |
+
+The port is discovered through `runner.state.json`. Treat that file as process coordination, not durable product data.
+
+## Hub connection and RPC
+
+The Runner creates or refreshes its machine through REST, then maintains the `/cli` Socket.IO namespace through `ApiMachineSyncClient`.
+
+Primary RPC handlers registered in `run.ts`:
+
+- `spawnSession`
+- `stopSession`
+- `requestShutdown`
+- `recoverCodexControl`
+- `getCodexRecovery`
+
+Machine metadata is built in `src/agent/sessionFactory.ts`. It includes platform/capabilities, optional workspace roots, and `runnerVersion`. `happyCliVersion` remains a compatibility field; use `runnerVersion` for update notices.
+
+Hub routes RPC only within the authenticated workspace. Preserve workspace scope when adding REST, Socket.IO, SSE, or RPC behavior.
+
+## Sessions and worktrees
+
+- Runner-spawned children are recorded before waiting for their `/session-started` callback.
+- Terminal-spawned sessions may report themselves and become tracked.
+- Late callbacks from timed-out Runner-spawned children are rejected and the orphan process is terminated.
+- Missing directories return a structured approval request instead of being created silently.
+- Worktree creation/removal lives in `src/runner/worktree.ts`.
+- Process termination uses platform-aware helpers in `src/utils/process.ts`.
+
+## Workspace roots
+
+Repeat `--workspace-root` to expose multiple directory trees in Hub Web:
+
+```bash
+shapi runner start --workspace-root ~/code --workspace-root /data/projects
 ```
 
-## 5. State Persistence
+`src/utils/workspaceRoot.ts` normalizes roots. Directory browsing validates against those roots. Session spawn remains allowed in any explicit directory accessible to the operating-system user. Do not describe workspace roots as an OS sandbox.
 
-### runner.state.json
-```json
-{
-  "pid": 12345,
-  "httpPort": 50097,
-  "startTime": "8/24/2025, 6:46:22 PM",
-  "startedWithCliVersion": "0.9.0-6",
-  "startedWithCliMtimeMs": 1724531182000,
-  "lastHeartbeat": "8/24/2025, 6:47:22 PM",
-  "runnerLogPath": "/path/to/runner.log"
-}
+## Version and update behavior
+
+- Dedicated version source: `cli/runner-version.json` via `src/runnerVersion.ts`.
+- Hub Web compares machine `runnerVersion` with `/downloads/runner/latest.json` and can show/copy the installer command.
+- The user updates manually by rerunning `install.sh`; Hub Web does not invoke Runner update RPCs.
+- The installer replaces the local binary and starts/restarts the Runner.
+- A live Runner can hand off to the already-installed binary when it detects local binary/source mtime drift. This is local process replacement, not network auto-update. `HAPI_DISABLE_VERSION_HANDOFF=1` disables it for external supervisors.
+
+Runner release only:
+
+```bash
+# From repository root; bump cli/runner-version.json first
+bun run build:runner-downloads
+scripts/deploy/publish-runner-downloads.sh <ssh-host>
 ```
 
-### Lock File
-- Created with O_EXCL flag for atomic acquisition
-- Contains PID for debugging
-- Prevents multiple runner instances
-- Cleaned up on graceful shutdown
+Binaries are attached to GitHub Releases tagged `runner-v*`. The Hub hosts `install.sh` and `latest.json`; the publish flow keeps the newest three Runner releases. Hub/Web-only changes must not bump the Runner version or publish Runner binaries.
 
-## 6. WebSocket Communication
+## Local files
 
-`ApiMachineClient` handles bidirectional communication:
+Under `~/.hapi/` or `$HAPI_HOME`:
 
-**Runner to Server:**
-- `machine-alive` - 20-second heartbeat
-- `machine-update-metadata` - static machine info changes
-- `machine-update-state` - runner status changes
+- `settings.json` - machine ID, Hub URL, compatibility settings.
+- `credentials-v2/` - per-Hub Runner credentials and private keys.
+- `runner.state.json` - live process/control metadata.
+- `runner.state.json.lock` - exclusive live-Runner lock.
+- `logs/` - Runner and CLI logs.
+- `native-codex-control-recovery.json` - native Codex recovery coordination.
 
-**Server to Runner:**
-- `rpc-request` with methods:
-  - `spawn-happy-session` - spawn new session
-  - `stop-session` - stop session by ID
-  - `stop-runner` - request shutdown
+## Change map
 
-All data is plain JSON over TLS; authentication is `CLI_API_TOKEN` (no end-to-end encryption).
+| Change | Start here |
+|---|---|
+| Pairing/credentials | `src/authV2/credentials.ts`, `src/authV2/pairRunner.ts` |
+| DPoP/token exchange | `src/authV2/runnerAuth.ts`, `src/api/api.ts` |
+| Lifecycle/session spawn | `src/runner/run.ts` |
+| Local commands/control | `src/commands/runner.ts`, `src/runner/controlClient.ts`, `src/runner/controlServer.ts` |
+| Machine metadata/RPC | `src/agent/sessionFactory.ts`, `src/api/apiMachine.ts` |
+| Workspace browsing roots | `src/utils/workspaceRoot.ts`, Runner directory RPC modules |
+| Installer/release | `scripts/install.sh`, `scripts/release/prepare-runner-downloads.ts`, `scripts/deploy/publish-runner-downloads.sh` |
 
-## 7. Process Discovery and Cleanup
+## Verification
 
-### Doctor Command
+Run focused tests first, then repository checks before push:
 
-`shapi doctor` uses `ps aux | grep` to find all SHAPI processes:
-- Production: matches `shapi`, the legacy `hapi` binary name, and `happy-coder`
-- Development: matches `src/index.ts` (run via `bun`)
-- Categorizes by command args: runner, runner-spawned, user-session, doctor
-
-### Clean Runaway Processes
-
-`shapi doctor clean`:
-1. `findRunawayHappyProcesses()` filters for likely orphans
-2. `killRunawayHappyProcesses()`:
-   - Sends SIGTERM
-   - Waits 1 second
-   - Sends SIGKILL if still alive
-
-## 8. Integration Testing
-
-### Test Environment
-- Requires `.env.integration-test`
-- Uses local hapi-hub (http://localhost:3006)
-- Separate `~/.hapi-dev-test` home directory
-
-### Key Test Scenarios
-- Session listing, spawning, stopping
-- External session webhook tracking
-- Graceful SIGTERM/SIGKILL shutdown
-- Multiple runner prevention
-- Version mismatch detection
-- Directory creation approval flow
-- Concurrent session stress tests
-
----
-
-# Machine Sync Architecture - Separated Metadata & Runner State
-
-> Direct-connect note: the "hub" is `hapi-hub`, payloads are plain JSON (no base64/encryption),
-> and authentication uses `CLI_API_TOKEN` (REST `Authorization: Bearer ...` + Socket.IO `handshake.auth.token`).
-
-## Data Structure (Similar to Session's metadata + agentState)
-
-```typescript
-// Static machine information (rarely changes)
-interface MachineMetadata {
-  host: string;              // hostname
-  platform: string;          // darwin, linux, win32
-  happyCliVersion: string;
-  homeDir: string;
-  happyHomeDir: string;
-  happyLibDir: string;       // runtime path
-}
-
-// Dynamic runner state (frequently updated)
-interface RunnerState {
-  status: 'running' | 'shutting-down' | 'offline';
-  pid?: number;
-  httpPort?: number;
-  startedAt?: number;
-  shutdownRequestedAt?: number;
-  shutdownSource?: 'hapi-app' | 'hapi-cli' | 'os-signal' | 'exception';
-}
+```bash
+(cd cli && bun run test)
+bun typecheck
+bun run test
 ```
 
-## 1. CLI Startup Phase
-
-Checks if machine ID exists in settings:
-- If not: creates ID locally only (so sessions can reference it)
-- Does NOT create machine on hub - that's runner's job
-- CLI doesn't manage machine details - all API & schema live in runner subpackage
-
-## 2. Runner Startup - Initial Registration
-
-### REST Request: `POST /cli/machines`
-```json
-{
-  "id": "machine-uuid-123",
-  "metadata": {
-    "host": "MacBook-Pro.local",
-    "platform": "darwin",
-    "happyCliVersion": "1.0.0",
-    "homeDir": "/Users/john",
-    "happyHomeDir": "/Users/john/.hapi",
-    "happyLibDir": "/usr/local/lib/node_modules/hapi"
-  },
-  "runnerState": {
-    "status": "running",
-    "pid": 12345,
-    "httpPort": 8080,
-    "startedAt": 1703001234567
-  }
-}
-```
-
-### Server Response:
-```json
-{
-  "machine": {
-    "id": "machine-uuid-123",
-    "metadata": { "host": "...", "platform": "...", "happyCliVersion": "..." },
-    "metadataVersion": 1,
-    "runnerState": { "status": "running", "pid": 12345 },
-    "runnerStateVersion": 1,
-    "active": true,
-    "activeAt": 1703001234567,
-    "createdAt": 1703001234567,
-    "updatedAt": 1703001234567
-  }
-}
-```
-
-## 3. WebSocket Connection & Real-time Updates
-
-### Connection Handshake:
-```javascript
-io(`${botUrl}/cli`, {
-  auth: {
-    token: "CLI_API_TOKEN",
-    clientType: "machine-scoped",
-    machineId: "machine-uuid-123"
-  },
-  path: "/socket.io/",
-  transports: ["websocket"]
-})
-```
-
-### Heartbeat (every 20s):
-```json
-// Client -> Server
-socket.emit('machine-alive', {
-  "machineId": "machine-uuid-123",
-  "time": 1703001234567
-})
-```
-
-## 4. Runner State Updates (via WebSocket)
-
-### When runner status changes:
-```json
-// Client -> Server
-socket.emit('machine-update-state', {
-  "machineId": "machine-uuid-123",
-  "runnerState": {
-    "status": "shutting-down",
-    "pid": 12345,
-    "httpPort": 8080,
-    "startedAt": 1703001234567,
-    "shutdownRequestedAt": 1703001244567,
-    "shutdownSource": "hapi-app"
-  },
-  "expectedVersion": 1
-}, callback)
-
-// Server -> Client (callback)
-// Success:
-{
-  "result": "success",
-  "version": 2,
-  "runnerState": { "status": "shutting-down" }
-}
-
-// Version mismatch:
-{
-  "result": "version-mismatch",
-  "version": 3,
-  "runnerState": { "status": "running" }
-}
-```
-
-### Machine metadata update (rare):
-```json
-// Client -> Server
-socket.emit('machine-update-metadata', {
-  "machineId": "machine-uuid-123",
-  "metadata": {
-    "host": "MacBook-Pro.local",
-    "platform": "darwin",
-    "happyCliVersion": "1.0.1",
-    "homeDir": "/Users/john",
-    "happyHomeDir": "/Users/john/.hapi"
-  },
-  "expectedVersion": 1
-}, callback)
-```
-
-## 5. Mini App RPC Calls (via hapi-hub)
-
-The Telegram Mini App calls REST endpoints on `hapi-hub` (for example `POST /api/machines/:id/spawn`).
-`hapi-hub` then relays those requests to the runner via Socket.IO `rpc-request` on the `/cli` namespace.
-
-RPC method naming (machine-scoped) uses a `${machineId}:` prefix, for example:
-- `${machineId}:spawn-happy-session`
-
-## 6. Server Broadcasts to Clients
-
-### When runner state changes:
-```json
-// Server -> Mobile/Web clients
-socket.emit('update', {
-  "id": "update-id-xyz",
-  "seq": 456,
-  "body": {
-    "t": "update-machine",
-    "machineId": "machine-uuid-123",
-    "runnerState": {
-      "value": { "status": "shutting-down" },
-      "version": 2
-    }
-  },
-  "createdAt": 1703001244567
-})
-```
-
-### When metadata changes:
-```json
-socket.emit('update', {
-  "id": "update-id-abc",
-  "seq": 457,
-  "body": {
-    "t": "update-machine",
-    "machineId": "machine-uuid-123",
-    "metadata": {
-      "value": { "host": "MacBook-Pro.local" },
-      "version": 2
-    }
-  },
-  "createdAt": 1703001244567
-})
-```
-
-## 7. GET Machine Status (REST)
-
-### Request: `GET /cli/machines/machine-uuid-123`
-```http
-Authorization: Bearer <CLI_API_TOKEN>
-```
-
-### Response:
-```json
-{
-  "machine": {
-    "id": "machine-uuid-123",
-    "metadata": { "host": "...", "platform": "...", "happyCliVersion": "..." },
-    "metadataVersion": 2,
-    "runnerState": { "status": "running", "pid": 12345 },
-    "runnerStateVersion": 3,
-    "active": true,
-    "activeAt": 1703001244567,
-    "createdAt": 1703001234567,
-    "updatedAt": 1703001244567
-  }
-}
-```
-
-## Key Design Decisions
-
-1. **Separation of Concerns**:
-   - `metadata`: Static machine info (host, platform, versions)
-   - `runnerState`: Dynamic runtime state (status, pid, ports)
-
-2. **Independent Versioning**:
-   - `metadataVersion`: For machine metadata updates
-   - `runnerStateVersion`: For runner state updates
-   - Allows concurrent updates without conflicts
-
-3. **Security**: No end-to-end encryption (TLS only); CLI auth is a shared secret `CLI_API_TOKEN`
-
-4. **Update Events**: Server broadcasts use same pattern as sessions:
-   - `t: 'update-machine'` with optional metadata and/or runnerState fields
-   - Clients only receive updates for fields that changed
-
-5. **RPC Pattern**: Machine-scoped RPC methods prefixed with machineId (like sessions)
-
----
-
-# Improvements
-
-- runner.state.json file is getting hard removed when runner exits or is stopped. We should keep it around and have 'state' field and 'stateReason' field that will explain why the runner is in that state
-- If the file is not found - we assume the runner was never started or was cleaned out by the user or doctor
-- If the file is found and corrupted - we should try to upgrade it to the latest version? or simply remove it if we have write access
-
-- posts helpers for runner do not return typed results
-- I don't like that runnerPost returns either response from runner or { error: ... }. We should have consistent envelope type
-
-- we loose track of children processes when runner exits / restarts - we should write them to the same state file? At least the pids should be there for doctor & cleanup
-
-- the runner control server binds to `127.0.0.1` on a random port; if we ever expose it beyond localhost, require an explicit auth token/header
+For installer/release changes, also run `scripts/tests/install-runner.test.sh` and `scripts/tests/prune-runner-releases.test.sh`.

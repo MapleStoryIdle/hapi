@@ -2,7 +2,7 @@
 
 Work style: telegraph; noun-phrases ok; drop grammar;
 
-Short guide for AI agents in this repo. Prefer progressive loading: start with the root README, then package READMEs as needed.
+Agent entrypoint. Progressive loading: read the root README, then only the package README and source files relevant to the task.
 
 ## What is HAPI?
 
@@ -41,10 +41,19 @@ Bun workspaces; `shared` consumed by cli, hub, web.
 3. Web subscribes to SSE `/api/events`, receives live updates
 4. User actions → Web → hub REST API → RPC to CLI → agent
 
+## Identity and isolation model
+
+- A **workspace** is the authorization and data-isolation boundary.
+- `spw...` is the workspace Web credential. Browser login exchanges it for an HttpOnly session cookie. Never use it as a Runner credential.
+- `spr...` is a per-Runner credential, bound to that Runner's P-256 public key. A workspace may have multiple Runners.
+- Runners use DPoP to exchange `spr` for short-lived access tokens; normal requests do not send raw `spr` credentials.
+- New installs use workspace registration and Runner pairing. `CLI_API_TOKEN:<namespace>` is legacy migration compatibility only.
+
 ## Reference docs
 
 - `README.md` - User overview, quick start
 - `cli/README.md` - CLI commands, config, runner
+- `cli/src/runner/README.md` - Runner lifecycle, pairing, control, release boundary
 - `hub/README.md` - Hub config, HTTP API, Socket.IO events
 - `web/README.md` - Routes, components, hooks
 - `docs/guide/` - User guides (installation, how-it-works, FAQ)
@@ -64,7 +73,7 @@ Bun workspaces; `shared` consumed by cli, hub, web.
 
 ```bash
 bun typecheck           # All packages
-bun run test            # cli + hub tests
+bun run test            # Package tests + mobile layout guard
 bun run dev             # hub + web concurrently
 bun run build:single-exe # All-in-one binary
 ```
@@ -81,6 +90,7 @@ bun run build:single-exe # All-in-one binary
 
 ### CLI (`cli/src/`)
 - `api/` - Hub connection (Socket.IO client, auth)
+- `authV2/` - Runner credentials, pairing, DPoP access-token exchange
 - `claude/` - Claude Code integration (wrapper, hooks)
 - `codex/` - Codex mode integration
 - `agent/` - Multi-agent support (Gemini via ACP)
@@ -91,6 +101,9 @@ bun run build:single-exe # All-in-one binary
 
 ### Hub (`hub/src/`)
 - `web/routes/` - REST API endpoints
+- `auth/` - Runner and Web request authentication
+- `web/routes/authV2.ts` - Workspace registration, Web sessions, Runner pairing/tokens
+- `store/workspaces.ts` - Workspaces, access keys, pairings, Web sessions
 - `socket/` - Socket.IO setup
 - `socket/handlers/cli/` - CLI event handlers (session, terminal, machine, RPC)
 - `sync/` - Core logic (sessionCache, messageService, rpcGateway)
@@ -162,6 +175,10 @@ keyboard offsets, or message-to-composer clearance, read
 | Modify message handling | `hub/src/sync/messageService.ts` |
 | Add notification type | `hub/src/notifications/` |
 | Add shared type | `shared/src/types.ts`, `shared/src/schemas.ts` |
+| Change workspace/Web auth | `hub/src/web/routes/authV2.ts`, `hub/src/auth/`, `hub/src/store/workspaces.ts`, `web/src/hooks/useAuth*.ts` |
+| Change Runner pairing/auth | `cli/src/authV2/`, `cli/src/commands/runner.ts`, `hub/src/auth/runnerAuth.ts` |
+| Change installer | `scripts/install.sh`, `scripts/release/prepare-runner-downloads.ts`, `web/src/routes/install.tsx` |
+| Release Runner | `cli/runner-version.json`, `package.json`, `scripts/deploy/publish-runner-downloads.sh` |
 
 ## Important patterns
 
@@ -169,7 +186,22 @@ keyboard offsets, or message-to-composer clearance, read
 - **Versioned updates**: CLI sends `update-metadata`/`update-state` with version; hub rejects stale
 - **Session modes**: `local` (terminal) vs `remote` (web-controlled); switchable mid-session
 - **Permission modes**: `default`, `acceptEdits`, `auto`, `bypassPermissions`, `plan`
-- **Namespaces**: Multi-user isolation via `CLI_API_TOKEN:<namespace>` suffix
+- **Isolation**: Every session, machine, and Runner belongs to one workspace; enforce workspace scope at storage, HTTP, Socket.IO, SSE, and RPC boundaries
+
+## Release boundaries (mandatory)
+
+Hub/Web and Runner releases are independent.
+
+**Hub/Web-only change**
+- Build/deploy Hub/Web only.
+- Do not change `cli/runner-version.json`.
+- Do not run `bun run build:runner-downloads`, publish `runner-v*`, or upload Runner binaries.
+
+**Runner behavior/runtime change**
+- Bump `cli/runner-version.json`.
+- Build with `bun run build:runner-downloads`.
+- Publish with `scripts/deploy/publish-runner-downloads.sh <ssh-host>`; GitHub Releases hosts binaries, Hub serves `install.sh` and `latest.json`.
+- Update remains manual: users rerun `curl -fsSL <hub>/install.sh | sh`. Hub Web may show/copy the command; it must not trigger an update.
 
 ## Adding new web features — consider an FUE
 
@@ -178,35 +210,12 @@ When you ship a non-essential feature (the 20% of sessions, not the 80%), consid
 - **Hook**: `web/src/lib/use-fue.ts` — `useFue(featureId)` returns `{ status, engage, dismiss }`. Storage namespace `hapi.fue.v1.<featureId>` (one localStorage key per feature, isolated from any upstream onboarding flow).
 - **Components**: `web/src/components/Fue.tsx` — `<FueDot>` (small pulsing badge for the affordance) and `<FueCallout>` (portal-rendered popover with title/body + "Got it" affirmative-action dismiss).
 
-Pattern (~10 lines around the affordance):
-
-```tsx
-const fue = useFue('my-feature')
-const buttonRef = useRef<HTMLButtonElement>(null)
-return (
-    <>
-        <button ref={buttonRef} onClick={() => { fue.engage(); doThing() }}>
-            <Icon />
-            {fue.status !== 'acknowledged' ? <FueDot pulsing={fue.status === 'unseen'} /> : null}
-        </button>
-        {fue.status === 'engaging' ? (
-            <FueCallout
-                title={t('myFeature.fueTitle')}
-                body={t('myFeature.fueBody')}
-                onDismiss={fue.dismiss}
-                anchorRef={buttonRef}
-            />
-        ) : null}
-    </>
-)
-```
-
 Rules:
 - Affirmative action only: there is no auto-timeout — user dismisses by clicking "Got it" (reading speed varies).
 - The FUE dot and any feature-specific badge (e.g. an entry counter) should be **mutually exclusive**: onboarding signal beats inventory signal until acknowledged.
 - Storage is opt-in per-feature; if upstream ships its own onboarding for a feature, just don't wrap that affordance.
 
-Canonical example: scratchlist toggle in `web/src/components/AssistantChat/ComposerButtons.tsx` (`ScratchlistToggleButton`).
+Implementation pattern: call `engage()` from the feature affordance, render `FueDot` until acknowledged, and anchor `FueCallout` while engaging. Canonical example: `ScratchlistToggleButton` in `web/src/components/AssistantChat/ComposerButtons.tsx`.
 
 ## Critical Thinking
 

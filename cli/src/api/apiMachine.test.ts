@@ -932,6 +932,7 @@ describe('ApiMachineClient runner metadata sync', () => {
             host: 'Mac-mini.local',
             platform: 'darwin',
             happyCliVersion: '0.20.2',
+            runnerVersion: '1.0.3',
             homeDir: '/Users/alice',
             happyHomeDir: '/Users/alice/.hapi',
             happyLibDir: '/opt/hapi',
@@ -942,6 +943,7 @@ describe('ApiMachineClient runner metadata sync', () => {
             host: 'Mac-mini.local',
             platform: 'darwin',
             happyCliVersion: '0.20.2',
+            runnerVersion: '1.0.4',
             homeDir: '/Users/alice',
             codexHome: '/Users/alice/.codex',
             happyHomeDir: '/Users/alice/.hapi',
@@ -980,6 +982,7 @@ describe('ApiMachineClient runner metadata sync', () => {
 
         expect(machine.metadata).toMatchObject({
             codexHome: '/Users/alice/.codex',
+            runnerVersion: '1.0.4',
             displayName: 'My runner'
         })
         client.shutdown()

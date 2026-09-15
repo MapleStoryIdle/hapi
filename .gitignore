@@ -5,6 +5,7 @@
 **/dist/
 **/.vitepress/cache/
 **/dist-exe/
+**/dist-runner-exe/
 **/*.tsbuildinfo
 hub/src/web/embeddedAssets.generated.ts
 hub/src/generated/

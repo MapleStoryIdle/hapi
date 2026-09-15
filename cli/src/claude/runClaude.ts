@@ -19,6 +19,7 @@ import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
+import { expandManagedSkillInvocation } from '@/managedSkills';
 import { normalizeClaudeSessionModel } from './model';
 import { normalizeClaudeSessionEffort } from './effort';
 import { getInvokedCwd } from '@/utils/invokedCwd';
@@ -259,7 +260,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         const specialCommand = parseSpecialCommand(message.content.text);
 
         // Format message text with attachments for Claude
-        const formattedText = formatMessageWithAttachments(message.content.text, message.content.attachments);
+        const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
 
         if (specialCommand.type === 'compact') {
             logger.debug('[start] Detected /compact command');

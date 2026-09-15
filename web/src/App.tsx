@@ -42,6 +42,7 @@ import { ToastContainer } from '@/components/ToastContainer'
 import { PwaUpdateProvider } from '@/lib/pwa-update-context'
 import { ToastProvider, type ToastKind, useToast } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
+import RunnerInstallPage from '@/routes/install'
 
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
 
@@ -70,7 +71,7 @@ export function App() {
 function AppInner() {
     const { t } = useTranslation()
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
-    const { authSource, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
+    const { authSource, isLoading: isAuthSourceLoading, setAccessToken, setCookieSession } = useAuthSource(baseUrl)
     const { token, api, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
@@ -676,6 +677,9 @@ function AppInner() {
         enabled: sseEnabled && Boolean(sessionEventSubscription)
     })
 
+    // Installation instructions are intentionally public; pairing approval remains authenticated.
+    if (pathname === '/install') return withPwaBanner(<RunnerInstallPage />)
+
     // Loading auth source
     if (isAuthSourceLoading) {
         return withPwaBanner(
@@ -690,6 +694,7 @@ function AppInner() {
         return withPwaBanner(
             <LoginPrompt
                 onLogin={setAccessToken}
+                onCookieLogin={setCookieSession}
                 baseUrl={baseUrl}
                 serverUrl={serverUrl}
                 setServerUrl={setServerUrl}
@@ -730,6 +735,7 @@ function AppInner() {
             return withPwaBanner(
                 <LoginPrompt
                     onLogin={setAccessToken}
+                    onCookieLogin={setCookieSession}
                     baseUrl={baseUrl}
                     serverUrl={serverUrl}
                     setServerUrl={setServerUrl}

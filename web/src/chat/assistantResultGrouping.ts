@@ -177,6 +177,26 @@ function markLatestActiveProcessDefaultOpen(blocks: VisibleChatBlock[]): Visible
     })
 }
 
+/**
+ * A Runner can finish its latest tool before the assistant turn itself ends.
+ * Keep that newest process row live until the session reports idle; otherwise
+ * the compact title jumps to "Processed" while the agent is still working.
+ */
+function markLatestCurrentTurnProcessActive(blocks: VisibleChatBlock[]): VisibleChatBlock[] {
+    const latestUserIndex = blocks.findLastIndex((block) => (
+        block.kind === 'user-text' || block.kind === 'question-answer'
+    ))
+    const latestProcessIndex = blocks.findLastIndex((block, index) => (
+        index > latestUserIndex && isToolGroupBlock(block)
+    ))
+    if (latestProcessIndex === -1) return blocks
+    return blocks.map((block, index) => (
+        index === latestProcessIndex && isToolGroupBlock(block)
+            ? { ...block, turnActive: true }
+            : block
+    ))
+}
+
 export function groupAssistantResultDetails(
     blocks: VisibleChatBlock[],
     options: {
@@ -223,6 +243,6 @@ export function groupAssistantResultDetails(
 
     flushGroup()
     return options.runActive
-        ? markLatestActiveProcessDefaultOpen(transformed)
+        ? markLatestActiveProcessDefaultOpen(markLatestCurrentTurnProcessActive(transformed))
         : transformed
 }

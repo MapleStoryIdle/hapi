@@ -35,6 +35,7 @@ import { RenameNativeCodexSessionRequestSchema } from '@hapi/protocol/apiTypes'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { Store, StoredMessage } from '../../store'
 import type { WebAppEnv } from '../middleware/auth'
+import { ensureManagedSkillCached, findManagedSkillInvocation, isManagedSkillEnabled, mergeEnabledManagedSkills } from '../../managedSkills'
 
 type ScriptLogKind = 'sync' | 'restart'
 
@@ -1961,17 +1962,10 @@ export function createCodexDesktopRoutes(options: {
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
-    app.use('/codex/*', async (c, next) => {
-        if (c.get('namespace') !== 'default') {
-            return c.json({
-                success: false,
-                error: CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR
-            }, 403)
-        }
-        return next()
-    })
-
     app.get('/codex/status', (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ success: false, error: CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR }, 403)
+        }
         const codexStatus = getCodexDesktopStatus()
         return c.json({
             success: true,
@@ -1995,6 +1989,9 @@ export function createCodexDesktopRoutes(options: {
         }
         const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
         if (!machineId) {
+            if (c.get('namespace') !== 'default') {
+                return c.json({ success: false, error: CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR }, 403)
+            }
             return c.json({
                 success: true,
                 sessions: listLocalCodexSessions(limit ?? DEFAULT_CODEX_SESSION_SCAN_LIMIT, { excludeHapiInitiated })
@@ -2061,6 +2058,9 @@ export function createCodexDesktopRoutes(options: {
         }
         const machineId = parseCodexRunnerMachineId(c.req.query('machineId'))
         if (!machineId) {
+            if (c.get('namespace') !== 'default') {
+                return c.json({ success: false, error: CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR }, 403)
+            }
             const summary = findLocalCodexSession(c.req.param('id'))
             if (!summary) {
                 return c.json({ success: false, error: 'Codex session not found' }, 404)
@@ -2357,7 +2357,10 @@ export function createCodexDesktopRoutes(options: {
             if (result.success !== true) {
                 return c.json(result, 404)
             }
-            return c.json(result satisfies CodexLocalSessionComposerCapabilitiesRpcResponse)
+            return c.json({
+                ...result,
+                skills: mergeEnabledManagedSkills(result.skills, options.store, c.get('namespace'))
+            } satisfies CodexLocalSessionComposerCapabilitiesRpcResponse)
         } catch (error) {
             return c.json({
                 success: false,
@@ -2612,6 +2615,13 @@ export function createCodexDesktopRoutes(options: {
         }
 
         try {
+            const managedSkillId = findManagedSkillInvocation(request.message, options.store, c.get('namespace'))
+            if (managedSkillId) {
+                if (!isManagedSkillEnabled(options.store, c.get('namespace'), managedSkillId)) {
+                    return c.json({ success: false, error: `SHAPI skill ${managedSkillId} is disabled` }, 409)
+                }
+                await ensureManagedSkillCached(engine!, target.machine, managedSkillId, options.store, c.get('namespace'))
+            }
             // A SHAPI session from an older runner can have a Codex Desktop
             // originator and therefore appear in the native transcript list.
             // Its app-server is already connected to SHAPI; sending through
@@ -2832,6 +2842,9 @@ export function createCodexDesktopRoutes(options: {
     })
 
     app.post('/codex/sync-session', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ success: false, error: CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR }, 403)
+        }
         const codexStatus = getCodexDesktopStatus()
         const body = await c.req.json().catch(() => null)
         const parsed = parseSyncSessionRequest(body)
@@ -2862,6 +2875,9 @@ export function createCodexDesktopRoutes(options: {
     })
 
     app.post('/codex/duplicate-sessions', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ success: false, error: CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR }, 403)
+        }
         const body = await c.req.json().catch(() => null)
         const parsed = parseSyncSessionRequest(body)
         if (parsed.error) {
@@ -2896,6 +2912,9 @@ export function createCodexDesktopRoutes(options: {
     })
 
     app.post('/codex/merge-duplicate-sessions', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ success: false, error: CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR }, 403)
+        }
         const body = await c.req.json().catch(() => null)
         const parsed = parseSyncSessionRequest(body)
         if (parsed.error) {
@@ -2942,6 +2961,9 @@ export function createCodexDesktopRoutes(options: {
     })
 
     app.post('/codex/restart-desktop', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ success: false, error: CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR }, 403)
+        }
         const codexStatus = getCodexDesktopStatus()
         if (!codexStatus.clientAvailable) {
             const scriptPath = getRestartScriptPath()

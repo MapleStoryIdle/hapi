@@ -274,6 +274,13 @@ describe('SessionHeader back action', () => {
         )
         expect(popover.querySelectorAll('[data-session-detail-group]')).toHaveLength(4)
         expect(screen.getByText('gpt-5.6')).toBeInTheDocument()
+        expect(screen.queryByText('ios-grouped-details')).not.toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Technical' }))
+        expect(screen.getByText('ios-grouped-details')).toBeInTheDocument()
+        expect(screen.queryByText('gpt-5.6')).not.toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Overview' }))
 
         fireEvent.click(screen.getByRole('button', { name: '🚀 Release' }))
         expect(onSetGroup).toHaveBeenCalledOnce()

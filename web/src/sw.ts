@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute } from 'workbox-precaching'
 import { registerRoute } from 'workbox-routing'
-import { CacheFirst, NetworkFirst, NetworkOnly } from 'workbox-strategies'
+import { CacheFirst, NetworkOnly } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import {
     cleanupExpiredShareTransfers,
@@ -12,6 +12,7 @@ import { shareTargetPathname } from './lib/sharePath'
 
 const sharePath = shareTargetPathname()
 const staticAssetsCacheName = 'static-assets'
+const legacyAuthenticatedApiCaches = ['api-sessions', 'api-session-detail', 'api-machines'] as const
 const legacyPreviewCacheScanLimit = 80
 const previewMethods = ['DELETE', 'GET', 'HEAD', 'PATCH', 'POST', 'PUT'] as const
 
@@ -66,44 +67,22 @@ registerRoute(
 
 registerRoute(
     ({ url }) => url.pathname === '/api/sessions',
-    new NetworkFirst({
-        cacheName: 'api-sessions',
-        networkTimeoutSeconds: 10,
-        plugins: [
-            new ExpirationPlugin({
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 5
-            })
-        ]
-    })
+    new NetworkOnly()
 )
 
 registerRoute(
     ({ url }) => /^\/api\/sessions\/[^/]+$/.test(url.pathname),
-    new NetworkFirst({
-        cacheName: 'api-session-detail',
-        networkTimeoutSeconds: 10,
-        plugins: [
-            new ExpirationPlugin({
-                maxEntries: 20,
-                maxAgeSeconds: 60 * 5
-            })
-        ]
-    })
+    new NetworkOnly()
 )
 
 registerRoute(
     ({ url }) => url.pathname === '/api/machines',
-    new NetworkFirst({
-        cacheName: 'api-machines',
-        networkTimeoutSeconds: 10,
-        plugins: [
-            new ExpirationPlugin({
-                maxEntries: 5,
-                maxAgeSeconds: 60 * 10
-            })
-        ]
-    })
+    new NetworkOnly()
+)
+
+registerRoute(
+    ({ url }) => url.pathname === '/downloads/runner/latest.json',
+    new NetworkOnly()
 )
 
 registerRoute(
@@ -146,7 +125,8 @@ self.addEventListener('activate', (event) => {
             // static runtime cache. Do not inspect or clear unrelated caches.
             cleanupLegacyPreviewCache().catch((error) => {
                 console.warn('preview cache cleanup failed', error)
-            })
+            }),
+            Promise.all(legacyAuthenticatedApiCaches.map((cacheName) => caches.delete(cacheName)))
         ])
     )
 })

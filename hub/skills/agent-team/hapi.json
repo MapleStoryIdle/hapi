@@ -1,0 +1,10 @@
+{
+    "id": "agent-team",
+    "name": "Agent Team",
+    "description": "Choose solo execution or a subagent team based on task complexity and risk.",
+    "descriptions": {
+        "zh-CN": "根据工程任务的复杂度和风险，选择单人执行或安全的子代理团队。"
+    },
+    "version": "1.0.0",
+    "minimumRunnerVersion": "1.1.2"
+}

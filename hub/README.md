@@ -15,9 +15,13 @@ Telegram bot + HTTP API + realtime updates for the SHAPI hub.
 
 See `src/configuration.ts` for all options.
 
-### Required
+### Workspace registration and authentication
 
-- `CLI_API_TOKEN` - Base shared secret used by CLI and web login. Clients append `:<namespace>` for isolation. Auto-generated on first run if not set.
+- `HAPI_REGISTRATION_MODE` - `closed`, `secret`, or `open`. Defaults to `secret` when a registration secret exists; otherwise `closed`.
+- `HAPI_REGISTRATION_SECRET` - Required in `secret` mode; minimum 32 bytes. Installers supply it only while creating a workspace.
+- `CLI_API_TOKEN` - Legacy shared-token bridge, auto-generated when absent. Keep it during migration, but do not distribute it to new users or use it for new Runner pairing.
+
+Each workspace is an authorization and data-isolation boundary. Its `spw...` credential creates browser sessions and approves any number of independently keyed `spr...` Runners.
 
 ### Optional (Telegram)
 
@@ -74,8 +78,8 @@ Binary (single executable):
 
 ```bash
 export TELEGRAM_BOT_TOKEN="..."
-export CLI_API_TOKEN="shared-secret"
 export HAPI_PUBLIC_URL="https://your-domain.example"
+export HAPI_REGISTRATION_MODE="open" # or secret + HAPI_REGISTRATION_SECRET
 
 shapi hub
 ```
@@ -84,7 +88,7 @@ The legacy `hapi` command remains supported as an alias; `hapi server` remains a
 
 If you only need web + CLI, you can omit TELEGRAM_BOT_TOKEN.
 To enable Telegram, set TELEGRAM_BOT_TOKEN and HAPI_PUBLIC_URL, start the hub, open `/app`
-in the bot chat, and bind the Mini App with `CLI_API_TOKEN:<namespace>` when prompted.
+in the bot chat, and bind the Mini App with the workspace's `spw...` credential when prompted.
 
 From source:
 
@@ -100,7 +104,7 @@ bun run dev:hub
 See [Events and service checks](../docs/guide/monitoring.md) for mobile setup,
 webhook authentication, probe safety, repair approval and retention limits.
 
-- `/api/monitors` — namespace-authenticated configuration and seven-day metrics.
+- `/api/monitors` — workspace-authenticated configuration and seven-day metrics.
 - `/api/monitors/:id` — detail, incidents and original-session links.
 - `POST /hooks/events?token=YOUR_RULE_TOKEN` with JSON `{"prompt":"..."}` — bounded webhook ingestion; disable query-string logging for this credential-bearing endpoint. GET/HEAD cannot trigger work.
 
@@ -109,10 +113,17 @@ and creates no sessions. HTTP checks originate from the Hub network.
 
 See `src/web/routes/` for all endpoints.
 
-### Authentication (`src/web/routes/auth.ts`)
+### Authentication (`src/web/routes/authV2.ts`)
 
-- `POST /api/auth` - Get JWT token (Telegram initData or `CLI_API_TOKEN[:namespace]`).
-- `POST /api/bind` - Bind a Telegram account using initData + `CLI_API_TOKEN:<namespace>`.
+- `POST /api/v2/workspaces/register` - Create a workspace when registration policy permits.
+- `POST /api/v2/web-sessions` - Exchange `spw...` for HttpOnly session + CSRF cookies.
+- `GET|DELETE /api/v2/web-sessions/current` - Inspect or revoke the current browser session.
+- `POST /api/v2/runner/device-authorizations` - Start Runner pairing.
+- `POST /api/v2/runner/device-authorizations/:userCode/approve` - Bind a Runner to the current browser's workspace.
+- `POST /api/v2/runner/token` - Exchange `spr...` + DPoP proof for a short-lived access token.
+- `POST /api/v2/runner/socket-tickets` - Exchange Runner access for a single Socket.IO ticket.
+
+`src/web/routes/auth.ts` retains `POST /api/auth` and `/api/bind` for Telegram and legacy clients. `CLI_API_TOKEN:<namespace>` is migration compatibility, not the current onboarding path.
 
 ### Sessions (`src/web/routes/sessions.ts`)
 
@@ -246,8 +257,11 @@ See `src/store/index.ts` for SQLite persistence:
 - Sessions with metadata and agent state.
 - Messages with pagination support.
 - Machines with runner state.
+- Workspaces and scoped access keys.
+- Runner pairings and public-key bindings.
+- Revocable Web sessions; raw Web credentials are stored as hashes.
 - Todo extraction from messages.
-- Users table for Telegram bindings (includes namespace).
+- Users table for Telegram-to-workspace bindings (stored through the workspace data namespace).
 
 ## Source structure
 
@@ -265,10 +279,13 @@ See `src/store/index.ts` for SQLite persistence:
 ## Security model
 
 Access is controlled by:
-- Telegram initData verification plus bound Telegram users (bound via `CLI_API_TOKEN:<namespace>`).
-- `CLI_API_TOKEN` base secret for CLI and browser access (namespace is appended by clients).
+- Workspace scope on sessions, machines, messages, SSE, RPC, and file operations.
+- Browser `spw...` exchange into HttpOnly session cookies plus CSRF checks.
+- Per-Runner `spr...` credentials bound to P-256 public keys. DPoP proofs protect token exchange and Runner requests; access tokens are short-lived.
+- Telegram initData verification plus a workspace binding.
+- Legacy shared-token namespaces only while old installations are migrated.
 
-Transport security depends on HTTPS in front of the hub.
+Auth v2 clients reject non-HTTPS public Hub URLs; localhost HTTP is allowed for development. Keep TLS termination and reverse-proxy headers correct.
 
 ## Build for deployment
 

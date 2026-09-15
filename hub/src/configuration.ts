@@ -14,6 +14,8 @@
  * - HAPI_LISTEN_HOST: Host/IP to bind the HTTP service (default: 127.0.0.1)
  * - HAPI_LISTEN_PORT: Port for HTTP service (default: 3006)
  * - HAPI_PUBLIC_URL: Public URL for external access (e.g., Telegram Mini App)
+ * - HAPI_REGISTRATION_MODE: Workspace registration mode: closed, secret, or open
+ * - HAPI_REGISTRATION_SECRET: Required when HAPI_REGISTRATION_MODE=secret
  * - CORS_ORIGINS: Comma-separated CORS origins
  * - HAPI_RELAY_API: Relay API domain for tunwg (default: relay.hapi.run)
  * - HAPI_RELAY_AUTH: Relay auth key for tunwg (default: hapi)
@@ -31,6 +33,7 @@ import { getSettingsFile } from './config/settings'
 import { loadServerSettings, type ServerSettings, type ServerSettingsResult } from './config/serverSettings'
 
 export type ConfigSource = 'env' | 'file' | 'default'
+export type RegistrationMode = 'closed' | 'secret' | 'open'
 
 export interface ConfigSources {
     telegramBotToken: ConfigSource
@@ -90,6 +93,12 @@ class Configuration {
     /** Allowed CORS origins for Mini App + Socket.IO (comma-separated env override) */
     public readonly corsOrigins: string[]
 
+    /** Enrollment capability for public workspace self-registration. */
+    public readonly registrationSecret: string | null
+
+    /** Whether workspace registration is disabled, secret-gated, or public. */
+    public readonly registrationMode: RegistrationMode
+
     /** Sources of each configuration value */
     public readonly sources: ConfigSources
 
@@ -114,6 +123,19 @@ class Configuration {
         this.listenPort = serverSettings.listenPort
         this.publicUrl = serverSettings.publicUrl
         this.corsOrigins = serverSettings.corsOrigins
+        this.registrationSecret = process.env.HAPI_REGISTRATION_SECRET?.trim() || null
+        if (this.registrationSecret && Buffer.byteLength(this.registrationSecret, 'utf8') < 32) {
+            throw new Error('HAPI_REGISTRATION_SECRET must be at least 32 bytes')
+        }
+        const configuredRegistrationMode = process.env.HAPI_REGISTRATION_MODE?.trim().toLowerCase()
+        if (configuredRegistrationMode && !['closed', 'secret', 'open'].includes(configuredRegistrationMode)) {
+            throw new Error('HAPI_REGISTRATION_MODE must be closed, secret, or open')
+        }
+        this.registrationMode = (configuredRegistrationMode
+            ?? (this.registrationSecret ? 'secret' : 'closed')) as RegistrationMode
+        if (this.registrationMode === 'secret' && !this.registrationSecret) {
+            throw new Error('HAPI_REGISTRATION_SECRET is required when HAPI_REGISTRATION_MODE=secret')
+        }
 
         // CLI API token - will be set by _setCliApiToken() before create() returns
         this.cliApiToken = ''

@@ -10,14 +10,19 @@
         "./startHub": {
             "types": "./src/startHub.d.ts",
             "default": "./src/startHub.ts"
+        },
+        "./managedSkillAdmin": {
+            "default": "./src/managedSkillAdmin.ts"
         }
     },
     "scripts": {
         "start": "bun run src/index.ts",
         "dev": "bun --watch run src/index.ts",
-        "test": "bun test",
+        "test": "bun run check:managed-skills && bun test",
         "typecheck": "tsc --noEmit",
-        "build": "bun build src/index.ts --outdir dist --target bun",
+        "build": "bun run generate:managed-skills && bun build src/index.ts --outdir dist --target bun",
+        "generate:managed-skills": "bun run scripts/generate-managed-skill-library.ts",
+        "check:managed-skills": "bun run scripts/generate-managed-skill-library.ts --check",
         "generate:embedded-web-assets": "bun run scripts/generate-embedded-web-assets.ts"
     },
     "dependencies": {

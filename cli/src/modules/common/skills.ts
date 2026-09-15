@@ -6,7 +6,7 @@ import { parse as parseYaml } from 'yaml';
 export interface SkillSummary {
     name: string;
     description?: string;
-    scope: 'project' | 'user' | 'plugin' | 'system' | 'admin';
+    scope: 'hub' | 'project' | 'user' | 'plugin' | 'system' | 'admin';
 }
 
 export interface ListSkillsRequest {

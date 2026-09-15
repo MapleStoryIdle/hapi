@@ -127,9 +127,11 @@ import {
 import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
+import { asHubAuth, type HubAuth } from '@/authV2/runnerAuth'
 import { collectMachineHealth } from '@/utils/machineHealth'
 import { readGeneratedImageFileBytes, readSessionFileBytes } from '@/modules/common/handlers/files'
 import { readUploadFileBytes } from '@/modules/common/handlers/uploads'
+import { expandManagedSkillInvocation, listManagedSkillInventory, reconcileManagedSkill, removeManagedSkill } from '@/managedSkills'
 
 const CODEX_SSH_OWNERSHIP_MONITOR_INTERVAL_MS = 1_000
 const NATIVE_CODEX_ATTACHMENT_CLEANUP_INTERVAL_MS = 60 * 60 * 1_000
@@ -321,6 +323,7 @@ function runnerMetadataMatchesAdvertised(
     return current.host === advertised.host
         && current.platform === advertised.platform
         && current.happyCliVersion === advertised.happyCliVersion
+        && current.runnerVersion === advertised.runnerVersion
         && current.homeDir === advertised.homeDir
         && current.codexHome === advertised.codexHome
         && current.nativeCodexRealtime === advertised.nativeCodexRealtime
@@ -337,6 +340,7 @@ function mergeAdvertisedRunnerMetadata(
         host: _host,
         platform: _platform,
         happyCliVersion: _happyCliVersion,
+        runnerVersion: _runnerVersion,
         homeDir: _homeDir,
         codexHome: _codexHome,
         nativeCodexRealtime: _nativeCodexRealtime,
@@ -353,6 +357,7 @@ function mergeAdvertisedRunnerMetadata(
 }
 
 export class ApiMachineClient {
+    private readonly auth: HubAuth
     private readonly localServiceTunnels = new LocalServiceTunnels(() => {
         const ports = [this.machine.runnerState?.httpPort].filter((port): port is number => typeof port === 'number')
         try {
@@ -442,13 +447,14 @@ export class ApiMachineClient {
     private readonly normalizedWorkspaceRoots: string[] | undefined
 
     constructor(
-        private readonly token: string,
+        auth: string | HubAuth,
         private readonly machine: Machine,
         private readonly workspaceRoots?: string[],
         private readonly advertisedMetadata?: MachineMetadata,
         private readonly createNativeCodexArchiveClient: () => NativeCodexArchiveClient = () => new CodexAppServerClient(),
         private readonly createNativeCodexRenameClient: () => Pick<CodexAppServerClient, 'connect' | 'initialize' | 'setThreadName' | 'disconnect'> = () => new CodexAppServerClient()
     ) {
+        this.auth = asHubAuth(auth)
         // Realpath roots once so all subsequent comparisons are against
         // canonical, symlink-resolved locations. Falls back to lexical
         // resolution if realpath fails so we still get protection.
@@ -736,9 +742,12 @@ export class ApiMachineClient {
                 if (summary) {
                     this.observeNativeCodexSession(sessionId)
                 }
+                const expandedMessage = typeof params?.message === 'string'
+                    ? expandManagedSkillInvocation(params.message)
+                    : params?.message
                 return await this.nativeCodexSessionDirectSender.sendWithExternalControlCheck(
                     sessionId,
-                    params?.message,
+                    expandedMessage,
                     params?.displayMessage,
                     params?.clientMessageId,
                     params?.forceRecovery,
@@ -1132,6 +1141,25 @@ export class ApiMachineClient {
     }
 
     setRPCHandlers({ spawnSession, stopSession, requestShutdown, recoverCodexControl, getCodexRecovery }: MachineRpcHandlers): void {
+        const publishManagedSkillInventory = async () => {
+            const managedSkills = await listManagedSkillInventory()
+            await this.updateMachineMetadata((metadata) => ({
+                ...(metadata ?? this.machine.metadata ?? {
+                    host: 'unknown', platform: process.platform, happyCliVersion: 'unknown'
+                }),
+                managedSkills
+            }))
+        }
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.ManagedSkillReconcile, async (params: unknown) => {
+            const result = await reconcileManagedSkill(params)
+            await publishManagedSkillInventory()
+            return result
+        })
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.ManagedSkillRemove, async (params: unknown) => {
+            const result = await removeManagedSkill(params)
+            await publishManagedSkillInventory()
+            return result
+        })
         this.nativeControlRecoveryStatus = getCodexRecovery ?? null
         this.rpcHandlerManager.registerHandler<RecoverCodexLocalSessionControlRpcRequest, CodexLocalSessionRecoveryResponse>(
             RPC_METHODS.RecoverCodexLocalSessionControl,
@@ -1705,11 +1733,10 @@ export class ApiMachineClient {
     connect(): void {
         this.socket = io(`${configuration.apiUrl}/cli`, {
             transports: ['websocket'],
-            auth: {
-                token: this.token,
+            auth: this.auth.socketAuth({
                 clientType: 'machine-scoped' as const,
                 machineId: this.machine.id
-            },
+            }),
             path: '/socket.io/',
             reconnection: true,
             reconnectionDelay: 1000,

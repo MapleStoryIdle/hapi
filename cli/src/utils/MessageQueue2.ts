@@ -10,7 +10,8 @@ interface QueueItem<T> {
 
 /**
  * A mode-aware message queue that stores messages with their modes.
- * Returns consistent batches of messages with the same mode.
+ * Hub user turns are returned one at a time; internal messages may be batched
+ * when they use the same mode.
  */
 export class MessageQueue2<T> {
     public queue: QueueItem<T>[] = []; // Made public for testing
@@ -311,7 +312,7 @@ export class MessageQueue2<T> {
     }
 
     /**
-     * Wait for messages and return all messages with the same mode as a single string
+     * Wait for messages and return the next user turn or internal-message batch.
      * Returns { message: string, mode: T } or null if aborted/closed
      */
     async waitForMessagesAndGetAsString(abortSignal?: AbortSignal): Promise<{ message: string, mode: T, isolate: boolean, hash: string } | null> {
@@ -336,7 +337,12 @@ export class MessageQueue2<T> {
     }
 
     /**
-     * Collect a batch of messages with the same mode, respecting isolation requirements
+     * Collect messages with the same mode, respecting isolation requirements.
+     *
+     * Hub-originated messages have a localId and represent distinct user turns.
+     * Never merge those messages: the agent must finish the current turn before
+     * the launcher asks the queue for the next one. Messages without a localId
+     * are internal inputs and retain the existing batching behaviour.
      */
     private collectBatch(): { message: string, mode: T, hash: string, isolate: boolean } | null {
         if (this.queue.length === 0) {
@@ -350,17 +356,20 @@ export class MessageQueue2<T> {
         let isolate = firstItem.isolate ?? false;
         const targetModeHash = firstItem.modeHash;
 
-        // If the first message requires isolation, only process it alone
-        if (firstItem.isolate) {
+        // Isolated commands and Hub-originated user turns are always consumed
+        // one at a time. A Hub turn does not set `isolate`: launchers may use
+        // that flag to restart an agent stream for special commands.
+        if (firstItem.isolate || firstItem.localId) {
             const item = this.queue.shift()!;
             sameModeMessages.push(item.message);
             if (item.localId) consumedLocalIds.push(item.localId);
-            logger.debug(`[MessageQueue2] Collected isolated message with mode hash: ${targetModeHash}`);
+            logger.debug(`[MessageQueue2] Collected single message with mode hash: ${targetModeHash}`);
         } else {
-            // Collect all messages with the same mode until we hit an isolated message
+            // Internal messages may batch, but stop before a distinct Hub turn.
             while (this.queue.length > 0 &&
                 this.queue[0].modeHash === targetModeHash &&
-                !this.queue[0].isolate) {
+                !this.queue[0].isolate &&
+                !this.queue[0].localId) {
                 const item = this.queue.shift()!;
                 sameModeMessages.push(item.message);
                 if (item.localId) consumedLocalIds.push(item.localId);

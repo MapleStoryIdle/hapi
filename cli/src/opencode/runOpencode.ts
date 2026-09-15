@@ -13,6 +13,7 @@ import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } f
 import { registerSessionConfigRpc } from '@/agent/sessionConfigRpc';
 import { startOpencodeHookServer } from './utils/startOpencodeHookServer';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
+import { expandManagedSkillInvocation } from '@/managedSkills';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { listSlashCommands } from '@/modules/common/slashCommands';
 import { resolveOpencodeSlashCommand } from './utils/slashCommands';
@@ -152,7 +153,7 @@ export async function runOpencode(opts: {
                 modelReasoningEffort: sessionModelReasoningEffort
             });
             const pushPlain = () => {
-                const formattedText = formatMessageWithAttachments(message.content.text, message.content.attachments);
+                const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
                 messageQueue.push(formattedText, buildMode(), localId);
             };
             try {
@@ -217,7 +218,7 @@ export async function runOpencode(opts: {
                     text = slash.text;
                 }
 
-                const formattedText = formatMessageWithAttachments(text, message.content.attachments);
+                const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(text), message.content.attachments);
                 messageQueue.push(formattedText, buildMode(), localId);
             } catch (error) {
                 logger.debug('[opencode] Failed to handle user message', error);

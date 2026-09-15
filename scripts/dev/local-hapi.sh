@@ -10,6 +10,7 @@ HAPI_LOCAL_HOST="${HAPI_LOCAL_HOST:-127.0.0.1}"
 HAPI_LOCAL_HUB_PORT="${HAPI_LOCAL_HUB_PORT:-8318}"
 HAPI_LOCAL_WEB_PORT="${HAPI_LOCAL_WEB_PORT:-5173}"
 HAPI_LOCAL_ACCESS_TOKEN="${HAPI_LOCAL_ACCESS_TOKEN:-hapi-test-local:localdev}"
+HAPI_LOCAL_REGISTRATION_SECRET="${HAPI_LOCAL_REGISTRATION_SECRET:-hapi-local-enrollment-secret-do-not-use}"
 if [[ "$HAPI_LOCAL_ACCESS_TOKEN" == *:* ]]; then
     HAPI_LOCAL_HUB_TOKEN="${HAPI_LOCAL_ACCESS_TOKEN%:*}"
 else
@@ -152,6 +153,7 @@ start_hub() {
             HAPI_HOME="$HAPI_LOCAL_HUB_HOME" \
             DB_PATH="$HAPI_LOCAL_DB_PATH" \
             CLI_API_TOKEN="$HAPI_LOCAL_HUB_TOKEN" \
+            HAPI_REGISTRATION_SECRET="$HAPI_LOCAL_REGISTRATION_SECRET" \
             HAPI_LISTEN_HOST="$HAPI_LOCAL_HOST" \
             HAPI_LISTEN_PORT="$HAPI_LOCAL_HUB_PORT" \
             HAPI_PUBLIC_URL="$HAPI_LOCAL_HUB_URL" \
@@ -206,6 +208,7 @@ status_all() {
     echo "Hub:        $HAPI_LOCAL_HUB_URL"
     echo "Web:        http://${HAPI_LOCAL_HOST}:${HAPI_LOCAL_WEB_PORT}"
     echo "Token:      $HAPI_LOCAL_ACCESS_TOKEN"
+    echo "Enrollment: $HAPI_LOCAL_REGISTRATION_SECRET"
     echo "Hub home:   $HAPI_LOCAL_HUB_HOME"
     echo "DB path:    $HAPI_LOCAL_DB_PATH"
     echo "Runner home:$HAPI_LOCAL_RUNNER_HOME"

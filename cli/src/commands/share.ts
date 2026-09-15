@@ -4,6 +4,7 @@ import { basename, isAbsolute, relative, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { configuration } from '@/configuration'
+import { createHubAuth } from '@/authV2/runnerAuth'
 import { initializeToken } from '@/ui/tokenInit'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import type { ShareSourceContext } from '@hapi/protocol/apiTypes'
@@ -169,12 +170,14 @@ function shareUrl(path: string): string {
 }
 
 async function request(path: string, init: RequestInit): Promise<Response> {
-    return fetch(shareUrl(path), {
+    const auth = await createHubAuth(configuration.cliApiToken)
+    const url = shareUrl(path)
+    return fetch(url, {
         ...init,
         headers: {
             ...configuration.extraHeaders,
             ...init.headers,
-            Authorization: `Bearer ${configuration.cliApiToken}`
+            ...await auth.restHeaders(init.method ?? 'GET', url)
         }
     })
 }

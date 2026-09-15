@@ -5,12 +5,13 @@ import {
     Volume2 as Volume2IconNode,
     VolumeX as VolumeXIconNode,
 } from 'lucide'
-import { Filter, Lock as LockIcon, Puzzle, Search, Zap } from 'lucide-react'
+import { Eye, Filter, Lock as LockIcon, Puzzle, Search, Zap } from 'lucide-react'
 import type { PermissionMode, SkillSummary } from '@/types/api'
 import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
 import { ScheduleIcon } from '@/components/icons'
 import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
+import { managedSkillCopy } from '@/lib/managed-skill-copy'
 import { getProjectRecentSkills, markProjectSkillUsed } from '@/lib/recent-skills'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
@@ -298,6 +299,7 @@ function PermissionModeIcon(props: { mode?: PermissionMode; className?: string }
         case 'debug':
             return <PermissionGearIcon className={props.className} />
         case 'read-only':
+            return <Eye className={props.className ?? 'h-[18px] w-[18px]'} />
         case 'acceptEdits':
             return <PermissionHandIcon className={props.className} />
         case 'safe-yolo':
@@ -770,11 +772,13 @@ export function ContextUsageProgressRail(props: {
     )
 }
 
-type SkillPickerGroup = 'project' | 'user' | 'plugin' | 'system'
+type SkillPickerGroup = 'hub' | 'project' | 'user' | 'plugin' | 'system'
+type SkillPickerSection = SkillPickerGroup | 'recent'
 const LARK_SKILL_PREFIX = 'lark-'
 
 function getSkillPickerGroup(skill: SkillSummary): SkillPickerGroup {
     switch (skill.scope) {
+        case 'hub':
         case 'project':
         case 'user':
         case 'plugin':
@@ -794,6 +798,8 @@ function getSkillScopeLabel(
     switch (skill.scope) {
         case 'project':
             return t('composer.skills.scope.project')
+        case 'hub':
+            return t('composer.skills.scope.hub')
         case 'user':
             return t('composer.skills.scope.user')
         case 'plugin':
@@ -1079,7 +1085,7 @@ export function ComposerButtons(props: {
     onScratchlistToggle?: () => void
     compact?: boolean
 }) {
-    const { t } = useTranslation()
+    const { t, locale } = useTranslation()
     const isVoiceConnected = props.voiceStatus === 'connected'
     const [showSchedulePicker, setShowSchedulePicker] = useState(false)
     const [showToolsMenu, setShowToolsMenu] = useState(false)
@@ -1087,7 +1093,11 @@ export function ComposerButtons(props: {
     const [showSkillMenu, setShowSkillMenu] = useState(false)
     const [showContextUsageMenu, setShowContextUsageMenu] = useState(false)
     const [skillQuery, setSkillQuery] = useState('')
+    const [showSkillSearch, setShowSkillSearch] = useState(false)
     const [hideLarkSkills, setHideLarkSkills] = useState(true)
+    const [expandedSkillSections, setExpandedSkillSections] = useState<Set<SkillPickerSection>>(
+        () => new Set(['recent'])
+    )
     const [recentSkillNames, setRecentSkillNames] = useState<string[]>(() => (
         getProjectRecentSkills(props.projectPath)
     ))
@@ -1099,6 +1109,12 @@ export function ComposerButtons(props: {
     const toolbarRef = useRef<HTMLDivElement>(null)
     const requiredControlsRef = useRef<HTMLDivElement>(null)
     const statusControlsRef = useRef<HTMLDivElement>(null)
+
+    useEffect(() => {
+        if (showSkillMenu) return
+        setShowSkillSearch(false)
+        setSkillQuery('')
+    }, [showSkillMenu])
     const toolsButtonRef = useRef<HTMLButtonElement>(null)
     const permissionButtonRef = useRef<HTMLButtonElement>(null)
     const skillButtonRef = useRef<HTMLButtonElement>(null)
@@ -1375,9 +1391,14 @@ export function ComposerButtons(props: {
             ) : null}
         </div>
     )
-    const permissionMenuContent = props.permissionModeOptions ? (
+    const orderedPermissionModeOptions = props.permissionModeOptions
+        ? [...props.permissionModeOptions].sort((left, right) => (
+            Number(right.mode === 'read-only') - Number(left.mode === 'read-only')
+        ))
+        : null
+    const permissionMenuContent = orderedPermissionModeOptions ? (
         <div className="py-2">
-            {props.permissionModeOptions.map((option) => {
+            {orderedPermissionModeOptions.map((option) => {
                 const selected = option.mode === props.permissionMode
                 const copy = getPermissionCopy(option.mode, option.label, t)
                 return (
@@ -1417,16 +1438,22 @@ export function ComposerButtons(props: {
     const visibleSkills = filteredSkills
         .filter((skill) => {
             if (!normalizedSkillQuery) return true
+            const copy = skill.scope === 'hub'
+                ? managedSkillCopy(skill.name, skill, t, locale)
+                : skill
             return skill.name.toLowerCase().includes(normalizedSkillQuery)
-                || (skill.description ?? '').toLowerCase().includes(normalizedSkillQuery)
+                || copy.name.toLowerCase().includes(normalizedSkillQuery)
+                || (copy.description ?? '').toLowerCase().includes(normalizedSkillQuery)
         })
         .sort((a, b) => a.name.localeCompare(b.name))
-    const skillSections = [
+    const skillSectionDefinitions: Array<{ key: SkillPickerGroup; label: string }> = [
         { key: 'project', label: t('composer.skills.scope.project') },
+        { key: 'hub', label: t('composer.skills.scope.hub') },
         { key: 'user', label: t('composer.skills.scope.user') },
         { key: 'plugin', label: t('composer.skills.scope.plugin') },
         { key: 'system', label: t('composer.skills.scope.system') },
-    ].map((section) => ({
+    ]
+    const skillSections = skillSectionDefinitions.map((section) => ({
         ...section,
         skills: visibleSkills.filter((skill) => getSkillPickerGroup(skill) === section.key),
     })).filter((section) => section.skills.length > 0)
@@ -1436,125 +1463,199 @@ export function ComposerButtons(props: {
             .map((name) => filteredSkills.find((skill) => skill.name === name))
             .filter((skill): skill is SkillSummary => skill != null)
 
-    const renderSkillOption = (skill: SkillSummary, recent = false) => (
+    const toggleSkillSearch = () => {
+        setShowSkillSearch((current) => {
+            if (current) setSkillQuery('')
+            return !current
+        })
+    }
+
+    const toggleSkillSection = (section: SkillPickerSection) => {
+        setExpandedSkillSections((current) => {
+            const next = new Set(current)
+            if (next.has(section)) next.delete(section)
+            else next.add(section)
+            return next
+        })
+    }
+
+    const renderSkillSectionHeader = (
+        section: SkillPickerSection,
+        label: string,
+        count: number,
+        expanded: boolean
+    ) => (
         <button
-            key={`${recent ? 'recent:' : ''}${skill.scope ?? 'unknown'}:${skill.name}`}
             type="button"
-            className={`group flex min-h-11 w-full gap-3 rounded-lg px-3 text-left transition-colors hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
-                recent ? 'items-center py-2' : 'items-start py-2.5'
-            }`}
+            aria-expanded={expanded}
+            className="flex min-h-9 w-full items-center gap-1.5 rounded-lg px-2.5 text-left text-[11px] font-medium text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
             onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-                setRecentSkillNames(markProjectSkillUsed(props.projectPath, skill.name))
-                props.onSkillSelect?.(skill)
-                setShowSkillMenu(false)
-                setSkillQuery('')
-            }}
+            onClick={() => toggleSkillSection(section)}
+            data-testid={`composer-skill-section-${section}`}
         >
-            <span className={`${recent ? '' : 'mt-0.5'} flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-[var(--app-link)]`}>
-                <Puzzle className="h-[17px] w-[17px]" />
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            <span className="shrink-0 rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-px text-[10px] tabular-nums text-[var(--app-hint)]">
+                {t('composer.skills.count', { count })}
             </span>
-            <span className="min-w-0 flex-1">
-                <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-sm font-semibold text-[var(--app-fg)]">
-                        {skill.name}
-                    </span>
-                    <span className="shrink-0 rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--app-hint)]">
-                        {getSkillScopeLabel(skill, t)}
-                    </span>
-                </span>
-                {!recent && skill.description ? (
-                    <span className="mt-0.5 block truncate text-xs leading-4 text-[var(--app-hint)]">
-                        {skill.description}
-                    </span>
-                ) : null}
+            <span className={`shrink-0 transition-transform [&_svg]:h-3 [&_svg]:w-3 ${expanded ? 'rotate-180' : ''}`} aria-hidden="true">
+                <ChevronIcon />
             </span>
         </button>
     )
 
+    const renderSkillOption = (skill: SkillSummary, recent = false) => {
+        const copy = skill.scope === 'hub'
+            ? managedSkillCopy(skill.name, skill, t, locale)
+            : skill
+        return (
+            <button
+                key={`${recent ? 'recent:' : ''}${skill.scope ?? 'unknown'}:${skill.name}`}
+                type="button"
+                className={`group flex min-h-10 w-full gap-2 rounded-lg px-2.5 text-left transition-colors hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                    recent ? 'items-center py-1.5' : 'items-start py-2'
+                }`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                    setRecentSkillNames(markProjectSkillUsed(props.projectPath, skill.name))
+                    props.onSkillSelect?.(skill)
+                    setShowSkillMenu(false)
+                    setSkillQuery('')
+                }}
+            >
+                <span className={`${recent ? '' : 'mt-px'} flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-[var(--app-link)]`}>
+                    <Puzzle className="h-3.5 w-3.5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-[13px] font-semibold leading-4 text-[var(--app-fg)]">
+                            {copy.name}
+                        </span>
+                        <span className="shrink-0 rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-px text-[9px] font-medium text-[var(--app-hint)]">
+                            {getSkillScopeLabel(skill, t)}
+                        </span>
+                    </span>
+                    {!recent && copy.description ? (
+                        <span className="mt-px block truncate text-[11px] leading-4 text-[var(--app-hint)]">
+                            {copy.description}
+                        </span>
+                    ) : null}
+                </span>
+            </button>
+        )
+    }
+
+    const renderSkillScopeSection = (section: typeof skillSections[number]) => {
+        const expanded = Boolean(normalizedSkillQuery) || expandedSkillSections.has(section.key)
+        return (
+            <div key={section.key}>
+                {renderSkillSectionHeader(section.key, section.label, section.skills.length, expanded)}
+                {expanded ? (
+                    <div>
+                        {section.skills.map((skill) => renderSkillOption(skill))}
+                    </div>
+                ) : null}
+            </div>
+        )
+    }
+
     const skillMenuContent = (
-        <div className="py-3">
-            <div className="flex items-center justify-between gap-3 px-4">
-                <div className="flex items-center gap-2 text-[15px] font-semibold text-[var(--app-fg)]">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500/10 text-[var(--app-link)]">
-                        <Puzzle className="h-[18px] w-[18px]" />
+        <div className="py-2">
+            <div className="flex items-center justify-between gap-2 px-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-[var(--app-fg)]">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-500/10 text-[var(--app-link)]">
+                        <Puzzle className="h-3.5 w-3.5" />
                     </span>
                     <span>{t('composer.skills.title')}</span>
+                    <span data-testid="composer-skill-total" className="rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-px text-[10px] font-medium tabular-nums text-[var(--app-hint)]">
+                        {t('composer.skills.count', { count: skills.length })}
+                    </span>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                     <button
                         type="button"
-                        aria-pressed={hideLarkSkills}
-                        aria-label={hideLarkSkills ? t('composer.skills.filterLark.show') : t('composer.skills.filterLark.hide')}
-                        title={hideLarkSkills ? t('composer.skills.filterLark.show') : t('composer.skills.filterLark.hide')}
-                        className={`flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
-                            hideLarkSkills
+                        aria-expanded={showSkillSearch}
+                        aria-label={showSkillSearch ? t('composer.skills.search.hide') : t('composer.skills.search.show')}
+                        title={showSkillSearch ? t('composer.skills.search.hide') : t('composer.skills.search.show')}
+                        className={`flex h-7 w-7 items-center justify-center rounded-full border transition-colors ${
+                            showSkillSearch
                                 ? 'border-blue-200 bg-blue-50 text-[var(--app-link)] dark:border-blue-400/25 dark:bg-blue-500/15'
                                 : 'border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)] hover:text-[var(--app-fg)]'
                         }`}
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => setHideLarkSkills((value) => !value)}
+                        onClick={toggleSkillSearch}
                     >
-                        <Filter className="h-3.5 w-3.5" />
+                        <Filter className="h-3 w-3" />
                     </button>
                 </div>
             </div>
 
-            <div className="px-3 pt-3">
-                <label className="relative block">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-hint)]" />
-                    <input
-                        value={skillQuery}
-                        autoFocus={typeof document === 'undefined'
-                            || document.documentElement.dataset.appKeyboardOpen !== 'true'}
-                        placeholder={t('composer.skills.search')}
-                        className="ios-form-control h-9 w-full pl-9 pr-3 text-sm"
-                        onChange={(event) => setSkillQuery(event.target.value)}
-                        onKeyDown={(event) => {
-                            if (event.key === 'Escape') {
-                                setShowSkillMenu(false)
-                            }
-                        }}
-                    />
-                </label>
-            </div>
+            {showSkillSearch ? (
+                <div className="flex gap-1.5 px-2.5 pt-2">
+                    <label className="relative min-w-0 flex-1">
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--app-hint)]" />
+                        <input
+                            value={skillQuery}
+                            autoFocus={typeof document === 'undefined'
+                                || document.documentElement.dataset.appKeyboardOpen !== 'true'}
+                            placeholder={t('composer.skills.search')}
+                            className="ios-form-control h-8 w-full pl-8 pr-2.5 text-xs"
+                            onChange={(event) => setSkillQuery(event.target.value)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Escape') {
+                                    setShowSkillMenu(false)
+                                }
+                            }}
+                        />
+                    </label>
+                    <button
+                        type="button"
+                        aria-pressed={!hideLarkSkills}
+                        aria-label={hideLarkSkills ? t('composer.skills.filterLark.show') : t('composer.skills.filterLark.hide')}
+                        title={hideLarkSkills ? t('composer.skills.filterLark.show') : t('composer.skills.filterLark.hide')}
+                        className={`h-8 shrink-0 rounded-lg border px-2 text-[10px] font-medium transition-colors ${
+                            hideLarkSkills
+                                ? 'border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'
+                                : 'border-blue-200 bg-blue-50 text-[var(--app-link)] dark:border-blue-400/25 dark:bg-blue-500/15'
+                        }`}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => setHideLarkSkills((value) => !value)}
+                    >
+                        lark-
+                    </button>
+                </div>
+            ) : null}
 
-            <div className="mt-3 px-2">
+            <div className="mt-2 px-1.5">
                 {props.skillsLoading ? (
-                    <div className="px-3 py-8 text-center text-sm text-[var(--app-hint)]">
+                    <div className="px-3 py-5 text-center text-xs text-[var(--app-hint)]">
                         {t('composer.skills.loading')}
                     </div>
                 ) : props.skillsError ? (
-                    <div className="px-3 py-8 text-center text-sm text-red-500">
+                    <div className="px-3 py-5 text-center text-xs text-red-500">
                         {props.skillsError}
                     </div>
-                ) : skillSections.length === 0 ? (
-                    <div className="px-3 py-8 text-center text-sm text-[var(--app-hint)]">
+                ) : normalizedSkillQuery && visibleSkills.length === 0 ? (
+                    <div className="px-3 py-5 text-center text-xs text-[var(--app-hint)]">
                         {t('composer.skills.noResults')}
                     </div>
                 ) : (
-                    <div className="space-y-3 pb-1">
+                    <div className="space-y-1.5 pb-0.5">
                         {recentSkills.length > 0 ? (
                             <div data-testid="composer-recent-skills">
-                                <div className="px-3 pb-1 text-[11px] font-medium text-[var(--app-hint)]">
-                                    {t('composer.skills.recent')}
-                                </div>
-                                <div className="space-y-0.5">
-                                    {recentSkills.map((skill) => renderSkillOption(skill, true))}
-                                </div>
-                                <div className="mx-3 mt-3 border-t border-[var(--app-divider)]" />
+                                {renderSkillSectionHeader(
+                                    'recent',
+                                    t('composer.skills.recent'),
+                                    recentSkills.length,
+                                    expandedSkillSections.has('recent')
+                                )}
+                                {expandedSkillSections.has('recent') ? (
+                                    <div>
+                                        {recentSkills.map((skill) => renderSkillOption(skill, true))}
+                                    </div>
+                                ) : null}
                             </div>
                         ) : null}
-                        {skillSections.map((section) => (
-                            <div key={section.key}>
-                                <div className="px-3 pb-1 text-[11px] font-medium text-[var(--app-hint)]">
-                                    {section.label}
-                                </div>
-                                <div className="space-y-0.5">
-                                    {section.skills.map((skill) => renderSkillOption(skill))}
-                                </div>
-                            </div>
-                        ))}
+                        {skillSections.map(renderSkillScopeSection)}
                     </div>
                 )}
             </div>

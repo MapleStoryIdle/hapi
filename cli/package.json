@@ -1,6 +1,6 @@
 {
   "name": "@twsxtd/hapi",
-  "version": "0.20.2",
+  "version": "1.0.4",
   "description": "SHAPI CLI - control local coding agents from anywhere",
   "author": "Kirill Dubovitskiy & weishu",
   "license": "AGPL-3.0-only",
@@ -40,6 +40,8 @@
     "build:exe:all": "bun run scripts/build-executable.ts --all",
     "build:exe:allinone": "bun run scripts/build-executable.ts --with-web-assets",
     "build:exe:allinone:all": "bun run scripts/build-executable.ts --with-web-assets --all",
+    "build:exe:runner": "bun run scripts/build-executable.ts --runner-only --outdir dist-runner-exe",
+    "build:exe:runner:all": "bun run scripts/build-executable.ts --runner-only --outdir dist-runner-exe --all",
     "prepare-npm-packages": "bun run scripts/prepare-npm-packages.ts",
     "prepack": "bun run prepare-npm-packages",
     "tools:unpack": "bun run scripts/unpack-tools.ts",

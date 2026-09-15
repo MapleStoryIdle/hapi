@@ -1,0 +1,6 @@
+interface:
+  display_name: "Agent Team"
+  short_description: "Choose a safe execution team"
+  default_prompt: "Use $agent-team to choose a solo or subagent execution route for this task."
+policy:
+  allow_implicit_invocation: false

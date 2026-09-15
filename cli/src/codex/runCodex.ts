@@ -14,6 +14,7 @@ import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import { CodexCollaborationModeSchema, PermissionModeSchema } from '@hapi/protocol/schemas';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
+import { expandManagedSkillInvocation } from '@/managedSkills';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import type { ReasoningEffort } from './appServerTypes';
 import { parseCodexSpecialCommand } from './codexSpecialCommands';
@@ -247,7 +248,7 @@ export async function runCodex(opts: {
                         isolatedCommandText = message.content.text.trim();
                     }
                 }
-                text = formatMessageWithAttachments(text, message.content.attachments);
+                text = formatMessageWithAttachments(expandManagedSkillInvocation(text), message.content.attachments);
 
                 const messagePermissionMode = currentPermissionMode;
                 logger.debug(
@@ -277,7 +278,7 @@ export async function runCodex(opts: {
                     collaborationMode: currentCollaborationMode,
                     serviceTier: currentServiceTier
                 };
-                const fallbackText = formatMessageWithAttachments(message.content.text, message.content.attachments);
+                const fallbackText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
                 messageQueue.push(fallbackText, enhancedMode, localId);
             }
         }).catch((error) => {

@@ -66,17 +66,27 @@ describe('OpenViking context routes', () => {
             }
         }, store)
 
-        expect(await (await app.request('/api/plugins/openviking')).json()).toEqual({ enabled: true })
+        expect(await (await app.request('/api/plugins/openviking')).json()).toEqual({ enabled: false })
         const update = await app.request('/api/plugins/openviking', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ enabled: true })
+        })
+        expect(await update.json()).toEqual({ enabled: true })
+
+        const available = await app.request('/api/openviking/machines/machine-1/status')
+        expect(available.status).toBe(200)
+        expect(statusCalls).toBe(1)
+
+        await app.request('/api/plugins/openviking', {
             method: 'PUT',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ enabled: false })
         })
-        expect(await update.json()).toEqual({ enabled: false })
 
         const blocked = await app.request('/api/openviking/machines/machine-1/status')
         expect(blocked.status).toBe(409)
-        expect(statusCalls).toBe(0)
+        expect(statusCalls).toBe(1)
         expect(await blocked.json()).toEqual({ error: 'OpenViking plugin is disabled' })
         store.close()
     })

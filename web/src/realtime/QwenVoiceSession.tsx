@@ -151,7 +151,13 @@ class QwenVoiceSessionImpl implements VoiceSession {
         // Truncate before encoding so long prompts are trimmed rather than silently dropped.
         const encodedPrompt = encodeVoiceSystemPromptForProxy(truncatePromptForProxy(this.currentInstructions ?? ''))
         const promptParam = `&systemPrompt=${encodeURIComponent(encodedPrompt)}`
-        const wsUrl = `${proxyUrl}${separator}token=${encodeURIComponent(authToken)}${langParam}${voiceParam}${promptParam}`
+        const proxyParams = [
+            authToken === '__cookie_session__' ? '' : `token=${encodeURIComponent(authToken)}`,
+            langParam.replace(/^&/, ''),
+            voiceParam.replace(/^&/, ''),
+            promptParam.replace(/^&/, '')
+        ].filter(Boolean).join('&')
+        const wsUrl = `${proxyUrl}${separator}${proxyParams}`
         const ws = new WebSocket(wsUrl)
         state.ws = ws
 

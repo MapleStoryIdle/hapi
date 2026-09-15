@@ -336,7 +336,8 @@ export type CodexLocalSessionComposerCapabilities = {
     skills: Array<{
         name: string
         description?: string
-        scope: 'project' | 'user' | 'plugin' | 'system' | 'admin'
+        descriptions?: Partial<Record<'en' | 'zh-CN', string>>
+        scope: 'hub' | 'project' | 'user' | 'plugin' | 'system' | 'admin'
     }>
 }
 

@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'bun:test'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
 import { createConfiguration } from '../../configuration'
@@ -225,6 +226,19 @@ describe('cli public share routes', () => {
         const dir = await mkdtemp(join(tmpdir(), 'hapi-native-share-cli-route-'))
         const store = new Store(':memory:')
         const service = new ArtifactService(store, dir)
+        const workspace = store.workspaces.getByDataNamespace('default')!
+        const runnerToken = `spr${Buffer.alloc(32, 's').toString('base64url')}`
+        const pair = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+        const jwk = pair.publicKey.export({ format: 'jwk' })
+        const publicJwk = JSON.stringify({ crv: 'P-256', kty: 'EC', x: jwk.x!, y: jwk.y! })
+        store.workspaces.registerClientGeneratedKey(workspace.id, {
+            kind: 'runner',
+            name: 'Test runner',
+            token: runnerToken,
+            boundMachineId: 'machine-1',
+            publicJwk,
+            publicKeyThumbprint: createHash('sha256').update(publicJwk).digest('base64url'),
+        })
         const machine = { id: 'machine-1', active: true, metadata: { codexHome: '/Users/test/.codex' } }
         const engine = {
             getMachineByNamespace: (id: string) => id === 'machine-1' ? machine : undefined,
@@ -237,7 +251,9 @@ describe('cli public share routes', () => {
         const app = new Hono()
         app.route('/cli', createCliRoutes(() => engine as unknown as SyncEngine, store, service))
         const headers = {
-            ...authHeaders(),
+            authorization: `Bearer ${runnerToken}`,
+            'x-hapi-machine-id': 'machine-1',
+            'x-hapi-auth-compat': 'spr',
             'content-type': 'application/octet-stream',
             'x-hapi-share-filename': Buffer.from('task.md', 'utf8').toString('base64url'),
             'x-hapi-share-expires': '300',

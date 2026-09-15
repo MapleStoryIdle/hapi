@@ -224,6 +224,7 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
 }) {
     const { t } = useTranslation()
     const [detailsOpen, setDetailsOpen] = useState(false)
+    const [detailsTab, setDetailsTab] = useState<'overview' | 'technical'>('overview')
     const detailsId = useId()
     const titleDetailsRef = useRef<HTMLDivElement | null>(null)
     const copyResetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -271,16 +272,26 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
     useEffect(() => () => clearTimeout(copyResetTimerRef.current), [])
 
     useEffect(() => {
+        if (!detailsOpen) setDetailsTab('overview')
+    }, [detailsOpen])
+
+    useEffect(() => {
         setDetailsOpen(false)
+        setDetailsTab('overview')
         setCopiedDetailKey(null)
     }, [props.sessionId])
 
     const titleDetail = details.find((detail) => detail.key === 'title')
-    const detailGroups = [
-        details.filter((detail) => detail.key === 'group' || detail.key === 'label'),
-        details.filter((detail) => detail.key === 'path' || detail.key === 'last-activity'),
-        details.filter((detail) => detail.key === 'agent' || detail.key === 'session-id' || detail.key === 'codex-session-id')
-    ].filter((group) => group.length > 0)
+    const detailGroups = detailsTab === 'overview'
+        ? [
+            details.filter((detail) => detail.key === 'group' || detail.key === 'label'),
+            details.filter((detail) => detail.key === 'path'),
+            details.filter((detail) => detail.key === 'agent')
+        ].filter((group) => group.length > 0)
+        : [
+            details.filter((detail) => detail.key === 'last-activity'),
+            details.filter((detail) => detail.key === 'session-id' || detail.key === 'codex-session-id')
+        ].filter((group) => group.length > 0)
 
     return (
         <div ref={titleDetailsRef} className="relative min-w-0 max-w-[min(58vw,22rem)]">
@@ -316,6 +327,21 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
                         </button>
                     </div>
 
+                    <div role="tablist" aria-label={t('session.header.details.title')} className="mb-2.5 grid grid-cols-2 rounded-xl bg-[var(--app-subtle-bg)] p-1">
+                        {(['overview', 'technical'] as const).map((tab) => (
+                            <button
+                                key={tab}
+                                type="button"
+                                role="tab"
+                                aria-selected={detailsTab === tab}
+                                onClick={() => setDetailsTab(tab)}
+                                className={`min-h-9 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${detailsTab === tab ? 'bg-[var(--app-bg)] text-[var(--app-fg)] shadow-sm' : 'text-[var(--app-hint)]'}`}
+                            >
+                                {t(tab === 'overview' ? 'session.header.details.overview' : 'session.header.details.technical')}
+                            </button>
+                        ))}
+                    </div>
+
                     <div className="flex flex-col gap-2.5">
                         <div className="flex min-h-[68px] items-center gap-3 rounded-[16px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5" data-session-detail-group="title">
                             <span className="min-w-0 flex-1">
@@ -339,7 +365,7 @@ export const SessionTitleDetails = memo(function SessionTitleDetails(props: {
                         {detailGroups.map((group, groupIndex) => (
                             <div
                                 key={group.map((detail) => detail.key).join('-')}
-                                data-session-detail-group={groupIndex}
+                                data-session-detail-group={`${detailsTab}-${groupIndex}`}
                                 className="overflow-hidden rounded-[16px] border border-[var(--app-border)] bg-[var(--app-bg)]"
                             >
                                 {group.map((detail, rowIndex) => (

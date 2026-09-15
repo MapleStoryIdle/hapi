@@ -60,13 +60,14 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
     const { io, store, rpcRegistry, terminalRegistry, onSessionAlive, onSessionReady, onSessionEnd, onMachineAlive, onExternalCodexRequest, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onMessagesConsumed, generatedImageStore } = deps
     const terminalNamespace = io.of('/terminal')
     const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null
+    const boundMachineId = socket.data.accessKind === 'runner' ? socket.data.boundMachineId : null
 
     const resolveSessionAccess = (sessionId: string): AccessResult<StoredSession> => {
         if (!namespace) {
             return { ok: false, reason: 'namespace-missing' }
         }
         const session = store.sessions.getSessionByNamespace(sessionId, namespace)
-        if (session) {
+        if (session && (!boundMachineId || session.machineId === boundMachineId)) {
             return { ok: true, value: session }
         }
         if (store.sessions.getSession(sessionId)) {
@@ -80,7 +81,7 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
             return { ok: false, reason: 'namespace-missing' }
         }
         const machine = store.machines.getMachineByNamespace(machineId, namespace)
-        if (machine) {
+        if (machine && (!boundMachineId || machine.id === boundMachineId)) {
             return { ok: true, value: machine }
         }
         if (store.machines.getMachine(machineId)) {
@@ -95,7 +96,8 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
         socket.join(`session:${sessionId}`)
     }
 
-    const machineId = typeof auth?.machineId === 'string' ? auth.machineId : null
+    const requestedMachineId = typeof auth?.machineId === 'string' ? auth.machineId : null
+    const machineId = boundMachineId ?? requestedMachineId
     if (machineId && resolveMachineAccess(machineId).ok) {
         socket.join(`machine:${machineId}`)
     }
@@ -109,7 +111,15 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
         socket.emit('error', { message, code: reason, scope, id })
     }
 
-    registerRpcHandlers(socket, rpcRegistry)
+    registerRpcHandlers(socket, rpcRegistry, (method) => {
+        const separator = method.indexOf(':')
+        if (separator <= 0) return false
+        const scopeId = method.slice(0, separator)
+        const machine = store.machines.getMachineByNamespace(scopeId, namespace!)
+        if (machine) return !boundMachineId || machine.id === boundMachineId
+        const session = store.sessions.getSessionByNamespace(scopeId, namespace!)
+        return Boolean(session && (!boundMachineId || session.machineId === boundMachineId))
+    })
     registerSessionHandlers(socket, {
         store,
         resolveSessionAccess,

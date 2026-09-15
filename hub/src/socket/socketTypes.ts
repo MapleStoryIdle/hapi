@@ -3,7 +3,12 @@ import type { DefaultEventsMap, Server, Socket } from 'socket.io'
 
 export type SocketData = {
     namespace?: string
+    workspaceId?: string
     userId?: number
+    accessKeyId?: string
+    accessKind?: 'legacy' | 'web' | 'runner'
+    boundMachineId?: string | null
+    authMode?: 'ticket' | 'compatibility'
 }
 
 export type SocketServer = Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>

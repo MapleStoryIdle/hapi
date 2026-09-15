@@ -8,7 +8,7 @@ import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/rpcTyp
 import { logger } from '@/ui/logger';
 import { authAndSetupMachineIfNeeded } from '@/ui/auth';
 import { configuration } from '@/configuration';
-import packageJson from '../../package.json';
+import { RUNNER_VERSION } from '@/runnerVersion';
 import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
 import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
@@ -30,6 +30,7 @@ import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken } from './runnerIdentity';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { NativeControlRecoveryCoordinator } from '@/codex/nativeControlRecovery';
+import { listManagedSkillInventory } from '@/managedSkills';
 
 export async function startRunner(options: { workspaceRoots?: string[] } = {}): Promise<void> {
   // We don't have cleanup function at the time of server construction
@@ -792,7 +793,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       pid: process.pid,
       httpPort: controlPort,
       startTime: new Date().toLocaleString(),
-      startedWithCliVersion: packageJson.version,
+      startedWithCliVersion: RUNNER_VERSION,
       startedWithCliMtimeMs,
       startedWithApiUrl: configuration.apiUrl,
       startedWithMachineId: machineId,
@@ -819,7 +820,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
     // Get or create machine (with retry for transient connection errors)
-    const machineMetadata = buildMachineMetadata({ workspaceRoots });
+    const machineMetadata = buildMachineMetadata({
+      workspaceRoots,
+      managedSkills: await listManagedSkillInventory()
+    });
     const machine = await withRetry(
       () => api.getOrCreateMachine({
         machineId,
@@ -1093,7 +1097,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           pid: process.pid,
           httpPort: controlPort,
           startTime: fileState.startTime,
-          startedWithCliVersion: packageJson.version,
+          startedWithCliVersion: RUNNER_VERSION,
           startedWithCliMtimeMs,
           startedWithApiUrl: fileState.startedWithApiUrl,
           startedWithMachineId: fileState.startedWithMachineId,

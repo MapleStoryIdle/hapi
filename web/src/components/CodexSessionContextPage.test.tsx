@@ -2385,13 +2385,17 @@ describe('CodexSessionContextPage', () => {
 
         expect(screen.getByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
         expect(screen.getByText('Full name')).toBeInTheDocument()
-        expect(screen.getByText('codex-thread-1')).toBeInTheDocument()
+        expect(screen.queryByText('codex-thread-1')).not.toBeInTheDocument()
         expect(screen.getByText('/workspace/project')).toBeInTheDocument()
         expect(screen.getByText('codex')).toBeInTheDocument()
         expect(screen.getByText('Model:')).toBeInTheDocument()
         expect(within(screen.getByRole('dialog', { name: 'Session details' })).getByText('gpt-5.6-terra')).toBeInTheDocument()
         expect(screen.getByText('Reasoning:')).toBeInTheDocument()
         expect(within(screen.getByRole('dialog', { name: 'Session details' })).getByText('high')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Technical' }))
+        expect(screen.getByText('codex-thread-1')).toBeInTheDocument()
+        expect(screen.queryByText('/workspace/project')).not.toBeInTheDocument()
     })
 
     it('updates display metadata from an unchanged conditional snapshot', async () => {

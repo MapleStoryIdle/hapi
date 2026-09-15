@@ -25,6 +25,11 @@ export const hubCommand: CommandDefinition = {
     requiresRuntimeAssets: true,
     run: async (context: CommandContext) => {
         try {
+            if (context.commandArgs[0] === 'skills' || context.commandArgs[0] === 'skill') {
+                const { runManagedSkillAdminCommand } = await import('hapi-hub/managedSkillAdmin')
+                await runManagedSkillAdminCommand(context.commandArgs.slice(1))
+                return
+            }
             const { host, port } = parseHubArgs(context.commandArgs)
 
             if (host) {

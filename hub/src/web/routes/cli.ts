@@ -16,6 +16,7 @@ import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import { ArtifactService, isMarkdownShare, MAX_ARTIFACT_BYTES } from '../../artifacts/service'
 import { revokeShareWithNativeCleanup } from '../../kanban/nativeFeedbackRevoke'
 import type { Store } from '../../store'
+import { buildRunnerDpopTarget, getRunnerAuthService } from '../../auth/runnerAuth'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
 
@@ -85,16 +86,23 @@ const getMessagesQuerySchema = z.object({
 type CliEnv = {
     Variables: {
         namespace: string
+        workspaceId: string | null
+        accessKeyId: string | null
+        machineId: string | null
     }
 }
 
 function resolveSessionForNamespace(
     engine: SyncEngine,
     sessionId: string,
-    namespace: string
+    namespace: string,
+    boundMachineId: string | null = null,
 ): { ok: true; session: Session; sessionId: string } | { ok: false; status: 403 | 404; error: string } {
     const access = engine.resolveSessionAccess(sessionId, namespace)
     if (access.ok) {
+        if (boundMachineId && access.session.metadata?.machineId !== boundMachineId) {
+            return { ok: false, status: 403, error: 'Session access denied' }
+        }
         return { ok: true, session: access.session, sessionId: access.sessionId }
     }
     return {
@@ -107,8 +115,12 @@ function resolveSessionForNamespace(
 function resolveMachineForNamespace(
     engine: SyncEngine,
     machineId: string,
-    namespace: string
+    namespace: string,
+    boundMachineId: string | null = null,
 ): { ok: true; machine: Machine } | { ok: false; status: 403 | 404; error: string } {
+    if (boundMachineId && machineId !== boundMachineId) {
+        return { ok: false, status: 403, error: 'Machine access denied' }
+    }
     const machine = engine.getMachineByNamespace(machineId, namespace)
     if (machine) {
         return { ok: true, machine }
@@ -205,7 +217,12 @@ async function resolveShareSource(
     return await resolveNativeCodexShareSource(engine, namespace, sourceSessionId, null)
 }
 
-export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: Store, injectedShareService?: ArtifactService): Hono<CliEnv> {
+export function createCliRoutes(
+    getSyncEngine: () => SyncEngine | null,
+    store?: Store,
+    injectedShareService?: ArtifactService,
+    runnerAuthConfig?: { jwtSecret: Uint8Array; publicUrl: string },
+): Hono<CliEnv> {
     const shareService = injectedShareService ?? (store ? new ArtifactService(store, getConfiguration().dataDir) : null)
     const app = new Hono<CliEnv>()
 
@@ -217,20 +234,52 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
             return c.json({ error: 'Missing Authorization header' }, 401)
         }
 
-        const parsed = bearerSchema.safeParse(raw)
-        if (!parsed.success) {
-            return c.json({ error: 'Invalid Authorization header' }, 401)
+        const dpopAccessToken = raw.match(/^DPoP\s+(.+)$/i)?.[1]
+        if (dpopAccessToken) {
+            const proof = c.req.header('dpop')
+            if (!proof || !store || !runnerAuthConfig) {
+                return c.json({ error: 'Runner DPoP authorization required' }, 401)
+            }
+            const identity = await getRunnerAuthService(
+                store,
+                runnerAuthConfig.jwtSecret,
+            ).authenticateRunnerAccess({
+                accessToken: dpopAccessToken,
+                proof,
+                method: c.req.method,
+                targetUrl: buildRunnerDpopTarget(runnerAuthConfig.publicUrl, c.req.path),
+            })
+            if (!identity) return c.json({ error: 'Invalid runner access token or DPoP proof' }, 401)
+            c.set('namespace', identity.namespace)
+            c.set('workspaceId', identity.workspaceId)
+            c.set('accessKeyId', identity.accessKeyId)
+            c.set('machineId', identity.machineId)
+            return await next()
         }
 
+        const parsed = bearerSchema.safeParse(raw)
+        if (!parsed.success) return c.json({ error: 'Invalid Authorization header' }, 401)
         const token = parsed.data.replace(/^Bearer\s+/i, '')
         const configuration = getConfiguration()
-        const access = store?.workspaces.authenticate(token, configuration.cliApiToken, 'runner')
+        const machineId = c.req.header('x-hapi-machine-id')
+        const access = store?.workspaces.authenticate(
+            token,
+            configuration.cliApiToken,
+            'runner',
+            machineId,
+        )
         const parsedToken = store || access ? null : parseAccessToken(token)
         if (!access && (!parsedToken || !constantTimeEquals(parsedToken.baseToken, configuration.cliApiToken))) {
             return c.json({ error: 'Invalid token' }, 401)
         }
+        if (access?.kind === 'runner' && c.req.header('x-hapi-auth-compat') !== 'spr') {
+            return c.json({ error: 'Runner credentials require DPoP authentication' }, 401)
+        }
 
         c.set('namespace', access?.workspace.dataNamespace ?? parsedToken!.namespace)
+        c.set('workspaceId', access?.workspace.id ?? null)
+        c.set('accessKeyId', access?.accessKeyId ?? null)
+        c.set('machineId', access?.boundMachineId ?? machineId ?? null)
         return await next()
     })
 
@@ -263,6 +312,18 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
             if (!engine) return c.json({ error: 'Not ready' }, 503)
             const resolved = await resolveShareSource(engine, c.get('namespace'), sourceSessionId, sourceMachineId)
             if (!resolved.ok) return c.json({ error: resolved.error, code: resolved.code }, resolved.status)
+            const boundMachineId = c.get('machineId')
+            if (boundMachineId) {
+                const resolvedMachineId = resolved.source.type === 'native-codex'
+                    ? resolved.source.machineId
+                    : (() => {
+                        const access = engine.resolveSessionAccess(resolved.source.sessionId, c.get('namespace'))
+                        return access.ok ? access.session.metadata?.machineId : null
+                    })()
+                if (resolvedMachineId !== boundMachineId) {
+                    return c.json({ error: 'Source machine access denied', code: 'source_machine_access_denied' }, 403)
+                }
+            }
             source = resolved.source
         }
         const sourceContext: ShareSourceContext | null = sourceDirectoryName
@@ -337,6 +398,17 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
             return c.json({ error: 'Invalid body' }, 400)
         }
 
+        const boundMachineId = c.get('machineId')
+        const metadataMachineId = parsed.data.metadata
+            && typeof parsed.data.metadata === 'object'
+            && 'machineId' in parsed.data.metadata
+            && typeof parsed.data.metadata.machineId === 'string'
+            ? parsed.data.metadata.machineId
+            : null
+        if (boundMachineId && metadataMachineId !== boundMachineId) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+
         const namespace = c.get('namespace')
         const session = engine.getOrCreateSession(
             parsed.data.tag,
@@ -357,7 +429,12 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         }
 
         const namespace = c.get('namespace')
-        const machineId = c.req.query('machineId') || undefined
+        const requestedMachineId = c.req.query('machineId') || undefined
+        const boundMachineId = c.get('machineId')
+        if (boundMachineId && requestedMachineId && requestedMachineId !== boundMachineId) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+        const machineId = boundMachineId ?? requestedMachineId
         const sessions = engine.listLocalResumableSessions(namespace, { machineId })
         return c.json({ sessions })
     })
@@ -369,6 +446,11 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         }
 
         const namespace = c.get('namespace')
+        const boundMachineId = c.get('machineId')
+        if (boundMachineId) {
+            const sessionAccess = resolveSessionForNamespace(engine, c.req.param('id'), namespace, boundMachineId)
+            if (!sessionAccess.ok) return c.json({ error: sessionAccess.error }, sessionAccess.status)
+        }
         const result = engine.resolveLocalResumeTarget(c.req.param('id'), namespace)
         if (result.type === 'error') {
             const status = result.code === 'access_denied' ? 403
@@ -377,6 +459,9 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
             return c.json({ error: result.message, code: result.code }, status)
         }
 
+        if (boundMachineId && result.target.machineId !== boundMachineId) {
+            return c.json({ error: 'Session access denied' }, 403)
+        }
         return c.json({ target: result.target })
     })
 
@@ -387,6 +472,11 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         }
 
         const namespace = c.get('namespace')
+        const boundMachineId = c.get('machineId')
+        if (boundMachineId) {
+            const sessionAccess = resolveSessionForNamespace(engine, c.req.param('id'), namespace, boundMachineId)
+            if (!sessionAccess.ok) return c.json({ error: sessionAccess.error }, sessionAccess.status)
+        }
         const result = await engine.handoffSessionToLocal(c.req.param('id'), namespace)
         if (result.type === 'error') {
             const status = result.code === 'access_denied' ? 403
@@ -406,7 +496,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         }
         const sessionId = c.req.param('id')
         const namespace = c.get('namespace')
-        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace, c.get('machineId'))
         if (!resolved.ok) {
             return c.json({ error: resolved.error }, resolved.status)
         }
@@ -420,7 +510,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         }
         const sessionId = c.req.param('id')
         const namespace = c.get('namespace')
-        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace, c.get('machineId'))
         if (!resolved.ok) {
             return c.json({ error: resolved.error }, resolved.status)
         }
@@ -450,7 +540,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         }
         const sessionId = c.req.param('id')
         const namespace = c.get('namespace')
-        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace, c.get('machineId'))
         if (!resolved.ok) {
             return c.json({ error: resolved.error }, resolved.status)
         }
@@ -493,6 +583,10 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         }
 
         const namespace = c.get('namespace')
+        const boundMachineId = c.get('machineId')
+        if (boundMachineId && parsed.data.id !== boundMachineId) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
         const existing = engine.getMachine(parsed.data.id)
         if (existing && existing.namespace !== namespace) {
             return c.json({ error: 'Machine access denied' }, 403)
@@ -508,7 +602,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store?: 
         }
         const machineId = c.req.param('id')
         const namespace = c.get('namespace')
-        const resolved = resolveMachineForNamespace(engine, machineId, namespace)
+        const resolved = resolveMachineForNamespace(engine, machineId, namespace, c.get('machineId'))
         if (!resolved.ok) {
             return c.json({ error: resolved.error }, resolved.status)
         }

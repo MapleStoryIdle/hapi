@@ -10,6 +10,7 @@ import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { createMessagesRoutes } from './messages'
+import { Store } from '../../store'
 
 // TS note: engine is cast to unknown→SyncEngine so test helpers don't need to
 // satisfy the full SyncEngine shape (only the subset the route under test uses).
@@ -22,6 +23,8 @@ function createApp(opts: {
     active?: boolean
     sendMessage?: (sessionId: string, payload: unknown) => Promise<void>
     getMessagesPage?: () => unknown
+    reconcileManagedSkill?: (machineId: string, payload: unknown) => Promise<unknown>
+    store?: Store
 }) {
     const sentMessages: Array<{ sessionId: string; payload: unknown }> = []
     const sendMessage = opts.sendMessage ?? (async (sessionId: string, payload: unknown) => {
@@ -32,8 +35,14 @@ function createApp(opts: {
         resolveSessionAccess: () => ({
             ok: true,
             sessionId: 'session-1',
-            session: { id: 'session-1', active: opts.active !== false }
+            session: { id: 'session-1', active: opts.active !== false, metadata: { machineId: 'machine-1' } }
         }),
+        getSession: () => ({ id: 'session-1', active: opts.active !== false, metadata: { machineId: 'machine-1' } }),
+        getMachine: () => ({
+            id: 'machine-1', active: true,
+            metadata: { host: 'runner', platform: 'test', happyCliVersion: '1.0.0', runnerVersion: '1.1.2' }
+        }),
+        reconcileManagedSkill: opts.reconcileManagedSkill,
         sendMessage,
         cancelQueuedMessage: async () => ({ status: 'cancelled' }),
         getMessagesPage: opts.getMessagesPage ?? (() => ({ messages: [], page: {} })),
@@ -44,7 +53,7 @@ function createApp(opts: {
         c.set('namespace', 'default')
         await next()
     })
-    app.route('/api', createMessagesRoutes(() => engine as SyncEngine))
+    app.route('/api', createMessagesRoutes(() => engine as SyncEngine, opts.store))
 
     return { app, sentMessages }
 }
@@ -128,6 +137,61 @@ describe('POST /api/sessions/:id/messages — #2 scheduledAt upper bound', () =>
 
         expect(response.status).toBe(200)
         expect(sentMessages).toHaveLength(1)
+    })
+})
+
+describe('POST /api/sessions/:id/messages — SHAPI managed skill cache', () => {
+    it('caches a selected Hub skill before delivering its token to the Runner', async () => {
+        const calls: Array<{ machineId: string; payload: Record<string, unknown> }> = []
+        const { app, sentMessages } = createApp({
+            reconcileManagedSkill: async (machineId, rawPayload) => {
+                const payload = rawPayload as Record<string, unknown>
+                calls.push({ machineId, payload })
+                return {
+                    success: true,
+                    status: {
+                        id: payload.id,
+                        version: payload.version,
+                        sha256: payload.sha256,
+                        state: 'ready'
+                    }
+                }
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/messages', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: '$public-share publish report.md', localId: 'local-skill' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls).toHaveLength(1)
+        expect(calls[0]?.machineId).toBe('machine-1')
+        expect(calls[0]?.payload).toMatchObject({
+            id: 'public-share',
+            version: '1.1.0',
+            files: expect.arrayContaining([expect.objectContaining({ path: 'SKILL.md' })])
+        })
+        expect(sentMessages).toHaveLength(1)
+    })
+
+    it('rejects a disabled Hub Skill before it reaches the Runner', async () => {
+        const store = new Store(':memory:')
+        store.pluginSettings.setEnabled('default', 'managed-skill:public-share', false)
+        const { app, sentMessages } = createApp({ store })
+        try {
+            const response = await app.request('/api/sessions/session-1/messages', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ text: '$public-share publish report.md', localId: 'local-disabled' })
+            })
+
+            expect(response.status).toBe(409)
+            expect(sentMessages).toHaveLength(0)
+        } finally {
+            store.close()
+        }
     })
 })
 

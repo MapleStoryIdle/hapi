@@ -111,7 +111,7 @@ function buildEventsUrl(
     lastStreamEpoch: string | null
 ): string {
     const params = new URLSearchParams()
-    params.set('token', token)
+    if (token !== '__cookie_session__') params.set('token', token)
     params.set('visibility', visibility)
     if (subscription.all) {
         params.set('all', 'true')

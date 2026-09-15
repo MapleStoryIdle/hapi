@@ -1,0 +1,10 @@
+{
+    "id": "public-share",
+    "name": "Public Share",
+    "description": "Create or revoke an expiring SHAPI public link, including feedback-enabled Kanban tasks.",
+    "descriptions": {
+        "zh-CN": "通过限时链接分享文件或收集反馈。"
+    },
+    "version": "1.1.0",
+    "minimumRunnerVersion": "1.1.2"
+}

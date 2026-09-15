@@ -9,11 +9,11 @@ function storageKey(plugin: LocalPluginId): string {
 }
 
 export function getLocalPluginEnabled(plugin: LocalPluginId): boolean {
-    if (typeof window === 'undefined') return true
+    if (typeof window === 'undefined') return false
     try {
-        return localStorage.getItem(storageKey(plugin)) !== 'false'
+        return localStorage.getItem(storageKey(plugin)) === 'true'
     } catch {
-        return true
+        return false
     }
 }
 
@@ -26,7 +26,7 @@ export function useLocalPluginEnabled(plugin: LocalPluginId): {
     useEffect(() => {
         const handleStorage = (event: StorageEvent) => {
             if (event.key === storageKey(plugin)) {
-                setEnabledState(event.newValue !== 'false')
+                setEnabledState(event.newValue === 'true')
             }
         }
         const handleLocalChange = (event: Event) => {

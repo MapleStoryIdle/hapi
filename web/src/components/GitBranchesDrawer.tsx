@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Download, Folder, GitBranch, GitCommitHorizontal, GitPullRequestArrow, LoaderCircle, Plus, Search, Upload } from 'lucide-react'
+import { Check, Download, Folder, GitBranch, GitCommitHorizontal, LoaderCircle, Plus, RefreshCw, Search, Upload } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { GitBranchOption, GitBranchesResponse } from '@hapi/protocol/apiTypes'
 import type { ApiClient } from '@/api/client'
@@ -434,49 +434,57 @@ export function GitBranchesDrawer(props: {
                             <div className="mt-3 grid grid-cols-4 gap-2" data-git-branch-actions>
                                 <button
                                     type="button"
-                                    onClick={() => void updateBranch()}
-                                    disabled={busy || !canUpdate}
-                                    className="flex h-11 w-full items-center justify-center rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
+                                    onClick={() => canUpdate ? void updateBranch() : addToast({ title: updateUnavailableTitle, kind: 'warning' })}
+                                    disabled={busy}
+                                    aria-disabled={!canUpdate}
+                                    className={`flex h-14 w-full flex-col items-center justify-center gap-1 rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[11px] font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait disabled:opacity-45 ${!canUpdate ? 'opacity-45' : ''}`}
                                     aria-label={updating ? t('gitBranches.updating') : t('gitBranches.update')}
                                     title={canUpdate ? t('gitBranches.update') : updateUnavailableTitle}
                                     data-git-branch-update
                                 >
                                     {updating
                                         ? <LoaderCircle className="h-5 w-5 animate-spin" strokeWidth={2} aria-hidden="true" />
-                                        : <GitPullRequestArrow className="h-5 w-5" strokeWidth={2} aria-hidden="true" />}
+                                        : <Download className="h-5 w-5" strokeWidth={2} aria-hidden="true" />}
+                                    <span>{t('gitBranches.update')}</span>
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => void fetchBranches()}
-                                    disabled={busy || !canFetch}
-                                    className="flex h-11 w-full items-center justify-center rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
+                                    onClick={() => canFetch ? void fetchBranches() : addToast({ title: t('gitBranches.fetchUnavailable'), kind: 'warning' })}
+                                    disabled={busy}
+                                    aria-disabled={!canFetch}
+                                    className={`flex h-14 w-full flex-col items-center justify-center gap-1 rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[11px] font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait disabled:opacity-45 ${!canFetch ? 'opacity-45' : ''}`}
                                     aria-label={fetching ? t('gitBranches.fetching') : t('gitBranches.fetch')}
                                     title={canFetch ? t('gitBranches.fetch') : t('gitBranches.fetchUnavailable')}
                                     data-git-branch-fetch
                                 >
                                     {fetching
                                         ? <LoaderCircle className="h-5 w-5 animate-spin" strokeWidth={2} aria-hidden="true" />
-                                        : <Download className="h-5 w-5" strokeWidth={2} aria-hidden="true" />}
+                                        : <RefreshCw className="h-5 w-5" strokeWidth={2} aria-hidden="true" />}
+                                    <span>{t('gitBranches.fetch')}</span>
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setCommitOpen(true)}
-                                    disabled={busy || !data.isDirty}
-                                    className="flex h-11 w-full items-center justify-center rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
+                                    onClick={() => data.isDirty ? setCommitOpen(true) : addToast({ title: t('gitBranches.commitUnavailable'), kind: 'warning' })}
+                                    disabled={busy}
+                                    aria-disabled={!data.isDirty}
+                                    className={`flex h-14 w-full flex-col items-center justify-center gap-1 rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[11px] font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait disabled:opacity-45 ${!data.isDirty ? 'opacity-45' : ''}`}
                                     aria-label={t('gitBranches.commit')}
-                                    title={t('gitBranches.commit')}
+                                    title={data.isDirty ? t('gitBranches.commit') : t('gitBranches.commitUnavailable')}
                                 >
                                     <GitCommitHorizontal className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
+                                    <span>{t('gitBranches.commit')}</span>
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setPushOpen(true)}
-                                    disabled={busy || !canPush}
-                                    className="flex h-11 w-full items-center justify-center rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-link)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45"
+                                    onClick={() => canPush ? setPushOpen(true) : addToast({ title: t('gitBranches.pushUnavailable'), kind: 'warning' })}
+                                    disabled={busy}
+                                    aria-disabled={!canPush}
+                                    className={`flex h-14 w-full flex-col items-center justify-center gap-1 rounded-[12px] border border-[var(--app-border)] bg-[var(--app-bg)] text-[11px] font-medium text-[var(--app-link)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait disabled:opacity-45 ${!canPush ? 'opacity-45' : ''}`}
                                     aria-label={t('gitBranches.push')}
                                     title={canPush ? t('gitBranches.push') : t('gitBranches.pushUnavailable')}
                                 >
                                     <Upload className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
+                                    <span>{t('gitBranches.push')}</span>
                                 </button>
                             </div>
                         </div>

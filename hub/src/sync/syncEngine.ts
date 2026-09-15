@@ -2347,10 +2347,18 @@ export class SyncEngine {
 
     async listSkills(sessionId: string, flavor?: string): Promise<{
         success: boolean
-        skills?: Array<{ name: string; description?: string; scope?: 'project' | 'user' | 'plugin' | 'system' | 'admin' }>
+        skills?: Array<{ name: string; description?: string; scope?: 'hub' | 'project' | 'user' | 'plugin' | 'system' | 'admin' }>
         error?: string
     }> {
         return await this.rpcGateway.listSkills(sessionId, flavor)
+    }
+
+    async reconcileManagedSkill(machineId: string, payload: unknown): Promise<unknown> {
+        return await this.rpcGateway.reconcileManagedSkill(machineId, payload)
+    }
+
+    async removeManagedSkill(machineId: string, id: string): Promise<unknown> {
+        return await this.rpcGateway.removeManagedSkill(machineId, id)
     }
 
     async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {

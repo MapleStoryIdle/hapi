@@ -5,8 +5,8 @@
  */
 
 import { FileHandle } from 'node:fs/promises'
-import { readFile, writeFile, mkdir, open, unlink, rename, stat } from 'node:fs/promises'
-import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs'
+import { chmod, readFile, writeFile, mkdir, open, unlink, rename, stat } from 'node:fs/promises'
+import { chmodSync, existsSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs'
 import { configuration } from '@/configuration'
 import { isProcessAlive } from '@/utils/process';
 
@@ -24,6 +24,16 @@ interface Settings {
 }
 
 const defaultSettings: Settings = {}
+
+async function ensurePrivateHome(): Promise<void> {
+  await mkdir(configuration.happyHomeDir, { recursive: true, mode: 0o700 })
+  await chmod(configuration.happyHomeDir, 0o700).catch(() => {})
+}
+
+async function writePrivateFile(path: string, contents: string): Promise<void> {
+  await writeFile(path, contents, { mode: 0o600 })
+  await chmod(path, 0o600).catch(() => {})
+}
 
 /**
  * Runner state persisted locally (different from API RunnerState)
@@ -75,11 +85,8 @@ export async function readSettings(): Promise<Settings> {
 }
 
 export async function writeSettings(settings: Settings): Promise<void> {
-  if (!existsSync(configuration.happyHomeDir)) {
-    await mkdir(configuration.happyHomeDir, { recursive: true })
-  }
-
-  await writeFile(configuration.settingsFile, JSON.stringify(settings, null, 2))
+  await ensurePrivateHome()
+  await writePrivateFile(configuration.settingsFile, JSON.stringify(settings, null, 2))
 }
 
 /**
@@ -95,9 +102,7 @@ export async function updateSettings(
   const MAX_LOCK_ATTEMPTS = 50;        // Maximum number of attempts (5 seconds total)
   const STALE_LOCK_TIMEOUT_MS = 10000; // Consider lock stale after 10 seconds
 
-  if (!existsSync(configuration.happyHomeDir)) {
-    await mkdir(configuration.happyHomeDir, { recursive: true });
-  }
+  await ensurePrivateHome()
 
   const lockFile = configuration.settingsFile + '.lock';
   const tmpFile = configuration.settingsFile + '.tmp';
@@ -108,7 +113,7 @@ export async function updateSettings(
   while (attempts < MAX_LOCK_ATTEMPTS) {
     try {
       // 'wx' = create exclusively, fail if exists (cross-platform compatible)
-      fileHandle = await open(lockFile, 'wx');
+      fileHandle = await open(lockFile, 'wx', 0o600);
       break;
     } catch (err: any) {
       if (err.code === 'EEXIST') {
@@ -141,8 +146,9 @@ export async function updateSettings(
     const updated = await updater(current);
 
     // Write atomically using rename
-    await writeFile(tmpFile, JSON.stringify(updated, null, 2));
+    await writePrivateFile(tmpFile, JSON.stringify(updated, null, 2));
     await rename(tmpFile, configuration.settingsFile); // Atomic on POSIX
+    await chmod(configuration.settingsFile, 0o600).catch(() => {})
 
     return updated;
   } finally {
@@ -157,13 +163,11 @@ export async function updateSettings(
 //
 
 export async function writeCredentialsDataKey(credentials: { publicKey: Uint8Array, machineKey: Uint8Array, token: string }): Promise<void> {
-  if (!existsSync(configuration.happyHomeDir)) {
-    await mkdir(configuration.happyHomeDir, { recursive: true })
-  }
-  await writeFile(configuration.privateKeyFile, JSON.stringify({
+  await ensurePrivateHome()
+  await writePrivateFile(configuration.privateKeyFile, JSON.stringify({
     encryption: { publicKey: Buffer.from(credentials.publicKey).toString('base64'), machineKey: Buffer.from(credentials.machineKey).toString('base64') },
     token: credentials.token
-  }, null, 2));
+  }, null, 2))
 }
 
 export async function clearCredentials(): Promise<void> {
@@ -200,7 +204,8 @@ export async function readRunnerState(): Promise<RunnerLocallyPersistedState | n
  * Write runner state to local file (synchronously for atomic operation)
  */
 export function writeRunnerState(state: RunnerLocallyPersistedState): void {
-  writeFileSync(configuration.runnerStateFile, JSON.stringify(state, null, 2), 'utf-8');
+  writeFileSync(configuration.runnerStateFile, JSON.stringify(state, null, 2), { encoding: 'utf-8', mode: 0o600 });
+  try { chmodSync(configuration.runnerStateFile, 0o600) } catch {}
 }
 
 /**

@@ -34,6 +34,8 @@ export function BottomDrawer(props: {
      */
     inputDialog?: boolean
     desktopClassName?: string
+    /** Explicit desktop dialog height; inline so app-safe-dialog cannot collapse it. */
+    desktopHeight?: CSSProperties['height']
     /** Fill 70% of the visible viewport, including header and safe-area padding. */
     fixedHeight?: boolean
     header?: ReactNode
@@ -63,6 +65,7 @@ export function BottomDrawer(props: {
     const stableViewportHeight = useRef(0)
     const keyboardWasOpen = useRef(false)
     const viewportOpenCycle = useRef(false)
+    const drawerOpenCycle = useRef(false)
     const gesture = useRef<{ id: number; start: number; last: number; at: number; velocity: number } | null>(null)
     const [offset, setOffset] = useState(0)
     const [dragging, setDragging] = useState(false)
@@ -99,6 +102,26 @@ export function BottomDrawer(props: {
     }, [expanded, dragging, dragHeight, props.open])
     useEffect(() => () => resizeAnimation.current?.cancel(), [])
 
+    // Reset entrance state once per closed -> open cycle. Layout changes while
+    // the drawer is already open must not replay the entrance animation.
+    useLayoutEffect(() => {
+        if (!props.open) {
+            drawerOpenCycle.current = false
+            viewportOpenCycle.current = false
+            stableViewportHeight.current = 0
+            keyboardWasOpen.current = false
+            return
+        }
+        if (drawerOpenCycle.current) return
+        drawerOpenCycle.current = true
+        gesture.current = null
+        setDragging(false)
+        setOffset(0)
+        setEntered(false)
+        setExpanded(false)
+        setDragHeight(null)
+    }, [props.open])
+
     useLayoutEffect(() => {
         if (!props.open || !keyboardSafeDialog || !viewport) return
         const frame = window.requestAnimationFrame(() => {
@@ -127,20 +150,7 @@ export function BottomDrawer(props: {
     }, [props.open, mobile])
 
     useLayoutEffect(() => {
-        if (!props.open || useDesktopDialog) {
-            if (!props.open) {
-                viewportOpenCycle.current = false
-                stableViewportHeight.current = 0
-                keyboardWasOpen.current = false
-            }
-            return
-        }
-        gesture.current = null
-        setDragging(false)
-        setOffset(0)
-        setEntered(false)
-        setExpanded(false)
-        setDragHeight(null)
+        if (!props.open || useDesktopDialog) return
         // A mobile sheet can switch to an input dialog without closing (for
         // example, selecting "edit group"). Keep the pre-keyboard viewport
         // baseline for that whole open cycle. Resetting it during the switch
@@ -370,9 +380,11 @@ export function BottomDrawer(props: {
                     style={{
                         zIndex: layer + 1,
                         left: 'calc(50% + (var(--app-safe-area-left) - var(--app-safe-area-right)) / 2)',
+                        ...(props.desktopHeight ? { height: props.desktopHeight } : {}),
                         ...style
                     }}
                     data-chat-overlay
+                    data-desktop-dialog="true"
                     data-density={props.density}
                     data-testid={props.testId}
                     aria-describedby={props.subtitle ? descriptionId : undefined}

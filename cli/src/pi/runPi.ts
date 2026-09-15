@@ -4,6 +4,7 @@ import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler'
 import { registerLocalHandoffHandler } from '@/agent/localHandoff';
 import { createRunnerLifecycle, createModeChangeHandler, setControlledByUser } from '@/agent/runnerLifecycle';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
+import { expandManagedSkillInvocation } from '@/managedSkills';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { PiTransport } from './piTransport';
 import { PiSession } from './session';
@@ -311,7 +312,7 @@ export async function runPi(opts: {
 
     // --- User message handler ---
     apiSession.onUserMessage((message, localId) => {
-        const formattedText = formatMessageWithAttachments(message.content.text, message.content.attachments);
+        const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
         if (piSession.piIsStreaming) {
             // Steer does not start a new turn, so the localId would never be
             // drained by turn_start. Mark it consumed immediately so it does
