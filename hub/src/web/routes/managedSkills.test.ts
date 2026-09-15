@@ -6,7 +6,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { createManagedSkillsRoutes } from './managedSkills'
 
 function createApp(store: Store) {
-    const engine = { getMachinesByNamespace: () => [] } as unknown as SyncEngine
+    const engine = { getOnlineMachinesByNamespace: () => [] } as unknown as SyncEngine
     const app = new Hono<WebAppEnv>()
     app.use('*', async (c, next) => {
         c.set('namespace', 'workspace-a')

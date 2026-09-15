@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { ManagedSkillControlResponse, ManagedSkillMachineState } from '@hapi/protocol'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
+import { managedSkillCopy } from '@/lib/managed-skill-copy'
 import { useTranslation } from '@/lib/use-translation'
 
 function BackIcon() {
@@ -84,7 +85,6 @@ export default function SkillsPage() {
                     </button>
                     <div className="min-w-0 flex-1">
                         <h1 className="text-base font-semibold text-[var(--app-fg)]">{t('skills.title')}</h1>
-                        <p className="text-xs text-[var(--app-hint)]">{t('skills.subtitle')}</p>
                     </div>
                     <button type="button" onClick={() => void load()} aria-label={t('skills.refresh')} className="flex h-11 w-11 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]">
                         <RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
@@ -95,22 +95,22 @@ export default function SkillsPage() {
                 <div className="mx-auto max-w-[680px] space-y-3">
                     {error ? <p role="alert" className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-300">{error}</p> : null}
                     {!loading && data?.skills.length === 0 ? <p className="py-10 text-center text-sm text-[var(--app-hint)]">{t('skills.empty')}</p> : null}
-                    {data?.skills.map((skill) => (
-                        <section key={skill.id} className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-4 shadow-sm">
+                    {data?.skills.map((skill) => {
+                        const copy = managedSkillCopy(skill.id, skill, t)
+                        return <section key={skill.id} className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-4 shadow-sm">
                             <div className="flex items-start gap-3">
                                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-[var(--app-link)]"><PackageCheck className="h-5 w-5" /></span>
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-2">
-                                        <h2 className="truncate text-sm font-semibold text-[var(--app-fg)]">{skill.name}</h2>
+                                        <h2 className="truncate text-sm font-semibold text-[var(--app-fg)]">{copy.name}</h2>
                                         <span className="text-[11px] text-[var(--app-hint)]">v{skill.version}</span>
                                     </div>
-                                    <p className="mt-1 text-xs leading-5 text-[var(--app-hint)]">{skill.description}</p>
                                 </div>
                                 <button
                                     type="button"
                                     role="switch"
                                     aria-checked={skill.enabled}
-                                    aria-label={t('skills.toggle', { name: skill.name })}
+                                    aria-label={t('skills.toggle', { name: copy.name })}
                                     disabled={pending === `toggle:${skill.id}`}
                                     onClick={() => void setEnabled(skill.id, !skill.enabled)}
                                     className={`relative mt-1 h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50 ${skill.enabled ? 'bg-[var(--app-link)]' : 'bg-[var(--app-border)]'}`}
@@ -118,7 +118,7 @@ export default function SkillsPage() {
                                     <span className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition-transform ${skill.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
                                 </button>
                             </div>
-                            {skill.enabled ? (
+                            {skill.enabled && skill.machines.length > 0 ? (
                                 <div className="mt-3 border-t border-[var(--app-divider)] pt-2">
                                     {skill.machines.map((machine) => {
                                         const key = `cache:${skill.id}:${machine.machineId}`
@@ -132,10 +132,9 @@ export default function SkillsPage() {
                                         )
                                     })}
                                 </div>
-                            ) : null}
+                            ) : skill.enabled ? <p className="mt-3 border-t border-[var(--app-divider)] pt-3 text-xs text-[var(--app-hint)]">{t('skills.noOnlineRunners')}</p> : null}
                         </section>
-                    ))}
-                    <p className="px-1 text-xs leading-5 text-[var(--app-hint)]">{t('skills.hint')}</p>
+                    })}
                 </div>
             </main>
         </div>

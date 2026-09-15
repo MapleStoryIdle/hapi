@@ -11,6 +11,7 @@ import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
 import { ScheduleIcon } from '@/components/icons'
 import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
+import { managedSkillCopy } from '@/lib/managed-skill-copy'
 import { getProjectRecentSkills, markProjectSkillUsed } from '@/lib/recent-skills'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
@@ -1420,8 +1421,12 @@ export function ComposerButtons(props: {
     const visibleSkills = filteredSkills
         .filter((skill) => {
             if (!normalizedSkillQuery) return true
+            const copy = skill.scope === 'hub'
+                ? managedSkillCopy(skill.name, skill, t)
+                : skill
             return skill.name.toLowerCase().includes(normalizedSkillQuery)
-                || (skill.description ?? '').toLowerCase().includes(normalizedSkillQuery)
+                || copy.name.toLowerCase().includes(normalizedSkillQuery)
+                || (copy.description ?? '').toLowerCase().includes(normalizedSkillQuery)
         })
         .sort((a, b) => a.name.localeCompare(b.name))
     const skillSections = [
@@ -1440,41 +1445,46 @@ export function ComposerButtons(props: {
             .map((name) => filteredSkills.find((skill) => skill.name === name))
             .filter((skill): skill is SkillSummary => skill != null)
 
-    const renderSkillOption = (skill: SkillSummary, recent = false) => (
-        <button
-            key={`${recent ? 'recent:' : ''}${skill.scope ?? 'unknown'}:${skill.name}`}
-            type="button"
-            className={`group flex min-h-11 w-full gap-3 rounded-lg px-3 text-left transition-colors hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
-                recent ? 'items-center py-2' : 'items-start py-2.5'
-            }`}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-                setRecentSkillNames(markProjectSkillUsed(props.projectPath, skill.name))
-                props.onSkillSelect?.(skill)
-                setShowSkillMenu(false)
-                setSkillQuery('')
-            }}
-        >
-            <span className={`${recent ? '' : 'mt-0.5'} flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-[var(--app-link)]`}>
-                <Puzzle className="h-[17px] w-[17px]" />
-            </span>
-            <span className="min-w-0 flex-1">
-                <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-sm font-semibold text-[var(--app-fg)]">
-                        {skill.name}
-                    </span>
-                    <span className="shrink-0 rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--app-hint)]">
-                        {getSkillScopeLabel(skill, t)}
-                    </span>
+    const renderSkillOption = (skill: SkillSummary, recent = false) => {
+        const copy = skill.scope === 'hub'
+            ? managedSkillCopy(skill.name, skill, t)
+            : skill
+        return (
+            <button
+                key={`${recent ? 'recent:' : ''}${skill.scope ?? 'unknown'}:${skill.name}`}
+                type="button"
+                className={`group flex min-h-11 w-full gap-3 rounded-lg px-3 text-left transition-colors hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                    recent ? 'items-center py-2' : 'items-start py-2.5'
+                }`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                    setRecentSkillNames(markProjectSkillUsed(props.projectPath, skill.name))
+                    props.onSkillSelect?.(skill)
+                    setShowSkillMenu(false)
+                    setSkillQuery('')
+                }}
+            >
+                <span className={`${recent ? '' : 'mt-0.5'} flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-[var(--app-link)]`}>
+                    <Puzzle className="h-[17px] w-[17px]" />
                 </span>
-                {!recent && skill.description ? (
-                    <span className="mt-0.5 block truncate text-xs leading-4 text-[var(--app-hint)]">
-                        {skill.description}
+                <span className="min-w-0 flex-1">
+                    <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm font-semibold text-[var(--app-fg)]">
+                            {copy.name}
+                        </span>
+                        <span className="shrink-0 rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--app-hint)]">
+                            {getSkillScopeLabel(skill, t)}
+                        </span>
                     </span>
-                ) : null}
-            </span>
-        </button>
-    )
+                    {!recent && copy.description ? (
+                        <span className="mt-0.5 block truncate text-xs leading-4 text-[var(--app-hint)]">
+                            {copy.description}
+                        </span>
+                    ) : null}
+                </span>
+            </button>
+        )
+    }
 
     const skillMenuContent = (
         <div className="py-3">

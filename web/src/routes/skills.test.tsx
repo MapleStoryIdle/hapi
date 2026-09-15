@@ -44,7 +44,19 @@ describe('SkillsPage', () => {
         fireEvent.click(screen.getByRole('switch', { name: 'Enable or disable Public Share' }))
         await waitFor(() => expect(runtime.api.setManagedSkillEnabled).toHaveBeenCalledWith('public-share', false))
 
-        fireEvent.click(screen.getByRole('button', { name: 'Cache now' }))
+        expect(screen.queryByText('Share one file.')).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Cache' }))
         await waitFor(() => expect(runtime.api.cacheManagedSkill).toHaveBeenCalledWith('public-share', 'runner-1'))
+    })
+
+    it('uses concise Chinese copy', async () => {
+        localStorage.setItem('hapi-lang', 'zh-CN')
+        render(<QueryClientProvider client={new QueryClient()}><I18nProvider><SkillsPage /></I18nProvider></QueryClientProvider>)
+
+        expect(await screen.findByRole('heading', { name: '技能' })).toBeInTheDocument()
+        expect(screen.getByText('公开分享')).toBeInTheDocument()
+        expect(screen.getByText('未缓存')).toBeInTheDocument()
+        expect(screen.queryByText(/只供 SHAPI/)).not.toBeInTheDocument()
+        expect(screen.queryByText('SHAPI 管理的技能')).not.toBeInTheDocument()
     })
 })

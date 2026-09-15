@@ -644,7 +644,7 @@ describe('ComposerButtons — skill picker', () => {
                 skills={[
                     { name: 'plugin-beta', description: 'Plugin skill', scope: 'plugin' },
                     { name: 'project-bravo', description: 'Project skill', scope: 'project' },
-                    { name: 'hub-share', description: 'Hub skill', scope: 'hub' },
+                    { name: 'public-share', description: 'Hub skill', scope: 'hub' },
                     { name: 'system-delta', description: 'System skill', scope: 'system' },
                     { name: 'global-alpha', description: 'Global skill', scope: 'user' },
                 ]}
@@ -671,7 +671,7 @@ describe('ComposerButtons — skill picker', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
 
         const projectSkill = screen.getByText('project-bravo')
-        const hubSkill = screen.getByText('hub-share')
+        const hubSkill = screen.getByText('Public Share')
         const globalSkill = screen.getByText('global-alpha')
         const pluginSkill = screen.getByText('plugin-beta')
         const systemSkill = screen.getByText('system-delta')
