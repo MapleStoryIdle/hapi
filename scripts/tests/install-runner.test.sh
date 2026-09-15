@@ -56,6 +56,7 @@ PORT=$((18000 + $$ % 10000))
 prepare 1.2.3
 mkdir -p "$TMP_ROOT/home/.hapi/credentials"
 printf 'keep-me\n' > "$TMP_ROOT/home/.hapi/credentials/runner.json"
+printf '%s\n' '{"cliApiToken":"keep-me"}' > "$TMP_ROOT/home/.hapi/settings.json"
 
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$TMP_ROOT/public" \
     >"$TMP_ROOT/http.log" 2>&1 &
@@ -108,19 +109,26 @@ grep -Fqx "runner start" "$TMP_ROOT/register.log"
 
 prepare 1.2.5
 mkdir -p "$TMP_ROOT/fresh-home"
-HOME="$TMP_ROOT/fresh-home" SHELL=/bin/zsh PATH=/usr/bin:/bin \
+HOME="$TMP_ROOT/fresh-home" HAPI_HOME= SHELL=/bin/zsh PATH=/usr/bin:/bin CLI_API_TOKEN= \
 SHAPI_DOWNLOAD_BASE_URL="http://127.0.0.1:$PORT" \
     sh "$REPO_ROOT/scripts/install.sh" --no-register >/dev/null
 [[ "$("$TMP_ROOT/fresh-home/.local/bin/shapi" --version)" == "SHAPI 1.2.5" ]]
 grep -Fqx 'export PATH="$HOME/.local/bin:$PATH"' "$TMP_ROOT/fresh-home/.zshrc"
 
 mkdir -p "$TMP_ROOT/fresh-nontty-home"
-HOME="$TMP_ROOT/fresh-nontty-home" SHELL=/bin/zsh PATH=/usr/bin:/bin \
+HOME="$TMP_ROOT/fresh-nontty-home" HAPI_HOME= SHELL=/bin/zsh PATH=/usr/bin:/bin CLI_API_TOKEN= \
 SHAPI_DOWNLOAD_BASE_URL="http://127.0.0.1:$PORT" \
     sh "$REPO_ROOT/scripts/install.sh" >"$TMP_ROOT/fresh-nontty.log"
 grep -Fqx 'Runner: not started' "$TMP_ROOT/fresh-nontty.log"
 grep -Fqx 'No interactive terminal was available, so workspace setup was skipped.' "$TMP_ROOT/fresh-nontty.log"
 grep -Fqx "Create: curl -fsSL http://127.0.0.1:$PORT/install.sh | sh -s -- --register" "$TMP_ROOT/fresh-nontty.log"
+
+# An installed binary without credentials is still an incomplete first setup.
+HOME="$TMP_ROOT/fresh-nontty-home" HAPI_HOME= SHELL=/bin/zsh PATH=/usr/bin:/bin CLI_API_TOKEN= \
+SHAPI_DOWNLOAD_BASE_URL="http://127.0.0.1:$PORT" \
+    sh "$REPO_ROOT/scripts/install.sh" >"$TMP_ROOT/incomplete-retry.log"
+grep -Fqx 'Runner: not started' "$TMP_ROOT/incomplete-retry.log"
+grep -Fqx 'No interactive terminal was available, so workspace setup was skipped.' "$TMP_ROOT/incomplete-retry.log"
 
 checksum="$TMP_ROOT/public/downloads/runner/1.2.5/checksums.txt"
 printf '%064d  %s\n' 0 "$(awk 'NR == 1 { print $2 }' "$checksum")" > "$checksum"

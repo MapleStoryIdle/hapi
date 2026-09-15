@@ -88,10 +88,27 @@ BASE_URL="${BASE_URL%/}"
 
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
 command -v tar >/dev/null 2>&1 || { echo "tar is required" >&2; exit 1; }
-existing_command="$(command -v shapi 2>/dev/null || command -v hapi 2>/dev/null || true)"
-fresh_install="yes"
-[ -n "$existing_command" ] && fresh_install="no"
-[ -f "$INSTALL_DIR/shapi" ] && fresh_install="no"
+has_runner_credentials() {
+    hapi_home="${HAPI_HOME:-$HOME/.hapi}"
+    if [ -n "${CLI_API_TOKEN:-}" ]; then
+        return 0
+    fi
+    if [ -f "$hapi_home/settings.json" ] \
+        && grep -Eq '"cliApiToken"[[:space:]]*:[[:space:]]*"[^"]+"' "$hapi_home/settings.json"; then
+        return 0
+    fi
+    for credential in "$hapi_home"/credentials-v2/runner-*.json; do
+        if [ -f "$credential" ] \
+            && grep -Eq '"status"[[:space:]]*:[[:space:]]*"approved"' "$credential" \
+            && grep -Fq "\"hubUrl\": \"$BASE_URL\"" "$credential"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+setup_required="yes"
+has_runner_credentials && setup_required="no"
 
 configure_path() {
     case ":$PATH:" in
@@ -129,7 +146,7 @@ choose_setup() {
     fi
     # stdout is often captured by terminals, launchers, or remote-control UIs.
     # Interaction only needs a usable controlling terminal, not a TTY stdout.
-    if [ "$fresh_install" != "yes" ] || ! ( : </dev/tty >/dev/tty ) 2>/dev/null; then
+    if [ "$setup_required" != "yes" ] || ! ( : </dev/tty >/dev/tty ) 2>/dev/null; then
         printf 'none\n'
         return
     fi
@@ -318,7 +335,7 @@ if [ "$setup" = "new" ] || [ "$setup" = "join" ]; then
 fi
 
 runner_started="no"
-if [ "$setup" != "none" ] || [ "$fresh_install" != "yes" ]; then
+if [ "$setup" != "none" ] || [ "$setup_required" != "yes" ]; then
     echo "Starting Runner"
     "$target" runner start
     runner_started="yes"
@@ -338,7 +355,7 @@ else
     printf '%bRunner:%b not started\n' "$color_yellow" "$color_reset"
 fi
 
-if [ "$fresh_install" = "yes" ] && [ "$setup" = "none" ]; then
+if [ "$setup_required" = "yes" ] && [ "$setup" = "none" ]; then
     echo "No interactive terminal was available, so workspace setup was skipped."
     echo "Next: rerun with --register to create a workspace, or --join to use an existing spw credential."
     echo "Create: curl -fsSL $BASE_URL/install.sh | sh -s -- --register"
