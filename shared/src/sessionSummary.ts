@@ -37,6 +37,7 @@ export type SessionSummaryMetadata = {
     flavor?: string | null
     worktree?: WorktreeMetadata
     agentSessionId?: string
+    controlOwner?: 'shapi' | 'external'
     lifecycleState?: string
     sideSession?: SideSessionMetadata
 }
@@ -125,6 +126,7 @@ export function toSessionSummary(session: Session): SessionSummary {
             ?? session.metadata.cursorSessionId
             ?? session.metadata.kimiSessionId
             ?? undefined,
+        controlOwner: session.metadata.controlOwner,
         lifecycleState: session.metadata.lifecycleState,
         sideSession: session.metadata.sideSession
     } : null

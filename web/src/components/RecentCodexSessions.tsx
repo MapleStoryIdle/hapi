@@ -558,7 +558,8 @@ function groupMergedCodexSessionsByDirectory(
 
 /**
  * Build the single Codex list shown on the sessions index. SHAPI rows win over
- * their matching transcript so an app-server thread is not shown twice.
+ * their matching transcript while SHAPI owns them. After control is released,
+ * the persisted thread is displayed as a normal native Codex session instead.
  */
 export function mergeRecentCodexSessions(
     hapiSessions: SessionSummary[],
@@ -570,12 +571,14 @@ export function mergeRecentCodexSessions(
     const codexHapiSessions = hapiSessions.filter(isCodexFlavor)
     const archivedManagedThreadIds = new Set(
         codexHapiSessions
-            .filter((session) => session.metadata?.lifecycleState === 'archived')
+            .filter((session) => session.metadata?.lifecycleState === 'archived'
+                && session.metadata.controlOwner !== 'external')
             .flatMap((session) => [session.id, session.metadata?.agentSessionId?.trim()])
             .filter((id): id is string => Boolean(id))
     )
     const managed = codexHapiSessions
         .filter((session) => session.metadata?.lifecycleState !== 'archived')
+        .filter((session) => session.metadata?.controlOwner !== 'external')
         .filter((session) => isRecentCodexSession(session.updatedAt, now, windowMs))
         .map((session): MergedCodexSession => ({
             key: `hapi:${session.id}`,

@@ -112,6 +112,13 @@ requireMatch(toastContainer, /top-\[var\(--app-toast-top\)\]/, 'non-modal toast 
 requireMatch(composer, /var\(--app-composer-expanded-bottom-gap\)\+var\(--app-composer-safe-area-bottom\)\+var\(--app-composer-expanded-keyboard-offset\)/, 'expanded composer must consume the canonical keyboard gap tokens')
 requireMatch(composer, /const requiresExpandedComposer = hasText\s*\|\|/, 'a non-empty draft must keep the composer expanded')
 requireMatch(composer, /const composerCompact = !composerExpanded && !requiresExpandedComposer/, 'the visual compact state must honor the non-empty draft invariant')
+requireMatch(composer, /const \[composerExpanded, setComposerExpanded\] = useState\(false\)/, 'an empty composer must start compact for each detail-page mount')
+requireMatch(composer, /const handleComposerFocus = useCallback\([\s\S]*?setComposerExpanded\(true\)/, 'the compact composer must expand when the user enters it')
+if (/setComposerExpanded\(false\)/.test(composer)) {
+    throw new Error('Mobile layout contract violation: an expanded composer must stay expanded until its detail page unmounts')
+}
+requireMatch(sessionChat, /<HappyComposer\s+key=\{`composer-\$\{props\.session\.id\}`\}/, 'managed session switches must reset composer expansion state')
+requireMatch(source('web/src/components/CodexSessionContextPage.tsx'), /<HappyComposer\s+key=\{`codex-native-composer-\$\{props\.sessionId\}`\}/, 'native session switches must reset composer expansion state')
 requireMatch(composer, /grid-rows-\[0fr_auto_1fr\]/, 'expanded composer text row must grow with multi-line input')
 if (/grid-rows-\[0fr_62px_1fr\]|grid-rows-\[auto_62px_1fr\]/.test(composer)) {
     throw new Error('Mobile layout contract violation: a fixed expanded text row can cover composer buttons')

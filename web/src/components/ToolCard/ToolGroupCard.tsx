@@ -811,7 +811,11 @@ export function ToolGroupCard(props: {
     const [historyExhausted, setHistoryExhausted] = useState(false)
     const [retryNonce, setRetryNonce] = useState(0)
     const [now, setNow] = useState(() => Date.now())
-    const [autoExpansionReady, setAutoExpansionReady] = useState(false)
+    const hasRunningTerminal = props.block.forceCompact === true && props.block.tools.some((tool) => (
+        isTerminalExecutionTool(tool.tool.name)
+        && (tool.tool.state === 'running' || tool.tool.state === 'pending')
+    ))
+    const [autoExpansionReady, setAutoExpansionReady] = useState(hasRunningTerminal)
     const hydrationRunRef = useRef(0)
     const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const { suppressFocusRing, onTriggerPointerDown, onTriggerKeyDown, onTriggerBlur } = usePointerFocusRing()
@@ -819,7 +823,7 @@ export function ToolGroupCard(props: {
     const compactMode = ctx.terminalToolDisplayMode === 'compact' || props.block.forceCompact === true
     const hasActiveTools = isToolGroupActive(props.block)
     const requestsAutomaticExpansion = hasActiveTools && (
-        props.block.defaultOpen || props.block.forceCompact !== true
+        hasRunningTerminal || props.block.defaultOpen || props.block.forceCompact !== true
     )
     const useExternalCompactHeader = compactMode && compactHeaderState?.groupId === props.block.id
     const expansionStateKeys = getToolGroupExpansionStateKeys(props.block)
@@ -859,7 +863,10 @@ export function ToolGroupCard(props: {
     }, [ctx, displayedOpen, externalSetOpen, primaryExpansionStateKey, useExternalCompactHeader, usesManagedExpansionState])
 
     useEffect(() => {
-        setAutoExpansionReady(false)
+        setAutoExpansionReady(hasRunningTerminal)
+        if (hasRunningTerminal) {
+            return
+        }
         if (!requestsAutomaticExpansion) {
             return
         }
@@ -867,7 +874,7 @@ export function ToolGroupCard(props: {
             setAutoExpansionReady(true)
         }, 3_000)
         return () => clearTimeout(timer)
-    }, [props.block.id, requestsAutomaticExpansion])
+    }, [hasRunningTerminal, props.block.id, requestsAutomaticExpansion])
 
     useEffect(() => {
         if (!usesManagedExpansionState) {

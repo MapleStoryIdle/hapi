@@ -3,7 +3,6 @@ import { ComposerPrimitive, useAssistantApi, useAssistantState } from '@assistan
 import {
     type ChangeEvent as ReactChangeEvent,
     type ClipboardEvent as ReactClipboardEvent,
-    type FocusEvent as ReactFocusEvent,
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
     type MouseEvent as ReactMouseEvent,
@@ -447,9 +446,11 @@ export function HappyComposer(props: {
     const [isSwitching, setIsSwitching] = useState(false)
     const [showSideSessionMenu, setShowSideSessionMenu] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
-    // Start small, expand while the text field is active, then return to the
-    // compact entry point when focus leaves an empty composer. A typed draft
-    // is always expanded, even after the textarea temporarily loses focus.
+    // Start small on each detail-page mount. Once the user expands this
+    // composer, keep it expanded for the rest of that page visit. SessionChat
+    // and the native detail page key the component by session, so leaving or
+    // switching sessions creates a fresh compact composer. A typed draft is
+    // always expanded too.
     const [composerExpanded, setComposerExpanded] = useState(false)
     // pendingSchedule is controlled externally when onSchedule prop is provided; otherwise local state
     const [pendingScheduleLocal, setPendingScheduleLocal] = useState<PendingSchedule | null>(null)
@@ -463,8 +464,6 @@ export function HappyComposer(props: {
         }
     }, [activeSideSessions.length])
 
-    const composerRootRef = useRef<HTMLDivElement>(null)
-    const composerBlurFrameRef = useRef<number | null>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const settingsButtonRef = useRef<HTMLButtonElement>(null)
     const piModelButtonRef = useRef<HTMLButtonElement>(null)
@@ -1178,31 +1177,6 @@ export function HappyComposer(props: {
             setComposerExpanded(true)
         }
     }, [composerCompact])
-    const handleComposerBlur = useCallback((_event: ReactFocusEvent<HTMLTextAreaElement>) => {
-        if (composerBlurFrameRef.current !== null) {
-            window.cancelAnimationFrame(composerBlurFrameRef.current)
-        }
-        // Let a click on a toolbar control settle first. Collapsing during the
-        // input's blur phase would unmount that control before its click fires.
-        composerBlurFrameRef.current = window.requestAnimationFrame(() => {
-            composerBlurFrameRef.current = null
-            if (requiresExpandedComposer) {
-                return
-            }
-            const activeElement = document.activeElement
-            if (activeElement instanceof Node && composerRootRef.current?.contains(activeElement)) {
-                return
-            }
-            setComposerExpanded(false)
-        })
-    }, [requiresExpandedComposer])
-    useEffect(() => {
-        return () => {
-            if (composerBlurFrameRef.current !== null) {
-                window.cancelAnimationFrame(composerBlurFrameRef.current)
-            }
-        }
-    }, [])
     // Keep one surface mounted and morph its grid tracks instead of swapping
     // a pill for a panel. This is the web equivalent of a container transform:
     // the input remains the visual anchor while the toolbar fades in after the
@@ -1665,10 +1639,7 @@ export function HappyComposer(props: {
             data-testid="happy-composer"
             data-mobile-layout-state={composerCompact ? 'compact' : 'expanded'}
         >
-            <div
-                ref={composerRootRef}
-                className="mx-auto w-full max-w-content"
-            >
+            <div className="mx-auto w-full max-w-content">
                 <ComposerPrimitive.Root
                     className="relative"
                     onSubmit={handleSubmit}
@@ -1844,7 +1815,6 @@ export function HappyComposer(props: {
                                 submitOnEnter={false}
                                 cancelOnEscape={false}
                                 onFocus={handleComposerFocus}
-                                onBlur={handleComposerBlur}
                                 onChange={handleChange}
                                 onSelect={handleSelect}
                                 onKeyDown={handleKeyDown}

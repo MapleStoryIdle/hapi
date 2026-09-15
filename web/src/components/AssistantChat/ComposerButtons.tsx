@@ -774,7 +774,24 @@ export function ContextUsageProgressRail(props: {
 
 type SkillPickerGroup = 'hub' | 'project' | 'user' | 'plugin' | 'system'
 type SkillPickerSection = SkillPickerGroup | 'recent'
-const LARK_SKILL_PREFIX = 'lark-'
+const LAST_SKILL_SEARCH_STORAGE_KEY = 'hapi:skills:last-search'
+
+function getLastSkillSearch(): string {
+    try {
+        return localStorage.getItem(LAST_SKILL_SEARCH_STORAGE_KEY)?.trim() ?? ''
+    } catch {
+        return ''
+    }
+}
+
+function saveLastSkillSearch(query: string): void {
+    try {
+        if (query) localStorage.setItem(LAST_SKILL_SEARCH_STORAGE_KEY, query)
+        else localStorage.removeItem(LAST_SKILL_SEARCH_STORAGE_KEY)
+    } catch {
+        // Search still works for this picker when storage is unavailable.
+    }
+}
 
 function getSkillPickerGroup(skill: SkillSummary): SkillPickerGroup {
     switch (skill.scope) {
@@ -1093,8 +1110,8 @@ export function ComposerButtons(props: {
     const [showSkillMenu, setShowSkillMenu] = useState(false)
     const [showContextUsageMenu, setShowContextUsageMenu] = useState(false)
     const [skillQuery, setSkillQuery] = useState('')
+    const [lastSkillQuery, setLastSkillQuery] = useState(getLastSkillSearch)
     const [showSkillSearch, setShowSkillSearch] = useState(false)
-    const [hideLarkSkills, setHideLarkSkills] = useState(true)
     const [expandedSkillSections, setExpandedSkillSections] = useState<Set<SkillPickerSection>>(
         () => new Set(['recent'])
     )
@@ -1431,11 +1448,8 @@ export function ComposerButtons(props: {
             })}
         </div>
     ) : null
-    const filteredSkills = hideLarkSkills
-        ? skills.filter((skill) => !skill.name.startsWith(LARK_SKILL_PREFIX))
-        : skills
     const normalizedSkillQuery = skillQuery.trim().toLowerCase()
-    const visibleSkills = filteredSkills
+    const visibleSkills = skills
         .filter((skill) => {
             if (!normalizedSkillQuery) return true
             const copy = skill.scope === 'hub'
@@ -1460,7 +1474,7 @@ export function ComposerButtons(props: {
     const recentSkills = normalizedSkillQuery
         ? []
         : recentSkillNames
-            .map((name) => filteredSkills.find((skill) => skill.name === name))
+            .map((name) => skills.find((skill) => skill.name === name))
             .filter((skill): skill is SkillSummary => skill != null)
 
     const toggleSkillSearch = () => {
@@ -1599,7 +1613,13 @@ export function ComposerButtons(props: {
                                 || document.documentElement.dataset.appKeyboardOpen !== 'true'}
                             placeholder={t('composer.skills.search')}
                             className="ios-form-control h-8 w-full pl-8 pr-2.5 text-xs"
-                            onChange={(event) => setSkillQuery(event.target.value)}
+                            onChange={(event) => {
+                                const query = event.target.value
+                                const remembered = query.trim()
+                                setSkillQuery(query)
+                                setLastSkillQuery(remembered)
+                                saveLastSkillSearch(remembered)
+                            }}
                             onKeyDown={(event) => {
                                 if (event.key === 'Escape') {
                                     setShowSkillMenu(false)
@@ -1607,21 +1627,18 @@ export function ComposerButtons(props: {
                             }}
                         />
                     </label>
-                    <button
-                        type="button"
-                        aria-pressed={!hideLarkSkills}
-                        aria-label={hideLarkSkills ? t('composer.skills.filterLark.show') : t('composer.skills.filterLark.hide')}
-                        title={hideLarkSkills ? t('composer.skills.filterLark.show') : t('composer.skills.filterLark.hide')}
-                        className={`h-8 shrink-0 rounded-lg border px-2 text-[10px] font-medium transition-colors ${
-                            hideLarkSkills
-                                ? 'border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'
-                                : 'border-blue-200 bg-blue-50 text-[var(--app-link)] dark:border-blue-400/25 dark:bg-blue-500/15'
-                        }`}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => setHideLarkSkills((value) => !value)}
-                    >
-                        lark-
-                    </button>
+                    {lastSkillQuery && normalizedSkillQuery !== lastSkillQuery.toLowerCase() ? (
+                        <button
+                            type="button"
+                            aria-label={t('composer.skills.search.recent', { query: lastSkillQuery })}
+                            title={t('composer.skills.search.recent', { query: lastSkillQuery })}
+                            className="h-8 max-w-28 shrink-0 truncate rounded-lg border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 text-[10px] font-medium text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => setSkillQuery(lastSkillQuery)}
+                        >
+                            {lastSkillQuery}
+                        </button>
+                    ) : null}
                 </div>
             ) : null}
 

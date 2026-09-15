@@ -34,4 +34,13 @@ describe('mergeMessages', () => {
         expect(merged).toHaveLength(1)
         expect(merged[0]?.invokedAt).toBe(invokedAt)
     })
+
+    it('keeps persisted history in sequence order when acknowledgement timestamps disagree', () => {
+        const merged = mergeMessages([], [
+            userMessage({ id: 'later', seq: 2, createdAt: 2_000, invokedAt: 1_000 }),
+            userMessage({ id: 'earlier', seq: 1, createdAt: 1_000, invokedAt: 3_000 })
+        ])
+
+        expect(merged.map((message) => message.id)).toEqual(['earlier', 'later'])
+    })
 })

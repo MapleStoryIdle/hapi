@@ -448,6 +448,34 @@ describe('RecentCodexSessions', () => {
         ])
     })
 
+    it('shows a released SHAPI Codex thread as a native session', () => {
+        const now = Date.now()
+        const released = createManagedCodexSession('released-hapi', now)
+        released.metadata = {
+            ...released.metadata!,
+            agentSessionId: 'released-thread',
+            controlOwner: 'external',
+            lifecycleState: 'archived'
+        }
+
+        const rows = mergeRecentCodexSessions([released], [{
+            id: 'released-thread',
+            title: 'Released Codex task',
+            cwd: '/workspace/released',
+            file: '/tmp/released.jsonl',
+            modifiedAt: now,
+            runState: 'idle'
+        }], { now })
+
+        expect(rows).toHaveLength(1)
+        expect(rows[0]).toMatchObject({
+            key: 'native:released-thread',
+            id: 'released-thread',
+            source: 'native',
+            title: 'Released Codex task'
+        })
+    })
+
     it('keeps pinned action and thinking cards in their higher-priority groups', () => {
         const now = 1_800_000_000_000
         const pending = {

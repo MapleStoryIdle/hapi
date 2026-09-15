@@ -109,6 +109,9 @@ export function HappyAssistantMessage() {
     const [detailsVisible, setDetailsVisible] = useState(false)
     const [unmanagedCompactToolGroupOpen, setUnmanagedCompactToolGroupOpen] = useState(false)
     const messageId = useAssistantState(({ message }) => message.id)
+    const scrollAnchorId = useAssistantState(({ message }) => (
+        message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+    )?.scrollAnchorId) ?? messageId
     const isCliOutput = useAssistantState(({ message }) => {
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.kind === 'cli-output'
@@ -214,7 +217,7 @@ export function HappyAssistantMessage() {
     if (isCliOutput) {
         return (
             <MessagePrimitive.Root
-                id={getConversationMessageAnchorId(messageId)}
+                id={getConversationMessageAnchorId(scrollAnchorId)}
                 className="scroll-mt-4 px-1 min-w-0 max-w-full overflow-x-hidden"
                 onClick={toggleDetailsVisible}
             >
@@ -235,7 +238,7 @@ export function HappyAssistantMessage() {
     if (codexReview) {
         return (
             <MessagePrimitive.Root
-                id={getConversationMessageAnchorId(messageId)}
+                id={getConversationMessageAnchorId(scrollAnchorId)}
                 className={`${rootClass} ${copyText ? 'group/msg' : ''} scroll-mt-4`}
                 onClick={toggleDetailsVisible}
             >
@@ -274,7 +277,7 @@ export function HappyAssistantMessage() {
     if (toolOnly) {
         return (
             <MessagePrimitive.Root
-                id={getConversationMessageAnchorId(messageId)}
+                id={getConversationMessageAnchorId(scrollAnchorId)}
                 className={`${rootClass} ${copyText ? 'group/msg' : ''} scroll-mt-4`}
                 onClick={toggleDetailsVisible}
             >
@@ -296,7 +299,7 @@ export function HappyAssistantMessage() {
 
     return (
         <MessagePrimitive.Root
-            id={getConversationMessageAnchorId(messageId)}
+            id={getConversationMessageAnchorId(scrollAnchorId)}
             className={`${rootClass} ${copyText ? 'group/msg' : ''} scroll-mt-4`}
             onClick={toggleDetailsVisible}
         >

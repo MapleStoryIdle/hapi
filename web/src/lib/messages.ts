@@ -27,6 +27,16 @@ function isOptimisticMessage(msg: DecryptedMessage): boolean {
 }
 
 function compareMessages(a: DecryptedMessage, b: DecryptedMessage): number {
+    const aSeq = typeof a.seq === 'number' ? a.seq : null
+    const bSeq = typeof b.seq === 'number' ? b.seq : null
+
+    // Persisted rows already have the hub's canonical session order. Timestamps
+    // can change when an optimistic prompt is acknowledged and must not reorder
+    // history that the person is currently reading.
+    if (aSeq !== null && bSeq !== null && aSeq !== bSeq) {
+        return aSeq - bSeq
+    }
+
     const aTime = a.invokedAt ?? a.createdAt
     const bTime = b.invokedAt ?? b.createdAt
 
@@ -34,12 +44,6 @@ function compareMessages(a: DecryptedMessage, b: DecryptedMessage): number {
         return aTime - bTime
     }
 
-    const aSeq = typeof a.seq === 'number' ? a.seq : null
-    const bSeq = typeof b.seq === 'number' ? b.seq : null
-
-    if (aSeq !== null && bSeq !== null && aSeq !== bSeq) {
-        return aSeq - bSeq
-    }
     return a.id.localeCompare(b.id)
 }
 

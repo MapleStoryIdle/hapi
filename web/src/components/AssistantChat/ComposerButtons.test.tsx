@@ -789,6 +789,53 @@ describe('ComposerButtons — skill picker', () => {
         expect(menu.parentElement).toBe(document.body)
         expect(search).not.toHaveFocus()
     })
+
+    it('shows the last entered skill search instead of a fixed lark filter', () => {
+        const props = {
+            canSend: false,
+            controlsDisabled: false,
+            showSettingsButton: false,
+            onSettingsToggle: noop,
+            skills: [
+                { name: 'lark-doc', scope: 'plugin' as const },
+                { name: 'public-share', scope: 'hub' as const }
+            ],
+            onSkillSelect: noop,
+            showTerminalButton: false,
+            terminalDisabled: false,
+            terminalLabel: 'Terminal',
+            onTerminal: noop,
+            showAbortButton: false,
+            abortDisabled: false,
+            isAborting: false,
+            onAbort: noop,
+            showSwitchButton: false,
+            switchDisabled: false,
+            isSwitching: false,
+            onSwitch: noop,
+            voiceEnabled: false,
+            voiceStatus: 'disconnected' as const,
+            onVoiceToggle: noop,
+            onSend: noop,
+        }
+
+        const first = renderInProviders(<ComposerButtons {...props} />)
+        fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
+        fireEvent.click(screen.getByTestId('composer-skill-section-plugin'))
+        expect(screen.getByText('lark-doc')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Show skill filters' }))
+        expect(screen.queryByRole('button', { name: /lark- skills/i })).not.toBeInTheDocument()
+        fireEvent.change(screen.getByPlaceholderText('Search skills'), { target: { value: 'share' } })
+        first.unmount()
+
+        renderInProviders(<ComposerButtons {...props} />)
+        fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Show skill filters' }))
+        const recentSearch = screen.getByRole('button', { name: 'Use recent search: share' })
+        expect(recentSearch).toHaveTextContent('share')
+        fireEvent.click(recentSearch)
+        expect(screen.getByPlaceholderText('Search skills')).toHaveValue('share')
+    })
 })
 
 describe('ComposerButtons — context usage popover', () => {

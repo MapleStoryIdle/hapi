@@ -4,6 +4,7 @@ import {
     aggregateResponseGroups,
     assignThreadMessageIds,
     assignThreadMessageIdsWithStableWrappers,
+    getResponseGroupScrollAnchors,
     toThreadMessageLike
 } from './assistant-runtime'
 import type { AgentEventBlock, AgentTextBlock, CliOutputBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
@@ -142,6 +143,25 @@ describe('assignThreadMessageIds', () => {
         expect(second[0]).toBe(first[0])
         expect(second[0].threadMessageId).toBe('agent-text:a')
         expect(second[1].threadMessageId).toBe('user-text:u')
+    })
+})
+
+describe('getResponseGroupScrollAnchors', () => {
+    it('keeps the same trailing source anchor when older assistant details are prepended', () => {
+        const current = [toolCall('tool-current'), agentText('answer-current')]
+        const before = getResponseGroupScrollAnchors(current)
+        const after = getResponseGroupScrollAnchors([toolCall('tool-older'), ...current])
+
+        expect(before.get('tool-current')).toBe('agent-text:answer-current')
+        expect(after.get('tool-older')).toBe('agent-text:answer-current')
+    })
+
+    it('anchors a derived tool group to its last source detail', () => {
+        const first = toolCall('tool-first')
+        const last = toolCall('tool-last')
+        const group = toolGroup('derived-group', [first, last], { detailBlocks: [first, last] })
+
+        expect(getResponseGroupScrollAnchors([group]).get(group.id)).toBe('tool-call:tool-last')
     })
 })
 

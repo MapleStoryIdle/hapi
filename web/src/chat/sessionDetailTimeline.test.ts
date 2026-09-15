@@ -224,6 +224,51 @@ describe('buildSessionDetailTimeline', () => {
         })
     })
 
+    it('does not merge completed history into an active turn while its user row is still arriving', () => {
+        const historicalTool = toolBlock()
+        const historicalResult = agentBlock()
+        const activeTool: ToolCallBlock = {
+            ...toolBlock(),
+            id: 'tool-current',
+            createdAt: 11,
+            tool: {
+                ...toolBlock().tool,
+                id: 'tool-current',
+                state: 'running',
+                createdAt: 11,
+                startedAt: 11,
+                completedAt: null,
+                result: undefined
+            }
+        }
+
+        const timeline = buildSessionDetailTimeline([
+            userBlock(),
+            historicalTool,
+            historicalResult,
+            activeTool
+        ], {
+            hasMoreMessages: false,
+            runActive: true,
+            aggregateActiveProcess: true,
+            activeTurnStartedAt: 10
+        })
+
+        expect(timeline.visible.map((block) => block.id)).toEqual([
+            'user-1',
+            'tool-group:result-details:tool-group:tool-1',
+            'agent-1',
+            'tool-group:active-process:tool-current'
+        ])
+        expect(timeline.visible[1]).toMatchObject({ kind: 'tool-group' })
+        expect(timeline.visible[1]).not.toHaveProperty('turnActive')
+        expect(timeline.visible[3]).toMatchObject({
+            kind: 'tool-group',
+            turnActive: true,
+            tools: [{ id: 'tool-current' }]
+        })
+    })
+
     it('keeps a reasoning-only active turn visible', () => {
         const timeline = buildSessionDetailTimeline([
             userBlock(),

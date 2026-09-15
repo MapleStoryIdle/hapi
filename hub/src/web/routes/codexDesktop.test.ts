@@ -1854,6 +1854,45 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('sends a released SHAPI thread through the native transport', async () => {
+        const store = new Store(':memory:')
+        const sessionId = '59675757-5757-4757-8757-575656565656'
+        const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')
+        const nativeSendCalls: unknown[][] = []
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            getSessionsByNamespace: () => [{
+                id: 'released-hapi-session',
+                active: false,
+                metadata: {
+                    machineId: 'mac-runner',
+                    flavor: 'codex',
+                    codexSessionId: sessionId,
+                    controlOwner: 'external',
+                    lifecycleState: 'archived'
+                }
+            }],
+            sendCodexLocalSessionMessage: async (...args: unknown[]) => {
+                nativeSendCalls.push(args)
+                return { success: true as const, status: 'processing' as const }
+            }
+        } as unknown as SyncEngine
+        const app = createRoutesAppWithEngine('default', store, engine)
+
+        try {
+            const response = await app.request(`/api/codex/sessions/${sessionId}/messages`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ machineId: 'mac-runner', message: 'Continue natively' })
+            })
+            expect(response.status).toBe(202)
+            expect(await response.json()).toMatchObject({ success: true, status: 'processing' })
+            expect(nativeSendCalls).toEqual([['mac-runner', sessionId, 'Continue natively']])
+        } finally {
+            store.close()
+        }
+    })
+
     it('asks the selected runner to exclude SHAPI-initiated Codex threads', async () => {
         const store = new Store(':memory:')
         const machine = createMachine('mac-runner', ['/runner/workspace'], 'default', '/runner/.codex')

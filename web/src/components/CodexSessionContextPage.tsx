@@ -887,14 +887,17 @@ function NativeCodexThread(props: {
             hasMoreMessages: props.hasMoreMessages,
             terminalToolDisplayMode,
             runActive: props.isProcessing,
-            aggregateActiveProcess: true
+            aggregateActiveProcess: true,
+            activeTurnStartedAt: props.connectionStartedAt ?? props.thinkingStartedAt
         }),
-        [props.hasMoreMessages, props.isProcessing, terminalToolDisplayMode, ungroupedBlocks]
+        [props.connectionStartedAt, props.hasMoreMessages, props.isProcessing, props.thinkingStartedAt,
+            terminalToolDisplayMode, ungroupedBlocks]
     )
     const blocks = timeline.visible
+    const currentTurnStartedAt = Math.max(latestUserAt ?? 0, props.connectionStartedAt ?? props.thinkingStartedAt ?? 0)
     const currentTurnProcessVisible = useMemo(
-        () => hasCurrentTurnProcess(timeline.grouped, { minCreatedAt: latestUserAt }),
-        [latestUserAt, timeline.grouped]
+        () => hasCurrentTurnProcess(timeline.grouped, { minCreatedAt: currentTurnStartedAt || null }),
+        [currentTurnStartedAt, timeline.grouped]
     )
     // A local echo is useful in the thread immediately, but it must not become
     // a durable outline anchor until the runner has actually written it.

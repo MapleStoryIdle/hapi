@@ -958,6 +958,7 @@ function findHapiManagedCodexSession(
 ) {
     return engine.getSessionsByNamespace(namespace).find((session) => (
         session.metadata?.machineId === machineId
+        && session.metadata?.controlOwner !== 'external'
         && (
             session.id === codexSessionId
             || session.metadata?.codexSessionId === codexSessionId
@@ -975,6 +976,7 @@ function findActiveHapiManagedCodexSession(
         session.active
         && session.metadata?.flavor === 'codex'
         && session.metadata?.machineId === machineId
+        && session.metadata?.controlOwner !== 'external'
         && (
             session.id === codexSessionId
             || session.metadata?.codexSessionId === codexSessionId

@@ -40,12 +40,47 @@ export type HappyChatMessageMetadata = {
     model?: string | null
     review?: CodexReview
     questionAnswer?: QuestionAnswerPresentation
+    /** Stable source block retained when pagination reshapes derived assistant groups. */
+    scrollAnchorId?: string
     /**
      * Distinct turn count when this block carries an aggregated response
      * group footer. Single-turn blocks omit this field so the existing
      * per-message footer is rendered unchanged.
      */
     turnCount?: number
+}
+
+function getStableBlockScrollAnchorId(block: VisibleChatBlock): string {
+    if (block.kind !== 'tool-group') return `${block.kind}:${block.id}`
+    const lastDetail = block.detailBlocks?.at(-1)
+    return lastDetail ? `${lastDetail.kind}:${lastDetail.id}` : `tool-call:${block.lastToolId}`
+}
+
+/** assistant-ui joins adjacent assistant blocks; anchor the joined row to its stable trailing source block. */
+export function getResponseGroupScrollAnchors(blocks: readonly VisibleChatBlock[]): Map<string, string> {
+    const anchors = new Map<string, string>()
+    let groupFirstBlockId: string | null = null
+    let groupLastAnchorId: string | null = null
+
+    const flush = () => {
+        if (groupFirstBlockId && groupLastAnchorId) {
+            anchors.set(groupFirstBlockId, groupLastAnchorId)
+        }
+        groupFirstBlockId = null
+        groupLastAnchorId = null
+    }
+
+    for (const block of blocks) {
+        if (visibleBlockRole(block) !== 'assistant') {
+            flush()
+            anchors.set(block.id, getStableBlockScrollAnchorId(block))
+            continue
+        }
+        groupFirstBlockId ??= block.id
+        groupLastAnchorId = getStableBlockScrollAnchorId(block)
+    }
+    flush()
+    return anchors
 }
 
 function formatCodexReviewText(review: CodexReview): string {
@@ -618,12 +653,15 @@ export function useHappyRuntime(props: {
         () => aggregateResponseGroups(props.blocks),
         [props.blocks]
     )
+    const scrollAnchors = useMemo(
+        () => getResponseGroupScrollAnchors(props.blocks),
+        [props.blocks]
+    )
 
     const convertBlock = useCallback(
         ({ block, threadMessageId }: BlockWithThreadMessageId): ThreadMessageLike => {
             const message = toThreadMessageLike(block, threadMessageId)
             const aggregate = aggregates.get(block.id)
-            if (!aggregate) return message
             const existing = message.metadata?.custom as HappyChatMessageMetadata | undefined
             return {
                 ...message,
@@ -631,16 +669,19 @@ export function useHappyRuntime(props: {
                     ...message.metadata,
                     custom: {
                         ...(existing ?? { kind: 'assistant' }),
-                        usage: aggregate.usage,
-                        model: aggregate.model,
-                        invokedAt: aggregate.invokedAt,
-                        durationMs: aggregate.durationMs,
-                        turnCount: aggregate.turnCount
+                        scrollAnchorId: scrollAnchors.get(block.id) ?? `${block.kind}:${block.id}`,
+                        ...(aggregate ? {
+                            usage: aggregate.usage,
+                            model: aggregate.model,
+                            invokedAt: aggregate.invokedAt,
+                            durationMs: aggregate.durationMs,
+                            turnCount: aggregate.turnCount
+                        } : {})
                     } satisfies HappyChatMessageMetadata
                 }
             }
         },
-        [aggregates]
+        [aggregates, scrollAnchors]
     )
 
     // Use cached message converter for performance optimization

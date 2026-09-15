@@ -13,7 +13,7 @@
 | iOS 顶部安全区 | standalone 模式通常最小 50px；若运行时确认顶部是 WebKit 绘制在 DOM 外的系统区，则不得再叠加这 50px，标题从可见网页视口开始 | `useViewportHeight.ts`、`index.css` |
 | iOS 底部安全区 | standalone 模式最小 34px；普通触屏最小 12px | `index.css` |
 | 展开输入框 + 键盘 | 底部总间隔固定 **4px**：安全区和常规 12px 间隔均归零，只保留 4px | `index.css` |
-| 有内容的输入框 | 草稿非空时始终保持展开；工具按钮以 `mousedown` 保持文本焦点，禁止用 `pointerdown.preventDefault()` 吞掉 iOS 的点击事件 | `HappyComposer.tsx`、`ComposerButtons.tsx` |
+| 输入框展开状态 | 每次进入会话详情且草稿为空时默认收起；本次停留中展开过一次后保持展开，即使失焦、发送或清空也不再收起；离开或切换会话后重置。草稿非空时始终展开；工具按钮以 `mousedown` 保持文本焦点，禁止用 `pointerdown.preventDefault()` 吞掉 iOS 的点击事件 | `HappyComposer.tsx`、`SessionChat.tsx`、`CodexSessionContextPage.tsx`、`ComposerButtons.tsx` |
 | 多行输入框 | 展开态文本行使用自适应 grid 行；超过一行时只能向上扩展，绝不覆盖下方工具、发送或停止按钮 | `HappyComposer.tsx` |
 | 键盘态操作菜单 | 工具、权限、技能、上下文和设置菜单必须留在 `VisualViewport` 内；空间不足时可滚动，不得要求先收起键盘 | `ComposerButtons.tsx`、`HappyComposer.tsx` |
 | 输入框可选按钮 | 必须按工具栏真实的 `12px` 水平内边距和 `2px` 间距计算；保留 42px 点击区域，空间够时不得误隐藏 Skill | `ComposerButtons.tsx` |

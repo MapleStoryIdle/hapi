@@ -202,6 +202,7 @@ export function groupAssistantResultDetails(
     options: {
         runActive?: boolean
         aggregateActiveProcess?: boolean
+        activeTurnStartsAtBeginning?: boolean
     } = {}
 ): VisibleChatBlock[] {
     const transformed: VisibleChatBlock[] = []
@@ -210,7 +211,7 @@ export function groupAssistantResultDetails(
     const latestUserIndex = blocks.findLastIndex((block) => (
         block.kind === 'user-text' || block.kind === 'question-answer'
     ))
-    if (options.runActive && latestUserIndex === -1) {
+    if (options.runActive && latestUserIndex === -1 && !options.activeTurnStartsAtBeginning) {
         return blocks
     }
 

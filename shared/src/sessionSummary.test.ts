@@ -86,15 +86,17 @@ describe('toSessionSummary', () => {
         expect(summary.futureScheduledMessageCount).toBe(0)
     })
 
-    it('includes lifecycleState in summary metadata', () => {
+    it('includes lifecycle and control ownership in summary metadata', () => {
         const summary = toSessionSummary(makeSession({
             metadata: {
                 path: '/proj',
                 host: 'local',
+                controlOwner: 'external',
                 lifecycleState: 'archived'
             }
         }))
 
+        expect(summary.metadata?.controlOwner).toBe('external')
         expect(summary.metadata?.lifecycleState).toBe('archived')
     })
 

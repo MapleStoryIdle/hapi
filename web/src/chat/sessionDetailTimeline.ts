@@ -21,6 +21,8 @@ export type SessionDetailTimelineOptions = {
     runActive?: boolean
     /** Native Codex: keep one process row across reasoning/tool snapshots. */
     aggregateActiveProcess?: boolean
+    /** Runner clock for the active turn; protects completed history while its user row is still arriving. */
+    activeTurnStartedAt?: number
 }
 
 export type SessionDetailTimeline = {
@@ -60,6 +62,7 @@ export type SessionDetailTimelineCache = {
     terminalToolDisplayMode: TerminalToolDisplayMode | undefined
     runActive: boolean | undefined
     aggregateActiveProcess: boolean | undefined
+    activeTurnStartedAt: number | undefined
     timeline: SessionDetailTimeline
 }
 
@@ -124,6 +127,7 @@ function createTimelineCache(
         terminalToolDisplayMode: options.terminalToolDisplayMode,
         runActive: options.runActive,
         aggregateActiveProcess: options.aggregateActiveProcess,
+        activeTurnStartedAt: options.activeTurnStartedAt,
         timeline
     }
 }
@@ -136,6 +140,31 @@ function canReuseTimelinePrefix(
         && cache.terminalToolDisplayMode === options.terminalToolDisplayMode
         && cache.runActive === options.runActive
         && cache.aggregateActiveProcess === options.aggregateActiveProcess
+        && cache.activeTurnStartedAt === options.activeTurnStartedAt
+}
+
+function buildTimelineSegment(
+    blocks: readonly ChatBlock[],
+    options: SessionDetailTimelineOptions,
+    activeTurnStartsAtBeginning = false
+): SessionDetailTimeline {
+    const grouped = foldActiveTurnReasoningIntoNearestToolGroup(
+        buildVisibleChatBlocks(compactActiveTurnReasoning([...blocks], options.runActive), {
+            hasMoreMessages: options.hasMoreMessages,
+            previousGroups: options.previousGroups ? [...options.previousGroups] : undefined,
+            terminalToolDisplayMode: options.terminalToolDisplayMode
+        }),
+        options.runActive
+    )
+
+    return {
+        grouped,
+        visible: groupAssistantResultDetails(grouped, {
+            runActive: options.runActive,
+            aggregateActiveProcess: options.aggregateActiveProcess,
+            activeTurnStartsAtBeginning
+        })
+    }
 }
 
 /**
@@ -215,22 +244,33 @@ export function buildSessionDetailTimeline(
     blocks: readonly ChatBlock[],
     options: SessionDetailTimelineOptions
 ): SessionDetailTimeline {
-    const grouped = foldActiveTurnReasoningIntoNearestToolGroup(
-        buildVisibleChatBlocks(compactActiveTurnReasoning([...blocks], options.runActive), {
-            hasMoreMessages: options.hasMoreMessages,
-            previousGroups: options.previousGroups ? [...options.previousGroups] : undefined,
-            terminalToolDisplayMode: options.terminalToolDisplayMode
-        }),
-        options.runActive
-    )
+    if (options.runActive && options.activeTurnStartedAt !== undefined) {
+        const hasActiveUserBoundary = blocks.some((block) => (
+            block.kind === 'user-text' && block.createdAt >= options.activeTurnStartedAt!
+        ))
+        if (!hasActiveUserBoundary) {
+            const activeIndex = blocks.findIndex((block) => block.createdAt >= options.activeTurnStartedAt!)
+            const historyEnd = activeIndex === -1 ? blocks.length : activeIndex
+            const history = buildTimelineSegment(blocks.slice(0, historyEnd), {
+                ...options,
+                runActive: false,
+                hasMoreMessages: options.hasMoreMessages
+            })
+            if (activeIndex === -1) return history
 
-    return {
-        grouped,
-        visible: groupAssistantResultDetails(grouped, {
-            runActive: options.runActive,
-            aggregateActiveProcess: options.aggregateActiveProcess
-        })
+            const active = buildTimelineSegment(blocks.slice(activeIndex), {
+                ...options,
+                hasMoreMessages: false,
+                previousGroups: getTailPreviousGroups(history, blocks.slice(activeIndex))
+            }, true)
+            return {
+                grouped: [...history.grouped, ...active.grouped],
+                visible: [...history.visible, ...active.visible]
+            }
+        }
     }
+
+    return buildTimelineSegment(blocks, options)
 }
 
 /**
@@ -295,7 +335,8 @@ export function buildIncrementalSessionDetailTimeline(
         previousGroups: getTailPreviousGroups(previousCache.timeline, tailBlocks),
         terminalToolDisplayMode: options.terminalToolDisplayMode,
         runActive: options.runActive,
-        aggregateActiveProcess: options.aggregateActiveProcess
+        aggregateActiveProcess: options.aggregateActiveProcess,
+        activeTurnStartedAt: options.activeTurnStartedAt
     })
     const timeline: SessionDetailTimeline = {
         grouped: [...groupedPrefix, ...tail.grouped],

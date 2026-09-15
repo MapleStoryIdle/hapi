@@ -31,6 +31,7 @@ type PendingScrollRestore = {
     anchor: ScrollAnchor | null
     scrollTop: number
     scrollHeight: number
+    restored: boolean
 }
 
 type PendingLoadBaseline = {
@@ -50,6 +51,8 @@ const PULL_TO_LOAD_OLDER_MAX_OFFSET_PX = 48
 const PULL_TO_LOAD_OLDER_LOADING_OFFSET_PX = 34
 const MANUAL_SCROLL_INTENT_WINDOW_MS = 250
 const PAGINATION_RENDER_SETTLE_MS = 200
+const PAGINATION_SCROLL_STABILIZE_MS = 400
+const PAGINATION_RESTORED_NOTICE_MS = 1800
 
 export type PullToLoadOlderPhase = 'idle' | 'pulling' | 'ready' | 'loading'
 
@@ -558,6 +561,8 @@ export function HappyThread(props: {
     const pendingLoadResolveRef = useRef<((value: boolean) => void) | null>(null)
     const pendingLoadBaselineRef = useRef<PendingLoadBaseline | null>(null)
     const pendingLoadSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const scrollRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const restoredNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const atBottomRef = useRef(true)
     const onAtBottomChangeRef = useRef(props.onAtBottomChange)
     const onFlushPendingRef = useRef(props.onFlushPending)
@@ -571,6 +576,7 @@ export function HappyThread(props: {
     const [isAwayFromBottom, setIsAwayFromBottom] = useState(false)
     const [pullToLoadDistance, setPullToLoadDistanceState] = useState(0)
     const [pullToLoadLoading, setPullToLoadLoading] = useState(false)
+    const [showHistoryRestoredNotice, setShowHistoryRestoredNotice] = useState(false)
     const [toolGroupExpansionStates, setToolGroupExpansionStates] = useState<ToolGroupExpansionStates>({})
     const pullToLoadDistanceRef = useRef(0)
     const pullToLoadLoadingRef = useRef(false)
@@ -680,6 +686,56 @@ export function HappyThread(props: {
         clearTimeout(pendingLoadSettleTimerRef.current)
         pendingLoadSettleTimerRef.current = null
     }, [])
+
+    const clearScrollRestoreTimer = useCallback(() => {
+        if (scrollRestoreTimerRef.current === null) return
+        clearTimeout(scrollRestoreTimerRef.current)
+        scrollRestoreTimerRef.current = null
+    }, [])
+
+    const clearRestoredNoticeTimer = useCallback(() => {
+        if (restoredNoticeTimerRef.current === null) return
+        clearTimeout(restoredNoticeTimerRef.current)
+        restoredNoticeTimerRef.current = null
+    }, [])
+
+    const finishPendingScrollRestore = useCallback((result: boolean) => {
+        const restored = pendingScrollRef.current?.restored === true
+        pendingScrollRef.current = null
+        loadLockRef.current = false
+        clearScrollRestoreTimer()
+        settlePendingLoad(result)
+        if (!result || !restored) return
+        clearRestoredNoticeTimer()
+        setShowHistoryRestoredNotice(true)
+        restoredNoticeTimerRef.current = setTimeout(() => {
+            restoredNoticeTimerRef.current = null
+            setShowHistoryRestoredNotice(false)
+        }, PAGINATION_RESTORED_NOTICE_MS)
+    }, [clearRestoredNoticeTimer, clearScrollRestoreTimer, settlePendingLoad])
+
+    const restorePendingScrollPosition = useCallback((viewport: HTMLElement): boolean => {
+        const pending = pendingScrollRef.current
+        if (!pending) return false
+        const restoredByAnchor = pending.anchor ? restoreScrollAnchor(viewport, pending.anchor) : false
+        if (!restoredByAnchor) {
+            const delta = viewport.scrollHeight - pending.scrollHeight
+            viewport.scrollTop = pending.scrollTop + delta
+        }
+        lastScrollTopRef.current = viewport.scrollTop
+        pending.restored = true
+        return true
+    }, [])
+
+    const schedulePendingScrollFinish = useCallback(() => {
+        clearScrollRestoreTimer()
+        scrollRestoreTimerRef.current = setTimeout(() => {
+            scrollRestoreTimerRef.current = null
+            const viewport = viewportRef.current
+            if (viewport) restorePendingScrollPosition(viewport)
+            finishPendingScrollRestore(true)
+        }, PAGINATION_SCROLL_STABILIZE_MS)
+    }, [clearScrollRestoreTimer, finishPendingScrollRestore, restorePendingScrollPosition])
 
     const markManualScrollIntent = useCallback(() => {
         manualScrollIntentExpiresAtRef.current = Date.now() + MANUAL_SCROLL_INTENT_WINDOW_MS
@@ -834,8 +890,11 @@ export function HappyThread(props: {
         initialScrollDeadlineRef.current = 0
         clearInitialScrollTimers()
         clearPendingLoadSettleTimer()
-        settlePendingLoad(false)
-    }, [props.sessionId, clearInitialScrollTimers, clearPendingLoadSettleTimer, resetPullGesture, setPullToLoadDistance, settlePendingLoad])
+        clearRestoredNoticeTimer()
+        setShowHistoryRestoredNotice(false)
+        finishPendingScrollRestore(false)
+    }, [props.sessionId, clearInitialScrollTimers, clearPendingLoadSettleTimer, clearRestoredNoticeTimer,
+        finishPendingScrollRestore, resetPullGesture, setPullToLoadDistance])
 
     useLayoutEffect(() => {
         if (
@@ -879,9 +938,10 @@ export function HappyThread(props: {
         return () => {
             clearInitialScrollTimers()
             clearPendingLoadSettleTimer()
-            settlePendingLoad(false)
+            clearRestoredNoticeTimer()
+            finishPendingScrollRestore(false)
         }
-    }, [clearInitialScrollTimers, clearPendingLoadSettleTimer, settlePendingLoad])
+    }, [clearInitialScrollTimers, clearPendingLoadSettleTimer, clearRestoredNoticeTimer, finishPendingScrollRestore])
 
     useLayoutEffect(() => {
         if (forceScrollTokenRef.current === props.forceScrollToken) {
@@ -942,8 +1002,11 @@ export function HappyThread(props: {
         pendingScrollRef.current = {
             anchor: captureScrollAnchor(viewport),
             scrollTop: viewport.scrollTop,
-            scrollHeight: viewport.scrollHeight
+            scrollHeight: viewport.scrollHeight,
+            restored: false
         }
+        clearRestoredNoticeTimer()
+        setShowHistoryRestoredNotice(false)
         autoScrollEnabledRef.current = false
         loadLockRef.current = true
         loadStartedRef.current = false
@@ -958,9 +1021,7 @@ export function HappyThread(props: {
         pendingLoadPromiseRef.current = loadPromise
         try {
             void onLoadMoreRef.current().catch((error) => {
-                pendingScrollRef.current = null
-                loadLockRef.current = false
-                settlePendingLoad(false)
+                finishPendingScrollRestore(false)
                 console.error('Failed to load older messages:', error)
             }).finally(() => {
                 if (!loadStartedRef.current && !isLoadingMoreRef.current) {
@@ -978,21 +1039,27 @@ export function HappyThread(props: {
                             return
                         }
                         if (pendingScrollRef.current) {
-                            pendingScrollRef.current = null
-                            loadLockRef.current = false
+                            const renderedChanged = messagesVersionRef.current !== baseline?.messagesVersion
+                            if (renderedChanged) {
+                                const currentViewport = viewportRef.current
+                                if (currentViewport) restorePendingScrollPosition(currentViewport)
+                                schedulePendingScrollFinish()
+                                return
+                            }
+                            finishPendingScrollRestore(true)
+                            return
                         }
                         settlePendingLoad(true)
                     }, PAGINATION_RENDER_SETTLE_MS)
                 }
             })
         } catch (error) {
-            pendingScrollRef.current = null
-            loadLockRef.current = false
-            settlePendingLoad(false)
+            finishPendingScrollRestore(false)
             console.error('Failed to load older messages:', error)
         }
         return loadPromise
-    }, [clearPendingLoadSettleTimer, isInitialScrollSettling, settlePendingLoad])
+    }, [clearPendingLoadSettleTimer, clearRestoredNoticeTimer, finishPendingScrollRestore,
+        isInitialScrollSettling, restorePendingScrollPosition, schedulePendingScrollFinish, settlePendingLoad])
 
     const canStartPullToLoadOlder = useCallback(() => {
         return (
@@ -1216,11 +1283,17 @@ export function HappyThread(props: {
 
     useEffect(() => {
         const content = contentRef.current
-        if (!content || typeof ResizeObserver === 'undefined') {
+        const viewport = viewportRef.current
+        if (!content || !viewport || typeof ResizeObserver === 'undefined') {
             return
         }
 
         const observer = new ResizeObserver(() => {
+            if (pendingScrollRef.current?.restored) {
+                restorePendingScrollPosition(viewport)
+                schedulePendingScrollFinish()
+                return
+            }
             // Message DOM can grow after messagesVersion commits (assistant-ui
             // updates its external runtime in an effect, then markdown/tool
             // content may resize). Keep following while the user is at bottom.
@@ -1234,7 +1307,7 @@ export function HappyThread(props: {
         })
         observer.observe(content)
         return () => observer.disconnect()
-    }, [scrollToBottomInstant])
+    }, [restorePendingScrollPosition, schedulePendingScrollFinish, scrollToBottomInstant])
 
     useLayoutEffect(() => {
         const pending = pendingScrollRef.current
@@ -1243,15 +1316,15 @@ export function HappyThread(props: {
             return
         }
         if (pending) {
-            const restoredByAnchor = pending.anchor ? restoreScrollAnchor(viewport, pending.anchor) : false
-            if (!restoredByAnchor) {
-                const delta = viewport.scrollHeight - pending.scrollHeight
-                viewport.scrollTop = pending.scrollTop + delta
-            }
-            lastScrollTopRef.current = viewport.scrollTop
-            pendingScrollRef.current = null
-            loadLockRef.current = false
-            settlePendingLoad(true)
+            const baseline = pendingLoadBaselineRef.current
+            if (shouldWaitForDeferredHistoryRender({
+                hasPendingRestore: true,
+                baselineSourceMessagesVersion: baseline?.sourceMessagesVersion ?? null,
+                sourceMessagesVersion: sourceMessagesVersionRef.current,
+                renderedMessagesVersion: props.messagesVersion
+            })) return
+            restorePendingScrollPosition(viewport)
+            schedulePendingScrollFinish()
             return
         }
         if (shouldFollowBottomInsetChange({
@@ -1261,7 +1334,7 @@ export function HappyThread(props: {
         })) {
             scrollToBottomInstant()
         }
-    }, [props.messagesVersion, scrollToBottomInstant, settlePendingLoad])
+    }, [props.messagesVersion, restorePendingScrollPosition, schedulePendingScrollFinish, scrollToBottomInstant])
 
     useEffect(() => {
         isLoadingMoreRef.current = props.isLoadingMoreMessages
@@ -1278,15 +1351,22 @@ export function HappyThread(props: {
                 renderedMessagesVersion: props.messagesVersion,
             })
             if (pendingScrollRef.current && !waitForDeferredRender) {
-                pendingScrollRef.current = null
-                loadLockRef.current = false
+                const renderedChanged = props.messagesVersion !== baseline?.messagesVersion
+                const viewport = viewportRef.current
+                if (renderedChanged && viewport) {
+                    restorePendingScrollPosition(viewport)
+                    schedulePendingScrollFinish()
+                } else {
+                    finishPendingScrollRestore(true)
+                }
             }
-            if (!waitForDeferredRender) {
+            if (!waitForDeferredRender && !pendingScrollRef.current) {
                 settlePendingLoad(true)
             }
         }
         prevLoadingMoreRef.current = props.isLoadingMoreMessages
-    }, [clearPendingLoadSettleTimer, props.isLoadingMoreMessages, props.messagesVersion, props.sourceMessagesVersion, settlePendingLoad])
+    }, [clearPendingLoadSettleTimer, finishPendingScrollRestore, props.isLoadingMoreMessages, props.messagesVersion,
+        props.sourceMessagesVersion, restorePendingScrollPosition, schedulePendingScrollFinish, settlePendingLoad])
 
     const showSkeleton = props.isLoadingMessages && props.rawMessagesCount === 0 && props.pendingCount === 0
     const pullToLoadIndicator = getPullToLoadOlderIndicator({
@@ -1294,6 +1374,9 @@ export function HappyThread(props: {
         loading: pullToLoadLoading,
         distancePx: pullToLoadDistance
     })
+    const showHistoryLoadingNotice = props.isLoadingMoreMessages
+        || (loadLockRef.current && !showHistoryRestoredNotice)
+    const historyNoticeTop = `calc(var(${MOBILE_LAYOUT_CONTRACT.thread.topSafeAreaVariable}) + ${(props.topInset ?? 0) + 8}px)`
 
     return (
         <HappyChatProvider value={{
@@ -1363,6 +1446,21 @@ export function HappyThread(props: {
                         </div>
                     </div>
                 </ThreadPrimitive.Viewport>
+                {(showHistoryLoadingNotice || showHistoryRestoredNotice) ? (
+                    <div
+                        className="pointer-events-none absolute left-1/2 z-10 -translate-x-1/2 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)]/95 px-3 py-1.5 text-xs text-[var(--app-hint)] shadow-sm"
+                        style={{ top: historyNoticeTop }}
+                        role="status"
+                        data-testid="history-load-position-notice"
+                    >
+                        <span className="flex items-center gap-1.5 whitespace-nowrap">
+                            {showHistoryLoadingNotice ? <Spinner size="sm" label={null} /> : null}
+                            {t(showHistoryLoadingNotice
+                                ? 'session.history.loadingOlder'
+                                : 'session.history.positionRestored')}
+                        </span>
+                    </div>
+                ) : null}
                 <PullToLoadOlderIndicator {...pullToLoadIndicator} />
                 {(props.scrollButtonPositionReady ?? true) ? (
                     <ScrollToBottomButton

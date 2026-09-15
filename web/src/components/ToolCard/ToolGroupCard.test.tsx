@@ -1475,8 +1475,7 @@ describe('ToolGroupCard', () => {
         expect(screen.queryByText('bun test')).not.toBeInTheDocument()
     })
 
-    it('never flashes open when processing finishes within three seconds', () => {
-        vi.useFakeTimers()
+    it('shows a compact terminal command immediately while it is running', () => {
         const startedAt = Date.now()
 
         function Harness() {
@@ -1529,11 +1528,11 @@ describe('ToolGroupCard', () => {
         let toggle = within(view.container)
             .getAllByRole('button', { name: /pwd/i })
             .find((button) => button.hasAttribute('aria-expanded'))!
-        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getAllByText('pwd')).toHaveLength(2)
+        expect(view.container.querySelector('svg.animate-spin')).not.toBeNull()
 
-        act(() => vi.advanceTimersByTime(1_500))
         fireEvent.click(screen.getByRole('button', { name: 'finish quick' }))
-        act(() => vi.advanceTimersByTime(1_500))
 
         toggle = within(view.container).getByRole('button', { name: /processed/i })
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
