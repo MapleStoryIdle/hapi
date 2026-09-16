@@ -250,7 +250,7 @@ export default function ChatPreviewDrawer(props: { preview: ChatPreview; open: b
         )}
         fixedHeight={preview.type === 'url'}
         bodyClassName={preview.type === 'url' ? 'chat-web-preview-body' : undefined}
-        testId="chat-preview-drawer" desktopClassName={preview.type === 'url' ? 'max-w-4xl h-[70dvh]' : 'max-w-4xl'}>
+        testId="chat-preview-drawer" desktopClassName="max-w-4xl">
         {preview.type === 'file'
             ? <FilePreview key={JSON.stringify([preview.source, preview.path, preview.line, preview.column, preview.diff])} preview={preview} />
             : !preview.localService && app?.api

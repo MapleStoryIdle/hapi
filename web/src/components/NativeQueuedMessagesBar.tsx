@@ -113,7 +113,7 @@ export function NativeQueuedMessagesBar(props: {
                                     </div>
                                     {props.onCancel ? <button type="button"
                                         aria-label={t('queuedMessages.cancel')}
-                                        disabled={props.cancelling || message.cancelBlocked === true}
+                                        disabled={props.cancelling}
                                         onClick={() => props.onCancel?.(message)}
                                         className="flex h-11 w-11 shrink-0 items-center justify-center text-[var(--app-hint)] disabled:opacity-40">
                                         <X className="h-5 w-5" aria-hidden="true" />

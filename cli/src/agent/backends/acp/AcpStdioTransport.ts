@@ -43,6 +43,7 @@ export function buildAcpStdioSpawnOptions(env?: Record<string, string>): SpawnOp
     return {
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
         shell: process.platform === 'win32',
         windowsHide: process.platform === 'win32'
     };

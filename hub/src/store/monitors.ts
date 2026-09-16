@@ -236,6 +236,30 @@ export class MonitorStore {
         const buckets = this.db.query('SELECT at,total,ok,failures,latency_ms AS latencyMs FROM monitor_buckets WHERE monitor_id = ? AND at >= ? ORDER BY at').all(id, Math.floor((now - MONITOR_WEEK_MS) / 3600_000) * 3600_000) as MonitorBucket[]
         const open = this.openForMonitor(id)
         const config = monitorConfig(row.config)
+        const latestActivity = this.activities(id, 1)[0] ?? null
+        const lastActivity = latestActivity ? (() => {
+            const { details: _details, ...summary } = latestActivity
+            return summary
+        })() : null
+        const lastDeliveryRow = this.db
+            .query(
+                `SELECT * FROM monitor_incidents
+                WHERE monitor_id=? AND json_type(data,'$.deliveredAt') IS NOT NULL
+                ORDER BY json_extract(data,'$.deliveredAt') DESC,updated_at DESC LIMIT 1`
+            )
+            .get(id) as IncidentRow | null
+        const lastDelivery = lastDeliveryRow ? (() => {
+            const delivered = publicIncident(incident(lastDeliveryRow))
+            return {
+                id: delivered.id,
+                monitorId: delivered.monitorId,
+                createdAt: delivered.createdAt,
+                updatedAt: delivered.updatedAt,
+                state: delivered.state,
+                summary: delivered.summary,
+                deliveredAt: delivered.deliveredAt
+            }
+        })() : null
         const recent = this.db.query("SELECT * FROM monitor_incidents WHERE monitor_id=? AND json_extract(data,'$.sessionId') IS NOT NULL ORDER BY created_at DESC LIMIT 1").get(id) as IncidentRow | null
         const last = recent ? incident(recent) : null
         const relatedSession: Monitor['relatedSession'] = config.targetSession && config.deliveryMode !== 'new-session'
@@ -290,6 +314,8 @@ export class MonitorStore {
             nextCheckAt: row.next_check_at,
             buckets,
             incident: open ? publicIncident(open) : null,
+            lastActivity,
+            lastDelivery,
             incidents,
             activities,
             callStats,

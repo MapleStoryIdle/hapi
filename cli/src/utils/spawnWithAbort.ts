@@ -46,13 +46,14 @@ export async function spawnWithAbort(options: SpawnWithAbortOptions): Promise<vo
 
     await new Promise<void>((resolve, reject) => {
         // Note: We intentionally do NOT pass signal to spawn() because Node.js's
-        // built-in abort handling only kills the direct child, not grandchildren.
-        // Instead, we handle abort ourselves using killProcessByChildProcess which
-        // kills the entire process tree to prevent orphan processes.
+        // built-in abort handling does not provide our graceful-then-forceful
+        // timing. The helper retains the live ChildProcess ownership boundary
+        // and never signals discovered descendant PIDs.
         const child = spawn(options.command, options.args, {
             stdio,
             cwd: options.cwd,
             env: options.env,
+            detached: process.platform !== 'win32',
             shell: options.shell,
             windowsHide: options.windowsHide ?? process.platform === 'win32'
         });
@@ -63,7 +64,7 @@ export async function spawnWithAbort(options: SpawnWithAbortOptions): Promise<vo
             if (abortKillTimeout) {
                 return;
             }
-            // First, try graceful termination of entire process tree
+            // First, try graceful termination of the owned child.
             if (child.exitCode === null && !child.killed) {
                 logDebug(`Abort signal received, killing process tree (pid=${child.pid}) with SIGTERM`);
                 // Note: We don't await here because we're in a sync callback,
@@ -151,4 +152,3 @@ export async function spawnWithAbort(options: SpawnWithAbortOptions): Promise<vo
         });
     });
 }
-

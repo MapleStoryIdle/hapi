@@ -1,122 +1,118 @@
 /**
- * Runner doctor utilities
- * 
- * Process discovery and cleanup functions for the runner
- * Helps diagnose and fix issues with hung or orphaned processes
+ * Runner doctor process discovery.
+ *
+ * Process-list matches are diagnostic only. Legacy Runner state has no durable
+ * process-identity proof, so Doctor never signals a discovered PID.
  */
 
 import psList from 'ps-list';
-import { killProcess } from '@/utils/process';
+import { inspectRunnerProcessClaim, listRunnerProcessClaims } from './processClaims';
 
-/**
- * Find all SHAPI CLI processes (including current process)
- */
-export async function findAllHappyProcesses(): Promise<Array<{ pid: number, command: string, type: string }>> {
-  try {
-    const processes = await psList();
-    const allProcesses: Array<{ pid: number, command: string, type: string }> = [];
-    
-    for (const proc of processes) {
-      const cmd = proc.cmd || '';
-      const name = proc.name || '';
-      
-      // Check if it's a SHAPI process
-      const isHappyBinary = name === 'hapi'
-        || name === 'hapi.exe'
-        || name === 'shapi'
-        || name === 'shapi.exe'
-        || /\b(?:shapi|hapi)(?:\.exe)?\b/.test(cmd);
-      // Dev mode: running via bun/node with src/index.ts (production uses compiled binary)
-      const isDevMode = cmd.includes('src/index.ts');
-      const isHappy = name.includes('happy') ||
-                      name === 'node' && cmd.includes('happy-cli') ||
-                      cmd.includes('happy-coder') ||
-                      isHappyBinary ||
-                      isDevMode;
-      
-      if (!isHappy) continue;
+export type DoctorProcess = { pid: number; command: string; type: string };
+export type DoctorCleanupPreview = {
+    pid: number;
+    command: string;
+    reason: 'verified-managed-live' | 'dead-stale-claim' | 'identity-mismatch' | 'unmanaged-process-discovery';
+};
 
-      // Classify process type
-      let type = 'unknown';
-      if (proc.pid === process.pid) {
-        type = 'current';
-      } else if (cmd.includes('--version')) {
-        type = isDevMode ? 'dev-runner-version-check' : 'runner-version-check';
-      } else if (cmd.includes('runner start-sync') || cmd.includes('runner start')) {
-        type = isDevMode ? 'dev-runner' : 'runner';
-      } else if (cmd.includes('--started-by runner')) {
-        type = isDevMode ? 'dev-runner-spawned' : 'runner-spawned-session';
-      } else if (cmd.includes('doctor')) {
-        type = isDevMode ? 'dev-doctor' : 'doctor';
-      } else if (cmd.includes('--yolo')) {
-        type = 'dev-session';
-      } else {
-        type = isDevMode ? 'dev-related' : 'user-session';
-      }
-
-      allProcesses.push({ pid: proc.pid, command: cmd || name, type });
-    }
-
-    return allProcesses;
-  } catch (error) {
-    return [];
-  }
-}
-
-/**
- * Find all runaway SHAPI CLI processes that should be killed
- */
-export async function findRunawayHappyProcesses(): Promise<Array<{ pid: number, command: string }>> {
-  const allProcesses = await findAllHappyProcesses();
-  
-  // Filter to just runaway processes (excluding current process)
-  return allProcesses
-    .filter(p => 
-      p.pid !== process.pid && (
-        p.type === 'runner' ||
-        p.type === 'dev-runner' ||
-        p.type === 'runner-spawned-session' ||
-        p.type === 'dev-runner-spawned' ||
-        p.type === 'runner-version-check' ||
-        p.type === 'dev-runner-version-check'
-      )
-    )
-    .map(p => ({ pid: p.pid, command: p.command }));
-}
-
-/**
- * Kill all runaway SHAPI CLI processes
- */
-export async function killRunawayHappyProcesses(): Promise<{ killed: number, errors: Array<{ pid: number, error: string }> }> {
-  const runawayProcesses = await findRunawayHappyProcesses();
-  const errors: Array<{ pid: number, error: string }> = [];
-  let killed = 0;
-  
-  for (const { pid, command } of runawayProcesses) {
+/** Find SHAPI-looking processes for display. This does not establish ownership. */
+export async function findAllHappyProcesses(): Promise<DoctorProcess[]> {
     try {
-      console.log(`Killing runaway process PID ${pid}: ${command}`);
-      
-      await killProcess(pid, false);
+        const processes = await psList();
+        const allProcesses: DoctorProcess[] = [];
 
-      // Wait a moment
-      await new Promise(resolve => setTimeout(resolve, 1000));
+        for (const proc of processes) {
+            const cmd = proc.cmd || '';
+            const name = proc.name || '';
+            const isHappyBinary = name === 'hapi'
+                || name === 'hapi.exe'
+                || name === 'shapi'
+                || name === 'shapi.exe'
+                || /\b(?:shapi|hapi)(?:\.exe)?\b/.test(cmd);
+            const isDevMode = cmd.includes('src/index.ts');
+            const isHappy = name.includes('happy')
+                || name === 'node' && cmd.includes('happy-cli')
+                || cmd.includes('happy-coder')
+                || isHappyBinary
+                || isDevMode;
 
-      // Check if still alive
-      const processes = await psList();
-      const stillAlive = processes.find(p => p.pid === pid);
-      if (stillAlive) {
-        console.log(`Process PID ${pid} ignored termination request, using force kill`);
-        await killProcess(pid, true);
-      }
-      
-      console.log(`Successfully killed runaway process PID ${pid}`);
-      killed++;
-    } catch (error) {
-      const errorMessage = (error as Error).message;
-      errors.push({ pid, error: errorMessage });
-      console.log(`Failed to kill process PID ${pid}: ${errorMessage}`);
+            if (!isHappy) continue;
+
+            let type = 'unknown';
+            if (proc.pid === process.pid) {
+                type = 'current';
+            } else if (cmd.includes('--version')) {
+                type = isDevMode ? 'dev-runner-version-check' : 'runner-version-check';
+            } else if (cmd.includes('runner start-sync') || cmd.includes('runner start')) {
+                type = isDevMode ? 'dev-runner' : 'runner';
+            } else if (cmd.includes('--started-by runner')) {
+                type = isDevMode ? 'dev-runner-spawned' : 'runner-spawned-session';
+            } else if (cmd.includes('doctor')) {
+                type = isDevMode ? 'dev-doctor' : 'doctor';
+            } else if (cmd.includes('--yolo')) {
+                type = 'dev-session';
+            } else {
+                type = isDevMode ? 'dev-related' : 'user-session';
+            }
+
+            allProcesses.push({ pid: proc.pid, command: cmd || name, type });
+        }
+
+        return allProcesses;
+    } catch {
+        return [];
     }
-  }
+}
 
-  return { killed, errors };
+/** Discovery candidates only; command text is never kill authorization. */
+export async function findRunawayHappyProcesses(): Promise<Array<{ pid: number; command: string }>> {
+    const allProcesses = await findAllHappyProcesses();
+    return allProcesses
+        .filter(p => p.pid !== process.pid && (
+            p.type === 'runner'
+            || p.type === 'dev-runner'
+            || p.type === 'runner-spawned-session'
+            || p.type === 'dev-runner-spawned'
+            || p.type === 'runner-version-check'
+            || p.type === 'dev-runner-version-check'
+        ))
+        .map(p => ({ pid: p.pid, command: p.command }));
+}
+
+export async function previewRunawayHappyProcesses(): Promise<DoctorCleanupPreview[]> {
+    const claims = await listRunnerProcessClaims();
+    const claimedPids = new Set(claims.map(claim => claim.pid));
+    const managed = claims.map(claim => {
+        const inspection = inspectRunnerProcessClaim(claim);
+        const reason = inspection.status === 'verified-live'
+            ? 'verified-managed-live' as const
+            : inspection.status === 'dead'
+                ? 'dead-stale-claim' as const
+                : 'identity-mismatch' as const;
+        return {
+            pid: claim.pid,
+            command: `managed session ${claim.sessionId ?? '(awaiting webhook)'} launch ${claim.launchId}`,
+            reason
+        };
+    });
+    const discovered = (await findRunawayHappyProcesses())
+        .filter(process => !claimedPids.has(process.pid))
+        .map(({ pid, command }) => ({
+            pid,
+            command,
+            reason: 'unmanaged-process-discovery' as const
+        }));
+    return [...managed, ...discovered];
+}
+
+/**
+ * Compatibility-shaped result for callers. This is permanently dry-run until
+ * an explicit managed-process ownership record and confirmation flow exist.
+ */
+export async function killRunawayHappyProcesses(): Promise<{
+    killed: number;
+    errors: Array<{ pid: number; error: string }>;
+    skipped: DoctorCleanupPreview[];
+}> {
+    return { killed: 0, errors: [], skipped: await previewRunawayHappyProcesses() };
 }

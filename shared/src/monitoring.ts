@@ -4,6 +4,7 @@ export const MonitorTargetSessionSchema = z.object({
     type: z.enum(['managed', 'native-codex']),
     sessionId: z.string().trim().min(1).max(256)
 }).strict()
+export type MonitorTargetSession = z.infer<typeof MonitorTargetSessionSchema>
 export const MonitorScheduleSchema = z.object({
     mode: z.enum(['daily', 'weekly', 'cron']),
     time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default('09:00'),
@@ -88,6 +89,8 @@ export type MonitorActivity = {
     details: string
     incidentId?: string
 }
+export type MonitorActivitySummary = Omit<MonitorActivity, 'details'>
+export type MonitorDeliverySummary = Pick<MonitorIncident, 'id' | 'monitorId' | 'createdAt' | 'updatedAt' | 'state' | 'summary' | 'deliveredAt'>
 export type MonitorCallStats = {
     total: number
     ok: number
@@ -109,6 +112,10 @@ export type Monitor = {
     nextCheckAt: number
     buckets: MonitorBucket[]
     incident: MonitorIncident | null
+    /** Latest trigger/call event, included in list summaries. */
+    lastActivity: MonitorActivitySummary | null
+    /** Latest incident that was delivered into an agent session. */
+    lastDelivery: MonitorDeliverySummary | null
     callStats: MonitorCallStats
     relatedSession?: { type: 'managed' | 'native-codex'; sessionId: string; machineId?: string }
 }

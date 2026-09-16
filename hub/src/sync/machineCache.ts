@@ -31,6 +31,13 @@ function healthDisplayChanged(
         || before.memoryPercent !== after.memoryPercent
         || before.cpuCount !== after.cpuCount
         || before.uptimeSeconds !== after.uptimeSeconds
+        || before.shapi?.cpuPercent !== after.shapi?.cpuPercent
+        || before.shapi?.memoryBytes !== after.shapi?.memoryBytes
+        || before.shapi?.diskBytes !== after.shapi?.diskBytes
+        || before.shapi?.processes.total !== after.shapi?.processes.total
+        || before.shapi?.processes.active !== after.shapi?.processes.active
+        || before.shapi?.processes.sleeping !== after.shapi?.processes.sleeping
+        || before.shapi?.processes.other !== after.shapi?.processes.other
 }
 
 export class MachineCache {

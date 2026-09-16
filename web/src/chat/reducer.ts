@@ -90,6 +90,100 @@ function filterSilentTimelineBlocks(blocks: ChatBlock[]): ChatBlock[] {
     return filtered
 }
 
+function reconcileCodexAgentBlocksWithState(
+    blocks: ChatBlock[],
+    agentState: AgentState | null | undefined
+): void {
+    const snapshots = Object.values(agentState?.codex?.subagents ?? {})
+
+    const snapshotsById = new Map(snapshots.map((snapshot) => [snapshot.id, snapshot]))
+    const snapshotsByCardId = new Map(
+        snapshots
+            .filter((snapshot) => Boolean(snapshot.cardId))
+            .map((snapshot) => [snapshot.cardId!, snapshot])
+    )
+
+    const finishActiveDescendants = (items: ChatBlock[], state: 'completed' | 'error', completedAt: number): void => {
+        for (const item of items) {
+            if (item.kind !== 'tool-call') continue
+            if (item.tool.state === 'running' || item.tool.state === 'pending') {
+                item.tool = {
+                    ...item.tool,
+                    state,
+                    completedAt,
+                    durationMs: Math.max(0, completedAt - (item.tool.startedAt ?? item.tool.createdAt))
+                }
+            }
+            finishActiveDescendants(item.children, state, completedAt)
+        }
+    }
+
+    const visit = (items: ChatBlock[]): void => {
+        for (const block of items) {
+            if (block.kind !== 'tool-call') continue
+
+            if (block.tool.name === 'CodexAgent') {
+                const input = typeof block.tool.input === 'object' && block.tool.input !== null
+                    ? block.tool.input as Record<string, unknown>
+                    : {}
+                const agentId = typeof input.agentId === 'string'
+                    ? input.agentId
+                    : typeof input.agent_id === 'string'
+                        ? input.agent_id
+                        : null
+                const snapshot = (agentId ? snapshotsById.get(agentId) : undefined)
+                    ?? snapshotsByCardId.get(block.id)
+                const terminal = snapshot
+                    && (
+                        snapshot.status === 'completed'
+                        || snapshot.status === 'failed'
+                        || snapshot.status === 'error'
+                        || snapshot.status === 'canceled'
+                        || snapshot.status === 'cancelled'
+                        || snapshot.status === 'notFound'
+                        || snapshot.status === 'not_found'
+                    )
+
+                if (snapshot && terminal && (block.tool.state === 'running' || block.tool.state === 'pending')) {
+                    const completedAt = snapshot.completedAt ?? snapshot.updatedAt
+                    const terminalState = snapshot.status === 'completed' ? 'completed' : 'error'
+                    block.tool = {
+                        ...block.tool,
+                        input: {
+                            ...input,
+                            agentId: snapshot.id,
+                            agentStatus: snapshot.status,
+                            statusText: snapshot.statusText ?? snapshot.status,
+                            ...(snapshot.activity ? { activity: snapshot.activity } : {}),
+                            ...(snapshot.activityKind ? { activityKind: snapshot.activityKind } : {})
+                        },
+                        state: terminalState,
+                        completedAt
+                    }
+                }
+
+                const terminalState = block.tool.state === 'completed'
+                    ? 'completed'
+                    : block.tool.state === 'error'
+                        ? 'error'
+                        : null
+                if (terminalState) {
+                    const completedAt = block.tool.completedAt
+                        ?? snapshot?.completedAt
+                        ?? snapshot?.updatedAt
+                        ?? block.tool.startedAt
+                        ?? block.tool.createdAt
+                    finishActiveDescendants(block.children, terminalState, completedAt)
+                }
+            }
+
+            visit(block.children)
+        }
+    }
+
+    visit(blocks)
+}
+
 export function reduceChatBlocks(
     normalized: NormalizedMessage[],
     agentState: AgentState | null | undefined,
@@ -117,6 +211,7 @@ export function reduceChatBlocks(
     const emittedTitleChangeToolUseIds = new Set<string>()
     const reducerContext = { permissionsById, groups, consumedGroupIds, titleChangesByToolUseId, emittedTitleChangeToolUseIds }
     const rootResult = reduceTimeline(root, reducerContext)
+    reconcileCodexAgentBlocksWithState(rootResult.blocks, agentState)
     let hasReadyEvent = rootResult.hasReadyEvent
 
     // Synthesize a tool card only for a *pending* permission that has no tool

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import {
     aggregateCodexTokenUsage,
+    getCodexBlendedTotal,
+    getCodexNonCachedInput,
     getCodexProcessedTotal,
     readCodexTokenUsage,
     selectCodexTokenUsage
@@ -15,6 +17,8 @@ describe('Codex usage snapshots', () => {
             output_tokens: 200
         } }, 1)!
         expect(getCodexProcessedTotal(usage)).toBe(1_200)
+        expect(getCodexNonCachedInput(usage)).toBe(200)
+        expect(getCodexBlendedTotal(usage)).toBe(400)
         expect(usage.cachedInput).toBe(800)
     })
 

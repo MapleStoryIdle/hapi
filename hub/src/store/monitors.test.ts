@@ -68,6 +68,9 @@ describe('monitor store', () => {
             expect(detail.buckets[0].total).toBe(3)
             expect(detail.callStats).toMatchObject({ total: 3, dispatched: 1, deferred: 1, duplicate: 1 })
             expect(detail.activities.map(activity => activity.outcome)).toEqual(['deferred', 'duplicate', 'dispatched'])
+            expect(store.monitors.list('a')[0]?.lastActivity).toMatchObject({ outcome: 'deferred', summary: 'Failure' })
+            expect(store.monitors.list('a')[0]?.lastActivity).not.toHaveProperty('details')
+            expect(store.monitors.list('a')[0]?.lastDelivery).toBeNull()
             const deferred = detail.activities.find(activity => activity.outcome === 'deferred')!
             expect(store.monitors.retriggerActivity(monitor, deferred.id)).toBeNull()
             expect(store.monitors.transition(first.incidentId, 'queued', 'closed')).toBe(true)
@@ -125,6 +128,23 @@ describe('monitor store', () => {
                 type: 'native-codex',
                 sessionId: 'native-thread',
                 machineId: 'm'
+            })
+        } finally { store.close() }
+    })
+    it('includes the latest delivered incident in monitor list summaries', () => {
+        const store = new Store(':memory:')
+        try {
+            const { id } = store.monitors.create('a', config())
+            const event = store.monitors.openIncident(store.monitors.get(id)!, 'delivered event', '')
+            expect(store.monitors.transition(event.incidentId, 'queued', 'starting')).toBe(true)
+            expect(store.monitors.transition(event.incidentId, 'starting', 'investigating', {
+                sessionId: 'session-1',
+                deliveredAt: 1234
+            })).toBe(true)
+            expect(store.monitors.list('a')[0]?.lastDelivery).toMatchObject({
+                id: event.incidentId,
+                summary: 'delivered event',
+                deliveredAt: 1234
             })
         } finally { store.close() }
     })

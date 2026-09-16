@@ -12,8 +12,8 @@ function visiblePollInterval(): number | false {
     return MONITOR_POLL_INTERVAL_MS
 }
 
-/** Scoped to the mounted monitor route; it never becomes an app-wide poller. */
-export function useMonitors(api: ApiClient | null): {
+/** Scoped to mounted monitor-aware surfaces; hidden tabs never poll. */
+export function useMonitors(api: ApiClient | null, options: { poll?: boolean } = {}): {
     monitors: Monitor[]
     isLoading: boolean
     error: Error | null
@@ -26,7 +26,7 @@ export function useMonitors(api: ApiClient | null): {
             return await api.getMonitors()
         },
         enabled: Boolean(api),
-        refetchInterval: visiblePollInterval,
+        refetchInterval: options.poll === false ? false : visiblePollInterval,
         refetchIntervalInBackground: false,
     })
 

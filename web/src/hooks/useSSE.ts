@@ -52,6 +52,33 @@ type SessionCacheEvent = Extract<SyncEvent, {
     type: 'session-added' | 'session-updated' | 'session-removed'
 }>
 
+export function coalesceSessionCacheEvents(events: SessionCacheEvent[]): SessionCacheEvent[] {
+    const bySessionId = new Map<string, SessionCacheEvent>()
+
+    for (const event of events) {
+        const previous = bySessionId.get(event.sessionId)
+        let next = event
+        if (
+            previous
+            && previous.type !== 'session-removed'
+            && event.type !== 'session-removed'
+            && isObject(previous.data)
+            && isObject(event.data)
+        ) {
+            next = {
+                ...event,
+                data: { ...previous.data, ...event.data }
+            } as SessionCacheEvent
+        }
+        // Moving an updated key to the end preserves the order of each
+        // session's final event relative to the rest of the batch.
+        bySessionId.delete(event.sessionId)
+        bySessionId.set(event.sessionId, next)
+    }
+
+    return Array.from(bySessionId.values())
+}
+
 function sortSessionSummaries(left: SessionSummary, right: SessionSummary): number {
     if (left.active !== right.active) {
         return left.active ? -1 : 1
@@ -513,8 +540,10 @@ export function useSSE(options: {
             }
             const updates = pendingSessionUpdates
             pendingSessionUpdates = []
-            for (const update of updates) {
+            for (const update of coalesceSessionCacheEvents(updates)) {
                 applySessionCacheEvent(update)
+            }
+            for (const update of updates) {
                 if (notify) onEventRef.current(update)
             }
         }
@@ -643,9 +672,11 @@ export function useSSE(options: {
 
         drainSyncEventQueue = () => {
             syncEventQueueScheduled = false
-            while (pendingSyncEvents.length > 0) {
-                const next = pendingSyncEvents.shift()
-                if (!next) continue
+            // Never shift a large array one element at a time. Backgrounded
+            // browsers can delay this callback and leave hundreds of events;
+            // repeated shift() turns recovery into quadratic main-thread work.
+            const queued = pendingSyncEvents.splice(0, pendingSyncEvents.length)
+            for (const next of queued) {
                 const nextStreamEpoch = next.event?.type === 'connection-changed'
                     ? next.event.data?.streamEpoch
                     : undefined
@@ -776,15 +807,43 @@ export function useSSE(options: {
             requestReconnect('heartbeat-timeout')
         }, HEARTBEAT_WATCHDOG_INTERVAL_MS)
 
+        let pausedForBackground = false
+        const pauseForBackground = () => {
+            if (eventSourceRef.current !== eventSource || pausedForBackground) return
+            pausedForBackground = true
+            reconnectRequested = true
+            // Stop delivery before background timer throttling can grow an
+            // unbounded browser-side queue. The reconnect callback in App
+            // performs an authoritative HTTP reconciliation on foreground.
+            drainSyncEventQueue()
+            flushPendingSessionUpdates()
+            flushInvalidations()
+            eventSource.close()
+            eventSourceRef.current = null
+            setSubscriptionId(null)
+        }
+
         // iOS PWA can preserve a seemingly-open EventSource across a background
-        // transition while silently dropping future events. Rebuild every stream
-        // on foreground instead of waiting for its 90-second heartbeat watchdog.
+        // transition while silently dropping future events. Close it as soon as
+        // the page is hidden, then rebuild immediately on foreground.
         const onVisibilityChange = () => {
-            if (getVisibilityState() !== 'visible') return
-            if (eventSourceRef.current !== eventSource) return
-            requestReconnect('visibility-recovery')
+            if (getVisibilityState() === 'hidden') {
+                pauseForBackground()
+                return
+            }
+            if (pausedForBackground) {
+                reconnectAttemptRef.current = 0
+                setReconnectNonce((value) => value + 1)
+                return
+            }
+            if (eventSourceRef.current === eventSource) {
+                requestReconnect('visibility-recovery')
+            }
         }
         document.addEventListener('visibilitychange', onVisibilityChange)
+        if (getVisibilityState() === 'hidden') {
+            pauseForBackground()
+        }
 
         return () => {
             clearInterval(watchdogTimer)

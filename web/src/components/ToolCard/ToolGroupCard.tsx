@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { getInputStringAny } from '@/lib/toolInputUtils'
 import { detectExplicitSkillName } from '@/chat/skillUsage'
+import { useSharedNow } from '@/hooks/useSharedNow'
 import {
     getDefaultToolGroupExpansionState,
     getPrimaryToolGroupExpansionStateKey,
@@ -28,8 +29,6 @@ import {
     isToolGroupExpansionOpen,
     resolveToolGroupExpansionState
 } from '@/components/ToolCard/toolGroupExpansion'
-
-const COMPACT_ELAPSED_INTERVAL_MS = 1000
 
 type ToolGroupCompactHeaderState = {
     groupId: string
@@ -840,7 +839,6 @@ export function ToolGroupCard(props: {
     const [isHydratingHistory, setIsHydratingHistory] = useState(false)
     const [historyExhausted, setHistoryExhausted] = useState(false)
     const [retryNonce, setRetryNonce] = useState(0)
-    const [now, setNow] = useState(() => Date.now())
     const hasRunningTerminal = props.block.forceCompact === true && props.block.tools.some((tool) => (
         isTerminalExecutionTool(tool.tool.name)
         && (tool.tool.state === 'running' || tool.tool.state === 'pending')
@@ -852,6 +850,7 @@ export function ToolGroupCard(props: {
     const compactHeaderState = useContext(ToolGroupCompactHeaderContext)
     const compactMode = ctx.terminalToolDisplayMode === 'compact' || props.block.forceCompact === true
     const hasActiveTools = isToolGroupActive(props.block)
+    const now = useSharedNow(compactMode && hasActiveTools)
     const requestsAutomaticExpansion = hasActiveTools && (
         hasRunningTerminal || props.block.defaultOpen || props.block.forceCompact !== true
     )
@@ -976,15 +975,6 @@ export function ToolGroupCard(props: {
             clearRetryTimer()
         }
     }, [])
-
-    useEffect(() => {
-        if (!compactMode || !hasActiveTools) {
-            return
-        }
-        setNow(Date.now())
-        const interval = setInterval(() => setNow(Date.now()), COMPACT_ELAPSED_INTERVAL_MS)
-        return () => clearInterval(interval)
-    }, [compactMode, hasActiveTools])
 
     useEffect(() => {
         if (!displayedOpen) {

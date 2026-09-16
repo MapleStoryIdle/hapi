@@ -384,8 +384,8 @@ export function query(config: {
     const child = spawn(spawnCommand, spawnArgs, {
         cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
-        signal: config.options?.abort,
         env: spawnEnv,
+        detached: process.platform !== 'win32',
         // Use shell: false with absolute path from getDefaultClaudeCodePath()
         // This avoids cmd.exe resolution issues on Windows
         shell: false,
@@ -437,7 +437,11 @@ export function query(config: {
     const handleProcessExit = () => {
         void cleanup()
     }
-    config.options?.abort?.addEventListener('abort', handleAbort)
+    if (config.options?.abort?.aborted) {
+        handleAbort()
+    } else {
+        config.options?.abort?.addEventListener('abort', handleAbort)
+    }
     process.on('exit', handleProcessExit)
 
     // Create query instance BEFORE registering close handler

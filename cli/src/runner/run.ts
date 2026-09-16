@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import os from 'os';
+import { randomUUID } from 'node:crypto';
 
 import { ApiClient } from '@/api/api';
 import { TrackedSession } from './types';
@@ -13,7 +14,7 @@ import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
 import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
 import { getCliArgs } from '@/utils/cliArgs';
-import { isProcessAlive, isWindows, killProcess, killProcessByChildProcess } from '@/utils/process';
+import { hasProcessIdentity, isProcessAlive, isWindows, readProcessIdentity, terminateOwnedDetachedProcessGroup } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
 import type { ExternalCodexRequestPayload } from '@hapi/protocol';
 import type { ExternalCodexLifecycleEvent } from '@/codex/nativeTurnLifecycle';
@@ -31,6 +32,7 @@ import { hashRunnerCliApiToken } from './runnerIdentity';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { NativeControlRecoveryCoordinator } from '@/codex/nativeControlRecovery';
 import { listManagedSkillInventory } from '@/managedSkills';
+import { inspectRunnerProcessClaim, listRunnerProcessClaims, removeRunnerProcessClaim, writeRunnerProcessClaim, writeRunnerProcessClaimSync } from './processClaims';
 
 export async function startRunner(options: { workspaceRoots?: string[] } = {}): Promise<void> {
   // We don't have cleanup function at the time of server construction
@@ -180,10 +182,36 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
   try {
     // Ensure auth and machine registration BEFORE anything else
     const { machineId } = await authAndSetupMachineIfNeeded();
+    if (!machineId) {
+      throw new Error('Runner machine ID is unavailable after authentication');
+    }
     logger.debug('[RUNNER RUN] Auth and machine setup complete');
 
     // Setup state - key by PID
     const pidToTrackedSession = new Map<number, TrackedSession>();
+
+    // Re-adopt only children with a durable claim and matching OS birth
+    // identity. Unknown or conflicting live PIDs are never signalled.
+    for (const claim of await listRunnerProcessClaims()) {
+      if (claim.machineId !== machineId || claim.hapiHome !== configuration.happyHomeDir) continue;
+      const inspection = inspectRunnerProcessClaim(claim);
+      if (inspection.status === 'dead') {
+        await removeRunnerProcessClaim(claim.launchId);
+        continue;
+      }
+      if (inspection.status !== 'verified-live' || !claim.sessionId) {
+        logger.debug(`[RUNNER RUN] Leaving unverifiable process claim ${claim.launchId} untouched`);
+        continue;
+      }
+      pidToTrackedSession.set(claim.pid, {
+        startedBy: 'runner',
+        happySessionId: claim.sessionId,
+        pid: claim.pid,
+        launchId: claim.launchId,
+        processIdentity: claim.identity
+      });
+      logger.debug(`[RUNNER RUN] Re-adopted verified session ${claim.sessionId} at PID ${claim.pid}`);
+    }
 
     // Webhook timeout tolerance. Opus 1M + --resume can legitimately take
     // longer than the default 15s to reach the "Session started" webhook
@@ -226,7 +254,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const getCurrentChildren = () => Array.from(pidToTrackedSession.values());
 
     // Handle webhook from SHAPI session reporting itself
-    const onHappySessionWebhook = (sessionId: string, sessionMetadata: Metadata) => {
+    const onHappySessionWebhook = async (sessionId: string, sessionMetadata: Metadata): Promise<void> => {
       logger.debugLargeJson(`[RUNNER RUN] Session reported`, sessionMetadata);
 
       const pid = sessionMetadata.hostPid;
@@ -242,9 +270,36 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       const existingSession = pidToTrackedSession.get(pid);
 
       if (existingSession && existingSession.startedBy === 'runner') {
+        if (!existingSession.launchId || sessionMetadata.runnerLaunchId !== existingSession.launchId) {
+          logger.debug(`[RUNNER RUN] Ignoring session webhook with mismatched launch ownership for PID ${pid}`);
+          return;
+        }
+        if (sessionMetadata.machineId !== machineId || sessionMetadata.happyHomeDir !== configuration.happyHomeDir) {
+          logger.debug(`[RUNNER RUN] Ignoring session webhook with mismatched machine or HAPI home for PID ${pid}`);
+          return;
+        }
         // Update runner-spawned session with reported data
         existingSession.happySessionId = sessionId;
         existingSession.happySessionMetadataFromLocalWebhook = sessionMetadata;
+        if (existingSession.processIdentity) {
+          try {
+            await writeRunnerProcessClaim({
+              schemaVersion: 1,
+              launchId: existingSession.launchId,
+              machineId,
+              hapiHome: configuration.happyHomeDir,
+              pid,
+              identity: existingSession.processIdentity,
+              sessionId,
+              state: 'running',
+              spawnedAt: sessionMetadata.lifecycleStateSince ?? Date.now(),
+              updatedAt: Date.now()
+            });
+          } catch (error) {
+            logger.debug(`[RUNNER RUN] Failed to update process claim ${existingSession.launchId}`, error);
+            return;
+          }
+        }
         logger.debug(`[RUNNER RUN] Updated runner-spawned session ${sessionId} with metadata`);
 
         // Resolve any awaiter for this PID
@@ -268,16 +323,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         // should be ignored + terminated instead of silently promoted.
         if (sessionMetadata.startedBy === 'runner') {
           logger.debug(
-            `[RUNNER RUN] Ignoring late webhook from orphaned runner-spawned PID ${pid} (session ${sessionId}). Terminating child.`
+            `[RUNNER RUN] Ignoring late webhook from untracked runner-spawned PID ${pid} (session ${sessionId}); refusing PID termination without a tracked ChildProcess.`
           );
-          // Use killProcess (SIGTERM → SIGKILL escalation) rather than a
-          // bare process.kill() so the orphan is reliably reaped even if
-          // it ignores SIGTERM.  We don't have a ChildProcess reference
-          // here (tracking entry was already removed by the timeout
-          // handler), so tree-kill via killProcessByChildProcess is not
-          // available — but the timeout handler should have already
-          // tree-killed the process group; this is defence-in-depth.
-          void killProcess(pid);
           return;
         }
 
@@ -334,7 +381,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const spawnSession = async (options: SpawnSessionOptions): Promise<SpawnSessionResult> => {
       logger.debugLargeJson('[RUNNER RUN] Spawning session', options);
 
-      const { directory, sessionId, machineId, approvedNewDirectoryCreation = true } = options;
+      const { directory, sessionId, approvedNewDirectoryCreation = true } = options;
       const agent = options.agent ?? 'claude';
       if (agent === 'gemini') {
         throw new Error('Gemini CLI is no longer supported and cannot be launched (Google sunset the consumer Gemini CLI on 2026-06-18). Existing Gemini sessions remain viewable in the web UI.');
@@ -346,6 +393,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       let spawnDirectory = directory;
       let worktreeInfo: WorktreeInfo | null = null;
       let happyProcess: ReturnType<typeof spawnHappyCLI> | null = null;
+      const launchId = randomUUID();
 
       if (sessionType === 'simple') {
         const validation = await validateWorkspaceDirectory(directory, {
@@ -490,7 +538,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           stdio: ['ignore', 'pipe', 'pipe'],  // Capture stdout/stderr for debugging
           env: {
             ...process.env,
-            ...extraEnv
+            ...extraEnv,
+            HAPI_RUNNER_LAUNCH_ID: launchId
           }
         });
 
@@ -528,6 +577,30 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         happyProcess.removeListener('error', captureSpawnErrorBeforePidCheck);
 
         const pid = happyProcess.pid;
+        const observedProcessIdentity = readProcessIdentity(pid);
+        const processIdentity = observedProcessIdentity?.ppid === process.pid ? observedProcessIdentity : null;
+        if (processIdentity) {
+          try {
+            writeRunnerProcessClaimSync({
+              schemaVersion: 1,
+              launchId,
+              machineId,
+              hapiHome: configuration.happyHomeDir,
+              pid,
+              identity: processIdentity,
+              sessionId: null,
+              state: 'awaiting-webhook',
+              spawnedAt: Date.now(),
+              updatedAt: Date.now()
+            });
+          } catch (error) {
+            logger.debug(`[RUNNER RUN] Failed to persist process claim ${launchId}`, error);
+            void terminateOwnedDetachedProcessGroup(happyProcess);
+            return { type: 'error', errorMessage: `Failed to persist ownership for spawned SHAPI PID ${pid}` };
+          }
+        } else {
+          logger.debug(`[RUNNER RUN] Durable process identity unavailable for PID ${pid}; continuing without a restart claim`);
+        }
         logger.debug(`[RUNNER RUN] Spawned process with PID ${pid}`);
         let observedExitCode: number | null = null;
         let observedExitSignal: NodeJS.Signals | null = null;
@@ -563,6 +636,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           startedBy: 'runner',
           pid,
           childProcess: happyProcess,
+          launchId,
+          processIdentity: processIdentity ?? undefined,
           directoryCreated,
           message: directoryCreated ? `The path '${directory}' did not exist. We created a new folder and spawned a new session there.` : undefined
         };
@@ -620,13 +695,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             // ghost session by onHappySessionWebhook().
             pidToTrackedSession.delete(pid);
 
-            // Terminate the entire process tree (wrapper + agent
-            // grandchildren).  Using killProcessByChildProcess instead of
-            // a bare SIGTERM ensures that detached grandchild processes
-            // (the actual claude/codex agent) are also reaped, and that
-            // SIGTERM → SIGKILL escalation kicks in if needed.
+            // The Runner created this child detached, so its verified PID is
+            // also its process-group ID. Signal the group in one operation;
+            // never enumerate and kill descendant PIDs individually.
             if (happyProcess) {
-              void killProcessByChildProcess(happyProcess);
+              void terminateOwnedDetachedProcessGroup(happyProcess);
             }
 
             // If this was a worktree session, the worktree can only be
@@ -698,7 +771,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     };
 
     // Stop a session by sessionId or PID fallback
-    const stopSession = (sessionId: string): boolean => {
+    const stopSession = async (sessionId: string): Promise<boolean> => {
       logger.debug(`[RUNNER RUN] Attempting to stop session ${sessionId}`);
 
       // Try to find by sessionId first
@@ -708,24 +781,24 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
           if (session.startedBy === 'runner' && session.childProcess) {
             try {
-              void killProcessByChildProcess(session.childProcess);
+              const terminated = await terminateOwnedDetachedProcessGroup(session.childProcess);
+              if (!terminated) {
+                logger.debug(`[RUNNER RUN] Safe termination was refused for session ${sessionId}`);
+                return false;
+              }
               logger.debug(`[RUNNER RUN] Requested termination for runner-spawned session ${sessionId}`);
+              return true;
             } catch (error) {
               logger.debug(`[RUNNER RUN] Failed to kill session ${sessionId}:`, error);
-            }
-          } else {
-            // For externally started sessions, try to kill by PID
-            try {
-              void killProcess(pid);
-              logger.debug(`[RUNNER RUN] Requested termination for external session PID ${pid}`);
-            } catch (error) {
-              logger.debug(`[RUNNER RUN] Failed to kill external session PID ${pid}:`, error);
+              return false;
             }
           }
 
-          pidToTrackedSession.delete(pid);
-          logger.debug(`[RUNNER RUN] Removed session ${sessionId} from tracking`);
-          return true;
+          // Re-adopted and terminal-started sessions do not carry a live
+          // ChildProcess handle. A PID or command line is not termination
+          // authority, so keep the record and refuse the destructive action.
+          logger.debug(`[RUNNER RUN] Refusing PID-only termination for session ${sessionId}`);
+          return false;
         }
       }
 
@@ -736,9 +809,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // Handle child process exit
     const onChildExited = (pid: number) => {
       logger.debug(`[RUNNER RUN] Removing exited process PID ${pid} from tracking`);
+      const launchId = pidToTrackedSession.get(pid)?.launchId;
       pidToTrackedSession.delete(pid);
       pidToAwaiter.delete(pid);
       pidToErrorAwaiter.delete(pid);
+      if (launchId) void removeRunnerProcessClaim(launchId);
     };
 
     // Start control server
@@ -957,9 +1032,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       }
 
       // Prune stale sessions
-      for (const [pid, _] of pidToTrackedSession.entries()) {
+      for (const [pid, trackedSession] of pidToTrackedSession.entries()) {
         if (!isProcessAlive(pid)) {
           logger.debug(`[RUNNER RUN] Removing stale session with PID ${pid} (process no longer exists)`);
+          pidToTrackedSession.delete(pid);
+          if (trackedSession.launchId) void removeRunnerProcessClaim(trackedSession.launchId);
+        } else if (trackedSession.processIdentity && !hasProcessIdentity(trackedSession.processIdentity)) {
+          logger.debug(`[RUNNER RUN] PID ${pid} no longer matches its SHAPI process identity; dropping in-memory tracking without signalling it`);
           pidToTrackedSession.delete(pid);
         }
       }

@@ -84,12 +84,24 @@ describe('alive incremental events', () => {
                 collectedAt: Date.now(),
                 load1m: 0.4,
                 cpuCount: 8,
-                memoryPercent: 55
+                memoryPercent: 55,
+                shapi: {
+                    cpuPercent: 4.2,
+                    memoryBytes: 1024,
+                    memoryPercent: 0.1,
+                    diskBytes: 2048,
+                    diskPath: '/home/dev/.hapi',
+                    processes: { total: 2, active: 1, sleeping: 1, other: 0 }
+                }
             }
         })
 
         const updated = cache.getMachine(machine.id)
-        expect(updated?.health).toEqual(expect.objectContaining({ load1m: 0.4, cpuCount: 8 }))
+        expect(updated?.health).toEqual(expect.objectContaining({
+            load1m: 0.4,
+            cpuCount: 8,
+            shapi: expect.objectContaining({ cpuPercent: 4.2, memoryBytes: 1024 })
+        }))
 
         events.length = 0
         cache.handleMachineAlive({
@@ -99,7 +111,15 @@ describe('alive incremental events', () => {
                 collectedAt: Date.now() + 1,
                 load1m: 2.1,
                 cpuCount: 8,
-                memoryPercent: 80
+                memoryPercent: 80,
+                shapi: {
+                    cpuPercent: 7.5,
+                    memoryBytes: 2048,
+                    memoryPercent: 0.2,
+                    diskBytes: 2048,
+                    diskPath: '/home/dev/.hapi',
+                    processes: { total: 3, active: 1, sleeping: 2, other: 0 }
+                }
             }
         })
 
@@ -109,7 +129,11 @@ describe('alive incremental events', () => {
             return
         }
         expect(healthUpdate.data).toEqual(expect.objectContaining({
-            health: expect.objectContaining({ load1m: 2.1, memoryPercent: 80 })
+            health: expect.objectContaining({
+                load1m: 2.1,
+                memoryPercent: 80,
+                shapi: expect.objectContaining({ cpuPercent: 7.5, memoryBytes: 2048 })
+            })
         }))
     })
 

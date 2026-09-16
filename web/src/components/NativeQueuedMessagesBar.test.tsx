@@ -26,7 +26,7 @@ it('offers recovery beside the uncertain receipt, without resending ordinary que
     expect(within(drawer).getAllByRole('button', { name: 'Send again (may duplicate)' })).toHaveLength(1)
 })
 
-it('allows cancelling waiting receipts while blocking in-flight receipts', () => {
+it('allows cancelling both waiting and already handed-off SHAPI receipts', () => {
     const onCancel = vi.fn()
     const messages = [
         { id: 'waiting', text: 'Waiting feedback', queuedAt: 1 },
@@ -36,9 +36,11 @@ it('allows cancelling waiting receipts while blocking in-flight receipts', () =>
     fireEvent.click(screen.getByTestId('native-queued-messages-trigger'))
     const buttons = screen.getAllByRole('button', { name: /cancel/i })
     expect(buttons[0]).not.toBeDisabled()
-    expect(buttons[1]).toBeDisabled()
+    expect(buttons[1]).not.toBeDisabled()
     fireEvent.click(buttons[0]!)
     expect(onCancel).toHaveBeenCalledWith(messages[0])
+    fireEvent.click(buttons[1]!)
+    expect(onCancel).toHaveBeenCalledWith(messages[1])
 })
 
 it('renders a queued native question reply as readable text', () => {

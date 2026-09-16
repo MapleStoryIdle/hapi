@@ -1,6 +1,7 @@
-import { ArrowDownToLine, ArrowUpFromLine, BrainCircuit, Database, RefreshCw, Server, UserRound } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpFromLine, BrainCircuit, Database, RefreshCw, Server, UserRound, Zap } from 'lucide-react'
 import {
-    getCodexProcessedTotal,
+    getCodexBlendedTotal,
+    getCodexNonCachedInput,
     type CodexTokenUsage,
     type CodexUsageAccount
 } from '@hapi/protocol/codexUsage'
@@ -57,7 +58,8 @@ export function CodexUsageDrawer(props: {
     ].filter(Boolean).join(' · ')
     const number = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
     const exact = (value: number | null | undefined) => value == null ? undefined : new Intl.NumberFormat(locale).format(value)
-    const processedTotal = usage ? getCodexProcessedTotal(usage) : null
+    const displayedInput = usage ? getCodexNonCachedInput(usage) ?? usage.input : null
+    const displayedTotal = usage ? getCodexBlendedTotal(usage) ?? usage.total : null
     const sessionLabel = usage?.breakdown ? t('usage.sessionWithSubagents') : t('usage.session')
     const breakdown = usage?.breakdown?.filter((row) => row.model) ?? []
     const percent = (value: number) => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value) + '%'
@@ -85,25 +87,36 @@ export function CodexUsageDrawer(props: {
                 <div className={group}>
                     {usage ? <>
                         {usage.scope === 'lastTurn' ? <p className="mb-3 text-[13px] text-[var(--app-hint)]">{t('usage.partial')}</p> : null}
-                        <div className="flex items-baseline justify-between gap-3"><span>{t('usage.total')}</span><span className="text-2xl font-semibold tabular-nums" title={exact(processedTotal)}>{number(processedTotal)}</span></div>
-                        <div className="my-4 grid grid-cols-2 gap-4">
-                            <div className="flex min-w-0 flex-col items-start text-left" data-testid="codex-usage-input-metric"><div className="flex items-center gap-1.5 text-[13px] text-[var(--app-link)]"><ArrowDownToLine className="h-4 w-4" aria-hidden="true" />{t('usage.input')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.input)}>{number(usage.input)}</div></div>
-                            <div className="flex min-w-0 flex-col items-end text-right" data-testid="codex-usage-output-metric"><div className="flex items-center justify-end gap-1.5 text-[13px] text-purple-700 dark:text-purple-300"><ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />{t('usage.output')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.output)}>{number(usage.output)}</div></div>
-                            <div className="flex min-w-0 flex-col items-start text-left" data-testid="codex-usage-cached-input-metric">
-                                <div className="flex items-center gap-1.5 text-[13px] text-teal-700 dark:text-teal-300"><Database className="h-4 w-4" aria-hidden="true" />{t('usage.cachedInput')}</div>
-                                <div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.cachedInput)}>{number(usage.cachedInput)}</div>
-                                {cachedRatio !== null ? <div className="mt-2 w-full" data-testid="codex-usage-cache-ratio">
-                                    <div className="mb-1 text-right text-[11px] font-medium tabular-nums text-teal-700 dark:text-teal-300">{percent(cachedRatio)}</div>
-                                    <Bar value={cachedRatio} color="bg-teal-600 dark:bg-teal-400" />
-                                </div> : null}
+                        <div className="flex min-w-0 items-center gap-3" data-testid="codex-usage-total-metric">
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-500">
+                                <Zap className="h-5 w-5" aria-hidden="true" />
                             </div>
-                            <div className="flex min-w-0 flex-col items-end text-right" data-testid="codex-usage-reasoning-output-metric"><div className="flex items-center justify-end gap-1.5 text-[13px] text-amber-700 dark:text-amber-300"><BrainCircuit className="h-4 w-4" aria-hidden="true" />{t('usage.reasoningOutput')}</div><div className="mt-1 text-xl font-semibold tabular-nums" title={exact(usage.reasoningOutput)}>{number(usage.reasoningOutput)}</div></div>
+                            <div className="min-w-0 flex-1">
+                                <div className="text-[13px] font-medium text-[var(--app-hint)]">{t('usage.total')}</div>
+                                <div className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                    <span className="text-[clamp(1.75rem,8vw,2.25rem)] font-semibold leading-none tracking-tight tabular-nums" title={exact(displayedTotal)}>{exact(displayedTotal) ?? '—'}</span>
+                                    {displayedTotal != null && number(displayedTotal) !== exact(displayedTotal) ? <span className="text-xs tabular-nums text-[var(--app-hint)]">≈ {number(displayedTotal)}</span> : null}
+                                </div>
+                            </div>
                         </div>
+                        <div className="my-4 grid grid-cols-2 gap-2.5">
+                            <div className="min-w-0 rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3.5 text-left" data-testid="codex-usage-input-metric"><div className="flex items-center gap-1.5 text-[13px] text-[var(--app-hint)]"><ArrowDownToLine className="h-4 w-4" aria-hidden="true" />{t('usage.input')}</div><div className="mt-2 text-xl font-semibold tabular-nums" title={exact(displayedInput)}>{number(displayedInput)}</div></div>
+                            <div className="min-w-0 rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3.5 text-left" data-testid="codex-usage-output-metric"><div className="flex items-center gap-1.5 text-[13px] text-purple-600 dark:text-purple-300"><ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />{t('usage.output')}</div><div className="mt-2 text-xl font-semibold tabular-nums" title={exact(usage.output)}>{number(usage.output)}</div></div>
+                            <div className="min-w-0 rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3.5 text-left" data-testid="codex-usage-reasoning-output-metric"><div className="flex items-center gap-1.5 text-[13px] text-amber-700 dark:text-amber-300"><BrainCircuit className="h-4 w-4" aria-hidden="true" />{t('usage.reasoningOutput')}</div><div className="mt-2 text-xl font-semibold tabular-nums" title={exact(usage.reasoningOutput)}>{number(usage.reasoningOutput)}</div></div>
+                            <div className="min-w-0 rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3.5 text-left" data-testid="codex-usage-cached-input-metric">
+                                <div className="flex items-center gap-1.5 text-[13px] text-teal-700 dark:text-teal-300"><Database className="h-4 w-4" aria-hidden="true" />{t('usage.cachedInput')}</div>
+                                <div className="mt-2 text-xl font-semibold tabular-nums" title={exact(usage.cachedInput)}>{number(usage.cachedInput)}</div>
+                            </div>
+                        </div>
+                        {cachedRatio !== null ? <div className="mb-4 w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3.5" data-testid="codex-usage-cache-ratio">
+                            <div className="mb-2 flex items-center justify-between gap-3 text-[13px]"><span className="font-medium text-[var(--app-hint)]">{t('usage.cacheRatio')}</span><span className="font-semibold tabular-nums text-teal-600 dark:text-teal-300">{percent(cachedRatio)}</span></div>
+                            <Bar value={cachedRatio} color="bg-teal-600 dark:bg-teal-400" />
+                        </div> : null}
                         {breakdown.length > 0 ? <div className="space-y-2 border-t border-[var(--app-border)] pt-3" data-testid="codex-usage-breakdown">
                             <h4 className="text-[13px] font-semibold text-[var(--app-hint)]">{t('usage.breakdown')}</h4>
                             {breakdown.map((row) => <div key={`${row.model ?? 'unavailable'}-${row.reasoningEffort ?? 'unavailable'}`} className="flex justify-between gap-3 text-[13px]">
                                 <div className="min-w-0"><div className="truncate font-medium">{row.model ?? t('usage.unavailable')}</div><div className="truncate text-[var(--app-hint)]">{t('usage.reasoningEffort')}: {row.reasoningEffort ?? t('usage.unavailable')}</div></div>
-                                <div className="shrink-0 text-right tabular-nums"><div className="font-semibold" title={exact(row.total)}>{number(row.total)}</div><div className="max-w-48 text-[11px] text-[var(--app-hint)]">{t('usage.inputShort')} {number(row.input)} · {t('usage.cachedInputShort')} {number(row.cachedInput)} · {t('usage.outputShort')} {number(row.output)} · {t('usage.reasoningOutputShort')} {number(row.reasoningOutput)}</div></div>
+                                <div className="shrink-0 text-right tabular-nums"><div className="font-semibold" title={exact(getCodexBlendedTotal(row) ?? row.total)}>{number(getCodexBlendedTotal(row) ?? row.total)}</div><div className="max-w-48 text-[11px] text-[var(--app-hint)]">{t('usage.inputShort')} {number(getCodexNonCachedInput(row) ?? row.input)} · {t('usage.cachedInputShort')} {number(row.cachedInput)} · {t('usage.outputShort')} {number(row.output)} · {t('usage.reasoningOutputShort')} {number(row.reasoningOutput)}</div></div>
                             </div>)}
                         </div> : null}
                     </> : <p className="text-[var(--app-hint)]">{t('usage.empty')}</p>}

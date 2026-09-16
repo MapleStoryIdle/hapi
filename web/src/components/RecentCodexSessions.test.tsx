@@ -8,6 +8,7 @@ import { publishNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-ev
 import { resetInteractionPriorityForTests } from '@/lib/interaction-priority'
 import type { ApiClient } from '@/api/client'
 import type { SessionGroup, SessionGroupsResponse } from '@hapi/protocol/sessionGroups'
+import type { Monitor } from '@hapi/protocol/monitoring'
 import type { CodexLocalSessionSummary, SessionSummary } from '@/types/api'
 import {
     COMPLETED_SESSION_DIRECTORY_COLORS,
@@ -50,6 +51,7 @@ function createApi() {
     return {
         getSessionGroups: vi.fn(async (): Promise<SessionGroupsResponse> => ({ groups: [], assignments: [] })),
         getSessionLabels: vi.fn(async () => ({ labels: [] })),
+        getMonitors: vi.fn(async () => ({ monitors: [] })),
         setSessionLabel: vi.fn(async () => ({ ok: true as const })),
         getCodexSessions: vi.fn(async () => ({
             success: true as const,
@@ -119,6 +121,54 @@ function createManagedCodexSession(
 }
 
 describe('RecentCodexSessions', () => {
+    it('shows Monitor state in the label slot, hiding the session label without changing the card background', async () => {
+        const api = createApi()
+        const session = createManagedCodexSession('investigation-session', Date.now(), { thinking: true })
+        session.metadata = { ...session.metadata!, machineId: 'machine-1' }
+        api.getSessionLabels = vi.fn(async () => ({
+            labels: [{
+                source: { type: 'managed' as const, sessionId: session.id },
+                label: '生产环境'
+            }]
+        }))
+        const monitor = {
+            id: 'monitor-1',
+            config: {
+                name: 'Production health', kind: 'http', deliveryMode: 'new-session', machineId: 'machine-1',
+                directory: '/workspace/project', agent: 'codex', model: '', reasoningEffort: '', permissionMode: 'read-only',
+                prompt: 'Investigate', webhookIgnoreKeywords: '', expiresAt: null, enabled: true, request: null
+            },
+            createdAt: 1, updatedAt: 2, health: 'down', lastCheckedAt: 2, lastLatencyMs: 10,
+            lastError: 'failed', nextCheckAt: 3, buckets: [], lastActivity: null, lastDelivery: null,
+            callStats: { total: 1, ok: 0, failed: 1, dispatched: 1, deferred: 0, duplicate: 0, ignored: 0 },
+            incident: {
+                id: 'incident-1', monitorId: 'monitor-1', createdAt: 1, updatedAt: 2,
+                state: 'investigating', summary: 'Investigating', sessionId: session.id,
+                repairSessionId: null, plan: null, planHash: null, error: null
+            }
+        } as Monitor
+        api.getMonitors = vi.fn(async () => ({ monitors: [monitor] }))
+
+        render(<I18nProvider><RecentCodexSessions
+            api={api}
+            machineId="machine-1"
+            hapiSessions={[session]}
+            onOpen={vi.fn()}
+            embedded
+            hideHeader
+            viewMode="kanban"
+        /></I18nProvider>)
+
+        const badge = await screen.findByText('Investigating')
+        expect(badge).toHaveAttribute('data-kanban-monitor-badge', 'investigating')
+        const card = badge.closest('.session-kanban-card')
+        expect(card).toHaveClass('bg-[var(--app-bg)]')
+        expect(card).not.toHaveClass('bg-amber-500/10')
+        expect(card?.querySelector('[data-kanban-card-top-row] [data-kanban-monitor-badge]')).toBeNull()
+        expect(card?.querySelector('[data-kanban-directory-row] [data-kanban-monitor-badge]')).toBe(badge)
+        expect(card?.querySelector('[data-kanban-session-label]')).toBeNull()
+    })
+
     it('uses geometry-preserving skeletons instead of loading copy for both session views', () => {
         const api = createApi()
         api.getCodexSessions = vi.fn(() => new Promise<never>(() => {}))

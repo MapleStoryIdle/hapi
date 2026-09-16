@@ -2,6 +2,7 @@ import { ChatPreviewProvider, useChatPreview } from '@/components/ChatPreviewCon
 import { useDrawerExitPresence } from '@/hooks/useDrawerExitPresence'
 import { ThreadThinkingMessage } from '@/components/ThreadThinkingMessage'
 import { SessionFilesDrawer } from '@/components/SessionFiles/SessionFilesDrawer'
+import { SessionMonitorControl, useRelatedSessionMonitors } from '@/components/SessionMonitorControl'
 import { getThinkingStartedAt } from '@/lib/thinking-started-at'
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
@@ -1469,8 +1470,8 @@ function SessionChatInner(props: SessionChatProps) {
         [latestUserTurnCreatedAt, reduced.blocks, turnCompletionKey]
     )
     const hasThinkingChildAgent = useMemo(
-        () => hasAbortableAgentRun(reduced.blocks, latestUserTurnCreatedAt),
-        [latestUserTurnCreatedAt, reduced.blocks]
+        () => turnCompletionKey === null && hasAbortableAgentRun(reduced.blocks, latestUserTurnCreatedAt),
+        [latestUserTurnCreatedAt, reduced.blocks, turnCompletionKey]
     )
     const latestPlanStatus = useMemo(
         () => extractLatestPlanStatus(reconciled.blocks, { minCreatedAt: latestUserTurnCreatedAt }),
@@ -1494,7 +1495,21 @@ function SessionChatInner(props: SessionChatProps) {
     const planStatusVisible = activePlanStatus !== null
     const gitDiffAccessoryVisible = !runActive && gitDiffSummaryVisible
     const queueAccessoryVisible = useDrawerExitPresence(queuedMessages.length > 0)
-    const bottomAccessoryVisible = queueAccessoryVisible || planStatusVisible || gitDiffAccessoryVisible
+    const monitorTargets = useMemo(() => [
+        { type: 'managed' as const, sessionId: props.session.id },
+        ...(props.session.metadata?.codexSessionId && props.session.metadata.machineId ? [{
+            type: 'native-codex' as const,
+            sessionId: props.session.metadata.codexSessionId,
+            machineId: props.session.metadata.machineId
+        }] : [])
+    ], [props.session.id, props.session.metadata?.codexSessionId, props.session.metadata?.machineId])
+    const monitorIds = useMemo(
+        () => props.session.metadata?.monitorSession?.monitorId ? [props.session.metadata.monitorSession.monitorId] : [],
+        [props.session.metadata?.monitorSession?.monitorId]
+    )
+    const { relatedMonitors, refetch: refetchRelatedMonitors } = useRelatedSessionMonitors(props.api, monitorTargets, monitorIds)
+    const monitorAccessoryVisible = relatedMonitors.length > 0
+    const bottomAccessoryVisible = queueAccessoryVisible || planStatusVisible || gitDiffAccessoryVisible || monitorAccessoryVisible
     const bottomAccessoryExpanded = statusAccessoryExpanded || queueAccessoryExpanded
     const threadBottomInset = getBottomOverlayThreadInset(
         bottomOverlayHeight,
@@ -1926,7 +1941,6 @@ function SessionChatInner(props: SessionChatProps) {
         voice?.status,
         voicePluginEnabled
     ])
-
     return (
         <SessionDetailSurface source="hapi" testId="session-chat-surface">
             {props.session.metadata?.path ? <SessionFilesDrawer key={props.session.id} api={props.api}
@@ -2101,8 +2115,7 @@ function SessionChatInner(props: SessionChatProps) {
                             ref={composerOverlayRef}
                             testId="session-chat-composer-overlay"
                         >
-                            <div className="relative">
-                                <HappyComposer
+                            <HappyComposer
                                 key={`composer-${props.session.id}`}
                                 sessionId={props.session.id}
                                 projectPath={props.session.metadata?.path}
@@ -2250,7 +2263,6 @@ function SessionChatInner(props: SessionChatProps) {
                                 sendError={props.sendError ?? null}
                                 onClearSendError={props.onClearSendError}
                             />
-                            </div>
                         </SessionDetailBottomDockComposer>
 
                         {bottomAccessoryVisible ? (
@@ -2262,6 +2274,13 @@ function SessionChatInner(props: SessionChatProps) {
                                 data-mobile-layout-contract={MOBILE_LAYOUT_CONTRACT.bottomAccessory.state}
                             >
                                 <div className="mx-auto flex w-full max-w-content flex-col items-center gap-2">
+                                    {monitorAccessoryVisible ? (
+                                        <SessionMonitorControl
+                                            api={props.api}
+                                            monitors={relatedMonitors}
+                                            refetch={refetchRelatedMonitors}
+                                        />
+                                    ) : null}
                                     {planStatusVisible ? (
                                         <PlanStatusSummary
                                             plan={activePlanStatus}

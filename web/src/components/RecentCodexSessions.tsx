@@ -23,9 +23,11 @@ import {
     LoaderCircle as LoaderCircleIcon,
     Pin,
     ArrowDownUp,
+    Radar,
     type LucideIcon
 } from 'lucide-react'
 import type { ApiClient } from '@/api/client'
+import type { Monitor, MonitorTargetSession } from '@hapi/protocol/monitoring'
 import type { SessionGroup } from '@hapi/protocol/sessionGroups'
 import type { SessionLabelSource } from '@hapi/protocol/sessionLabels'
 import { resolveSessionGroup, useSessionGroups } from '@/hooks/useSessionGroups'
@@ -49,6 +51,7 @@ import { useNativeCodexRealtime } from '@/lib/native-codex-realtime-context'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { SwipeArchiveRow } from '@/components/SwipeArchiveRow'
 import { useLocalDayKey } from '@/hooks/useLocalDayKey'
+import { useMonitors } from '@/hooks/queries/useMonitors'
 import { formatShareTimelineTime, groupShareTimeline, localDateKey } from '@/lib/shareTimeline'
 import { queryKeys } from '@/lib/query-keys'
 import { scheduleBackgroundWork } from '@/lib/interaction-priority'
@@ -149,6 +152,63 @@ export type MergedCodexSession = {
     active: boolean
     hapiSession?: SessionSummary
     nativeSession?: CodexLocalSessionSummary
+}
+
+export type MonitorSessionBadgeKind = 'investigating' | 'repairing' | 'attention'
+
+function monitorTargetMatchesSession(
+    target: MonitorTargetSession & { machineId?: string },
+    session: MergedCodexSession,
+    machineId: string | null
+): boolean {
+    if (target.type === 'managed') {
+        return session.hapiSession?.id === target.sessionId
+    }
+    if (target.machineId && machineId && target.machineId !== machineId) return false
+    return session.nativeSession?.id === target.sessionId
+        || session.hapiSession?.metadata?.agentSessionId === target.sessionId
+}
+
+export function getMonitorSessionBadgeKind(
+    session: MergedCodexSession,
+    monitors: readonly Monitor[],
+    machineId: string | null
+): MonitorSessionBadgeKind | null {
+    let resolved: MonitorSessionBadgeKind | null = null
+    const sessionIds = new Set([
+        session.id,
+        session.hapiSession?.id,
+        session.nativeSession?.id,
+        session.hapiSession?.metadata?.agentSessionId
+    ].filter((id): id is string => Boolean(id)))
+
+    for (const monitor of monitors) {
+        const incident = monitor.incident
+        if (!incident) continue
+        if (session.source === 'native' && machineId && monitor.config.machineId !== machineId) continue
+        const kind: MonitorSessionBadgeKind | null = incident.state === 'repair_starting' || incident.state === 'repairing'
+            ? 'repairing'
+            : incident.state === 'starting' || incident.state === 'investigating'
+                ? 'investigating'
+                : incident.state === 'review' || incident.state === 'needs_attention'
+                    ? 'attention'
+                    : null
+        if (!kind) continue
+
+        const matchesKnownSession = [incident.sessionId, incident.repairSessionId]
+            .some((id) => id !== null && sessionIds.has(id))
+        const matchesDelivery = incident.deliverySession
+            ? monitorTargetMatchesSession(incident.deliverySession, session, machineId)
+            : false
+        const matchesCurrentTarget = monitor.config.deliveryMode === 'current-session' && monitor.config.targetSession
+            ? monitorTargetMatchesSession({ ...monitor.config.targetSession, machineId: monitor.config.machineId }, session, machineId)
+            : false
+        if (!matchesKnownSession && !matchesDelivery && !matchesCurrentTarget) continue
+        if (kind === 'repairing') return kind
+        if (kind === 'investigating') resolved = kind
+        else if (resolved === null) resolved = kind
+    }
+    return resolved
 }
 
 export type MergedCodexDirectoryGroup = {
@@ -690,6 +750,24 @@ function KanbanSubagentBadge(props: { label: string; title: string }) {
     )
 }
 
+function KanbanMonitorBadge(props: { kind: MonitorSessionBadgeKind; t: (key: string) => string }) {
+    const className = props.kind === 'repairing'
+        ? 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+        : props.kind === 'attention'
+            ? 'border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300'
+            : 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200'
+    return (
+        <span
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-none ${className}`}
+            title={props.t(`sessions.monitor.${props.kind}Title`)}
+            data-kanban-monitor-badge={props.kind}
+        >
+            <Radar className="h-3 w-3" aria-hidden="true" />
+            {props.t(`sessions.monitor.${props.kind}`)}
+        </span>
+    )
+}
+
 function KanbanRunDuration(props: { startedAt: number }) {
     const [now, setNow] = useState(() => Date.now())
     useEffect(() => {
@@ -725,6 +803,7 @@ function KanbanSessionCard(props: {
     sessionLabel?: string
     unviewed?: boolean
     labelTarget?: { source: SessionLabelSource; nativeAlias?: SessionLabelSource }
+    monitorBadge?: MonitorSessionBadgeKind | null
     t: (key: string, params?: Record<string, string | number>) => string
 }) {
     const { api, machineId, session, selected = false, pinned, onOpen, onTogglePin, onArchived, dateLocale, now, directoryColor, t } = props
@@ -828,7 +907,9 @@ function KanbanSessionCard(props: {
                                 <GitDirtyIndicator label={t('recentCodex.gitDirty')} />
                             ) : null}
                         </span>
-                        {props.sessionLabel && props.labelTarget ? (
+                        {props.monitorBadge ? (
+                            <KanbanMonitorBadge kind={props.monitorBadge} t={t} />
+                        ) : props.sessionLabel && props.labelTarget ? (
                             <button
                                 type="button"
                                 onClick={event => {
@@ -1193,6 +1274,7 @@ export function RecentCodexSessions(props: {
     // Keep the richer Cupertino card treatment for Kanban only. The directory
     // list intentionally uses the earlier compact, nested list presentation.
     const isCupertinoPresentation = isMerged && embedded && props.viewMode === 'kanban'
+    const monitorQuery = useMonitors(isCupertinoPresentation ? props.api : null)
     const shouldFilterRecent = props.recentOnly ?? isMerged
     const limit = props.limit ?? (isMerged ? 100 : 5)
     const SectionIcon = onlyProcessing ? Activity : History
@@ -1259,6 +1341,12 @@ export function RecentCodexSessions(props: {
             : [],
         [archivedSessionKeys, isMerged, props.hapiSessions, recentNativeSessions]
     )
+    const monitorBadgesBySessionKey = useMemo(() => new Map(
+        mergedSessions.flatMap((session) => {
+            const badge = getMonitorSessionBadgeKind(session, monitorQuery.monitors, props.machineId)
+            return badge ? [[session.key, badge] as const] : []
+        })
+    ), [mergedSessions, monitorQuery.monitors, props.machineId])
     const pinTargets = useMemo((): SessionPinTarget[] => mergedSessions.flatMap(session => {
         const metadata = session.hapiSession?.metadata
         const machineId = session.source === 'hapi' ? metadata?.machineId : props.machineId
@@ -1781,6 +1869,7 @@ export function RecentCodexSessions(props: {
                                             sessionLabel={sessionLabelsByKey.get(session.key)}
                                             unviewed={unviewedSessionKeys.has(session.key)}
                                             labelTarget={sessionLabelTargetsByKey.get(session.key)}
+                                            monitorBadge={monitorBadgesBySessionKey.get(session.key)}
                                             t={t}
                                             onTogglePin={onTogglePin ? () => onTogglePin(session.key) : undefined}
                                             onArchived={handleArchived}
@@ -1820,6 +1909,7 @@ export function RecentCodexSessions(props: {
                                                         sessionLabel={sessionLabelsByKey.get(session.key)}
                                                         unviewed={unviewedSessionKeys.has(session.key)}
                                                         labelTarget={sessionLabelTargetsByKey.get(session.key)}
+                                                        monitorBadge={monitorBadgesBySessionKey.get(session.key)}
                                                         t={t}
                                                         onTogglePin={onTogglePin ? () => onTogglePin(session.key) : undefined}
                                                         onArchived={handleArchived}

@@ -112,6 +112,7 @@ export class CodexAppServerClient extends JsonLineParser {
                 return acc;
             }, {} as Record<string, string>),
             stdio: ['pipe', 'pipe', 'pipe'],
+            detached: process.platform !== 'win32',
             shell: process.platform === 'win32',
             windowsHide: process.platform === 'win32'
         });

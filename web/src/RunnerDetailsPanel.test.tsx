@@ -37,6 +37,14 @@ const machine = {
         cpuPercent: 9,
         memoryPercent: 93,
         disk: { usedPercent: 97, path: '/', totalBytes: 100, freeBytes: 3 },
+        shapi: {
+            cpuPercent: 12.4,
+            memoryBytes: 680 * 1024 * 1024,
+            memoryPercent: 2.1,
+            diskBytes: 2.3 * 1024 * 1024 * 1024,
+            diskPath: '/Users/dev/.hapi',
+            processes: { total: 18, active: 3, sleeping: 14, other: 1 }
+        },
         networkInterfaces: [{ name: 'en1', address: '192.168.2.38', family: 'IPv4' }],
         agentCli: [{ id: 'codex', label: 'Codex', command: 'codex', available: true }]
     }
@@ -47,7 +55,15 @@ describe('RunnerDetailsPanel', () => {
         render(<RunnerDetailsPanel machine={machine} />)
 
         expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
-        expect(screen.getByText('CPU')).toBeInTheDocument()
+        expect(screen.getAllByText('CPU')).toHaveLength(2)
+        expect(screen.getByText('Runner 占用')).toBeInTheDocument()
+        expect(screen.getByText('680 MiB')).toBeInTheDocument()
+        expect(screen.queryByText('整机归一化')).not.toBeInTheDocument()
+        expect(screen.queryByText('2.1% 整机')).not.toBeInTheDocument()
+        expect(screen.queryByText('/Users/dev/.hapi')).not.toBeInTheDocument()
+        expect(screen.getByText('18')).toBeInTheDocument()
+        expect(screen.getByText('活跃')).toBeInTheDocument()
+        expect(screen.getByText('睡眠')).toBeInTheDocument()
         expect(screen.queryByText('machine-technical-id')).not.toBeInTheDocument()
 
         fireEvent.click(screen.getByRole('tab', { name: '详情' }))

@@ -4,6 +4,7 @@
 
 import { Metadata } from '@/api/types';
 import { ChildProcess } from 'child_process';
+import type { ProcessIdentity } from '@/utils/process';
 
 /**
  * Session tracking for runner
@@ -14,6 +15,8 @@ export interface TrackedSession {
   happySessionMetadataFromLocalWebhook?: Metadata;
   pid: number;
   childProcess?: ChildProcess;
+  launchId?: string;
+  processIdentity?: ProcessIdentity;
   error?: string;
   directoryCreated?: boolean;
   message?: string;

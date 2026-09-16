@@ -1081,7 +1081,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('keeps an in-flight SSH queue-add receipt when discard races its acknowledgement', async () => {
+    it('discards SHAPI state even when SSH queue-add acknowledgement is still in flight', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-discard-race-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789089'
         const clientMessageId = 'ssh:discard-race-1'
@@ -1153,18 +1153,10 @@ describe('NativeCodexSessionDirectSender', () => {
             })
             expect(sender.discard(sessionId, clientMessageId)).toEqual({
                 success: true,
-                discarded: false,
-                active: true,
-                queuedMessages: [{
-                    id: clientMessageId,
-                    text: 'Keep this receipt until Codex answers',
-                    cancelBlocked: true,
-                    queuedAt: 123,
-                    recoveryRequired: true,
-                    recoveryReason: 'runner_restarted'
-                }]
+                discarded: true,
+                queuedMessages: []
             })
-            expect(stored).toHaveLength(1)
+            expect(stored).toEqual([])
 
             acknowledgeQueueAdd({
                 queuedSubmission: {
@@ -1174,18 +1166,8 @@ describe('NativeCodexSessionDirectSender', () => {
             })
             await flushMicrotasks()
 
-            expect(stored).toEqual([expect.objectContaining({
-                id: clientMessageId,
-                accepted: true
-            })])
-            expect(stored[0]?.completed).toBeUndefined()
-            expect(stored[0]?.terminalAt).toBeUndefined()
-            expect(sender.getStatus(sessionId)).toMatchObject({
-                success: true,
-                status: 'processing',
-                startedAt: 123,
-                queuedMessages: [expect.objectContaining({ id: clientMessageId, cancelBlocked: true })]
-            })
+            expect(stored).toEqual([])
+            expect(sender.getStatus(sessionId)).toMatchObject({ queuedMessages: [] })
             expect(sharedClient.requestCalls).toHaveLength(1)
             expect(privateClient.connectCalls).toBe(0)
             expect(spawn).not.toHaveBeenCalled()
@@ -2553,7 +2535,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('keeps ambiguous review receipts after restart until a persisted terminal tombstone exists', () => {
+    it('lets a person discard every SHAPI receipt without claiming Codex was cancelled', () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-review-revoke-workspace-'))
         const sessionId = '82345678-1234-4234-8234-123456789013'
         let summary: ReturnType<() => { id: string; title: string; cwd: string; file: string; modifiedAt: number; runState: 'idle' | 'processing' }> | null = {
@@ -2634,19 +2616,18 @@ describe('NativeCodexSessionDirectSender', () => {
             acceptsReviewGuard
         )
         try {
-            expect(sender.discard(sessionId, acceptedId)).toMatchObject({ success: true, discarded: false, active: true })
-            expect(persisted.some((item) => item.id === acceptedId)).toBe(true)
+            expect(sender.discard(sessionId, acceptedId)).toMatchObject({ success: true, discarded: true })
+            expect(persisted.some((item) => item.id === acceptedId)).toBe(false)
 
             summary = { ...summary!, runState: 'idle' }
-            expect(sender.discard(sessionId, acceptedId)).toMatchObject({ success: true, discarded: false, active: true })
-            expect(persisted.some((item) => item.id === acceptedId)).toBe(true)
+            expect(sender.discard(sessionId, acceptedId)).toMatchObject({ success: true, discarded: true })
 
             summary = null
-            expect(sender.discard(sessionId, recoveryId)).toMatchObject({ success: true, discarded: false, active: true })
+            expect(sender.discard(sessionId, recoveryId)).toMatchObject({ success: true, discarded: true })
             expect(sender.discard(sessionId, completedId)).toMatchObject({ success: true, discarded: true })
             expect(sender.discard(sessionId, safeQueuedId)).toMatchObject({ success: true, discarded: true })
             expect(sender.discard(sessionId, unsentReviewId)).toMatchObject({ success: true, discarded: true })
-            expect(persisted.map((item) => item.id)).toEqual([acceptedId, recoveryId])
+            expect(persisted).toEqual([])
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
@@ -3372,6 +3353,77 @@ describe('NativeCodexSessionDirectSender', () => {
                 queuedMessages: []
             })
             expect(sender.getStatus(sessionId)).not.toHaveProperty('lastErrorCode')
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('removes an active accepted receipt from SHAPI without stopping Codex', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-active-discard-workspace-'))
+        const sessionId = '83345678-1234-4234-8234-123456789099'
+        const clientMessageId = 'native:active-discard'
+        let runState: 'idle' | 'processing' = 'idle'
+        const stored: NativeCodexSessionDirectSendStoredItem[] = []
+        const client = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState
+                })
+            },
+            () => client,
+            {
+                load: () => [...stored],
+                save: (items) => stored.splice(0, stored.length, ...items)
+            }
+        )
+
+        try {
+            expect(sender.send(sessionId, 'Codex can keep working', undefined, clientMessageId)).toMatchObject({
+                success: true,
+                status: 'processing'
+            })
+            await flushAsyncWork()
+            expect(stored).toEqual([expect.objectContaining({ id: clientMessageId, accepted: true })])
+            client.emit('turn/started', {
+                thread: { id: sessionId },
+                turn: { id: 'native-turn-1' }
+            })
+            runState = 'processing'
+            sender.notifyTranscriptChanged(sessionId)
+
+            expect(sender.discard(sessionId, clientMessageId)).toEqual({
+                success: true,
+                discarded: true,
+                queuedMessages: []
+            })
+            expect(stored).toEqual([])
+            expect(client.disconnectCalls).toBe(0)
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                status: 'processing',
+                activeClientMessageId: clientMessageId,
+                queuedMessages: []
+            })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('deliveryReceipts')
+
+            runState = 'idle'
+            client.emit('turn/completed', {
+                thread: { id: sessionId },
+                turn: { id: 'native-turn-1' },
+                status: 'completed'
+            })
+            expect(stored).toEqual([])
+            expect(client.disconnectCalls).toBe(1)
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })

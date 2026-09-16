@@ -33,10 +33,10 @@ export function startRunnerControlServer({
   onExternalCodexLifecycle
 }: {
   getChildren: () => TrackedSession[];
-  stopSession: (sessionId: string) => boolean;
+  stopSession: (sessionId: string) => boolean | Promise<boolean>;
   spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>;
   requestShutdown: () => void;
-  onHappySessionWebhook: (sessionId: string, metadata: Metadata) => void;
+  onHappySessionWebhook: (sessionId: string, metadata: Metadata) => Promise<void> | void;
   onCodexRecoveryReady?: (input: { recoveryRequestId: string; sessionId: string; threadId: string }) => boolean;
   onCodexRecoveryUnconfirmed?: (input: { recoveryRequestId: string; sessionId: string; threadId: string; error: string }) => boolean;
   onExternalCodexRequest: (request: Omit<ExternalCodexRequestPayload, 'machineId'>) => void;
@@ -69,7 +69,7 @@ export function startRunnerControlServer({
       const { sessionId, metadata } = request.body;
 
       logger.debug(`[CONTROL SERVER] Session started: ${sessionId}`);
-      onHappySessionWebhook(sessionId, metadata);
+      await onHappySessionWebhook(sessionId, metadata);
 
       return { status: 'ok' as const };
     });
@@ -177,7 +177,7 @@ export function startRunnerControlServer({
       const { sessionId } = request.body;
 
       logger.debug(`[CONTROL SERVER] Stop session request: ${sessionId}`);
-      const success = stopSession(sessionId);
+      const success = await stopSession(sessionId);
       return { success };
     });
 

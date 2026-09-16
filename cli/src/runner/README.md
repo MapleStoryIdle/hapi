@@ -170,6 +170,17 @@ Under `~/.hapi/` or `$HAPI_HOME`:
 - `runner.state.json.lock` - exclusive live-Runner lock.
 - `logs/` - Runner and CLI logs.
 - `native-codex-control-recovery.json` - native Codex recovery coordination.
+- `runner-processes/<launch-id>.json` - private, validated ownership claims for
+  Runner-launched sessions. Claims are used for read-only reconciliation and
+  diagnostics; an unverifiable claim never authorizes process termination.
+
+Process diagnostics are fail-closed:
+
+```bash
+shapi doctor processes
+shapi doctor processes --json
+shapi doctor clean # dry-run only; never signals unmanaged PIDs
+```
 
 ## Change map
 

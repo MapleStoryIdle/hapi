@@ -33,6 +33,7 @@ import { SessionLabelDialog } from '@/components/SessionLabelDialog'
 import { resolveSessionGroup, useSessionGroups } from '@/hooks/useSessionGroups'
 import { resolveSessionLabel, useSessionLabels } from '@/hooks/useSessionLabels'
 import { SessionFilesDrawer } from '@/components/SessionFiles/SessionFilesDrawer'
+import { SessionMonitorControl, useRelatedSessionMonitors } from '@/components/SessionMonitorControl'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { GitBranchesDrawer } from '@/components/GitBranchesDrawer'
 import { SESSION_DETAIL_HEADER_HEIGHT_PX } from '@/components/SessionDetailHeader'
@@ -843,6 +844,13 @@ function NativeCodexThread(props: {
             : undefined,
         [props.api, props.machineId, props.sessionId]
     )
+    const monitorTargets = useMemo(() => props.machineId ? [{
+        type: 'native-codex' as const,
+        sessionId: props.sessionId,
+        machineId: props.machineId
+    }] : [], [props.machineId, props.sessionId])
+    const { relatedMonitors, refetch: refetchRelatedMonitors } = useRelatedSessionMonitors(props.api, monitorTargets)
+    const monitorAccessoryVisible = relatedMonitors.length > 0
     const composerOverlayRef = useRef<HTMLDivElement | null>(null)
     const accessoryOverlayRef = useRef<HTMLDivElement | null>(null)
     const [composerHeight, setComposerHeight] = useState(0)
@@ -962,10 +970,10 @@ function NativeCodexThread(props: {
             observer.disconnect()
             window.removeEventListener('resize', measure)
         }
-    }, [nativePlan?.sourceBlockId, props.queuedMessages.length])
+    }, [monitorAccessoryVisible, nativePlan?.sourceBlockId, props.queuedMessages.length])
 
     const queueAccessoryVisible = useDrawerExitPresence(props.queuedMessages.length > 0 || props.controls?.queuePaused === true)
-    const accessoryVisible = queueAccessoryVisible || nativePlan !== null
+    const accessoryVisible = queueAccessoryVisible || nativePlan !== null || monitorAccessoryVisible
     const totalBottomInset = composerHeight + (accessoryHeight > 0 ? accessoryHeight + NATIVE_QUEUE_FLOATING_GAP_PX : 0)
 
     return (
@@ -1094,6 +1102,13 @@ function NativeCodexThread(props: {
                             testId="codex-native-session-accessory-overlay"
                         >
                             <div className="pointer-events-auto flex flex-col gap-2">
+                                {monitorAccessoryVisible ? (
+                                    <SessionMonitorControl
+                                        api={props.api}
+                                        monitors={relatedMonitors}
+                                        refetch={refetchRelatedMonitors}
+                                    />
+                                ) : null}
                                 {nativePlan ? (
                                     <PlanStatusSummary
                                         plan={nativePlan}

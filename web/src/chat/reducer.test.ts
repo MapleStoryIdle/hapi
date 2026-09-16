@@ -377,4 +377,123 @@ describe('reduceChatBlocks', () => {
         expect(block).toBeDefined()
         expect(block?.kind === 'tool-call' ? block.tool.permission?.status : null).toBe('pending')
     })
+
+    it('reconciles a stale running CodexAgent card from terminal persisted state', () => {
+        const messages: NormalizedMessage[] = [{
+            id: 'agent-start',
+            localId: null,
+            createdAt: 100,
+            role: 'event',
+            content: {
+                type: 'agent-run-start',
+                cardId: 'spawn-1',
+                agentId: 'agent-1',
+                status: 'running',
+                input: { message: 'Inspect the session' }
+            },
+            isSidechain: false
+        }]
+        const agentState = {
+            requests: {},
+            completedRequests: {},
+            codex: {
+                activeSubagentId: null,
+                subagents: {
+                    'agent-1': {
+                        id: 'agent-1',
+                        cardId: 'spawn-1',
+                        status: 'completed',
+                        statusText: 'Completed',
+                        activity: 'Completed',
+                        activityKind: 'completed',
+                        startedAt: 100,
+                        updatedAt: 200,
+                        completedAt: 200
+                    }
+                }
+            }
+        } satisfies AgentState
+
+        const reduced = reduceChatBlocks(messages, agentState)
+        const block = reduced.blocks.find((candidate) => candidate.kind === 'tool-call')
+
+        expect(block?.kind === 'tool-call' ? block.tool.state : null).toBe('completed')
+        expect(block?.kind === 'tool-call' ? block.tool.completedAt : null).toBe(200)
+        expect(block?.kind === 'tool-call' ? block.tool.input : null).toMatchObject({
+            agentId: 'agent-1',
+            agentStatus: 'completed',
+            statusText: 'Completed'
+        })
+    })
+
+    it('finishes stale running child tools when persisted CodexAgent state is terminal', () => {
+        const messages: NormalizedMessage[] = [
+            {
+                id: 'agent-start', localId: null, createdAt: 100, role: 'event', isSidechain: false,
+                content: {
+                    type: 'agent-run-start', cardId: 'spawn-1', agentId: 'agent-1',
+                    status: 'running', input: { message: 'Inspect the session' }
+                }
+            },
+            {
+                id: 'agent-tool', localId: null, createdAt: 120, role: 'event', isSidechain: false,
+                content: {
+                    type: 'agent-run-trace', cardId: 'spawn-1', agentId: 'agent-1',
+                    message: { type: 'tool-call', name: 'CodexBash', callId: 'cmd-1', input: { command: 'sleep 1' } }
+                }
+            }
+        ]
+        const agentState = {
+            requests: {}, completedRequests: {},
+            codex: {
+                activeSubagentId: null,
+                subagents: {
+                    'agent-1': {
+                        id: 'agent-1', cardId: 'spawn-1', status: 'completed', statusText: 'Completed',
+                        activity: 'Completed', activityKind: 'completed', startedAt: 100, updatedAt: 200, completedAt: 200
+                    }
+                }
+            }
+        } satisfies AgentState
+
+        const parent = reduceChatBlocks(messages, agentState).blocks.find((candidate) => candidate.kind === 'tool-call')
+        expect(parent?.kind).toBe('tool-call')
+        if (parent?.kind !== 'tool-call') return
+        const child = parent.children.find((candidate) => candidate.kind === 'tool-call')
+        expect(child?.kind === 'tool-call' ? child.tool.state : null).toBe('completed')
+        expect(child?.kind === 'tool-call' ? child.tool.completedAt : null).toBe(200)
+    })
+
+    it('finishes stale child tools when the parent transcript is already terminal', () => {
+        const messages: NormalizedMessage[] = [
+            {
+                id: 'agent-start', localId: null, createdAt: 100, role: 'event', isSidechain: false,
+                content: {
+                    type: 'agent-run-start', cardId: 'spawn-1', agentId: 'agent-1',
+                    status: 'running', input: { message: 'Inspect the session' }
+                }
+            },
+            {
+                id: 'agent-tool', localId: null, createdAt: 120, role: 'event', isSidechain: false,
+                content: {
+                    type: 'agent-run-trace', cardId: 'spawn-1', agentId: 'agent-1',
+                    message: { type: 'tool-call', name: 'CodexBash', callId: 'cmd-1', input: { command: 'sleep 1' } }
+                }
+            },
+            {
+                id: 'agent-done', localId: null, createdAt: 200, role: 'event', isSidechain: false,
+                content: {
+                    type: 'agent-run-update', cardId: 'spawn-1', agentId: 'agent-1',
+                    status: 'completed', statusText: 'Completed', result: 'done'
+                }
+            }
+        ]
+
+        const parent = reduceChatBlocks(messages, null).blocks.find((candidate) => candidate.kind === 'tool-call')
+        expect(parent?.kind).toBe('tool-call')
+        if (parent?.kind !== 'tool-call') return
+        const child = parent.children.find((candidate) => candidate.kind === 'tool-call')
+        expect(parent.tool.state).toBe('completed')
+        expect(child?.kind === 'tool-call' ? child.tool.state : null).toBe('completed')
+    })
 })

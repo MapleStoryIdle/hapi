@@ -87,6 +87,7 @@ export function buildSessionMetadata(options: {
         happyLibDir,
         happyToolsDir: resolve(happyLibDir, 'tools', 'unpacked'),
         startedFromRunner: options.startedBy === 'runner',
+        runnerLaunchId: process.env.HAPI_RUNNER_LAUNCH_ID || undefined,
         hostPid: process.pid,
         startedBy: options.startedBy,
         lifecycleState: 'running',

@@ -6,7 +6,10 @@ import type { Machine } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { DirectoryPickerDrawer } from './DirectoryPickerDrawer'
 
-afterEach(cleanup)
+afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+})
 it('filters directories and returns the selected path without creating a session', async () => {
     const list = vi.fn().mockResolvedValue({ success: true, entries: [{ name: 'src', type: 'directory' }, { name: 'docs', type: 'directory' }, { name: 'README.md', type: 'file' }] })
     const select = vi.fn()
@@ -22,4 +25,17 @@ it('filters directories and returns the selected path without creating a session
     fireEvent.click(screen.getByRole('button', { name: 'Use this directory' }))
     expect(select).toHaveBeenCalledWith('m1', '/workspace/src')
     expect(close).toHaveBeenCalledWith(false)
+})
+
+it('uses a real fixed height on desktop instead of collapsing to its header', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+        matches: true,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn()
+    })))
+    const machines = [{ id: 'm1', active: true, metadata: { host: 'Mac', workspaceRoots: ['/workspace'] } }] as Machine[]
+    render(<QueryClientProvider client={new QueryClient()}><I18nProvider><DirectoryPickerDrawer open onOpenChange={() => {}} onSelect={() => {}} api={{ listMachineDirectory: vi.fn().mockResolvedValue({ success: true, entries: [] }) } as unknown as ApiClient} machines={machines} machinesLoading={false} initialMachineId="m1" /></I18nProvider></QueryClientProvider>)
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveAttribute('data-desktop-dialog', 'true')
+    expect(dialog).toHaveStyle({ height: '70dvh' })
 })

@@ -104,6 +104,8 @@ export const MetadataSchema = z.object({
     happyLibDir: z.string().optional(),
     happyToolsDir: z.string().optional(),
     startedFromRunner: z.boolean().optional(),
+    /** Random ownership marker assigned by the Runner that launched this process. */
+    runnerLaunchId: z.string().uuid().optional(),
     hostPid: z.number().optional(),
     hapiMcpUrl: z.string().url().optional(),
     startedBy: z.enum(['runner', 'terminal']).optional(),
@@ -397,6 +399,22 @@ export const MachineAgentCliStatusSchema = z.object({
     available: z.boolean()
 }).strict()
 
+export const MachineShapiProcessCountsSchema = z.object({
+    total: z.number().int().nonnegative(),
+    active: z.number().int().nonnegative(),
+    sleeping: z.number().int().nonnegative(),
+    other: z.number().int().nonnegative()
+}).strict()
+
+export const MachineShapiResourcesSchema = z.object({
+    cpuPercent: z.number().min(0).max(100),
+    memoryBytes: z.number().int().nonnegative(),
+    memoryPercent: z.number().min(0).max(100),
+    diskBytes: z.number().int().nonnegative().optional(),
+    diskPath: z.string().optional(),
+    processes: MachineShapiProcessCountsSchema
+}).strict()
+
 export const MachineHealthSchema = z.object({
     collectedAt: z.number(),
     cpuCount: z.number().int().positive().optional(),
@@ -405,6 +423,7 @@ export const MachineHealthSchema = z.object({
     memoryPercent: z.number().min(0).max(100).optional(),
     uptimeSeconds: z.number().nonnegative().optional(),
     disk: MachineHealthDiskSchema.optional(),
+    shapi: MachineShapiResourcesSchema.optional(),
     networkInterfaces: z.array(MachineHealthNetworkInterfaceSchema).optional(),
     agentCli: z.array(MachineAgentCliStatusSchema).optional()
 }).strict()

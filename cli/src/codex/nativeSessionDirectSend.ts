@@ -634,6 +634,8 @@ export class NativeCodexSessionDirectSender {
     private readonly activeSends = new Map<string, ActiveSend>()
     /** Accepted receipts survive a runner restart as idempotency tombstones. */
     private readonly acceptedReceipts = new Map<string, AcceptedReceipt>()
+    /** Live Codex work whose SHAPI receipt a person explicitly removed. */
+    private readonly discardedReceiptKeys = new Set<string>()
     private readonly recentFailures = new Map<string, RecentFailure>()
     private readonly queues = new Map<string, QueuedSend[]>()
     private readonly queueTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -800,6 +802,7 @@ export class NativeCodexSessionDirectSender {
     private getPersistedItems(extra: readonly NativeCodexSessionDirectSendStoredItem[] = []): NativeCodexSessionDirectSendStoredItem[] {
         const items: NativeCodexSessionDirectSendStoredItem[] = []
         for (const [key, receipt] of this.acceptedReceipts) {
+            if (this.discardedReceiptKeys.has(key)) continue
             if (this.isExpiredResolvedDefaultReceipt(receipt)) {
                 this.acceptedReceipts.delete(key)
                 continue
@@ -807,6 +810,9 @@ export class NativeCodexSessionDirectSender {
             items.push(receipt)
         }
         for (const [sessionId, active] of this.activeSends) {
+            if (active.clientMessageId && this.discardedReceiptKeys.has(this.acceptedKey(sessionId, active.clientMessageId))) {
+                continue
+            }
             if (active.clientMessageId && this.acceptedReceipts.has(this.acceptedKey(sessionId, active.clientMessageId))) {
                 continue
             }
@@ -871,6 +877,7 @@ export class NativeCodexSessionDirectSender {
     private markAccepted(sessionId: string, active: ActiveSend): void {
         if (!active.clientMessageId) return
         const key = this.acceptedKey(sessionId, active.clientMessageId)
+        if (this.discardedReceiptKeys.has(key)) return
         if (this.acceptedReceipts.has(key)) return
         this.acceptedReceipts.set(key, {
             sessionId,
@@ -2178,62 +2185,66 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
+        const acceptedKey = this.acceptedKey(sessionId, clientMessageId)
         const active = this.activeSends.get(sessionId)
         if (active?.clientMessageId === clientMessageId) {
+            const accepted = this.acceptedReceipts.get(acceptedKey)
+            this.discardedReceiptKeys.add(acceptedKey)
+            this.acceptedReceipts.delete(acceptedKey)
+            if (!this.persistOutbox()) {
+                this.discardedReceiptKeys.delete(acceptedKey)
+                if (accepted) this.acceptedReceipts.set(acceptedKey, accepted)
+                return {
+                    success: false,
+                    code: 'launch_failed',
+                    error: 'Could not discard this active native message from SHAPI'
+                }
+            }
+            const failure = this.recentFailures.get(sessionId)
+            if (failure?.clientMessageId === clientMessageId) {
+                this.recentFailures.delete(sessionId)
+            }
+            this.notifyStateChange(sessionId)
             return {
                 success: true,
-                discarded: false,
-                active: true,
+                discarded: true,
                 queuedMessages: this.getQueuedMessages(sessionId)
             }
         }
 
-        if (this.sharedQueueDeliveries.get(sessionId)?.clientMessageId === clientMessageId) {
-            return {
-                success: true,
-                discarded: false,
-                active: true,
-                queuedMessages: this.getQueuedMessages(sessionId)
-            }
-        }
+        const sharedDelivery = this.sharedQueueDeliveries.get(sessionId)?.clientMessageId === clientMessageId
+            ? this.sharedQueueDeliveries.get(sessionId)!
+            : null
 
         const session = this.sessionLookup.getSummary(sessionId)
 
-        const acceptedKey = this.acceptedKey(sessionId, clientMessageId)
         const accepted = this.acceptedReceipts.get(acceptedKey)
         if (accepted) {
-            if (accepted.deliveryPolicy !== 'untrusted-review') {
-                // Ordinary completed receipts are short-lived idempotency
-                // tombstones, not cancelable outbox work. Retain them so a
-                // stale browser retry cannot create the same turn twice.
-                return {
-                    success: true,
-                    discarded: accepted.completed === true,
-                    queuedMessages: this.getQueuedMessages(sessionId)
-                }
-            }
-            if (accepted.completed !== true) {
-                // `turn/start` acceptance is not a terminal event. After a
-                // runner restart an idle snapshot can be stale or from a
-                // short turn that has not been durably reconciled, so it must
-                // never authorize deleting the staged feedback file.
-                return {
-                    success: true,
-                    discarded: false,
-                    active: true,
-                    queuedMessages: this.getQueuedMessages(sessionId)
-                }
-            }
             this.acceptedReceipts.delete(acceptedKey)
             if (!this.persistOutbox()) {
                 this.acceptedReceipts.set(acceptedKey, accepted)
                 return {
                     success: false,
                     code: 'launch_failed',
-                    error: 'Could not safely discard this accepted native review'
+                    error: 'Could not discard this accepted native message from SHAPI'
                 }
             }
-            this.cleanupUnretainedAttachments(sessionId, accepted.attachmentIds ?? [])
+            if (sharedDelivery) {
+                this.clearSharedQueueDeliveryTimer(sharedDelivery)
+                this.sharedQueueDeliveries.delete(sessionId)
+                this.disconnectSharedQueueClient(sharedDelivery.client)
+            }
+            // Once Codex has accepted the message, local discard only removes
+            // SHAPI's receipt. Do not delete staged attachments that Codex may
+            // still be reading, and do not claim that the native queue changed.
+            if (accepted.completed === true) {
+                this.cleanupUnretainedAttachments(sessionId, accepted.attachmentIds ?? [])
+            }
+            const failure = this.recentFailures.get(sessionId)
+            if (failure?.clientMessageId === clientMessageId) {
+                this.recentFailures.delete(sessionId)
+            }
+            this.scheduleQueuePump(sessionId, 0, { replacePending: true })
             this.notifyStateChange(sessionId)
             return {
                 success: true,
@@ -2255,22 +2266,7 @@ export class NativeCodexSessionDirectSender {
             }
             return {
                 success: true,
-                discarded: false,
-                queuedMessages: this.getQueuedMessages(sessionId)
-            }
-        }
-
-        const queuedReview = queue[queueIndex]!
-        if (queuedReview.deliveryPolicy === 'untrusted-review' && queuedReview.recoveryRequired
-            && queuedReview.recoveryReason !== 'review_guard_failed') {
-            // A recovery receipt exists exactly when the prior runner could
-            // not prove whether Codex received the prompt. Keep both it and
-            // the staged file until a separately persisted terminal outcome
-            // exists; revoke must surface cleanup-pending instead.
-            return {
-                success: true,
-                discarded: false,
-                active: true,
+                discarded: true,
                 queuedMessages: this.getQueuedMessages(sessionId)
             }
         }
@@ -2291,7 +2287,17 @@ export class NativeCodexSessionDirectSender {
             }
         }
 
-        this.cleanupUnretainedAttachments(sessionId, discarded!.attachmentIds)
+        if (sharedDelivery) {
+            this.clearSharedQueueDeliveryTimer(sharedDelivery)
+            this.sharedQueueDeliveries.delete(sessionId)
+            this.disconnectSharedQueueClient(sharedDelivery.client)
+        }
+        // An uncertain receipt may already have crossed into Codex. Local
+        // discard removes SHAPI's copy only, so retain any staged files that
+        // the native process could still need.
+        if (!discarded!.recoveryRequired || discarded!.recoveryReason === 'review_guard_failed') {
+            this.cleanupUnretainedAttachments(sessionId, discarded!.attachmentIds)
+        }
 
         const failure = this.recentFailures.get(sessionId)
         if (failure?.clientMessageId === clientMessageId) {
@@ -2624,7 +2630,9 @@ export class NativeCodexSessionDirectSender {
         const previousQueue = this.queues.get(sessionId)
         const queue = previousQueue ? [...previousQueue] : []
         const id = this.getActiveReceiptId(sessionId, active)
-        if (!queue.some((item) => item.id === id)) {
+        const receiptKey = this.acceptedKey(sessionId, id)
+        const discarded = this.discardedReceiptKeys.has(receiptKey)
+        if (!discarded && !queue.some((item) => item.id === id)) {
             queue.unshift({
                 id,
                 text: active.displayText,
@@ -2660,6 +2668,7 @@ export class NativeCodexSessionDirectSender {
         }
 
         this.disposeBridge(active)
+        if (discarded) this.discardedReceiptKeys.delete(receiptKey)
         this.scheduleQueuePump(sessionId, delay, { replacePending: true })
         this.notifyStateChange(sessionId)
         return true
@@ -2673,7 +2682,9 @@ export class NativeCodexSessionDirectSender {
         const previousQueue = this.queues.get(sessionId)
         const queue = previousQueue ? [...previousQueue] : []
         const id = this.getActiveReceiptId(sessionId, active)
-        if (!queue.some((item) => item.id === id)) {
+        const receiptKey = this.acceptedKey(sessionId, id)
+        const discarded = this.discardedReceiptKeys.has(receiptKey)
+        if (!discarded && !queue.some((item) => item.id === id)) {
             queue.unshift({
                 id,
                 text: active.displayText,
@@ -2706,6 +2717,7 @@ export class NativeCodexSessionDirectSender {
         }
 
         this.disposeExec(active)
+        if (discarded) this.discardedReceiptKeys.delete(receiptKey)
         this.recentFailures.delete(sessionId)
         this.notifyStateChange(sessionId)
         if (active.deliveryPolicy === 'untrusted-review') {
@@ -3386,13 +3398,17 @@ export class NativeCodexSessionDirectSender {
         failureCode: CodexLocalSessionDirectSendRecoveryReason = 'launch_failed'
     ): void {
         if (!this.isCurrentActive(sessionId, active)) return
+        const discardedKey = active.clientMessageId
+            ? this.acceptedKey(sessionId, active.clientMessageId)
+            : null
+        const receiptDiscarded = discardedKey !== null && this.discardedReceiptKeys.has(discardedKey)
         this.activeSends.delete(sessionId)
         if (active.kind === 'app-server') {
             this.disposeBridge(active)
         } else {
             this.disposeExec(active)
         }
-        if (failure) {
+        if (failure && !receiptDiscarded) {
             this.recentFailures.set(sessionId, {
                 message: failure,
                 occurredAt: this.now(),
@@ -3408,7 +3424,7 @@ export class NativeCodexSessionDirectSender {
             if (!acceptedKey || !this.acceptedReceipts.has(acceptedKey)) {
                 this.preserveFailedActive(sessionId, active, failureCode)
             }
-        } else {
+        } else if (!failure) {
             // A review receipt is revocable only after this terminal success,
             // not merely after Codex accepted turn/start.
             this.markAcceptedCompleted(sessionId, active)
@@ -3416,6 +3432,7 @@ export class NativeCodexSessionDirectSender {
         if (this.persistOutbox()) {
             this.cleanupUnretainedAttachments(sessionId, active.attachmentIds)
         }
+        if (discardedKey) this.discardedReceiptKeys.delete(discardedKey)
         if (this.queues.get(sessionId)?.length && !this.queues.get(sessionId)?.[0]?.recoveryRequired) {
             this.scheduleQueuePump(sessionId, failure ? NATIVE_QUEUE_RETRY_INTERVAL_MS : this.queuePollIntervalMs)
         }
@@ -3427,6 +3444,9 @@ export class NativeCodexSessionDirectSender {
         this.activeSends.delete(sessionId)
         this.disposeBridge(active)
         this.persistOutbox()
+        if (active.clientMessageId) {
+            this.discardedReceiptKeys.delete(this.acceptedKey(sessionId, active.clientMessageId))
+        }
     }
 
     private disposeBridge(active: ActiveAppServerSend): void {

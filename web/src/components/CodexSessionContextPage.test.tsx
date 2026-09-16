@@ -423,7 +423,7 @@ describe('CodexSessionContextPage', () => {
         }))
     })
 
-    it('keeps a Desktop queue acknowledgement in the drawer until the native transcript consumes it', async () => {
+    it('lets the person hide a Desktop-accepted queue receipt from SHAPI', async () => {
         const now = Date.now()
         localStorage.setItem('hapi:native-codex-direct-messages:v1', JSON.stringify({
             [JSON.stringify(['machine-1', 'codex-thread-1'])]: [{
@@ -446,7 +446,13 @@ describe('CodexSessionContextPage', () => {
         fireEvent.click(trigger)
         const drawer = screen.getByTestId('native-queued-messages-drawer')
         expect(drawer).toHaveTextContent('Waiting inside Desktop')
-        expect(within(drawer).getByRole('button', { name: /cancel/i })).toBeDisabled()
+        const cancel = within(drawer).getByRole('button', { name: /cancel/i })
+        expect(cancel).toBeEnabled()
+        fireEvent.click(cancel)
+        await waitFor(() => expect(api.discardCodexSessionMessage).toHaveBeenCalledWith('codex-thread-1', {
+            machineId: 'machine-1', clientMessageId: 'desktop-queued'
+        }))
+        await waitFor(() => expect(screen.queryByText('Waiting inside Desktop')).not.toBeInTheDocument())
         expect(within(drawer).queryByRole('button', { name: /Send again/ })).toBeNull()
         expect(api.sendCodexSessionMessage).not.toHaveBeenCalled()
     })

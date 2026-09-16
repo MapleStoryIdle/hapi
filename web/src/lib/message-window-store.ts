@@ -26,6 +26,7 @@ export type MessageWindowState = {
 // controls sluggish; older history remains pageable from the hub.
 export const VISIBLE_WINDOW_SIZE = 600
 export const PENDING_WINDOW_SIZE = 200
+export const RETAINED_MESSAGE_WINDOW_COUNT = 12
 const PAGE_SIZE = 50
 const COLD_LOAD_BACKFILL_PAGE_SIZE = 200
 const COLD_LOAD_REGULAR_TARGET = PAGE_SIZE
@@ -122,6 +123,31 @@ let persistTimerId: ReturnType<typeof setTimeout> | null = null
 let persistDueAt = 0
 let lastNotifyAt = 0
 let incomingMessageFlushScheduled = false
+
+function touchState(sessionId: string, state: InternalState): void {
+    states.delete(sessionId)
+    states.set(sessionId, state)
+}
+
+function evictInactiveStates(): void {
+    if (states.size <= RETAINED_MESSAGE_WINDOW_COUNT) return
+    for (const [sessionId, state] of states) {
+        if (states.size <= RETAINED_MESSAGE_WINDOW_COUNT) return
+        if (
+            listeners.has(sessionId)
+            || pendingPersistSessionIds.has(sessionId)
+            || pendingIncomingMessagesBySession.has(sessionId)
+            || pendingForcedLatestRefreshes.has(sessionId)
+            || state.isLoading
+            || state.isLoadingMore
+            || state.isLoadingNewer
+        ) {
+            continue
+        }
+        states.delete(sessionId)
+        pendingVisibilityCacheBySession.delete(sessionId)
+    }
+}
 
 /** Test-only cleanup for this module's process-wide frame/timer coordinator. */
 export function resetMessageWindowStoreForTests(): void {
@@ -392,6 +418,7 @@ function flushPersistedStates(): void {
         }
         persistState(sessionId, state)
     }
+    evictInactiveStates()
 }
 
 function schedulePersist(sessionId: string): void {
@@ -531,6 +558,7 @@ function hydrateState(sessionId: string): InternalState | null {
 function getState(sessionId: string): InternalState {
     const existing = states.get(sessionId)
     if (existing) {
+        touchState(sessionId, existing)
         return existing
     }
     const created = hydrateState(sessionId) ?? createState(sessionId)
@@ -553,7 +581,7 @@ function notifyImmediate(sessionId: string): void {
 }
 
 function setState(sessionId: string, next: InternalState, immediate?: boolean): void {
-    states.set(sessionId, next)
+    touchState(sessionId, next)
     schedulePersist(sessionId)
     if (immediate) {
         notifyImmediate(sessionId)

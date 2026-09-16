@@ -6,7 +6,7 @@ import { markUserInteraction, resetInteractionPriorityForTests } from '@/lib/int
 import { subscribeNativeCodexSessionUpdated } from '@/lib/native-codex-realtime-events'
 import { queryKeys } from '@/lib/query-keys'
 import type { SessionSummary, SessionsResponse } from '@/types/api'
-import { isGlobalScopedMessageStreamEvent, useSSE } from './useSSE'
+import { coalesceSessionCacheEvents, isGlobalScopedMessageStreamEvent, useSSE } from './useSSE'
 
 class MockEventSource {
     static readonly CONNECTING = 0
@@ -212,14 +212,14 @@ describe('useSSE reconnect handling', () => {
 
         act(() => {
             setVisibilityState('hidden')
-            setVisibilityState('visible')
             document.dispatchEvent(new Event('visibilitychange'))
         })
 
         expect(source?.close).toHaveBeenCalledTimes(1)
 
         act(() => {
-            vi.advanceTimersByTime(1_000)
+            setVisibilityState('visible')
+            document.dispatchEvent(new Event('visibilitychange'))
         })
 
         expect(MockEventSource.instances).toHaveLength(2)
@@ -641,6 +641,17 @@ describe('useSSE native Codex session events', () => {
 })
 
 describe('useSSE session update batching', () => {
+    it('coalesces repeated patches without losing their final fields or order', () => {
+        expect(coalesceSessionCacheEvents([
+            { type: 'session-updated', sessionId: 'session-1', data: { thinking: true } },
+            { type: 'session-updated', sessionId: 'session-2', data: { active: false } },
+            { type: 'session-updated', sessionId: 'session-1', data: { updatedAt: 3 } }
+        ])).toEqual([
+            { type: 'session-updated', sessionId: 'session-2', data: { active: false } },
+            { type: 'session-updated', sessionId: 'session-1', data: { thinking: true, updatedAt: 3 } }
+        ])
+    })
+
     it('applies bursty session patches together after the short interaction window', () => {
         vi.useFakeTimers()
         Object.defineProperty(globalThis, 'EventSource', {

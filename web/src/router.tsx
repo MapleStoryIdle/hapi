@@ -286,6 +286,10 @@ function formatRunnerTime(value: number | null | undefined): string | null {
     return date.toLocaleString()
 }
 
+function formatPercent(value: number): string {
+    return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}%`
+}
+
 function RunnerMetricCard(props: { label: string; value: string; detail?: string; tone?: 'default' | 'ok' | 'warn' }) {
     const toneClass = props.tone === 'ok'
         ? 'text-green-600 dark:text-green-400'
@@ -317,6 +321,7 @@ export function RunnerDetailsPanel(props: { machine: Machine }) {
     const runnerStartedAt = formatRunnerTime(machine.runnerState?.startedAt)
     const lastSeenAt = formatRunnerTime(machine.activeAt)
     const uptimeText = health?.uptimeSeconds !== undefined ? formatMachineUptimeSeconds(health.uptimeSeconds) : null
+    const shapi = health?.shapi
 
     return (
         <div role="dialog" aria-label="Runner 状态" className="absolute left-1/2 top-full z-50 mt-3 max-h-[calc(100dvh-7rem)] w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 overflow-y-auto overscroll-contain rounded-[24px] border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-[0_20px_60px_rgba(15,23,42,0.20)]">
@@ -355,6 +360,32 @@ export function RunnerDetailsPanel(props: { machine: Machine }) {
                         <RunnerMetricCard label="内存" value={ramMetric ? `${ramMetric.percent}%` : '—'} />
                         <RunnerMetricCard label="磁盘" value={diskMetric ? `${diskMetric.percent}%` : '—'} detail={diskDetail} />
                     </div>
+                    {shapi ? (
+                        <div className="mt-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2.5">
+                            <div className="mb-2 flex items-center justify-between gap-2 px-0.5">
+                                <div className="text-xs font-semibold text-[var(--app-fg)]">Runner 占用</div>
+                                <div className="text-[10px] text-[var(--app-hint)]">仅统计 Runner 管理的资源</div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                                <RunnerMetricCard label="CPU" value={formatPercent(shapi.cpuPercent)} />
+                                <RunnerMetricCard label="内存" value={formatBytes(shapi.memoryBytes)} />
+                                <RunnerMetricCard label="磁盘" value={formatBytes(shapi.diskBytes)} />
+                            </div>
+                            <div className="mt-2 grid grid-cols-4 divide-x divide-[var(--app-divider)] rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] py-2 text-center">
+                                {[
+                                    ['进程', shapi.processes.total],
+                                    ['活跃', shapi.processes.active],
+                                    ['睡眠', shapi.processes.sleeping],
+                                    ['其他', shapi.processes.other]
+                                ].map(([label, value]) => (
+                                    <div key={label} className="min-w-0 px-1">
+                                        <div className="text-sm font-semibold text-[var(--app-fg)]">{value}</div>
+                                        <div className="truncate text-[10px] text-[var(--app-hint)]">{label}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ) : null}
                     <RunnerUpdateNotice currentVersion={getMachineRunnerVersion(machine)} />
                 </>
             ) : (

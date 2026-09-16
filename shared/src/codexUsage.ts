@@ -45,6 +45,19 @@ export function getCodexProcessedTotal(usage: Pick<CodexTokenUsage, 'input' | 'o
     return usage.input + usage.output
 }
 
+/** Input that was not served from cache. */
+export function getCodexNonCachedInput(usage: Pick<CodexTokenUsage, 'input' | 'cachedInput'>): number | null {
+    if (usage.input === null || usage.cachedInput === null) return null
+    return Math.max(0, usage.input - usage.cachedInput)
+}
+
+/** Matches Codex TUI blended usage: non-cached input plus output. */
+export function getCodexBlendedTotal(usage: Pick<CodexTokenUsage, 'input' | 'cachedInput' | 'output'>): number | null {
+    const input = getCodexNonCachedInput(usage)
+    if (input === null || usage.output === null) return null
+    return input + usage.output
+}
+
 type CodexUsageAggregateSource = {
     usage: CodexTokenUsage
     model?: string | null

@@ -46,6 +46,7 @@ const harness = vi.hoisted(() => ({
     emitChildWaitStructuredOutput: false,
     emitChildTaskCompleteBeforeMessage: false,
     suppressChildTaskCompleteEvent: false,
+    suppressChildCommandEnd: false,
     emitSecondChildMessage: false,
     emitChildFailureSequence: false,
     emitLateChildCommandAfterParentTool: false,
@@ -691,17 +692,19 @@ vi.mock('./codexAppServerClient', () => {
                     threadId: childThreadId,
                     turnId: childTurnId
                 });
-                const childCommandEnd = {
-                    item: {
-                        id: 'child-cmd-1',
-                        type: 'commandExecution',
-                        exitCode: 0
-                    },
-                    threadId: childThreadId,
-                    turnId: childTurnId
-                };
-                harness.notifications.push({ method: 'item/completed', params: childCommandEnd });
-                this.notificationHandler?.('item/completed', childCommandEnd);
+                if (!harness.suppressChildCommandEnd) {
+                    const childCommandEnd = {
+                        item: {
+                            id: 'child-cmd-1',
+                            type: 'commandExecution',
+                            exitCode: 0
+                        },
+                        threadId: childThreadId,
+                        turnId: childTurnId
+                    };
+                    harness.notifications.push({ method: 'item/completed', params: childCommandEnd });
+                    this.notificationHandler?.('item/completed', childCommandEnd);
+                }
 
                 const childTitleStart = {
                     item: {
@@ -1186,6 +1189,7 @@ describe('codexRemoteLauncher', () => {
         harness.emitChildWaitStructuredOutput = false;
         harness.emitChildTaskCompleteBeforeMessage = false;
         harness.suppressChildTaskCompleteEvent = false;
+        harness.suppressChildCommandEnd = false;
         harness.emitSecondChildMessage = false;
         harness.emitChildFailureSequence = false;
         harness.emitLateChildCommandAfterParentTool = false;
@@ -2171,6 +2175,30 @@ describe('codexRemoteLauncher', () => {
         }));
     });
 
+    it('closes an unfinished child tool when the child becomes terminal', async () => {
+        harness.emitChildThreadEvents = true;
+        harness.suppressChildCommandEnd = true;
+        const { session, codexMessages, getAgentState } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'agent-run-trace',
+            agentId: 'child-thread',
+            message: expect.objectContaining({
+                type: 'tool-call-result',
+                callId: 'child-cmd-1',
+                is_error: true,
+                output: 'Subagent ended before the tool completed',
+                completedAt: expect.any(Number)
+            })
+        }));
+        expect(getAgentState().codex?.subagents?.['child-thread']).toMatchObject({
+            status: 'completed',
+            completedAt: expect.any(Number)
+        });
+    });
+
     it('does not let a trailing generic child failure erase the provider error', async () => {
         harness.emitChildThreadEvents = true;
         harness.emitChildFailureSequence = true;
@@ -2325,7 +2353,7 @@ describe('codexRemoteLauncher', () => {
         }));
     });
 
-    it('does not regress a terminal child after resume_agent when a late command starts', async () => {
+    it('drops a late child command after a terminal child only receives resume_agent bookkeeping', async () => {
         harness.emitChildThreadEvents = true;
         harness.emitParentResumeSuccess = true;
         harness.emitLateChildCommandAfterParentTool = true;
@@ -2333,7 +2361,7 @@ describe('codexRemoteLauncher', () => {
 
         await codexRemoteLauncher(session as never);
 
-        expect(codexMessages).toContainEqual(expect.objectContaining({
+        expect(codexMessages).not.toContainEqual(expect.objectContaining({
             type: 'agent-run-trace',
             agentId: 'child-thread',
             message: expect.objectContaining({
@@ -2347,6 +2375,12 @@ describe('codexRemoteLauncher', () => {
             activity: 'Running command: echo late',
             activityKind: 'running-command',
             status: 'running'
+        }));
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'agent-run-update',
+            agentId: 'child-thread',
+            status: 'canceled',
+            statusText: 'Parent turn completed'
         }));
     });
 

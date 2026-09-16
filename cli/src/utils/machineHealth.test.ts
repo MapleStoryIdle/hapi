@@ -41,4 +41,16 @@ describe('collectMachineHealth', () => {
             expect(second.cpuPercent).toBeLessThanOrEqual(100)
         }
     })
+
+    it('includes validated SHAPI resource usage', () => {
+        const shapi = {
+            cpuPercent: 12.5,
+            memoryBytes: 1024,
+            memoryPercent: 1.2,
+            diskBytes: 2048,
+            diskPath: '/tmp/.hapi',
+            processes: { total: 3, active: 1, sleeping: 2, other: 0 }
+        }
+        expect(collectMachineHealth(1_700_000_000_000, shapi).shapi).toEqual(shapi)
+    })
 })

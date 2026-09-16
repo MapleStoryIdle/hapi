@@ -180,7 +180,10 @@ function listAgentCliStatus(): MachineHealth['agentCli'] {
     }))
 }
 
-export function collectMachineHealth(now: number = Date.now()): MachineHealth {
+export function collectMachineHealth(
+    now: number = Date.now(),
+    shapi?: MachineHealth['shapi']
+): MachineHealth {
     const cpuCount = availableParallelism()
     const memoryPercent = computeMemoryPercent()
     const uptimeSeconds = computeUptimeSeconds()
@@ -206,6 +209,7 @@ export function collectMachineHealth(now: number = Date.now()): MachineHealth {
         ...(memoryPercent !== undefined ? { memoryPercent } : {}),
         ...(uptimeSeconds !== undefined ? { uptimeSeconds } : {}),
         ...(disk !== undefined ? { disk } : {}),
+        ...(shapi !== undefined ? { shapi } : {}),
         ...(network !== undefined ? { networkInterfaces: network } : {}),
         agentCli
     }

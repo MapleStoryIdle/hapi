@@ -945,6 +945,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const pendingAgentTracesByAgentId = new Map<string, unknown[]>();
         const pendingAgentToolInputByCallId = new Map<string, { name: string; input: unknown }>();
         const childAgentRuntimeById = new Map<string, ChildAgentRuntime>();
+        const openChildToolCallsByAgentId = new Map<string, Map<string, number | undefined>>();
         const childAgentConfigurationById = new Map<string, CodexSubagentConfiguration>();
         const usageByThreadId = new Map<string, CodexTokenUsage>();
         const usageByModelAndEffort = new Map<string, CodexUsageBreakdown>();
@@ -1094,17 +1095,78 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             scheduleSubagentStateFlush(flushImmediately);
         };
 
+        const closeActiveChildTools = (
+            agentId: string,
+            runtime: ChildAgentRuntime,
+            reason: string
+        ): void => {
+            const activeCallIds = new Set([
+                ...runtime.activeToolsByCallId.keys(),
+                ...runtime.toolStartedAtByCallId.keys(),
+                ...(openChildToolCallsByAgentId.get(agentId)?.keys() ?? [])
+            ]);
+            for (const callId of activeCallIds) {
+                const completedAt = Date.now();
+                const startedAt = runtime.toolStartedAtByCallId.get(callId)
+                    ?? openChildToolCallsByAgentId.get(agentId)?.get(callId);
+                emitAgentRunEvent({
+                    type: 'agent-run-trace',
+                    agentId,
+                    ...(agentCardByAgentId.get(agentId) ? { cardId: agentCardByAgentId.get(agentId) } : {}),
+                    message: {
+                        type: 'tool-call-result',
+                        callId,
+                        output: reason,
+                        is_error: true,
+                        completedAt,
+                        ...(startedAt !== undefined ? { durationMs: Math.max(0, completedAt - startedAt) } : {}),
+                        id: randomUUID()
+                    }
+                });
+            }
+            openChildToolCallsByAgentId.delete(agentId);
+        };
+
         const markAllActiveSubagents = (status: string, statusText: string): void => {
             for (const snapshot of subagentSnapshotById.values()) {
                 if (isTerminalAgentRunStatus(snapshot.status)) continue;
-                subagentSnapshotById.set(snapshot.id, {
+                const completedAt = Date.now();
+                cancelPendingThrottledAgentRunUpdate(snapshot.id);
+                pendingAgentUpdatesByAgentId.delete(snapshot.id);
+                pendingAgentTracesByAgentId.delete(snapshot.id);
+                const runtime = childAgentRuntimeById.get(snapshot.id);
+                if (runtime) {
+                    closeActiveChildTools(snapshot.id, runtime, statusText);
+                    runtime.terminal = true;
+                    runtime.reasoningProcessor.reset();
+                    runtime.diffProcessor.reset();
+                    runtime.toolStartedAtByCallId.clear();
+                    runtime.activeToolsByCallId.clear();
+                    runtime.pendingTitleByCallId.clear();
+                    runtime.reasoningPreview = '';
+                }
+                agentStatusByAgentId.set(snapshot.id, status);
+                const terminalSnapshot = {
                     ...snapshot,
                     status,
                     statusText,
                     activity: statusText,
                     activityKind: status,
-                    updatedAt: Date.now(),
-                    completedAt: Date.now()
+                    updatedAt: completedAt,
+                    completedAt
+                };
+                subagentSnapshotById.set(snapshot.id, terminalSnapshot);
+                emitAgentRunEvent({
+                    type: 'agent-run-update',
+                    agentId: snapshot.id,
+                    ...(snapshot.cardId ? { cardId: snapshot.cardId } : {}),
+                    ...(snapshot.summary ? { summary: snapshot.summary } : {}),
+                    status,
+                    statusText,
+                    activity: statusText,
+                    activityKind: status,
+                    startedAt: snapshot.startedAt,
+                    completedAt
                 });
             }
             flushSubagentState();
@@ -1444,6 +1506,19 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             const nextStatus = asString(update.status);
             const currentStatus = agentStatusByAgentId.get(agentId);
             const activityKind = asString(update.activityKind ?? update.activity_kind);
+            if (isTerminalAgentRunStatus(nextStatus)) {
+                const runtime = childAgentRuntimeById.get(agentId);
+                if (runtime) {
+                    closeActiveChildTools(agentId, runtime, 'Subagent ended before the tool completed');
+                    runtime.terminal = true;
+                    runtime.reasoningProcessor.reset();
+                    runtime.diffProcessor.reset();
+                    runtime.toolStartedAtByCallId.clear();
+                    runtime.activeToolsByCallId.clear();
+                    runtime.pendingTitleByCallId.clear();
+                    runtime.reasoningPreview = '';
+                }
+            }
             if (
                 isTerminalAgentRunStatus(currentStatus)
                 && !isTerminalAgentRunStatus(nextStatus)
@@ -1772,6 +1847,18 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         };
 
         const emitAgentRunTraceMessage = (agentId: string, message: unknown): void => {
+            const trace = asRecord(message);
+            const traceType = asString(trace?.type);
+            const callId = asString(trace?.callId ?? trace?.call_id);
+            if (callId && traceType === 'tool-call') {
+                const openCalls = openChildToolCallsByAgentId.get(agentId) ?? new Map<string, number | undefined>();
+                openCalls.set(callId, typeof trace?.startedAt === 'number' ? trace.startedAt : undefined);
+                openChildToolCallsByAgentId.set(agentId, openCalls);
+            } else if (callId && traceType === 'tool-call-result') {
+                const openCalls = openChildToolCallsByAgentId.get(agentId);
+                openCalls?.delete(callId);
+                if (openCalls?.size === 0) openChildToolCallsByAgentId.delete(agentId);
+            }
             const cardId = agentCardByAgentId.get(agentId);
             if (!cardId) {
                 const traces = pendingAgentTracesByAgentId.get(agentId) ?? [];
@@ -2092,6 +2179,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             childAgentActivityInCurrentTurn = true;
             const runtime = getChildRuntime(agentId);
             const isChildTerminalEvent = msgType === 'task_complete' || msgType === 'turn_aborted' || msgType === 'task_failed';
+            if (
+                runtime.terminal
+                && msgType !== 'task_started'
+                && msgType !== 'agent_message'
+                && !isChildTerminalEvent
+            ) {
+                return;
+            }
             if (runtime.blockedNestedAgent && !isChildTerminalEvent) {
                 return;
             }
@@ -2460,6 +2555,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 return;
             }
             if (isChildTerminalEvent) {
+                closeActiveChildTools(agentId, runtime, 'Subagent ended before the tool completed');
                 runtime.terminal = true;
                 runtime.reasoningProcessor.reset();
                 runtime.diffProcessor.reset();
@@ -2829,6 +2925,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         `(attempt ${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES}): ${error ?? 'unknown error'}`
                     );
                 }
+                markAllActiveSubagents(
+                    msgType === 'task_failed' ? 'failed' : 'canceled',
+                    msgType === 'task_complete'
+                        ? 'Parent turn completed'
+                        : msgType === 'turn_aborted'
+                            ? 'Parent turn canceled'
+                            : 'Parent turn failed'
+                );
                 this.currentTurnId = null;
                 allowAnonymousTerminalEvent = false;
                 if (isThreadStatusFailure && !shouldRetrySameThread && !shouldCompactAndRetrySameThread) {

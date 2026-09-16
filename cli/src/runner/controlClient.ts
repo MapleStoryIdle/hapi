@@ -10,7 +10,7 @@ import { RUNNER_VERSION } from '@/runnerVersion';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { isBunCompiled, projectPath } from '@/projectPath';
-import { isProcessAlive, isHapiRunnerProcess, killProcess } from '@/utils/process';
+import { isProcessAlive, isHapiRunnerProcess } from '@/utils/process';
 import { configuration } from '@/configuration';
 import { hashRunnerCliApiToken, isRunnerStateCompatibleWithIdentity } from './runnerIdentity';
 
@@ -51,6 +51,14 @@ async function runnerPost(path: string, body?: any): Promise<{ error?: string } 
     return {
       error: errorMessage
     };
+  }
+
+  // State is only process coordination, not an authority token. Refuse to
+  // send control requests when the claimed Runner cannot be identified.
+  if (!isHapiRunnerProcess(state.pid)) {
+    const errorMessage = 'Runner identity could not be verified; refusing control request';
+    logger.debug(`[CONTROL CLIENT] ${errorMessage}`);
+    return { error: errorMessage };
   }
 
   try {
@@ -151,13 +159,19 @@ export async function checkIfRunnerRunningAndCleanupStaleState(): Promise<boolea
     return false;
   }
 
-  // Verify PID is alive AND belongs to hapi (not a reused PID from another process)
+  if (!isProcessAlive(state.pid)) {
+    logger.debug('[RUNNER RUN] Runner PID is dead, cleaning up stale state');
+    await cleanupRunnerState();
+    return false;
+  }
+
+  // Command inspection is a non-destructive liveness check only. A live PID
+  // that cannot be inspected is not stale: preserve its coordination state.
   if (isHapiRunnerProcess(state.pid)) {
     return true;
   }
 
-  logger.debug('[RUNNER RUN] Runner PID not running or not a hapi process, cleaning up state');
-  await cleanupRunnerState();
+  logger.debug('[RUNNER RUN] Runner PID is live but identity is unverified; preserving state and refusing cleanup');
   return false;
 }
 
@@ -260,7 +274,7 @@ export async function waitForRunnerHandoff(
   while (Date.now() < deadline) {
     try {
       const state = await readRunnerState();
-      if (state && state.pid !== oldPid && isProcessAlive(state.pid)) {
+      if (state && state.pid !== oldPid && isHapiRunnerProcess(state.pid)) {
         logger.debug(`[RUNNER CONTROL] Handoff confirmed: new runner PID ${state.pid} replaced ${oldPid}`);
         return true;
       }
@@ -301,18 +315,16 @@ export async function stopRunner() {
       logger.debug('Runner stopped gracefully via HTTP');
       return;
     } catch (error) {
-      logger.debug('HTTP stop failed, will force kill', error);
+      logger.debug('HTTP graceful stop failed; refusing force kill', error);
     }
 
-    // Force kill
-    const killed = await killProcess(state.pid, true);
-    if (killed) {
-      logger.debug('Force killed runner');
-    } else {
-      logger.debug('Runner already dead or could not be killed');
-    }
+    // A PID in runner.state.json is not enough to authorize a signal. Leave
+    // a non-responsive Runner for explicit operator confirmation/cleanup.
+    logger.debug('Runner did not stop via verified control endpoint; refusing PID force-kill');
+    throw new Error('Runner did not stop through its verified control endpoint; no PID signal was sent');
   } catch (error) {
     logger.debug('Error stopping runner', error);
+    throw error;
   }
 }
 

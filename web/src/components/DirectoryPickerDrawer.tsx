@@ -19,7 +19,7 @@ export function DirectoryPickerDrawer(props: Omit<ComponentProps<typeof Workspac
             fixedHeight
             density="compact"
             desktopDialog
-            desktopClassName="h-[70dvh] max-w-3xl"
+            desktopClassName="max-w-3xl"
             bodyClassName="file-browser-surface directory-picker-body flex flex-col p-0"
         >
             <div className="min-h-0 flex-1">

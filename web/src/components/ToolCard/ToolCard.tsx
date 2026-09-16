@@ -1,7 +1,7 @@
 import type { ToolCallBlock } from '@/chat/types'
 import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
-import { memo, useContext, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { memo, useContext, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { NativeQuestionCards } from '@/components/NativeQuestionCards'
 import { isObject, safeStringify } from '@hapi/protocol'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,8 +30,7 @@ import { formatTerminalExecutionDuration, getTerminalExecutionToolState, isTermi
 import { TerminalExecutionDrawer } from '@/components/ToolCard/TerminalExecutionDrawer'
 import { getTerminalReadRequest } from '@/components/ToolCard/fileAccess'
 import { getFileMutationDialogSummary } from '@/components/ToolCard/fileMutationDetail'
-
-const ELAPSED_INTERVAL_MS = 1000
+import { useSharedNow } from '@/hooks/useSharedNow'
 
 export const FILE_MUTATION_DIALOG_CLASS_NAME = 'flex flex-col overflow-hidden sm:h-[min(75dvh,50rem)] sm:max-h-[calc(100dvh-2rem)]'
 
@@ -52,14 +51,7 @@ export function shouldShowInlineToolCardBody(
 }
 
 function ElapsedView(props: { from: number; active: boolean }) {
-    const [now, setNow] = useState(() => Date.now())
-
-    useEffect(() => {
-        if (!props.active) return
-        setNow(Date.now())
-        const id = setInterval(() => setNow(Date.now()), ELAPSED_INTERVAL_MS)
-        return () => clearInterval(id)
-    }, [props.active, props.from])
+    const now = useSharedNow(props.active)
 
     if (!props.active) return null
 
@@ -110,14 +102,7 @@ function ActivityToolTiming(props: { block: ToolCallBlock }) {
     const { t } = useTranslation()
     const active = props.block.tool.state === 'pending' || props.block.tool.state === 'running'
     const startedAt = props.block.tool.startedAt ?? props.block.tool.createdAt
-    const [now, setNow] = useState(() => Date.now())
-
-    useEffect(() => {
-        if (!active) return
-        setNow(Date.now())
-        const id = setInterval(() => setNow(Date.now()), ELAPSED_INTERVAL_MS)
-        return () => clearInterval(id)
-    }, [active, startedAt])
+    const now = useSharedNow(active)
 
     const duration = formatTerminalExecutionDuration(getActivityToolDurationMs(props.block, now)) ?? '0.0s'
     const state = props.block.tool.state

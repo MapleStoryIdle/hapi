@@ -219,6 +219,18 @@ export function getPullToLoadOlderIndicator(params: {
     }
 }
 
+export function shouldShowHistoryLoadingNotice(params: {
+    isLoadingOlder: boolean
+    isLoadingNewer: boolean
+    loadLocked: boolean
+    showRestoredNotice: boolean
+    pullToLoadLoading: boolean
+}): boolean {
+    return params.isLoadingNewer || (!params.pullToLoadLoading && (
+        params.isLoadingOlder || (params.loadLocked && !params.showRestoredNotice)
+    ))
+}
+
 export function captureScrollAnchor(
     viewport: HTMLElement,
     edge: 'top' | 'bottom' = 'top'
@@ -1441,8 +1453,13 @@ export function HappyThread(props: {
         loading: pullToLoadLoading,
         distancePx: pullToLoadDistance
     })
-    const showHistoryLoadingNotice = props.isLoadingMoreMessages || props.isLoadingNewerMessages
-        || (loadLockRef.current && !showHistoryRestoredNotice)
+    const showHistoryLoadingNotice = shouldShowHistoryLoadingNotice({
+        isLoadingOlder: props.isLoadingMoreMessages,
+        isLoadingNewer: props.isLoadingNewerMessages,
+        loadLocked: loadLockRef.current,
+        showRestoredNotice: showHistoryRestoredNotice,
+        pullToLoadLoading
+    })
     const historyNoticeTop = `calc(var(${MOBILE_LAYOUT_CONTRACT.thread.topSafeAreaVariable}) + ${(props.topInset ?? 0) + 8}px)`
 
     return (

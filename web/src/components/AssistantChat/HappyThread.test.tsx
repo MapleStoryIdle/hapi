@@ -8,6 +8,7 @@ import {
     captureScrollAnchor,
     getThreadContentPadding,
     getPullToLoadOlderIndicator,
+    shouldShowHistoryLoadingNotice,
     getScrollIntent,
     locateOutlineTargetMessage,
     restoreScrollAnchor,
@@ -350,6 +351,30 @@ describe('pull-to-load-older helpers', () => {
             phase: 'loading',
             progress: 1
         })
+    })
+
+    it('shows only the pull indicator while pull-to-load is fetching older messages', () => {
+        expect(shouldShowHistoryLoadingNotice({
+            isLoadingOlder: true,
+            isLoadingNewer: false,
+            loadLocked: true,
+            showRestoredNotice: false,
+            pullToLoadLoading: true
+        })).toBe(false)
+        expect(shouldShowHistoryLoadingNotice({
+            isLoadingOlder: true,
+            isLoadingNewer: false,
+            loadLocked: true,
+            showRestoredNotice: false,
+            pullToLoadLoading: false
+        })).toBe(true)
+        expect(shouldShowHistoryLoadingNotice({
+            isLoadingOlder: false,
+            isLoadingNewer: true,
+            loadLocked: false,
+            showRestoredNotice: false,
+            pullToLoadLoading: true
+        })).toBe(true)
     })
 })
 

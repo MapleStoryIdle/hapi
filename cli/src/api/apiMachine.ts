@@ -26,6 +26,7 @@ import type {
     Update,
     UpdateMachineBody
 } from '@hapi/protocol'
+import type { MachineHealth } from '@hapi/protocol/types'
 import {
     MachineGitBranchCreateRequestSchema,
     MachineGitBranchCommitRequestSchema,
@@ -129,6 +130,7 @@ import { applyVersionedAck } from './versionedUpdate'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { asHubAuth, type HubAuth } from '@/authV2/runnerAuth'
 import { collectMachineHealth } from '@/utils/machineHealth'
+import { collectShapiResourceUsage, stopShapiResourceUsageCollection } from '@/utils/shapiResourceUsage'
 import { readGeneratedImageFileBytes, readSessionFileBytes } from '@/modules/common/handlers/files'
 import { readUploadFileBytes } from '@/modules/common/handlers/uploads'
 import { expandManagedSkillInvocation, listManagedSkillInventory, reconcileManagedSkill, removeManagedSkill } from '@/managedSkills'
@@ -140,7 +142,7 @@ type NativeCodexArchiveClient = Pick<CodexAppServerClient, 'connect' | 'initiali
 
 type MachineRpcHandlers = {
     spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>
-    stopSession: (sessionId: string) => boolean
+    stopSession: (sessionId: string) => boolean | Promise<boolean>
     requestShutdown: () => void
     recoverCodexControl?: (input: { threadId: string; recoveryRequestId: string; cwd: string }) => { status: 'pending' | 'ready' | 'unconfirmed'; recoveryRequestId: string; sessionId?: string; error?: string }
     getCodexRecovery?: (threadId: string) => { status: 'pending' | 'ready' | 'unconfirmed'; recoveryRequestId: string; sessionId?: string; error?: string } | null
@@ -372,6 +374,9 @@ export class ApiMachineClient {
     private socket!: Socket<ServerToClientEvents, ClientToServerEvents>
     private keepAliveInterval: NodeJS.Timeout | null = null
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
+    private healthCollectionInFlight = false
+    private healthCollectionRun = 0
+    private latestShapiResources: MachineHealth['shapi'] | undefined
     private codexSshOwnershipMonitor: ReturnType<typeof setInterval> | null = null
     private nativeCodexAttachmentCleanupTimer: ReturnType<typeof setInterval> | null = null
     private nativeControlRecoveryStatus: ((threadId: string) => { status: 'pending' | 'ready' | 'unconfirmed' } | null) | null = null
@@ -1249,13 +1254,13 @@ export class ApiMachineClient {
             }
         })
 
-        this.rpcHandlerManager.registerHandler(RPC_METHODS.StopSession, (params: any) => {
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.StopSession, async (params: any) => {
             const { sessionId } = params || {}
             if (!sessionId) {
                 throw new Error('Session ID is required')
             }
 
-            const success = stopSession(sessionId)
+            const success = await stopSession(sessionId)
             if (!success) {
                 throw new Error('Session not found or failed to stop')
             }
@@ -1930,11 +1935,31 @@ export class ApiMachineClient {
     private startKeepAlive(): void {
         this.stopKeepAlive()
         const emitAlive = () => {
+            const time = Date.now()
+            const health = collectMachineHealth(time, this.latestShapiResources)
             this.socket.emit('machine-alive', {
                 machineId: this.machine.id,
-                time: Date.now(),
-                health: collectMachineHealth()
+                time,
+                health
             })
+            if (this.healthCollectionInFlight) return
+            this.healthCollectionInFlight = true
+            const collectionRun = ++this.healthCollectionRun
+            void collectShapiResourceUsage(this.machine.id, time)
+                .then((shapi) => {
+                    if (collectionRun !== this.healthCollectionRun || shapi === undefined) return
+                    this.latestShapiResources = shapi
+                    this.socket.emit('machine-alive', {
+                        machineId: this.machine.id,
+                        time,
+                        health: { ...health, shapi }
+                    })
+                })
+                .catch(() => {})
+                .finally(() => {
+                    if (collectionRun !== this.healthCollectionRun) return
+                    this.healthCollectionInFlight = false
+                })
         }
         // Prime CPU sampling so the first heartbeat already includes CPU %.
         collectMachineHealth()
@@ -1946,6 +1971,9 @@ export class ApiMachineClient {
     }
 
     private stopKeepAlive(): void {
+        this.healthCollectionRun += 1
+        this.healthCollectionInFlight = false
+        stopShapiResourceUsageCollection()
         if (this.keepAliveStartTimeout) {
             clearTimeout(this.keepAliveStartTimeout)
             this.keepAliveStartTimeout = null
