@@ -182,7 +182,7 @@ export class MonitoringService {
 
     close(monitor: StoredMonitor, id: string): boolean {
         const event = this.store.monitors.getIncident(id)
-        if (!event || event.monitorId !== monitor.id || ['starting', 'investigating', 'repair_starting', 'repairing'].includes(event.state)) return false
+        if (!event || event.monitorId !== monitor.id || event.state === 'closed') return false
         return this.store.monitors.transition(id, event.state, 'closed')
     }
 

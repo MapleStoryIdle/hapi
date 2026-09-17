@@ -72,11 +72,40 @@ describe('normalizeExplicitSkillUsage', () => {
         expect(normalized[1]).toBe(result)
     })
 
-    it('keeps an ordinary SKILL.md read when it lacks a matching explicit announcement', () => {
+    it('hides SKILL.md content even when the preceding announcement names another skill', () => {
         const intro = agentText('intro', '使用 `imagegen`：生成预览图。')
         const read = shellRead('read-other-skill', "/bin/zsh -lc 'cat /Users/alice/.codex/skills/.system/frontend-design/SKILL.md'")
         const blocks: ChatBlock[] = [intro, read]
 
-        expect(normalizeExplicitSkillUsage(blocks)).toEqual(blocks)
+        expect(normalizeExplicitSkillUsage(blocks)).toEqual([
+            intro,
+            expect.objectContaining({
+                kind: 'tool-call',
+                id: 'skill:read-other-skill',
+                tool: expect.objectContaining({
+                    name: 'Skill',
+                    input: { skill: 'frontend-design' },
+                    description: 'Read skill instructions',
+                    result: null,
+                })
+            })
+        ])
+    })
+
+    it('hides a standalone SKILL.md result without requiring assistant narration', () => {
+        const read = shellRead('read-skill', "sed -n '1,220p' /Users/alice/.agents/skills/ui-ux-pro-max/SKILL.md")
+
+        const normalized = normalizeExplicitSkillUsage([read])
+
+        expect(normalized).toHaveLength(1)
+        expect(normalized[0]).toMatchObject({
+            kind: 'tool-call',
+            tool: {
+                name: 'Skill',
+                input: { skill: 'ui-ux-pro-max' },
+                result: null,
+            }
+        })
+        expect(JSON.stringify(normalized)).not.toContain('# imagegen instructions')
     })
 })

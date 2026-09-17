@@ -83,9 +83,10 @@ function createSyntheticSkillBlock(source: ToolCallBlock, skill: string, descrip
 }
 
 /**
- * Older Codex transcripts represent skill loading as an explanatory assistant
- * message followed by a shell read of that skill's SKILL.md. Normalize only
- * that paired shape into the same standalone Skill card used by native events.
+ * Codex loads a skill by reading its SKILL.md. The file body is internal prompt
+ * material, not conversation content, so always collapse that read into the
+ * same compact Skill card used by native events. When an adjacent announcement
+ * names the same skill, fold that sentence into the card as its description.
  */
 export function normalizeExplicitSkillUsage(blocks: ChatBlock[]): ChatBlock[] {
     const normalized: ChatBlock[] = []
@@ -93,20 +94,29 @@ export function normalizeExplicitSkillUsage(blocks: ChatBlock[]): ChatBlock[] {
     for (let index = 0; index < blocks.length; index += 1) {
         const block = blocks[index]!
         const next = blocks[index + 1]
-        if (block.kind !== 'agent-text' || next?.kind !== 'tool-call') {
-            normalized.push(block)
-            continue
+        if (block.kind === 'agent-text' && next?.kind === 'tool-call') {
+            const announcedSkill = detectExplicitSkillName(block.text)
+            const readSkill = getReadSkillName(next)
+            if (announcedSkill && readSkill && sameSkillName(announcedSkill, readSkill)) {
+                normalized.push(createSyntheticSkillBlock(next, announcedSkill, block.text))
+                index += 1
+                continue
+            }
         }
 
-        const announcedSkill = detectExplicitSkillName(block.text)
-        const readSkill = getReadSkillName(next)
-        if (!announcedSkill || !readSkill || !sameSkillName(announcedSkill, readSkill)) {
-            normalized.push(block)
-            continue
+        if (block.kind === 'tool-call') {
+            const readSkill = getReadSkillName(block)
+            if (readSkill) {
+                normalized.push(createSyntheticSkillBlock(
+                    block,
+                    readSkill,
+                    block.tool.description ?? `Using ${readSkill}`
+                ))
+                continue
+            }
         }
 
-        normalized.push(createSyntheticSkillBlock(next, announcedSkill, block.text))
-        index += 1
+        normalized.push(block)
     }
 
     return normalized

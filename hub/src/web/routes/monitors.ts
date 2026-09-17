@@ -422,7 +422,7 @@ export function createMonitorRoutes(store: Store, getEngine: () => SyncEngine | 
     app.post('/monitors/:id/incidents/:incidentId/close', (c) => {
         const monitor = store.monitors.get(c.req.param('id'), c.get('namespace'))
         if (!monitor) return c.json({ error: 'Monitor not found' }, 404)
-        return getService()?.close(monitor, c.req.param('incidentId')) ? c.json({ accepted: true }) : c.json({ error: 'Stop the running session before closing this event' }, 409)
+        return getService()?.close(monitor, c.req.param('incidentId')) ? c.json({ accepted: true }) : c.json({ error: 'This incident was already closed or changed. Refresh and try again.' }, 409)
     })
     return app
 }

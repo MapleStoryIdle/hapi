@@ -101,13 +101,6 @@ export function FilePreview({ preview }: { preview: ChatFilePreview }) {
         return () => URL.revokeObjectURL(url)
     }, [blob.data])
     const decoded = decodeBase64(file.data?.content ?? '')
-    const lineRef = useRef<HTMLDivElement>(null)
-    useEffect(() => {
-        // Scroll only the drawer body, never the background chat.
-        const line = lineRef.current
-        const body = line?.closest<HTMLElement>('[data-chat-drawer-body]')
-        if (line && body) body.scrollTop += line.getBoundingClientRect().top - body.getBoundingClientRect().top - 16
-    }, [file.data, preview.line, mode])
     const query = image ? blob : mode === 'diff' ? diff : file
     if (query.isPending) return <p role="status" className="chat-sheet-feedback">{t('loading')}</p>
     if (query.error) return <FilePreviewState issue={classifyFilePreviewError(query.error)} busy={query.isFetching} retry={() => { void query.refetch() }} />
@@ -130,9 +123,11 @@ export function FilePreview({ preview }: { preview: ChatFilePreview }) {
                     : decoded.text.includes('\0') ? <FilePreviewState issue="unsupported" />
                     : decoded.text.length === 0 ? <FilePreviewState issue="empty" />
                     : mode === 'preview' ? <MarkdownRenderer content={decoded.text} standalone />
-                        : preview.line ? <div className="overflow-x-auto font-mono text-xs leading-6">{decoded.text.split('\n').map((line, index) =>
-                            <div key={index} ref={index + 1 === preview.line ? lineRef : undefined} className={index + 1 === preview.line ? 'whitespace-pre bg-[var(--app-subtle-bg)]' : 'whitespace-pre'}><span className="mr-3 inline-block w-9 text-right text-[var(--app-hint)]">{index + 1}</span>{line || ' '}</div>)}</div>
-                            : <CodeBlock code={decoded.text} language={preview.path.split('.').pop()} />}
+                        : <CodeBlock
+                            code={decoded.text}
+                            language={extension}
+                            highlightLine={preview.line}
+                        />}
     </div>
 }
 

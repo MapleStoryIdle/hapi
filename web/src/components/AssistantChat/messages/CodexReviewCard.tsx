@@ -26,6 +26,11 @@ function getPriorityClassName(priority: number | null): string {
     return 'border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'
 }
 
+function formatFindingTitle(finding: CodexReviewFinding): string {
+    if (finding.priority === null) return finding.title
+    return finding.title.replace(new RegExp(`^\\[P${finding.priority}\\]\\s*`, 'i'), '')
+}
+
 function ReviewBadge(props: { children: string; className?: string }) {
     return (
         <span className={cn('inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium leading-4', props.className)}>
@@ -48,7 +53,7 @@ function FindingItem(props: { finding: CodexReviewFinding }) {
                     </ReviewBadge>
                 ) : null}
                 <div className="min-w-0 flex-1 text-sm font-semibold leading-6 text-[var(--app-fg)]">
-                    {props.finding.title}
+                    {formatFindingTitle(props.finding)}
                 </div>
             </div>
             <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--app-fg)]">

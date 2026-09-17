@@ -13,7 +13,11 @@ const copyPath = vi.hoisted(() => vi.fn(async () => true))
 vi.mock('@/hooks/useCopyToClipboard', () => ({ useCopyToClipboard: () => ({ copy: copyPath, copied: false }) }))
 
 vi.mock('@/components/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <p>{content}</p> }))
-vi.mock('@/components/CodeBlock', () => ({ CodeBlock: ({ code }: { code: string }) => <pre>{code}</pre> }))
+vi.mock('@/components/CodeBlock', () => ({
+    CodeBlock: ({ code, language, highlightLine }: { code: string; language?: string; highlightLine?: number }) => (
+        <pre data-language={language} data-highlight-line={highlightLine}>{code}</pre>
+    )
+}))
 afterEach(() => { cleanup(); copyPath.mockClear(); vi.useRealTimers(); vi.restoreAllMocks() })
 
 function show(preview: ChatPreview, strict = false, api?: ApiClient) {
@@ -32,6 +36,22 @@ it('loads a native file from its source machine without managed-session APIs', a
     expect(document.querySelector('.chat-detail-tabs')).toBeNull()
     expect(document.querySelector('.chat-web-preview-body')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Changes' })).not.toBeInTheDocument()
+})
+
+it('keeps syntax highlighting when opening a Java file at a specific line', async () => {
+    const source = 'public class CabinetThirdAccountHelp {}'
+    const read = vi.fn().mockResolvedValue({ success: true, content: btoa(source) })
+    show({
+        type: 'file',
+        api: { readCodexSessionFile: read } as unknown as ApiClient,
+        source: { type: 'native-codex', sessionId: 'n1', machineId: 'm1' },
+        path: 'CabinetThirdAccountHelp.java',
+        line: 1
+    })
+
+    const code = await screen.findByText(source)
+    expect(code).toHaveAttribute('data-language', 'java')
+    expect(code).toHaveAttribute('data-highlight-line', '1')
 })
 
 it.each(['png', 'JPG', 'webp', 'svg'])('previews native %s images as blobs and releases the URL on close', async (extension) => {

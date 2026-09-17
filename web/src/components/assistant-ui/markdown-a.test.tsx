@@ -850,6 +850,37 @@ describe('mobile chat preview routing', () => {
         expect(open).toHaveBeenCalledWith(expect.objectContaining({ type: 'file', source, path: './src/index.ts', line: 12 }))
         expect(routerMocks.navigate).not.toHaveBeenCalled()
     })
+    it('previews a copied same-origin workspace file URL in the file drawer', () => {
+        const open = vi.fn(() => true)
+        vi.spyOn(chatPreview, 'useChatPreview').mockReturnValue(open)
+        const workspacePath = '/Users/dev/.codex/worktrees/jikeyun/homebar-cloud'
+        const filePath = `${workspacePath}/src/main/java/CabinetThirdAccountHelp.java`
+        const href = `${window.location.origin}${filePath}#L85-L117`
+
+        renderAInChat({ href, children: 'CabinetThirdAccountHelp.java' }, { workspacePath })
+        const link = screen.getByRole('link', { name: 'CabinetThirdAccountHelp.java' })
+        expect(link).toHaveAttribute('data-hapi-file-link', 'true')
+        fireEvent.click(link)
+
+        expect(open).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'file',
+            path: filePath,
+            line: 85
+        }))
+        expect(routerMocks.navigate).not.toHaveBeenCalled()
+    })
+    it('compacts a visible same-origin workspace URL without losing its line range', () => {
+        const workspacePath = '/Users/dev/.codex/worktrees/jikeyun/homebar-cloud'
+        const filePath = `${workspacePath}/src/main/java/CabinetThirdAccountHelp.java`
+        const href = `${window.location.origin}${filePath}#L85-L117`
+
+        renderAInChat({ href, children: href }, { workspacePath })
+
+        const link = screen.getByRole('link', { name: 'CabinetThirdAccountHelp.java:85-117' })
+        expect(link).toHaveAttribute('title', `${filePath}:85-117`)
+        expect(link).not.toHaveTextContent(window.location.origin)
+        expect(link).not.toHaveTextContent(workspacePath)
+    })
     it('previews local services with an authenticated request, not the phone localhost', () => {
         const open = vi.fn(() => true)
         vi.spyOn(chatPreview, 'useChatPreview').mockReturnValue(open)

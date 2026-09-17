@@ -7,7 +7,7 @@ import {
     getResponseGroupScrollAnchors,
     toThreadMessageLike
 } from './assistant-runtime'
-import type { AgentEventBlock, AgentTextBlock, CliOutputBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
+import type { AgentEventBlock, AgentTextBlock, CliOutputBlock, CodexReviewBlock, ToolCallBlock, UserTextBlock } from '@/chat/types'
 import type { ToolGroupBlock, VisibleChatBlock } from '@/chat/toolGroups'
 import type { QuestionAnswerBlock } from '@/chat/questionAnswers'
 
@@ -79,6 +79,29 @@ function cliOutput(id: string, source: CliOutputBlock['source'], overrides: Part
     }
 }
 
+function codexReview(id: string): CodexReviewBlock {
+    return {
+        kind: 'codex-review',
+        id,
+        localId: null,
+        createdAt: 0,
+        review: {
+            overallCorrectness: null,
+            overallExplanation: null,
+            overallConfidenceScore: null,
+            findings: [{
+                title: '[P1] 骑手设备权限未限制任务类型',
+                body: '权限范围过宽。',
+                priority: 1,
+                confidenceScore: null,
+                filePath: '/repo/CabinetThirdAccountHelp.java',
+                lineStart: 85,
+                lineEnd: 117
+            }]
+        }
+    }
+}
+
 function questionAnswer(id: string, overrides: Partial<QuestionAnswerBlock> = {}): QuestionAnswerBlock {
     return {
         kind: 'question-answer',
@@ -143,6 +166,19 @@ describe('assignThreadMessageIds', () => {
         expect(second[0]).toBe(first[0])
         expect(second[0].threadMessageId).toBe('agent-text:a')
         expect(second[1].threadMessageId).toBe('user-text:u')
+    })
+})
+
+describe('Codex review messages', () => {
+    it('does not repeat the priority and keeps the file range together', () => {
+        const message = toThreadMessageLike(codexReview('review'), 'codex-review:review')
+        const content = message.content[0]
+
+        expect(content).toMatchObject({ type: 'text' })
+        if (typeof content === 'string' || content.type !== 'text') throw new Error('Expected text content')
+        expect(content.text).toContain('[P1] 骑手设备权限未限制任务类型')
+        expect(content.text).not.toContain('[P1] [P1]')
+        expect(content.text).toContain('/repo/CabinetThirdAccountHelp.java:85-117')
     })
 })
 

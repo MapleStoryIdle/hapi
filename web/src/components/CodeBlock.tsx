@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useEffect, useRef, type CSSProperties } from 'react'
 import { Check as CheckIconNode, Copy as CopyIconNode } from 'lucide'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useShikiHighlighter } from '@/lib/shiki'
@@ -42,6 +42,7 @@ export function CodeBlock(props: {
     size?: 'compact' | 'comfortable'
     collapseLineThreshold?: number
     collapseCharThreshold?: number
+    highlightLine?: number
 }) {
     const { t } = useTranslation()
     const showCopyButton = props.showCopyButton ?? true
@@ -58,6 +59,17 @@ export function CodeBlock(props: {
         ? 'text-[0.95rem] leading-6'
         : 'text-[0.875rem] leading-6'
     const lineCount = countCodeLines(props.code)
+    const highlightLine = props.highlightLine && props.highlightLine > 0 && props.highlightLine <= lineCount
+        ? props.highlightLine
+        : null
+    const highlightRef = useRef<HTMLDivElement>(null)
+    useEffect(() => {
+        const line = highlightRef.current
+        const drawer = line?.closest<HTMLElement>('[data-chat-drawer-body]')
+        if (line && drawer) {
+            drawer.scrollTop += line.getBoundingClientRect().top - drawer.getBoundingClientRect().top - 16
+        }
+    }, [highlightLine, props.code])
     const lineNumberWidth = Math.max(String(lineCount).length, 3)
     const lineNumbers = Array.from({ length: lineCount }, (_, index) => String(index + 1)).join('\n')
     const label = formatCodeLabel(props.language, props.title)
@@ -100,14 +112,22 @@ export function CodeBlock(props: {
                 className="min-w-0 w-full max-w-full overflow-x-auto"
                 style={bodyStyle}
             >
-                <div className={`grid w-max min-w-full font-mono ${codeTextClass}`} style={codeGridStyle}>
+                <div className={`relative grid w-max min-w-full font-mono ${codeTextClass}`} style={codeGridStyle}>
+                    {highlightLine !== null ? (
+                        <div
+                            ref={highlightRef}
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-x-0 h-6 bg-[var(--app-subtle-bg)]"
+                            style={{ top: `${(highlightLine - 1) * 1.5}rem` }}
+                        />
+                    ) : null}
                     <pre
                         aria-hidden="true"
-                        className="m-0 select-none px-4 pb-2 pt-0 text-left text-[var(--app-hint)]/65"
+                        className="relative z-[1] m-0 select-none px-4 pb-2 pt-0 text-left text-[var(--app-hint)]/65"
                     >
                         {lineNumbers}
                     </pre>
-                    <pre className="shiki m-0 px-4 pb-2 pt-0 pr-5">
+                    <pre className="shiki relative z-[1] m-0 px-4 pb-2 pt-0 pr-5">
                         <code className="block">{highlighted ?? props.code}</code>
                     </pre>
                 </div>

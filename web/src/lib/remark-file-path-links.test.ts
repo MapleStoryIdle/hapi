@@ -5,6 +5,7 @@ import {
     isProjectFilePathTarget,
     parseAbsoluteFilePathHref,
     parseProjectFilePathHref,
+    parseSameOriginProjectFileUrl,
     remarkFilePathLinks,
     type FilePathLinkOptions
 } from '@/lib/remark-file-path-links'
@@ -66,6 +67,19 @@ describe('remarkFilePathLinks', () => {
             line: 42,
             column: 7
         })
+    })
+
+    it('keeps a line range inside one file link', () => {
+        const nodes = transform('Open web/src/router.tsx:42-57 please')
+        const link = nodes.find((node) => node.type === 'link')
+
+        expect(link?.children?.[0]?.value).toBe('web/src/router.tsx:42-57')
+        expect(decodeFilePathLinkHref(link!.url!)).toEqual({
+            path: 'web/src/router.tsx',
+            line: 42,
+            lineEnd: 57
+        })
+        expect(nodes.some((node) => node.type === 'text' && node.value?.startsWith('-57'))).toBe(false)
     })
 
     it('links image and markdown filenames for preview', () => {
@@ -172,6 +186,24 @@ describe('remarkFilePathLinks', () => {
             path: '/Users/alice/Projects/other-project/doc/中文 文件.md',
             line: 42
         })
+    })
+
+    it('recovers a same-origin absolute workspace URL with a line fragment', () => {
+        const workspacePath = '/Users/dev/.codex/worktrees/jikeyun/homebar-cloud'
+        const filePath = `${workspacePath}/src/main/java/CabinetThirdAccountHelp.java`
+
+        expect(parseSameOriginProjectFileUrl(
+            `https://hapi.example${filePath}#L85-L117`,
+            { origin: 'https://hapi.example', workspacePath }
+        )).toEqual({ path: filePath, line: 85, lineEnd: 117 })
+        expect(parseSameOriginProjectFileUrl(
+            `https://other.example${filePath}#L85`,
+            { origin: 'https://hapi.example', workspacePath }
+        )).toBeNull()
+        expect(parseSameOriginProjectFileUrl(
+            'https://hapi.example/settings#L85',
+            { origin: 'https://hapi.example', workspacePath }
+        )).toBeNull()
     })
 
     it('recognizes encoded absolute traversal for unavailable chips but rejects viewer access', () => {

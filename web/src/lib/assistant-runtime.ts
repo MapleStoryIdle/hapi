@@ -95,10 +95,13 @@ function formatCodexReviewText(review: CodexReview): string {
         lines.push('', 'Findings:')
         for (const finding of review.findings) {
             const priority = finding.priority === null ? '' : `[P${finding.priority}] `
+            const title = finding.priority === null
+                ? finding.title
+                : finding.title.replace(new RegExp(`^\\[P${finding.priority}\\]\\s*`, 'i'), '')
             const location = finding.filePath
                 ? ` (${finding.filePath}${finding.lineStart === null ? '' : `:${finding.lineStart}${finding.lineEnd !== null && finding.lineEnd !== finding.lineStart ? `-${finding.lineEnd}` : ''}`})`
                 : ''
-            lines.push(`- ${priority}${finding.title}${location}`)
+            lines.push(`- ${priority}${title}${location}`)
             lines.push(`  ${finding.body}`)
         }
     }

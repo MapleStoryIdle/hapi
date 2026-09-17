@@ -105,7 +105,7 @@ describe('MonitorIncidentCard', () => {
         await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
     })
 
-    it('does not offer an invalid close while an investigation is running and points to its session', () => {
+    it('allows a running investigation workflow to be closed without hiding its session', async () => {
         const running = {
             ...reviewIncident(),
             state: 'investigating' as const,
@@ -114,27 +114,36 @@ describe('MonitorIncidentCard', () => {
             approvalContext: undefined,
             sessionId: 'session-running'
         }
+        const closeMonitorIncident = vi.fn().mockResolvedValue({ accepted: true })
+        const onChanged = vi.fn().mockResolvedValue(undefined)
 
         render(
             <I18nProvider>
                 <MonitorIncidentCard
-                    api={{ approveMonitorIncident: vi.fn(), closeMonitorIncident: vi.fn() } as unknown as ApiClient}
+                    api={{ approveMonitorIncident: vi.fn(), closeMonitorIncident } as unknown as ApiClient}
                     monitorId="monitor-1"
                     incident={running}
                     locale="en-US"
                     t={(key) => ({
                         'monitors.incident.state.investigating': 'Investigating',
                         'monitors.incident.investigationSession': 'Investigation session',
-                        'monitors.incident.closeRunningHint': 'Open its session to stop it before closing this event.'
+                        'monitors.incident.close': 'Close incident',
+                        'monitors.incident.closeConfirm.title': 'Close this incident?',
+                        'monitors.incident.closeConfirm.description': 'Close tracking without stopping the session.',
+                        'monitors.incident.closeConfirm.confirm': 'Close incident',
+                        'monitors.incident.closeConfirm.confirming': 'Closing…'
                     }[key] ?? key)}
-                    onChanged={vi.fn().mockResolvedValue(undefined)}
+                    onChanged={onChanged}
                 />
             </I18nProvider>
         )
 
-        expect(screen.queryByRole('button', { name: 'monitors.incident.close' })).not.toBeInTheDocument()
-        expect(screen.getByText('Open its session to stop it before closing this event.')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'Investigation session' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Close incident' }))
+        expect(screen.getByRole('dialog')).toHaveTextContent('Close tracking without stopping the session.')
+        fireEvent.click(screen.getByRole('button', { name: 'Close incident' }))
+        await waitFor(() => expect(closeMonitorIncident).toHaveBeenCalledWith('monitor-1', 'incident-1'))
+        await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
     })
 
     it('requires acknowledgement before a completed result releases future triggers', async () => {

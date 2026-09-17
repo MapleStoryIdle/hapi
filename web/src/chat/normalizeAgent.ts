@@ -218,14 +218,135 @@ function normalizeCodexReviewJson(value: unknown): CodexReview | null {
     }
 }
 
+const CODE_COMMENT_PREFIX = '::code-comment{'
+
+function decodeCodeCommentAttribute(value: string): string {
+    return value.replace(/\\([\\"nrt])/g, (_match, escaped: string) => {
+        if (escaped === 'n') return '\n'
+        if (escaped === 'r') return '\r'
+        if (escaped === 't') return '\t'
+        return escaped
+    })
+}
+
+function parseCodeCommentAttributes(source: string): Map<string, string> {
+    const attributes = new Map<string, string>()
+    const pattern = /([A-Za-z][\w-]*)\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s]+))/g
+    for (const match of source.matchAll(pattern)) {
+        attributes.set(match[1], decodeCodeCommentAttribute(match[2] ?? match[3] ?? match[4] ?? ''))
+    }
+    return attributes
+}
+
+function normalizeCodeCommentFile(value: string): string | null {
+    const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    if (lines.length >= 2 && /^[A-Za-z][A-Za-z0-9_+#.-]*$/.test(lines[0]) && /[\\/]/.test(lines[1])) {
+        lines.shift()
+    }
+    const file = lines.join(' ').trim()
+    return file || null
+}
+
+function parseCodeCommentLine(value: string | undefined): number | null {
+    if (!value || !/^\d+$/.test(value)) return null
+    const parsed = Number(value)
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function parseCodeCommentPriority(value: string | undefined): number | null {
+    return value && /^[0-3]$/.test(value) ? Number(value) : null
+}
+
+function findCodeCommentEnd(message: string, contentStart: number): number {
+    let quote: '"' | "'" | null = null
+    let escaped = false
+    for (let index = contentStart; index < message.length; index += 1) {
+        const character = message[index]
+        if (escaped) {
+            escaped = false
+            continue
+        }
+        if (quote && character === '\\') {
+            escaped = true
+            continue
+        }
+        if (character === '"' || character === "'") {
+            quote = quote === character ? null : quote ?? character
+            continue
+        }
+        if (character === '}' && quote === null) return index
+    }
+    return -1
+}
+
+function normalizeCodeCommentFinding(source: string): CodexReviewFinding | null {
+    const attributes = parseCodeCommentAttributes(source)
+    const title = attributes.get('title')?.trim()
+    const body = attributes.get('body')?.trim()
+    const filePath = normalizeCodeCommentFile(attributes.get('file') ?? '')
+    if (!title || !body || !filePath) return null
+
+    const lineStart = parseCodeCommentLine(attributes.get('start'))
+    const parsedLineEnd = parseCodeCommentLine(attributes.get('end'))
+    return {
+        title,
+        body,
+        priority: parseCodeCommentPriority(attributes.get('priority')),
+        confidenceScore: null,
+        filePath,
+        lineStart,
+        lineEnd: lineStart === null ? null : parsedLineEnd ?? lineStart
+    }
+}
+
+function parseCodeCommentReview(message: string): CodexReview | null {
+    const findings: CodexReviewFinding[] = []
+    const remaining: string[] = []
+    let cursor = 0
+
+    while (cursor < message.length) {
+        const start = message.indexOf(CODE_COMMENT_PREFIX, cursor)
+        if (start === -1) {
+            remaining.push(message.slice(cursor))
+            break
+        }
+        remaining.push(message.slice(cursor, start))
+        const contentStart = start + CODE_COMMENT_PREFIX.length
+        const end = findCodeCommentEnd(message, contentStart)
+        if (end === -1) {
+            remaining.push(message.slice(start))
+            break
+        }
+        const finding = normalizeCodeCommentFinding(message.slice(contentStart, end))
+        if (finding) {
+            findings.push(finding)
+        } else {
+            remaining.push(message.slice(start, end + 1))
+        }
+        cursor = end + 1
+    }
+
+    if (findings.length === 0) return null
+    const overallExplanation = remaining.join('').trim() || null
+    return {
+        findings,
+        overallCorrectness: null,
+        overallExplanation,
+        overallConfidenceScore: null
+    }
+}
+
 function parseCodexReviewMessage(message: string): CodexReview | null {
     const trimmed = message.trim()
-    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null
-    try {
-        return normalizeCodexReviewJson(JSON.parse(trimmed) as unknown)
-    } catch {
-        return null
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        try {
+            const review = normalizeCodexReviewJson(JSON.parse(trimmed) as unknown)
+            if (review) return review
+        } catch {
+            // Fall through to directive parsing.
+        }
     }
+    return parseCodeCommentReview(message)
 }
 
 function normalizeAssistantOutput(

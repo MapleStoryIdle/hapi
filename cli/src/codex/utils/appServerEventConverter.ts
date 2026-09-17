@@ -57,6 +57,17 @@ function extractCommand(value: unknown): string | null {
     return null;
 }
 
+function extractCommandMeta(item: Record<string, unknown>): Record<string, unknown> {
+    const command = extractCommand(item.command ?? item.cmd ?? item.args);
+    const cwd = asString(item.cwd ?? item.workingDirectory ?? item.working_directory);
+    const autoApproved = asBoolean(item.autoApproved ?? item.auto_approved);
+    const meta: Record<string, unknown> = {};
+    if (command) meta.command = command;
+    if (cwd) meta.cwd = cwd;
+    if (autoApproved !== null) meta.auto_approved = autoApproved;
+    return meta;
+}
+
 function extractGeneratedImagePath(item: Record<string, unknown>): string | null {
     return asString(
         item.savedPath
@@ -992,13 +1003,7 @@ export class AppServerEventConverter {
 
             if (itemType === 'commandexecution') {
                 if (method === 'item/started') {
-                    const command = extractCommand(item.command ?? item.cmd ?? item.args);
-                    const cwd = asString(item.cwd ?? item.workingDirectory ?? item.working_directory);
-                    const autoApproved = asBoolean(item.autoApproved ?? item.auto_approved);
-                    const meta: Record<string, unknown> = {};
-                    if (command) meta.command = command;
-                    if (cwd) meta.cwd = cwd;
-                    if (autoApproved !== null) meta.auto_approved = autoApproved;
+                    const meta = extractCommandMeta(item);
                     this.commandMeta.set(itemId, meta);
 
                     events.push(scoped({
@@ -1009,12 +1014,25 @@ export class AppServerEventConverter {
                 }
 
                 if (method === 'item/completed') {
-                    const meta = this.commandMeta.get(itemId) ?? {};
+                    const hadStarted = this.commandMeta.has(itemId);
+                    const meta = this.commandMeta.get(itemId) ?? extractCommandMeta(item);
                     const output = asString(item.output ?? item.result ?? item.stdout) ?? this.commandOutputBuffers.get(itemId);
                     const stderr = asString(item.stderr);
                     const error = asString(item.error);
                     const exitCode = asNumber(item.exitCode ?? item.exit_code ?? item.exitcode);
                     const status = asString(item.status);
+
+                    // App-server recovery can report a command completion after a
+                    // restart without replaying its start event. Emit a nearby
+                    // begin event so paginated clients can still pair the result
+                    // with the command name and input.
+                    if (!hadStarted) {
+                        events.push(scoped({
+                            type: 'exec_command_begin',
+                            call_id: itemId,
+                            ...meta
+                        }));
+                    }
 
                     events.push(scoped({
                         type: 'exec_command_end',

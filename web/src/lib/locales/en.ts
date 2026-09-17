@@ -1818,7 +1818,7 @@ export default {
   'monitors.incident.repairConfirm.confirm': 'Approve repair',
   'monitors.incident.repairConfirm.confirming': 'Approving…',
   'monitors.incident.closeConfirm.title': 'Close this incident?',
-  'monitors.incident.closeConfirm.description': 'This stops the current incident workflow. You can create a new investigation later if needed.',
+  'monitors.incident.closeConfirm.description': 'This closes the delivered event and stops tracking it. The Monitor stays enabled, and an investigation session already running is not interrupted.',
   'monitors.incident.closeConfirm.confirm': 'Close incident',
   'monitors.incident.closeConfirm.confirming': 'Closing…',
   'monitors.incident.acknowledge': 'Acknowledge',

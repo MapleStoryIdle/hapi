@@ -240,6 +240,38 @@ describe('AppServerEventConverter', () => {
         }]);
     });
 
+    it('reconstructs a command call when recovery only reports its completion', () => {
+        const converter = new AppServerEventConverter();
+
+        const completed = converter.handleNotification('item/completed', {
+            item: {
+                id: 'cmd-recovered',
+                type: 'commandExecution',
+                command: ['/bin/zsh', '-lc', 'find . -type f'],
+                cwd: 'file:///workspace',
+                status: 'completed',
+                exitCode: 0
+            }
+        });
+
+        expect(completed).toEqual([
+            {
+                type: 'exec_command_begin',
+                call_id: 'cmd-recovered',
+                command: '/bin/zsh -lc find . -type f',
+                cwd: 'file:///workspace'
+            },
+            {
+                type: 'exec_command_end',
+                call_id: 'cmd-recovered',
+                command: '/bin/zsh -lc find . -type f',
+                cwd: 'file:///workspace',
+                exit_code: 0,
+                status: 'completed'
+            }
+        ]);
+    });
+
     it('normalizes file change arrays by file path and preserves their diffs', () => {
         const converter = new AppServerEventConverter();
         const change = {

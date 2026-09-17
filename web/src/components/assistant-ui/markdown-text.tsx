@@ -27,7 +27,7 @@ import { parseGitCodeBlock } from '@/components/assistant-ui/git-codeblock'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { MotionIcon, toMotionIcon } from '@/components/MotionIcon'
 import { useOptionalHappyChatContext, type HappyChatFileLinkTarget } from '@/components/AssistantChat/context'
-import { decodeFilePathLinkHref, isProjectFilePathTarget, isWindowsDriveRootPath, parseAbsoluteFilePathHref, parseProjectFilePathHref, remarkFilePathLinks, type FilePathLinkTarget } from '@/lib/remark-file-path-links'
+import { decodeFilePathLinkHref, isProjectFilePathTarget, isWindowsDriveRootPath, parseAbsoluteFilePathHref, parseProjectFilePathHref, parseSameOriginProjectFileUrl, remarkFilePathLinks, type FilePathLinkTarget } from '@/lib/remark-file-path-links'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
 import { useTranslation } from '@/lib/use-translation'
 import { useLocalServiceLink } from '@/lib/local-service-links'
@@ -473,7 +473,27 @@ function formatFileTargetTitle(fileTarget: FilePathLinkTarget): string {
         return fileTarget.path
     }
 
-    return `${fileTarget.path}:${fileTarget.line}${fileTarget.column !== undefined ? `:${fileTarget.column}` : ''}`
+    const range = fileTarget.lineEnd !== undefined ? `-${fileTarget.lineEnd}` : ''
+    return `${fileTarget.path}:${fileTarget.line}${range}${fileTarget.column !== undefined ? `:${fileTarget.column}` : ''}`
+}
+
+function compactFileTargetLabel(fileTarget: FilePathLinkTarget): string {
+    const filename = fileTarget.path.split(/[\\/]/).at(-1) ?? fileTarget.path
+    if (fileTarget.line === undefined) return filename
+    const range = fileTarget.lineEnd !== undefined ? `-${fileTarget.lineEnd}` : ''
+    return `${filename}:${fileTarget.line}${range}`
+}
+
+function shouldCompactFileLinkLabel(children: ReactNode, href: string, fileTarget: FilePathLinkTarget): boolean {
+    if (typeof children !== 'string') return false
+    const label = children.trim()
+    if (!label) return false
+    if (label === href || label === fileTarget.path || label.includes(fileTarget.path)) return true
+    try {
+        return decodeURIComponent(label) === fileTarget.path
+    } catch {
+        return false
+    }
 }
 
 const FILE_PATH_LINK_CLASS = `${MESSAGE_LINK_CLASS} aui-md-file-link`
@@ -665,20 +685,32 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
     const projectFileTarget = markdownHref && chat
         ? parseProjectFilePathHref(markdownHref, { workspacePath: chat.metadata?.path })
         : null
+    const sameOriginFileTarget = markdownHref && chat
+        ? parseSameOriginProjectFileUrl(markdownHref, {
+            workspacePath: chat.metadata?.path,
+            origin: typeof window === 'undefined' ? null : window.location.origin
+        })
+        : null
     const unavailableFileTarget = chat && decodedFileTarget && !decodedFileTargetAllowed
         ? decodedFileTarget
         : markdownHref && chat && !decodedFileTarget && !projectFileTarget
             ? parseAbsoluteFilePathHref(markdownHref)
             : null
-    const fileTarget = decodedFileTarget && decodedFileTargetAllowed ? decodedFileTarget : projectFileTarget
+    const fileTarget = decodedFileTarget && decodedFileTargetAllowed
+        ? decodedFileTarget
+        : projectFileTarget ?? sameOriginFileTarget
     const rel = props.target === '_blank' ? (props.rel ?? 'noreferrer') : props.rel
 
     if (fileTarget) {
         if (!chat) {
             return <>{props.children}</>
         }
+        const children = markdownHref && shouldCompactFileLinkLabel(props.children, markdownHref, fileTarget)
+            ? compactFileTargetLabel(fileTarget)
+            : props.children
         return <FilePathAnchor
             {...props}
+            children={children}
             fileTarget={fileTarget}
             sessionId={chat.sessionId}
             fileLinkTarget={chat.fileLinkTarget}

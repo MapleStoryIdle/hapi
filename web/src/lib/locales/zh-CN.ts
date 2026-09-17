@@ -1822,7 +1822,7 @@ export default {
   'monitors.incident.repairConfirm.confirm': '批准修复',
   'monitors.incident.repairConfirm.confirming': '批准中…',
   'monitors.incident.closeConfirm.title': '关闭这个事件？',
-  'monitors.incident.closeConfirm.description': '这会停止当前事件流程。需要时仍可以稍后发起新的调查。',
+  'monitors.incident.closeConfirm.description': '这会关闭本次已投递事件并停止跟踪。Monitor 本体仍保持启用，已经运行的调查会话不会被中断。',
   'monitors.incident.closeConfirm.confirm': '关闭事件',
   'monitors.incident.closeConfirm.confirming': '关闭中…',
   'monitors.incident.acknowledge': '确认结果',

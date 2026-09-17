@@ -1,6 +1,6 @@
 const FILE_PATH_HREF_PREFIX = 'hapi-file:'
 
-const PATH_PATTERN = /(?:[A-Za-z]:[\\/](?:[^\s`"\'<>\\/]+[\\/])*[^\s`"\'<>\\/]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?::\d+)?)?|\/(?:[^\s`"\'<>\/]+\/)*[^\s`"\'<>\/]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?::\d+)?)?|(?:\.\/|[A-Za-z0-9_.-]+\/)[^\s`"\'<>]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?::\d+)?)?|(?:[A-Za-z0-9_.-]+\.(?:[A-Za-z0-9]{1,12}|lock))(?::\d+(?::\d+)?)?)/g
+const PATH_PATTERN = /(?:[A-Za-z]:[\\/](?:[^\s`"\'<>\\/]+[\\/])*[^\s`"\'<>\\/]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?:-\d+|:\d+)?)?|\/(?:[^\s`"\'<>\/]+\/)*[^\s`"\'<>\/]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?:-\d+|:\d+)?)?|(?:\.\/|[A-Za-z0-9_.-]+\/)[^\s`"\'<>]*?\.(?:[A-Za-z0-9]{1,12}|lock)(?::\d+(?:-\d+|:\d+)?)?|(?:[A-Za-z0-9_.-]+\.(?:[A-Za-z0-9]{1,12}|lock))(?::\d+(?:-\d+|:\d+)?)?)/g
 
 const TRAILING_PUNCTUATION = new Set(['.', ',', ';', ':', '!', '?'])
 const COMMON_FILE_EXTENSIONS = new Set([
@@ -13,6 +13,7 @@ const COMMON_FILE_EXTENSIONS = new Set([
 export type FilePathLinkTarget = {
     path: string
     line?: number
+    lineEnd?: number
     column?: number
 }
 
@@ -22,6 +23,10 @@ export type FilePathLinkOptions = {
      * Windows drive-root path can be treated as an internal file link.
      */
     workspacePath?: string | null
+}
+
+export type SameOriginFileUrlOptions = FilePathLinkOptions & {
+    origin?: string | null
 }
 
 type MarkdownNode = {
@@ -36,6 +41,9 @@ function createFileHref(target: FilePathLinkTarget): string {
     const params = new URLSearchParams()
     if (target.line !== undefined) {
         params.set('line', String(target.line))
+    }
+    if (target.lineEnd !== undefined) {
+        params.set('lineEnd', String(target.lineEnd))
     }
     if (target.column !== undefined) {
         params.set('column', String(target.column))
@@ -70,10 +78,12 @@ export function decodeFilePathLinkHref(href: string): FilePathLinkTarget | null 
         if (!path) return null
         const params = new URLSearchParams(query)
         const line = parsePositiveInt(params.get('line'))
+        const lineEnd = parsePositiveInt(params.get('lineEnd'))
         const column = parsePositiveInt(params.get('column'))
         return {
             path,
             ...(line !== undefined ? { line } : {}),
+            ...(lineEnd !== undefined && lineEnd !== line ? { lineEnd } : {}),
             ...(column !== undefined ? { column } : {})
         }
     } catch {
@@ -113,17 +123,19 @@ function splitTrailingPunctuation(value: string): { path: string; trailing: stri
 }
 
 function stripLineSuffix(value: string): string {
-    return value.replace(/:\d+(?::\d+)?$/, '')
+    return value.replace(/:\d+(?:-\d+|:\d+)?$/, '')
 }
 
 function parseLineTarget(value: string): FilePathLinkTarget {
-    const match = value.match(/^(.*?):(\d+)(?::(\d+))?$/)
+    const match = value.match(/^(.*?):(\d+)(?:(?:-(\d+))|(?::(\d+)))?$/)
     if (!match) return { path: value }
     const line = parsePositiveInt(match[2] ?? null)
-    const column = parsePositiveInt(match[3] ?? null)
+    const lineEnd = parsePositiveInt(match[3] ?? null)
+    const column = parsePositiveInt(match[4] ?? null)
     return {
         path: match[1] ?? value,
         ...(line !== undefined ? { line } : {}),
+        ...(lineEnd !== undefined && lineEnd !== line ? { lineEnd } : {}),
         ...(column !== undefined ? { column } : {})
     }
 }
@@ -323,6 +335,46 @@ export function parseProjectFilePathHref(
     }
 
     return parsed.target
+}
+
+/**
+ * Browsers serialize a Markdown href such as `/Users/me/project/App.tsx#L12`
+ * as a full same-origin URL when it is copied. Recover that local file identity
+ * only when the URL stays inside the current session workspace.
+ */
+export function parseSameOriginProjectFileUrl(
+    href: string,
+    options: SameOriginFileUrlOptions = {}
+): FilePathLinkTarget | null {
+    if (!options.origin) return null
+    let url: URL
+    try {
+        url = new URL(href, options.origin)
+    } catch {
+        return null
+    }
+    if (
+        url.origin !== options.origin
+        || (url.protocol !== 'http:' && url.protocol !== 'https:')
+        || url.username
+        || url.password
+        || url.search
+    ) {
+        return null
+    }
+    const coordinate = url.hash.match(/^#L(\d+)(?:C(\d+))?(?:-L?(\d+)(?:C\d+)?)?$/i)
+    if (url.hash && !coordinate) return null
+    const line = parsePositiveInt(coordinate?.[1] ?? null)
+    const column = parsePositiveInt(coordinate?.[2] ?? null)
+    const lineEnd = parsePositiveInt(coordinate?.[3] ?? null)
+    const target = parseProjectFilePathHref(url.pathname, options)
+    if (!target) return null
+    return {
+        ...target,
+        ...(line !== undefined ? { line } : {}),
+        ...(lineEnd !== undefined && lineEnd !== line ? { lineEnd } : {}),
+        ...(column !== undefined ? { column } : {})
+    }
 }
 
 function linkTextNode(node: MarkdownNode, options: FilePathLinkOptions): MarkdownNode[] {

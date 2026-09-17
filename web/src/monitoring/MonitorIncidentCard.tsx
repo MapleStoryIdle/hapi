@@ -67,8 +67,7 @@ export function MonitorIncidentCard(props: { api: ApiClient; monitorId: string; 
     const [closeTarget, setCloseTarget] = useState<MonitorIncident | null>(null)
     const [pendingAction, setPendingAction] = useState<'repair' | 'close' | null>(null)
     const canApprove = props.incident.state === 'review' && Boolean(props.incident.plan && props.incident.planHash && props.incident.approvalContext)
-    const isRunning = ['starting', 'investigating', 'repair_starting', 'repairing'].includes(props.incident.state)
-    const canClose = !isRunning && props.incident.state !== 'closed'
+    const canClose = props.incident.state !== 'closed'
     const isCompleted = props.incident.state === 'completed'
 
     const approveRepair = async () => {
@@ -177,7 +176,6 @@ export function MonitorIncidentCard(props: { api: ApiClient; monitorId: string; 
                         </Link>
                     ) : null}
                 </div>
-                {!props.compact && isRunning ? <p className="mt-3 rounded-xl bg-[var(--app-subtle-bg)] px-3 py-2 text-xs leading-5 text-[var(--app-hint)]">{props.t('monitors.incident.closeRunningHint')}</p> : null}
             </article>
 
             <ConfirmDialog

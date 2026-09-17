@@ -611,6 +611,81 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('normalizes Codex code-comment directives as structured review content', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: `Review summary
+
+::code-comment{title="[P1] 三方调用期间持有工作流锁" body="submit 本身是事务方法，建议避免在行锁范围内执行网络请求。" file="
+JAVA
+/workspace/homebar/CabinetInventoryRecordServiceImpl.java
+" start=220 end=256 priority=1}`
+                }
+            }
+        })
+
+        expect(normalizeDecryptedMessage(message)).toMatchObject({
+            role: 'agent',
+            content: [{
+                type: 'codex-review',
+                review: {
+                    overallCorrectness: null,
+                    overallExplanation: 'Review summary',
+                    overallConfidenceScore: null,
+                    findings: [{
+                        title: '[P1] 三方调用期间持有工作流锁',
+                        body: 'submit 本身是事务方法，建议避免在行锁范围内执行网络请求。',
+                        priority: 1,
+                        confidenceScore: null,
+                        filePath: '/workspace/homebar/CabinetInventoryRecordServiceImpl.java',
+                        lineStart: 220,
+                        lineEnd: 256
+                    }]
+                }
+            }]
+        })
+    })
+
+    it('collects multiple code comments and leaves malformed directives as text', () => {
+        const structured = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: [
+                        '::code-comment{title="First" body="One" file="/repo/a.ts" start=2 priority=2}',
+                        '::code-comment{title="Second" body="Two" file="/repo/b.ts" start=4 priority=3}'
+                    ].join('\n')
+                }
+            }
+        })
+        const malformedText = '::code-comment{title="Missing fields"}'
+        const malformed = makeMessage({
+            role: 'agent',
+            content: { type: 'codex', data: { type: 'message', message: malformedText } }
+        })
+
+        expect(normalizeDecryptedMessage(structured)).toMatchObject({
+            content: [{
+                type: 'codex-review',
+                review: {
+                    findings: [
+                        { title: 'First', lineStart: 2, lineEnd: 2, priority: 2 },
+                        { title: 'Second', lineStart: 4, lineEnd: 4, priority: 3 }
+                    ]
+                }
+            }]
+        })
+        expect(normalizeDecryptedMessage(malformed)).toMatchObject({
+            content: [{ type: 'text', text: malformedText }]
+        })
+    })
+
     it('keeps non-review Codex JSON messages as text', () => {
         const message = makeMessage({
             role: 'agent',

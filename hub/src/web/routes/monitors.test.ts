@@ -70,6 +70,27 @@ describe('monitor routes', () => {
             expect((await app.request(`/monitors/${id}/activities/${deferred.id}/retrigger`, { method: 'POST' })).status).toBe(202)
         } finally { await service.stop(); store.close() }
     })
+    it('closes a running investigation workflow without requiring its session to stop', async () => {
+        const store = new Store(':memory:')
+        const service = new MonitoringService(store, () => null, { sendToNamespace: async () => undefined })
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => { c.set('namespace', 'a'); await next() })
+        app.route('/', createMonitorRoutes(store, () => null, () => service))
+        try {
+            const config = MonitorConfigSchema.parse({ name: 'hook', kind: 'webhook', machineId: 'm', directory: '/work', prompt: 'Inspect' })
+            const created = store.monitors.create('a', config)
+            const monitor = store.monitors.get(created.id)!
+            service.requestTest(monitor)
+            const incident = store.monitors.openForMonitor(monitor.id)!
+            expect(store.monitors.transition(incident.id, 'queued', 'investigating', { sessionId: 'session-running' })).toBe(true)
+
+            const response = await app.request(`/monitors/${monitor.id}/incidents/${incident.id}/close`, { method: 'POST' })
+
+            expect(response.status).toBe(200)
+            expect(store.monitors.getIncident(incident.id)?.state).toBe('closed')
+            expect((await app.request(`/monitors/${monitor.id}/incidents/${incident.id}/close`, { method: 'POST' })).status).toBe(409)
+        } finally { await service.stop(); store.close() }
+    })
     it('resolves bound environment server-side and prevents retargeting', async () => {
         const store = new Store(':memory:')
         store.machines.getOrCreateMachine('m', {}, {}, 'a')

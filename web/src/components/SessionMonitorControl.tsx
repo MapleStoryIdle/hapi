@@ -130,8 +130,7 @@ export function SessionMonitorControl(props: {
                 {actionError ? <div role="alert" className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-200">{actionError}</div> : null}
                 {relatedMonitors.map((monitor) => {
                     const incident = monitor.incident
-                    const isRunning = incident ? ['starting', 'investigating', 'repair_starting', 'repairing'].includes(incident.state) : false
-                    const canClose = Boolean(incident && !isRunning && incident.state !== 'closed')
+                    const canClose = Boolean(incident && incident.state !== 'closed')
                     const canContinue = Boolean(incident?.state === 'review' && incident.plan && incident.planHash && incident.approvalContext)
                     const canRetry = monitor.lastActivity?.outcome === 'deferred' && !incident
                     const busy = busyId === monitor.id
