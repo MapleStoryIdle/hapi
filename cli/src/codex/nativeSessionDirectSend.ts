@@ -1303,7 +1303,7 @@ export class NativeCodexSessionDirectSender {
         if (!session) {
             return { success: false, code: 'session_not_found', error: 'Codex session not found' }
         }
-        if (isHapiInitiatedCodexSession(session)) {
+        if (isHapiInitiatedCodexSession(session) && action.action !== 'answerUserInput') {
             return { success: false, code: 'not_native_session', error: 'Only original native Codex sessions support direct control' }
         }
         if (this.controlReservations.has(sessionId)) {

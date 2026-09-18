@@ -3967,6 +3967,69 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
+    it('answers an exact pending question for an explicitly handed-off SHAPI-origin thread', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-released-input-workspace-'))
+        const sessionId = '11345678-1234-4234-8234-123456789014'
+        const client = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            Date.now,
+            1_000,
+            { getSummary: () => ({
+                id: sessionId,
+                title: 'Locally handed-off SHAPI thread',
+                cwd,
+                file: '/not-read.jsonl',
+                modifiedAt: 0,
+                originator: 'hapi-codex-client',
+                runState: 'idle'
+            }) },
+            () => client,
+            null,
+            null,
+            async () => false
+        )
+
+        try {
+            await expect(sender.sendWithExternalControlCheck(
+                sessionId,
+                'ask after handoff',
+                undefined,
+                'native:released-input',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                true
+            )).resolves.toMatchObject({ success: true, status: 'processing' })
+            await flushMicrotasks()
+
+            const input = {
+                threadId: sessionId,
+                turnId: 'native-turn-1',
+                itemId: 'question-1',
+                questions: [{ id: 'choice', question: 'Push?', options: [{ label: 'Yes' }, { label: 'No' }] }]
+            }
+            const answer = Promise.resolve(client.handlers.get('item/tool/requestUserInput')!(input))
+            const context = { controlledByCodexSsh: false, activeTurnId: 'native-turn-1' }
+
+            await expect(sender.control(sessionId, {
+                action: 'answerUserInput',
+                expectedTurnId: 'native-turn-1',
+                requestId: 'question-1',
+                answers: { choice: { answers: ['Yes'] } }
+            }, context)).resolves.toMatchObject({ success: true })
+            await expect(answer).resolves.toEqual({ answers: { choice: { answers: ['Yes'] } } })
+            await expect(sender.control(sessionId, {
+                action: 'configure',
+                configuration: { model: 'model-a' }
+            }, context)).resolves.toMatchObject({ success: false, code: 'not_native_session' })
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('releases a queued prompt immediately when the transcript watcher sees idle', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-direct-watcher-workspace-'))
         const sessionId = '21345678-1234-4234-8234-123456789012'
