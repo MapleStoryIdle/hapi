@@ -33,6 +33,20 @@ We do not accept oversized pull requests that introduce large features all at on
 - Update documentation if needed
 - Reference related issues in your PR description
 
+### Security and Privacy Check
+
+Before pushing, confirm that the change contains no credentials, private keys,
+pairing codes, session transcripts, personal data, or production logs. If
+Gitleaks is installed, scan the staged change locally:
+
+```bash
+gitleaks protect --staged --redact
+```
+
+CI also scans the checked-out repository. Do not paste an unredacted scanner
+finding into a public issue or pull request; rotate any exposed credential and
+use [private vulnerability reporting](SECURITY.md) when disclosure is needed.
+
 ## Bug Reports
 
 Bug reports are always welcome! When reporting a bug, please include:
