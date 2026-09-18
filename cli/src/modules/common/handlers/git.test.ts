@@ -195,7 +195,7 @@ describe('machine Git branch actions', () => {
                 currentBranch: 'main',
                 pushRemote: 'origin'
             })
-            const { stdout } = await execFileAsync('git', ['--git-dir', remote, 'log', '-1', '--format=%s'])
+            const { stdout } = await execFileAsync('git', ['--git-dir', remote, 'log', '-1', '--format=%s', 'main'])
             expect(stdout.trim()).toBe('Save local work')
         } finally {
             await rm(sandbox, { recursive: true, force: true })
