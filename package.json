@@ -10,7 +10,7 @@
         "build:single-exe": "bun run download:tunwg && bun run build:web && (cd hub && bun run generate:embedded-web-assets) && (cd cli && bun run build:exe:allinone)",
         "build:single-exe:all": "bun run download:tunwg && bun run build:web && (cd hub && bun run generate:embedded-web-assets) && (cd cli && bun run build:exe:allinone:all)",
         "prepare:runner-downloads": "bun scripts/release/prepare-runner-downloads.ts",
-    "build:runner-downloads": "bun run download:tunwg && (cd cli && bun run build:exe:runner:all) && bun run prepare:runner-downloads --binaries-dir cli/dist-runner-exe",
+        "build:runner-downloads": "bun run download:tunwg && (cd cli && bun run build:exe:runner:all) && bun run prepare:runner-downloads --binaries-dir cli/dist-runner-exe",
         "download:tunwg": "bun run hub/scripts/download-tunwg.ts",
         "build:hub": "cd hub && bun run build",
         "build:web": "cd web && bun run build",
