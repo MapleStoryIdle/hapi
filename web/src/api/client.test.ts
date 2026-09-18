@@ -25,6 +25,23 @@ describe('ApiClient error mapping', () => {
         }))
     })
 
+    it('keeps one spawn idempotency key when authentication retries the request', async () => {
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ type: 'success', sessionId: 'session-1' }), { status: 200 }))
+        const api = new ApiClient('test-token', {
+            onUnauthorized: async () => 'refreshed-token'
+        })
+
+        await api.spawnSession('machine-1', '/work/project', 'codex')
+
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+        const firstBody = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string)
+        const retryBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string)
+        expect(firstBody.requestId).toMatch(/^[0-9a-f-]{36}$/)
+        expect(retryBody).toEqual(firstBody)
+    })
+
     it('resolves a native Codex thread to its managed SHAPI session on the selected runner', async () => {
         fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
             success: true,

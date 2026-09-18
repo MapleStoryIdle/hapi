@@ -387,6 +387,7 @@ export const SendMessageRequestSchema = z.object({
 export type SendMessageRequest = z.infer<typeof SendMessageRequestSchema>
 
 export const SpawnSessionRequestSchema = z.object({
+    requestId: z.string().uuid(),
     directory: z.string().min(1),
     agent: AgentFlavorSchema.optional(),
     model: z.string().optional(),

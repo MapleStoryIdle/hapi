@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandIntentTitle, getTerminalCommandSummary, usesTerminalCommandAsLabel, joinTerminalSummaryParts } from '@/components/ToolCard/terminalCommandIntent'
+import { getTerminalCommandDisplayTitle, getTerminalCommandIntent, getTerminalCommandIntentDetail, getTerminalCommandIntentLabel, getTerminalCommandIntentTitle, getTerminalCommandSummary, getTerminalReadRequestLabel, usesTerminalCommandAsLabel, joinTerminalSummaryParts } from '@/components/ToolCard/terminalCommandIntent'
 
 describe('terminal command intent', () => {
     it('joins summary fragments once, without dangling or duplicate separators', () => {
@@ -116,7 +116,7 @@ describe('terminal command intent', () => {
         })).toBe('ssh · 192.0.2.18')
         expect(getTerminalCommandDisplayTitle({
             command: 'scp -i /credentials/private-key /build/hapi deploy@192.0.2.18:/tmp/hapi'
-        })).toBe('scp · 192.0.2.18')
+        })).toBe('scp · 192.0.2.18 · hapi')
 
         expect(getTerminalCommandDisplayTitle({
             command: 'curl https://example.com/api'
@@ -148,7 +148,7 @@ describe('terminal command intent', () => {
         const searchedMany = getTerminalCommandIntent({
             command: 'rg -n ToolCard web/src/a.ts web/src/b.ts web/src/c.ts web/src/d.ts web/src/e.ts'
         })
-        expect(searchedMany && getTerminalCommandIntentDetail(searchedMany)).toBe('5 files')
+        expect(searchedMany && getTerminalCommandIntentDetail(searchedMany)).toBe('a.ts · … and 5 source files')
 
         const readMany = getTerminalCommandIntent({
             command: "cat web/src/a.ts; sed -n '1,20p' web/src/b.ts"
@@ -222,6 +222,51 @@ describe('terminal command intent', () => {
 
         expect(getTerminalCommandSummary(input)).toBe('git status; git diff; +1')
         expect(getTerminalCommandDisplayTitle(input)).toBe('git status; git diff; +1')
+    })
+
+    it('recognizes Skill reads inside a Codex Desktop orchestration wrapper', () => {
+        const input = {
+            command: `const r = await tools.exec_command({
+                cmd: "sed -n '1,240p' /Users/dev/.codex/skills/agent-team/SKILL.md\\nsed -n '1,220p' /Users/dev/.codex/skills/karpathy-guidelines/SKILL.md\\nsed -n '1,220p' /Users/dev/.codex/skills/agent-team/references/team-profiles.md",
+                workdir: "/workspace"
+            }); text(r.output);`
+        }
+        const intent = getTerminalCommandIntent(input)
+
+        expect(intent).toMatchObject({ kind: 'read-request' })
+        expect(intent?.kind === 'read-request' && intent.targets).toHaveLength(3)
+        expect(intent?.kind === 'read-request' && getTerminalReadRequestLabel(intent)).toBe('Read agent-team/SKILL.md · … and 3 Skill files')
+        expect(getTerminalCommandSummary(input)).toBe('sed -n')
+
+        const single = getTerminalCommandIntent({
+            command: "sed -n '1,240p' /Users/dev/.codex/skills/agent-team/SKILL.md"
+        })
+        expect(single?.kind === 'read-request' && getTerminalReadRequestLabel(single)).toBe(
+            'Read agent-team/SKILL.md · L1–240'
+        )
+    })
+
+    it('uses conservative semantic labels only when all read targets match', () => {
+        const source = getTerminalCommandIntent({ command: "cat src/a.ts; sed -n '1,20p' src/b.ts" })
+        const mixed = getTerminalCommandIntent({ command: "cat src/a.ts; sed -n '1,20p' README.md" })
+        const configuration = getTerminalCommandIntent({ command: "cat package.json; sed -n '1,20p' tsconfig.json" })
+        const documentation = getTerminalCommandIntent({ command: "cat README.md; sed -n '1,20p' docs/setup.md" })
+        const tests = getTerminalCommandIntent({ command: "cat src/a.test.ts; sed -n '1,20p' src/b.spec.tsx" })
+
+        expect(source?.kind === 'read-request' && getTerminalReadRequestLabel(source)).toBe('Read a.ts · … and 2 source files')
+        expect(mixed?.kind === 'read-request' && getTerminalReadRequestLabel(mixed)).toBe('Read 2 files')
+        expect(configuration?.kind === 'read-request' && getTerminalReadRequestLabel(configuration)).toBe('Read package.json · … and 2 configuration files')
+        expect(documentation?.kind === 'read-request' && getTerminalReadRequestLabel(documentation)).toBe('Read README.md · … and 2 documents')
+        expect(tests?.kind === 'read-request' && getTerminalReadRequestLabel(tests)).toBe('Read a.test.ts · … and 2 test files')
+    })
+
+    it('keeps search targets when rg is nested inside orchestration', () => {
+        const input = {
+            command: `const r = await tools.exec_command({ cmd: "rg -n ToolCard web/src/a.ts web/src/b.ts" }); text(r.output);`
+        }
+
+        expect(getTerminalCommandIntent(input)).toEqual({ kind: 'search-files', files: ['a.ts', 'b.ts'] })
+        expect(getTerminalCommandDisplayTitle(input)).toBe('rg · a.ts · … and 2 source files')
     })
 
     it('does not expose Codex Desktop orchestration as Run const', () => {

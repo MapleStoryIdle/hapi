@@ -76,4 +76,39 @@ describe('useSpawnSession', () => {
             expect(queryClient.getQueryData(queryKeys.session(session.id))).toEqual({ session })
         })
     })
+
+    it('shares concurrent creates with the same session configuration', async () => {
+        const queryClient = new QueryClient({
+            defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+        })
+        let resolveSpawn: (value: { type: 'success'; sessionId: string }) => void = () => {
+            throw new Error('Spawn did not start')
+        }
+        const spawnSession = vi.fn(() => new Promise<{ type: 'success'; sessionId: string }>((resolve) => {
+            resolveSpawn = resolve
+        }))
+        const api = { spawnSession } as unknown as ApiClient
+        const input = {
+            machineId: 'machine-1',
+            directory: '/work/project',
+            agent: 'codex' as const,
+            model: 'gpt-5.6-sol',
+        }
+
+        const { result } = renderHook(
+            () => useSpawnSession(api),
+            { wrapper: createWrapper(queryClient) },
+        )
+
+        const first = result.current.spawnSession(input)
+        const second = result.current.spawnSession(input)
+
+        await waitFor(() => {
+            expect(spawnSession).toHaveBeenCalledTimes(1)
+        })
+        resolveSpawn({ type: 'success', sessionId: 'session-1' })
+        await act(async () => {
+            await Promise.all([first, second])
+        })
+    })
 })

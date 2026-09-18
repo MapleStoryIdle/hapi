@@ -7,12 +7,14 @@ const mockCodexSession = vi.hoisted(() => ({
     setModelReasoningEffort: vi.fn(),
     setServiceTier: vi.fn(),
     setCollaborationMode: vi.fn(),
-    stopKeepAlive: vi.fn()
+    stopKeepAlive: vi.fn(),
+    cleanupActiveTransport: vi.fn(async () => {})
 }))
 
 const harness = vi.hoisted(() => ({
     bootstrapArgs: [] as Array<Record<string, unknown>>,
     loopArgs: [] as Array<Record<string, unknown>>,
+    lifecycleOptions: [] as Array<Record<string, unknown>>,
     sessionInfo: { serviceTier: null as string | null } as Record<string, unknown>,
     session: {
         onUserMessage: vi.fn(),
@@ -66,7 +68,10 @@ const lifecycleMock = vi.hoisted(() => ({
 
 vi.mock('@/agent/runnerLifecycle', () => ({
     createModeChangeHandler: vi.fn(() => vi.fn()),
-    createRunnerLifecycle: vi.fn(() => lifecycleMock),
+    createRunnerLifecycle: vi.fn((options: Record<string, unknown>) => {
+        harness.lifecycleOptions.push(options)
+        return lifecycleMock
+    }),
     setControlledByUser: vi.fn()
 }))
 
@@ -108,6 +113,7 @@ describe('runCodex', () => {
     beforeEach(() => {
         harness.bootstrapArgs.length = 0
         harness.loopArgs.length = 0
+        harness.lifecycleOptions.length = 0
         harness.sessionInfo = { serviceTier: null }
         harness.session.onUserMessage.mockReset()
         harness.session.onCancelQueuedMessage.mockReset()
@@ -117,12 +123,24 @@ describe('runCodex', () => {
         mockCodexSession.setModelReasoningEffort.mockReset()
         mockCodexSession.setServiceTier.mockReset()
         mockCodexSession.setCollaborationMode.mockReset()
+        mockCodexSession.cleanupActiveTransport.mockClear()
         lifecycleMock.registerProcessHandlers.mockClear()
         lifecycleMock.cleanupAndExit.mockClear()
         lifecycleMock.markCrash.mockClear()
         lifecycleMock.setExitCode.mockClear()
         lifecycleMock.setArchiveReason.mockClear()
         lifecycleMock.setSessionEndReason.mockClear()
+    })
+
+    it('stops the active Codex transport before closing the SHAPI session', async () => {
+        await runCodexImpl({
+            workingDirectory: '/tmp/project'
+        } as Parameters<typeof runCodex>[0])
+
+        const onBeforeClose = harness.lifecycleOptions[0]?.onBeforeClose as (() => Promise<void>) | undefined
+        expect(onBeforeClose).toBeDefined()
+        await onBeforeClose?.()
+        expect(mockCodexSession.cleanupActiveTransport).toHaveBeenCalledTimes(1)
     })
 
     it('uses the requested collaboration mode when resuming locally', async () => {

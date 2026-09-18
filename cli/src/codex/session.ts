@@ -25,6 +25,7 @@ export class CodexSession extends AgentSessionBase<EnhancedMode> {
     localLaunchFailure: LocalLaunchFailure | null = null;
 
     private transcriptPathCallbacks: Array<(path: string) => void> = [];
+    private activeTransportCleanup: (() => Promise<void>) | null = null;
 
     constructor(opts: {
         api: ApiClient;
@@ -100,6 +101,25 @@ export class CodexSession extends AgentSessionBase<EnhancedMode> {
         const index = this.transcriptPathCallbacks.indexOf(cb);
         if (index !== -1) {
             this.transcriptPathCallbacks.splice(index, 1);
+        }
+    }
+
+    setActiveTransportCleanup(cleanup: () => Promise<void>): void {
+        this.activeTransportCleanup = cleanup;
+    }
+
+    clearActiveTransportCleanup(cleanup: () => Promise<void>): void {
+        if (this.activeTransportCleanup === cleanup) {
+            this.activeTransportCleanup = null;
+        }
+    }
+
+    async cleanupActiveTransport(): Promise<void> {
+        const cleanup = this.activeTransportCleanup;
+        if (!cleanup) return;
+        await cleanup();
+        if (this.activeTransportCleanup === cleanup) {
+            this.activeTransportCleanup = null;
         }
     }
 

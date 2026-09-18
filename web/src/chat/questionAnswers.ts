@@ -1,4 +1,5 @@
 import { isObject } from '@hapi/protocol'
+import { parseShapiManagedSkillInvocation } from '@hapi/protocol/codexUserMessage'
 import type { ToolCallBlock } from '@/chat/types'
 import { isAskUserQuestionToolName, parseAskUserQuestionInput, type AskUserQuestionOption, type AskUserQuestionQuestion } from '@/components/ToolCard/askUserQuestion'
 import { isCursorAskQuestionToolName, parseCursorAskQuestionInput } from '@/components/ToolCard/cursorAskQuestion'
@@ -221,5 +222,8 @@ export function formatQuestionAnswerText(answer: QuestionAnswerPresentation): st
 /** Convert only a complete native question-reply envelope into readable text. */
 export function formatUserMessageForDisplay(text: string): string {
     const answer = parseUserMessageQuestionReply(text)
-    return answer ? formatQuestionAnswerText(answer) : text
+    if (answer) return formatQuestionAnswerText(answer)
+
+    const skill = parseShapiManagedSkillInvocation(text)
+    return skill ? `$${skill.id}${skill.request ? ` ${skill.request}` : ''}` : text
 }

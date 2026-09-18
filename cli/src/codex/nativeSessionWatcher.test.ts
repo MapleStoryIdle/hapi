@@ -73,6 +73,7 @@ describe('NativeCodexSessionWatcher', () => {
 
         try {
             watcher.start()
+            watcher.observeTranscript(file, sessionId)
             writeFileSync(file, '{"type":"session_meta"}\n{"type":"event_msg"}\n', 'utf-8')
             callbacks.get(file)?.()
             callbacks.get(file)?.()
@@ -111,11 +112,79 @@ describe('NativeCodexSessionWatcher', () => {
         })
 
         watcher.start()
+        watcher.observeTranscript(file, sessionId)
         callbacks.get(file)?.()
         watcher.stop()
         await new Promise((resolve) => setTimeout(resolve, 30))
 
         expect(changes).toEqual([])
+    })
+
+    it('does not open file watchers for dormant transcripts', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-native-codex-recent-window-'))
+        cleanupPaths.push(root)
+        const callbacks = new Map<string, () => void>()
+        const watcher = new NativeCodexSessionWatcher({
+            root,
+            watchFile: (filePath, onChange) => {
+                callbacks.set(filePath, onChange)
+                return () => callbacks.delete(filePath)
+            },
+            onChange: () => {}
+        })
+
+        for (let index = 0; index < 65; index += 1) {
+            const sessionId = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
+            writeFileSync(join(root, `rollout-${sessionId}.jsonl`), '{"type":"session_meta"}\n', 'utf-8')
+        }
+
+        try {
+            watcher.start()
+            expect(callbacks.size).toBe(0)
+        } finally {
+            watcher.stop()
+        }
+    })
+
+    it('discovers a changed older transcript on the periodic scan', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-native-codex-polling-'))
+        cleanupPaths.push(root)
+        const olderSessionId = '11111111-1111-4111-8111-111111111111'
+        const recentSessionId = '22222222-2222-4222-8222-222222222222'
+        const olderFile = join(root, `rollout-${olderSessionId}.jsonl`)
+        const recentFile = join(root, `rollout-${recentSessionId}.jsonl`)
+        writeFileSync(olderFile, '{"type":"session_meta"}\n', 'utf-8')
+        writeFileSync(recentFile, '{"type":"session_meta"}\n', 'utf-8')
+        const now = Date.now()
+        utimesSync(olderFile, new Date(now - 10_000), new Date(now - 10_000))
+        utimesSync(recentFile, new Date(now), new Date(now))
+
+        const callbacks = new Map<string, () => void>()
+        const changes: Array<{ codexSessionId: string }> = []
+        const watcher = new NativeCodexSessionWatcher({
+            root,
+            discoveryIntervalMs: 10,
+            debounceMs: 1,
+            watchFile: (filePath, onChange) => {
+                callbacks.set(filePath, onChange)
+                return () => callbacks.delete(filePath)
+            },
+            onChange: (change) => changes.push(change)
+        })
+
+        try {
+            watcher.start()
+            expect(callbacks.has(olderFile)).toBe(false)
+
+            writeFileSync(olderFile, '{"type":"session_meta"}\n{"type":"event_msg"}\n', 'utf-8')
+
+            await waitForChange(() => {
+                expect(changes.map((change) => change.codexSessionId)).toContain(olderSessionId)
+            })
+            expect(callbacks.has(olderFile)).toBe(false)
+        } finally {
+            watcher.stop()
+        }
     })
 
     it('keeps an observed older transcript on the low-latency watcher set', async () => {
@@ -137,7 +206,6 @@ describe('NativeCodexSessionWatcher', () => {
             root,
             debounceMs: 1,
             discoveryIntervalMs: 60_000,
-            maxWatchedTranscripts: 1,
             watchFile: (filePath, onChange) => {
                 callbacks.set(filePath, onChange)
                 return () => callbacks.delete(filePath)
@@ -155,6 +223,39 @@ describe('NativeCodexSessionWatcher', () => {
 
             await waitForChange(() => expect(changes).toHaveLength(1))
             expect(changes[0]?.codexSessionId).toBe(oldSessionId)
+        } finally {
+            watcher.stop()
+        }
+    })
+
+    it('releases the least recently observed transcript watcher', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-native-codex-observe-limit-'))
+        cleanupPaths.push(root)
+        const firstId = '11111111-1111-4111-8111-111111111111'
+        const secondId = '22222222-2222-4222-8222-222222222222'
+        const firstFile = join(root, `rollout-${firstId}.jsonl`)
+        const secondFile = join(root, `rollout-${secondId}.jsonl`)
+        writeFileSync(firstFile, '{"type":"session_meta"}\n', 'utf-8')
+        writeFileSync(secondFile, '{"type":"session_meta"}\n', 'utf-8')
+
+        const callbacks = new Map<string, () => void>()
+        const watcher = new NativeCodexSessionWatcher({
+            root,
+            maxObservedTranscripts: 1,
+            watchFile: (filePath, onChange) => {
+                callbacks.set(filePath, onChange)
+                return () => callbacks.delete(filePath)
+            },
+            onChange: () => {}
+        })
+
+        try {
+            watcher.start()
+            watcher.observeTranscript(firstFile, firstId)
+            watcher.observeTranscript(secondFile, secondId)
+
+            expect(callbacks.has(firstFile)).toBe(false)
+            expect(callbacks.has(secondFile)).toBe(true)
         } finally {
             watcher.stop()
         }

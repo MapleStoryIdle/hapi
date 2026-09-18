@@ -84,6 +84,7 @@ describe('machines routes', () => {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
+                requestId: '5f753e18-5f5e-47c8-bfcf-94b8d6bd3f34',
                 directory: '/work/project',
                 agent: 'codex',
                 model: 'gpt-5.5',
@@ -104,6 +105,52 @@ describe('machines routes', () => {
             sessionId: 'session-1',
             session,
         })
+    })
+
+    it('spawns once when concurrent requests share an idempotency key', async () => {
+        const machine = createMachine()
+        let resolveSpawn: (value: { type: 'success'; sessionId: string }) => void = () => {
+            throw new Error('Spawn did not start')
+        }
+        let spawnCalls = 0
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            spawnSession: () => {
+                spawnCalls += 1
+                return new Promise<{ type: 'success'; sessionId: string }>((resolve) => {
+                    resolveSpawn = resolve
+                })
+            },
+            getSessionByNamespace: () => undefined,
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const body = JSON.stringify({
+            requestId: 'cd8c9d80-5077-42cd-8743-eb653107a1dc',
+            directory: '/work/project',
+            agent: 'codex',
+        })
+        const responses = Array.from({ length: 20 }, () => app.request('/api/machines/machine-1/spawn', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body,
+        }))
+
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(spawnCalls).toBe(1)
+        resolveSpawn({ type: 'success', sessionId: 'session-1' })
+
+        for (const response of await Promise.all(responses)) {
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({ type: 'success', sessionId: 'session-1' })
+        }
     })
 
     it('returns Codex models for an online machine', async () => {

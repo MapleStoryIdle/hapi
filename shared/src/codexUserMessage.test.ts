@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import {
     normalizeCodexUserMessageContent,
-    normalizeCodexUserMessageText
+    normalizeCodexUserMessageText,
+    parseShapiManagedSkillInvocation
 } from './codexUserMessage'
 
 describe('normalizeCodexUserMessageText', () => {
@@ -251,6 +252,23 @@ describe('normalizeCodexUserMessageText', () => {
             'User request:',
             'test again'
         ].join('\n'))).toBeNull()
+    })
+
+    it('recovers only the skill name and user request for a local display surface', () => {
+        const wrapped = [
+            '<shapi-managed-skill-ref id="agent-team" version="1.0.0">',
+            'private managed instructions',
+            '</shapi-managed-skill-ref>',
+            '',
+            'User request:',
+            'Check the release state.'
+        ].join('\n')
+
+        expect(parseShapiManagedSkillInvocation(wrapped)).toEqual({
+            id: 'agent-team',
+            request: 'Check the release state.'
+        })
+        expect(parseShapiManagedSkillInvocation('<shapi-managed-skill-ref id="agent-team">broken</shapi-managed-skill-ref>')).toBeNull()
     })
 
     it('drops complete internal-only wrappers but keeps a following user request', () => {

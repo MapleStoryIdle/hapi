@@ -68,6 +68,7 @@ const harness = vi.hoisted(() => ({
     emitRunningChildTurnBeforeSuppressedParent: false,
     emitCompletedChildTurnBeforeSuppressedParent: false,
     emitTurnAbortedOnInterrupt: false,
+    disconnectCalls: 0,
     bridgeOptions: [] as unknown[]
 }));
 
@@ -919,7 +920,9 @@ vi.mock('./codexAppServerClient', () => {
             return {};
         }
 
-        async disconnect(): Promise<void> {}
+        async disconnect(): Promise<void> {
+            harness.disconnectCalls += 1;
+        }
     }
 
     return { CodexAppServerClient: MockCodexAppServerClient };
@@ -994,6 +997,7 @@ function createSessionStub(messages = ['hello from launcher test'], mode = creat
         requests: {},
         completedRequests: {}
     };
+    let activeTransportCleanup: (() => Promise<void>) | null = null;
 
     const rpcHandlers = new Map<string, (params: unknown) => unknown>();
     let usageMetadata: import('@hapi/protocol/types').Metadata = { path: '/tmp/hapi-update', host: 'test' };
@@ -1080,6 +1084,15 @@ function createSessionStub(messages = ['hello from launcher test'], mode = creat
         },
         updateAgentState(handler: (state: FakeAgentState) => FakeAgentState) {
             agentState = handler(agentState);
+        },
+        setActiveTransportCleanup(cleanup: () => Promise<void>) {
+            activeTransportCleanup = cleanup;
+        },
+        clearActiveTransportCleanup(cleanup: () => Promise<void>) {
+            if (activeTransportCleanup === cleanup) activeTransportCleanup = null;
+        },
+        async cleanupActiveTransport() {
+            await activeTransportCleanup?.();
         }
     };
 
@@ -1211,6 +1224,7 @@ describe('codexRemoteLauncher', () => {
         harness.emitRunningChildTurnBeforeSuppressedParent = false;
         harness.emitCompletedChildTurnBeforeSuppressedParent = false;
         harness.emitTurnAbortedOnInterrupt = false;
+        harness.disconnectCalls = 0;
         harness.bridgeOptions = [];
     });
 
@@ -1247,6 +1261,18 @@ describe('codexRemoteLauncher', () => {
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
         expect(thinkingChanges).toContain(true);
         expect(session.thinking).toBe(false);
+    });
+
+    it('stops the app-server transport when the owning session closes', async () => {
+        harness.suppressTurnCompletion = true;
+        const { session } = createSessionStub(['keep running']);
+
+        const running = codexRemoteLauncher(session as never);
+        await vi.waitFor(() => expect(harness.startTurnThreadIds).toEqual(['thread-1']));
+        await session.cleanupActiveTransport();
+
+        await expect(running).resolves.toBe('exit');
+        expect(harness.disconnectCalls).toBe(1);
     });
 
     it('forks the native Codex thread without applying SHAPI model or reasoning overrides', async () => {

@@ -1022,6 +1022,67 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
+    it('converts an old restored shared acknowledgement into explicit recovery', async () => {
+        vi.useFakeTimers()
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-restore-ack-timeout-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789095'
+        const stored: NativeCodexSessionDirectSendStoredItem[] = [{
+            sessionId,
+            id: 'ssh:restore-timeout-a',
+            text: 'Old accepted shared item',
+            deliveryText: 'Old accepted shared item',
+            queuedAt: 1,
+            recoveryRequired: false,
+            accepted: true
+        }]
+        const store = {
+            load: () => [...stored],
+            save: (items: readonly NativeCodexSessionDirectSendStoredItem[]) => {
+                stored.splice(0, stored.length, ...items)
+            }
+        }
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 300_001,
+            60_000,
+            {
+                getSummary: () => ({
+                    id: sessionId,
+                    title: 'Native thread',
+                    cwd,
+                    file: '/not-read.jsonl',
+                    modifiedAt: 100,
+                    runState: 'idle' as const
+                })
+            },
+            null,
+            store
+        )
+
+        try {
+            await vi.advanceTimersByTimeAsync(0)
+
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                lastErrorCode: 'session_status_unknown',
+                queuedMessages: [expect.objectContaining({
+                    id: 'ssh:restore-timeout-a',
+                    recoveryRequired: true,
+                    recoveryReason: 'session_status_unknown'
+                })]
+            })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('deliveryReceipts')
+            expect(stored).toEqual([expect.objectContaining({
+                id: 'ssh:restore-timeout-a',
+                recoveryRequired: true,
+                recoveryReason: 'session_status_unknown'
+            })])
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
     it('restores every later FIFO receipt when an incomplete shared ACK fills the normal queue cap', () => {
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-restore-cap-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789082'
@@ -1807,7 +1868,7 @@ describe('NativeCodexSessionDirectSender', () => {
         }
     })
 
-    it('keeps an acknowledged shared send pending beyond twenty seconds without replay or draining later work', async () => {
+    it('turns an unconfirmed shared ACK into explicit recovery without replaying later work', async () => {
         vi.useFakeTimers()
         const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-ack-timeout-workspace-'))
         const sessionId = '89345678-1234-4234-8234-123456789086'
@@ -1815,6 +1876,13 @@ describe('NativeCodexSessionDirectSender', () => {
         const secondClient = new FakeAppServerClient()
         const sharedClients = [firstClient, secondClient]
         let runState: 'idle' | 'processing' = 'idle'
+        const stored: NativeCodexSessionDirectSendStoredItem[] = []
+        const store = {
+            load: () => [...stored],
+            save: (items: readonly NativeCodexSessionDirectSendStoredItem[]) => {
+                stored.splice(0, stored.length, ...items)
+            }
+        }
         const sender = new NativeCodexSessionDirectSender(
             vi.fn<SpawnNativeCodexProcess>(),
             Date.now,
@@ -1830,7 +1898,7 @@ describe('NativeCodexSessionDirectSender', () => {
                 })
             },
             null,
-            null,
+            store,
             null,
             async () => true,
             () => {
@@ -1862,6 +1930,41 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(sender.getStatus(sessionId)).not.toHaveProperty('lastErrorCode')
             expect(firstClient.requestCalls).toHaveLength(1)
             expect(secondClient.requestCalls).toEqual([])
+
+            await vi.advanceTimersByTimeAsync(180_000)
+
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                lastErrorCode: 'session_status_unknown',
+                queuedMessages: [
+                    expect.objectContaining({
+                        id: 'ssh:timeout-a',
+                        recoveryRequired: true,
+                        recoveryReason: 'session_status_unknown'
+                    }),
+                    expect.objectContaining({ id: 'ssh:timeout-b' })
+                ]
+            })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('deliveryReceipts')
+            expect(stored).toEqual([
+                expect.objectContaining({
+                    id: 'ssh:timeout-a',
+                    recoveryRequired: true,
+                    recoveryReason: 'session_status_unknown'
+                }),
+                expect.objectContaining({ id: 'ssh:timeout-b', recoveryRequired: false })
+            ])
+            expect(firstClient.requestCalls).toHaveLength(1)
+            expect(secondClient.requestCalls).toEqual([])
+
+            sender.notifyTranscriptChanged(sessionId, [{
+                text: 'Ambiguous shared item',
+                createdAt: Date.now()
+            }])
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                deliveryReceipts: [{ id: 'ssh:timeout-a', state: 'delivered' }],
+                queuedMessages: [expect.objectContaining({ id: 'ssh:timeout-b' })]
+            })
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })

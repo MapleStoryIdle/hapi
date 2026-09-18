@@ -771,14 +771,13 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const singleToggle = within(singleView.container).getByRole('button', { name: /^read file · App\.tsx · L12–80$/i })
+        const singleToggle = within(singleView.container).getByRole('button', { name: /^read App\.tsx · L12–80$/i })
         fireEvent.click(singleToggle)
 
-        expect(within(singleView.container).getByText('Read file')).toBeInTheDocument()
-        expect(within(singleView.container).getByText('App.tsx · L12–80')).toBeInTheDocument()
+        expect(within(singleView.container).getAllByText('Read App.tsx · L12–80')).toHaveLength(2)
         expect(singleView.container.querySelector('[data-tool-group-timeline]')).toHaveClass('left-0')
         const singleRow = within(singleView.container)
-            .getAllByRole('button', { name: /read file App\.tsx/i })
+            .getAllByRole('button', { name: /read App\.tsx/i })
             .find((button) => !button.hasAttribute('aria-expanded'))
         expect(singleRow).toHaveClass('-ml-[7px]', 'px-0')
 
@@ -809,12 +808,39 @@ describe('ToolGroupCard', () => {
             },
         }), { terminalToolDisplayMode: 'compact' })
 
-        const batchToggle = within(batchView.container).getByRole('button', { name: /^read 2 files$/i })
+        const batchToggle = within(batchView.container).getByRole('button', { name: /^read a\.ts · … and 2 source files$/i })
         fireEvent.click(batchToggle)
 
-        expect(within(batchView.container).getAllByText('Read 2 files')).toHaveLength(2)
+        expect(within(batchView.container).getAllByText('Read a.ts · … and 2 source files')).toHaveLength(2)
         expect(within(batchView.container).queryByText('web/src/a.ts')).not.toBeInTheDocument()
         expect(within(batchView.container).queryByText('web/src/b.ts · L1–20')).not.toBeInTheDocument()
+    })
+
+    it('shows the real Skill-read action instead of the orchestration wrapper or sed', () => {
+        const skillRead = makeToolBlock('skill-read', 'CodexBash', {
+            command: `const r = await tools.exec_command({
+                cmd: "sed -n '1,240p' /Users/dev/.codex/skills/agent-team/SKILL.md\\nsed -n '1,220p' /Users/dev/.codex/skills/karpathy-guidelines/SKILL.md\\nsed -n '1,220p' /Users/dev/.codex/skills/agent-team/references/team-profiles.md"
+            }); text(r.output);`
+        })
+        const view = renderCard(makeGroup({
+            id: 'tool-group:skill-read',
+            tools: [skillRead],
+            summary: {
+                totalTools: 1,
+                countsByKind: { read: 1, search: 0, command: 0, mutation: 0, web: 0, other: 0 },
+                fileTargets: [],
+                commandTargets: [],
+                searchTargets: [],
+                urlTargets: [],
+                otherTargets: [],
+                errorCount: 0,
+                runningCount: 0,
+                pendingCount: 0,
+            },
+        }), { terminalToolDisplayMode: 'compact' })
+
+        expect(within(view.container).getByRole('button', { name: /^read agent-team\/SKILL\.md · … and 3 Skill files$/i })).toBeInTheDocument()
+        expect(within(view.container).queryByText('sed -n')).not.toBeInTheDocument()
     })
 
     it('uses action-specific compact titles for single tool groups', () => {

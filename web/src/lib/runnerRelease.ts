@@ -36,4 +36,3 @@ export function parseRunnerReleaseManifest(value: unknown): RunnerReleaseManifes
         publishedAt: record.publishedAt,
     }
 }
-

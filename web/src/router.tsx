@@ -28,6 +28,7 @@ import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
 import { useSessionListViewMode } from '@/hooks/useSessionListViewMode'
+import { useKanbanRecentPreferences } from '@/hooks/useKanbanRecentPreferences'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useSession } from '@/hooks/queries/useSession'
@@ -1589,13 +1590,14 @@ function SessionDetailRoute() {
     const { session, notFound: sessionNotFound } = useSession(api, sessionId)
     const basePath = `/sessions/${sessionId}`
     const isChat = pathname === basePath || pathname === `${basePath}/`
+    const { autoRemoveOnOpen } = useKanbanRecentPreferences()
 
     useEffect(() => {
-        if (!session) {
+        if (!session || !autoRemoveOnOpen) {
             return
         }
         markSessionSeen(session.id, session.updatedAt)
-    }, [session?.id, session?.updatedAt])
+    }, [autoRemoveOnOpen, session?.id, session?.updatedAt])
 
     useEffect(() => {
         if (!sessionNotFound) {

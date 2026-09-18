@@ -21,4 +21,3 @@ changed by this project. For routine coding, consider a separate profile that
 disables Sites, browser/Chrome, Visualize, and computer-use plugins. Enable them
 only for tasks that need those capabilities. Measure a new session before and
 after; plugin availability and tool schemas vary by Codex version.
-

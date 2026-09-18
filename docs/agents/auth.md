@@ -33,4 +33,3 @@ workspace-scoped data.
 - Web and Runner credentials are not interchangeable.
 - Revocation must reject new access and disconnect existing Runner sockets.
 - Never log raw `spw`, `spr`, private keys, session cookies, or access tokens.
-

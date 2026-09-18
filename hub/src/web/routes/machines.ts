@@ -15,8 +15,16 @@ import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireMachine } from './guards'
 
+const SPAWN_REQUEST_TTL_MS = 5 * 60 * 1_000
+
+type SpawnRouteOutcome = {
+    result: Awaited<ReturnType<SyncEngine['spawnSession']>>
+    session: ReturnType<SyncEngine['getSessionByNamespace']> | null
+}
+
 export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
+    const spawnRequests = new Map<string, Promise<SpawnRouteOutcome>>()
 
     app.get('/machines', (c) => {
         const engine = getSyncEngine()
@@ -47,23 +55,47 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Invalid body' }, 400)
         }
 
-        const result = await engine.spawnSession(
-            machineId,
-            parsed.data.directory,
-            parsed.data.agent,
-            parsed.data.model,
-            parsed.data.modelReasoningEffort,
-            parsed.data.yolo,
-            parsed.data.sessionType,
-            parsed.data.worktreeName,
-            undefined,
-            parsed.data.effort
-        )
-        if (result.type === 'success') {
-            const session = engine.getSessionByNamespace(result.sessionId, c.get('namespace'))
-            if (session) {
-                return c.json({ ...result, session })
-            }
+        const namespace = c.get('namespace')
+        const requestKey = `${namespace}\u0000${machineId}\u0000${parsed.data.requestId}`
+        let spawnRequest = spawnRequests.get(requestKey)
+        if (!spawnRequest) {
+            spawnRequest = (async (): Promise<SpawnRouteOutcome> => {
+                const result = await engine.spawnSession(
+                    machineId,
+                    parsed.data.directory,
+                    parsed.data.agent,
+                    parsed.data.model,
+                    parsed.data.modelReasoningEffort,
+                    parsed.data.yolo,
+                    parsed.data.sessionType,
+                    parsed.data.worktreeName,
+                    undefined,
+                    parsed.data.effort
+                )
+                return {
+                    result,
+                    session: result.type === 'success'
+                        ? engine.getSessionByNamespace(result.sessionId, namespace)
+                        : null
+                }
+            })()
+            spawnRequests.set(requestKey, spawnRequest)
+            const storedRequest = spawnRequest
+            setTimeout(() => {
+                if (spawnRequests.get(requestKey) === storedRequest) {
+                    spawnRequests.delete(requestKey)
+                }
+            }, SPAWN_REQUEST_TTL_MS)
+            void spawnRequest.catch(() => {
+                if (spawnRequests.get(requestKey) === storedRequest) {
+                    spawnRequests.delete(requestKey)
+                }
+            })
+        }
+
+        const { result, session } = await spawnRequest
+        if (result.type === 'success' && session) {
+            return c.json({ ...result, session })
         }
         return c.json(result)
     })

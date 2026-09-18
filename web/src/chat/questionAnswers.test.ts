@@ -69,6 +69,14 @@ describe('native desktop question replies', () => {
     it('formats a complete reply for queue and composer display', () => {
         expect(formatUserMessageForDisplay(wrap([reply]))).toBe('选择哪种方案？\n• 轻量方案')
         expect(formatUserMessageForDisplay('普通消息')).toBe('普通消息')
+        expect(formatUserMessageForDisplay([
+            '<shapi-managed-skill-ref id="agent-team" version="1.0.0">',
+            'private managed instructions',
+            '</shapi-managed-skill-ref>',
+            '',
+            'User request:',
+            '检查发布状态'
+        ].join('\n'))).toBe('$agent-team 检查发布状态')
     })
 })
 

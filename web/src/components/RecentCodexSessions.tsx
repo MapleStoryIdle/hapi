@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     CircleAlert,
@@ -65,10 +65,14 @@ import {
     markSessionSeen,
     useSessionLastSeenState
 } from '@/lib/sessionLastSeen'
+import {
+    DEFAULT_KANBAN_RECENT_MINUTES,
+    useKanbanRecentPreferences
+} from '@/hooks/useKanbanRecentPreferences'
 
 /** The sessions index intentionally stays focused on the last three days. */
 export const RECENT_CODEX_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
-export const RECENT_COMPLETED_WINDOW_MS = 15 * 60 * 1000
+export const RECENT_COMPLETED_WINDOW_MS = DEFAULT_KANBAN_RECENT_MINUTES * 60 * 1000
 const NATIVE_CODEX_LIST_FALLBACK_REFRESH_INTERVAL_MS = 5_000
 const NATIVE_CODEX_LIST_UPDATE_BATCH_MS = 100
 const HAPI_CODEX_ORIGINATOR = 'hapi-codex-client'
@@ -487,11 +491,13 @@ function getMergedCodexSessionSeenKey(session: MergedCodexSession): string {
     return session.source === 'hapi' ? session.id : session.key
 }
 
-/** A completed row stays unviewed only inside the recent completion window. */
+/** A completed row can enter Recent only inside the configured completion window. */
 export function isMergedCodexSessionUnviewed(
     session: MergedCodexSession,
     lastSeenAtBySession: Readonly<Record<string, number>>,
-    now = Date.now()
+    now = Date.now(),
+    recentWindowMs = RECENT_COMPLETED_WINDOW_MS,
+    respectLastSeen = true
 ): boolean {
     if (getMergedCodexKanbanStatus(session) !== 'completed') {
         return false
@@ -501,11 +507,12 @@ export function isMergedCodexSessionUnviewed(
     // A Hub timestamp can be a few milliseconds ahead of the browser clock.
     // Treat that as a just-finished session rather than hiding its unread state.
     const age = Math.max(0, now - completedAt)
-    if (!Number.isFinite(completedAt) || age >= RECENT_COMPLETED_WINDOW_MS) {
+    if (!Number.isFinite(completedAt) || age >= recentWindowMs) {
         return false
     }
 
-    return completedAt > toEpochMilliseconds(lastSeenAtBySession[getMergedCodexSessionSeenKey(session)] ?? 0)
+    return !respectLastSeen
+        || completedAt > toEpochMilliseconds(lastSeenAtBySession[getMergedCodexSessionSeenKey(session)] ?? 0)
 }
 
 export function groupMergedCodexSessionsForKanban(
@@ -513,7 +520,8 @@ export function groupMergedCodexSessionsForKanban(
     pinnedSessionKeys: ReadonlySet<string> = EMPTY_PINNED_SESSION_KEYS,
     lastSeenAtBySession: Readonly<Record<string, number>> = {},
     now = Date.now(),
-    sessionGroups: ReadonlyMap<string, SessionGroup> = EMPTY_SESSION_GROUPS
+    sessionGroups: ReadonlyMap<string, SessionGroup> = EMPTY_SESSION_GROUPS,
+    options: { recentWindowMs?: number; autoRemoveOnOpen?: boolean } = {}
 ): MergedCodexKanbanGroup[] {
     const customGroups = [...new Map([...sessionGroups.values()].map(group => [group.id, group])).values()]
         .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
@@ -530,9 +538,15 @@ export function groupMergedCodexSessionsForKanban(
     for (const session of sessions) {
         const status = getMergedCodexKanbanStatus(session)
         const customGroup = sessionGroups.get(session.key)
-        // A fresh completion temporarily outranks pin/group placement. Once the
-        // person opens it, the persisted seen watermark restores its normal lane.
-        const unviewed = isMergedCodexSessionUnviewed(session, lastSeenAtBySession, now)
+        // A fresh completion temporarily outranks pin/group placement. When
+        // auto-remove is enabled, its seen watermark restores the normal lane.
+        const unviewed = isMergedCodexSessionUnviewed(
+            session,
+            lastSeenAtBySession,
+            now,
+            options.recentWindowMs,
+            options.autoRemoveOnOpen !== false
+        )
         const groupId: MergedCodexKanbanGroupId = status === 'completed' && unviewed
                 ? 'recent'
                 : status === 'completed' && pinnedSessionKeys.has(session.key)
@@ -798,6 +812,7 @@ function KanbanSessionCard(props: {
     onArchived: (session: MergedCodexSession) => void
     dateLocale: string
     now: number
+    recentWindowMs: number
     directoryColor: string | null
     sessionGroup?: SessionGroup
     sessionLabel?: string
@@ -820,7 +835,7 @@ function KanbanSessionCard(props: {
     const completedAge = now - modifiedAt
     const recentlyCompleted = status === 'completed'
         && completedAge >= 0
-        && completedAge < RECENT_COMPLETED_WINDOW_MS
+        && completedAge < props.recentWindowMs
     const directoryLabel = getKanbanDirectoryLabel(session.cwd) ?? t('recentCodex.noDirectory')
     const gitMachineId = session.hapiSession?.metadata?.machineId ?? machineId
     const gitCwd = session.hapiSession?.metadata?.path ?? session.cwd
@@ -862,6 +877,7 @@ function KanbanSessionCard(props: {
                 <div
                     className={`cupertino-session-card session-kanban-card flex min-h-[5.625rem] w-full min-w-0 flex-col rounded-[14px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[background-color,box-shadow,transform] hover:bg-[var(--app-subtle-bg)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${status === 'processing' ? 'session-kanban-card-thinking' : `border-l-[3px] ${presentation.borderClassName}`} ${recentlyCompleted ? 'session-kanban-card-recent-completed' : ''} ${props.unviewed ? 'session-kanban-card-unviewed' : ''} ${selected ? 'bg-[var(--app-subtle-bg)]' : ''}`}
                     style={status !== 'processing' && borderColor ? { borderLeftColor: borderColor } : undefined}
+                    data-session-selected={selected || undefined}
                     data-kanban-card-status={status}
                     data-kanban-directory-color={!groupColor ? completedDirectoryColor ?? undefined : undefined}
                     data-kanban-group-color={groupColor ?? undefined}
@@ -1309,7 +1325,48 @@ export function RecentCodexSessions(props: {
     const hasInitializedRealtimeStateRef = useRef(false)
     const [manualRefreshFeedback, setManualRefreshFeedback] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const [archivedSessionKeys, setArchivedSessionKeys] = useState<Set<string>>(() => new Set())
+    const [optimisticSelection, setOptimisticSelection] = useState<{ id: string; previousId: string | null } | null>(null)
+    const scrollContainerRef = useRef<HTMLElement | null>(null)
+    const pendingScrollTopRef = useRef<number | null>(null)
+    const scrollRestoreFramesRef = useRef<number[]>([])
     const sessionLastSeenState = useSessionLastSeenState()
+    const kanbanRecentPreferences = useKanbanRecentPreferences()
+    const kanbanRecentWindowMs = kanbanRecentPreferences.recentMinutes * 60 * 1000
+    const selectedSessionId = optimisticSelection?.id ?? props.selectedSessionId
+
+    useEffect(() => {
+        if (!optimisticSelection) return
+        if (
+            (props.selectedSessionId ?? null) === optimisticSelection.id
+            || (props.selectedSessionId ?? null) !== optimisticSelection.previousId
+        ) {
+            setOptimisticSelection(null)
+        }
+    }, [optimisticSelection, props.selectedSessionId])
+
+    useLayoutEffect(() => {
+        const scrollTop = pendingScrollTopRef.current
+        const container = scrollContainerRef.current
+        if (scrollTop === null || !container) return
+
+        for (const frame of scrollRestoreFramesRef.current) window.cancelAnimationFrame(frame)
+        scrollRestoreFramesRef.current = []
+        container.scrollTop = scrollTop
+        const firstFrame = window.requestAnimationFrame(() => {
+            container.scrollTop = scrollTop
+            const secondFrame = window.requestAnimationFrame(() => {
+                container.scrollTop = scrollTop
+                pendingScrollTopRef.current = null
+                scrollRestoreFramesRef.current = []
+            })
+            scrollRestoreFramesRef.current.push(secondFrame)
+        })
+        scrollRestoreFramesRef.current.push(firstFrame)
+    })
+
+    useEffect(() => () => {
+        for (const frame of scrollRestoreFramesRef.current) window.cancelAnimationFrame(frame)
+    }, [])
 
     useEffect(() => {
         const updateRelativeTime = () => setRelativeTimeNow(Date.now())
@@ -1434,15 +1491,25 @@ export function RecentCodexSessions(props: {
             pinnedSessionKeys,
             sessionLastSeenState.lastSeenAtBySession,
             relativeTimeNow,
-            sessionGroupsByKey
+            sessionGroupsByKey,
+            {
+                recentWindowMs: kanbanRecentWindowMs,
+                autoRemoveOnOpen: kanbanRecentPreferences.autoRemoveOnOpen
+            }
         ),
-        [mergedSessions, pinnedSessionKeys, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession, sessionGroupsByKey]
+        [kanbanRecentPreferences.autoRemoveOnOpen, kanbanRecentWindowMs, mergedSessions, pinnedSessionKeys, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession, sessionGroupsByKey]
     )
     const unviewedSessionKeys = useMemo(() => new Set(
         mergedSessions
-            .filter(session => isMergedCodexSessionUnviewed(session, sessionLastSeenState.lastSeenAtBySession, relativeTimeNow))
+            .filter(session => isMergedCodexSessionUnviewed(
+                session,
+                sessionLastSeenState.lastSeenAtBySession,
+                relativeTimeNow,
+                kanbanRecentWindowMs,
+                kanbanRecentPreferences.autoRemoveOnOpen
+            ))
             .map(session => session.key)
-    ), [mergedSessions, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession])
+    ), [kanbanRecentPreferences.autoRemoveOnOpen, kanbanRecentWindowMs, mergedSessions, relativeTimeNow, sessionLastSeenState.lastSeenAtBySession])
     const completedTimelineGroups = useMemo(() => {
         const completed = kanbanGroups.find((group) => group.id === 'completed')?.sessions ?? []
         return groupMergedCodexCompletedTimeline(completed, new Date(), dateLocale, {
@@ -1489,16 +1556,16 @@ export function RecentCodexSessions(props: {
             return changed ? next : current
         })
 
-        if (!props.selectedSessionId || !isMerged) {
+        if (!selectedSessionId || !isMerged) {
             autoExpandedSelectionRef.current = null
             return
         }
         const selectedGroup = mergedDirectoryGroups.find((group) => group.sessions.some((session) => (
-            session.source === 'hapi' && session.id === props.selectedSessionId
+            session.source === 'hapi' && session.id === selectedSessionId
         )))
         if (!selectedGroup) return
 
-        const selectionKey = `${props.selectedSessionId}:${getDirectoryKey(selectedGroup.directory)}`
+        const selectionKey = `${selectedSessionId}:${getDirectoryKey(selectedGroup.directory)}`
         if (autoExpandedSelectionRef.current === selectionKey) return
         autoExpandedSelectionRef.current = selectionKey
         const directoryKey = getDirectoryKey(selectedGroup.directory)
@@ -1508,7 +1575,7 @@ export function RecentCodexSessions(props: {
             next.delete(directoryKey)
             return next
         })
-    }, [directoryGroupsForDisclosure, isMerged, mergedDirectoryGroups, props.selectedSessionId])
+    }, [directoryGroupsForDisclosure, isMerged, mergedDirectoryGroups, selectedSessionId])
 
     const refresh = useCallback(async (forceRefresh = false): Promise<boolean> => {
         const startedAt = Date.now()
@@ -1686,7 +1753,15 @@ export function RecentCodexSessions(props: {
     }, [refresh])
 
     const handleOpenMergedSession = useCallback((session: MergedCodexSession) => {
-        markSessionSeen(getMergedCodexSessionSeenKey(session), getHapiSessionUpdatedAt(session))
+        if (isCupertinoPresentation && window.innerWidth >= 1024) {
+            pendingScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? null
+        }
+        if (session.source === 'hapi' && isCupertinoPresentation) {
+            setOptimisticSelection({ id: session.id, previousId: props.selectedSessionId ?? null })
+        }
+        if (kanbanRecentPreferences.autoRemoveOnOpen) {
+            markSessionSeen(getMergedCodexSessionSeenKey(session), getHapiSessionUpdatedAt(session))
+        }
         if (session.source === 'hapi') {
             if (!session.hapiSession) return
             props.onOpenHapi?.(session.hapiSession)
@@ -1695,7 +1770,7 @@ export function RecentCodexSessions(props: {
         if (session.nativeSession) {
             props.onOpen(session.nativeSession)
         }
-    }, [props.onOpen, props.onOpenHapi])
+    }, [isCupertinoPresentation, kanbanRecentPreferences.autoRemoveOnOpen, props.onOpen, props.onOpenHapi, props.selectedSessionId])
 
     // Current runners patch this list through SSE. Older runners, or a
     // temporarily disconnected event stream, retain a small polling fallback.
@@ -1731,6 +1806,7 @@ export function RecentCodexSessions(props: {
 
     return (
         <section
+            ref={scrollContainerRef}
             className={embedded
                 ? 'cupertino-session-list app-scroll-y flex min-h-0 w-full flex-1 flex-col px-4 pb-3 pt-1 sm:px-6 [font-family:var(--app-control-font-family)]'
                 : 'cupertino-session-list flex min-h-0 w-full flex-1 flex-col px-4 pb-4 pt-3 sm:px-6 [font-family:var(--app-control-font-family)]'}
@@ -1860,10 +1936,11 @@ export function RecentCodexSessions(props: {
                                             api={props.api}
                                             machineId={props.machineId}
                                             session={session}
-                                            selected={session.source === 'hapi' && session.id === props.selectedSessionId}
+                                            selected={session.source === 'hapi' && session.id === selectedSessionId}
                                             pinned={pinnedSessionKeys?.has(session.key) ?? false}
                                             dateLocale={dateLocale}
                                             now={relativeTimeNow}
+                                            recentWindowMs={kanbanRecentWindowMs}
                                             directoryColor={getAssignedCompletedSessionDirectoryColor(completedDirectoryColors, session.cwd)}
                                             sessionGroup={sessionGroupsByKey.get(session.key)}
                                             sessionLabel={sessionLabelsByKey.get(session.key)}
@@ -1900,10 +1977,11 @@ export function RecentCodexSessions(props: {
                                                         api={props.api}
                                                         machineId={props.machineId}
                                                         session={session}
-                                                        selected={session.source === 'hapi' && session.id === props.selectedSessionId}
+                                                        selected={session.source === 'hapi' && session.id === selectedSessionId}
                                                         pinned={pinnedSessionKeys?.has(session.key) ?? false}
                                                         dateLocale={dateLocale}
                                                         now={relativeTimeNow}
+                                                        recentWindowMs={kanbanRecentWindowMs}
                                                         directoryColor={getAssignedCompletedSessionDirectoryColor(completedDirectoryColors, session.cwd)}
                                                         sessionGroup={sessionGroupsByKey.get(session.key)}
                                                         sessionLabel={sessionLabelsByKey.get(session.key)}
@@ -1959,7 +2037,7 @@ export function RecentCodexSessions(props: {
                                                     <MergedCodexSessionRow
                                                         key={session.key}
                                                         session={session}
-                                                        selected={session.source === 'hapi' && session.id === props.selectedSessionId}
+                                                        selected={session.source === 'hapi' && session.id === selectedSessionId}
                                                         t={t}
                                                     onOpen={() => handleOpenMergedSession(session)}
                                                     />

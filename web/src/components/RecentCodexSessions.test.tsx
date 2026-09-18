@@ -347,6 +347,25 @@ describe('RecentCodexSessions', () => {
         expect(ids).toHaveLength(rows.length)
     })
 
+    it('uses the configured recent window and can keep opened sessions in Recent', () => {
+        const now = new Date(2026, 8, 5, 12).getTime()
+        const rows = mergeRecentCodexSessions([
+            createManagedCodexSession('twenty-minutes-old', now - 20 * 60_000)
+        ], [], { now })
+        const seen = { 'twenty-minutes-old': now }
+
+        const defaultGroups = groupMergedCodexSessionsForKanban(rows, new Set(), seen, now)
+        expect(defaultGroups.find(group => group.id === 'recent')?.sessions).toHaveLength(0)
+
+        const configuredGroups = groupMergedCodexSessionsForKanban(rows, new Set(), seen, now, new Map(), {
+            recentWindowMs: 30 * 60_000,
+            autoRemoveOnOpen: false
+        })
+        expect(configuredGroups.find(group => group.id === 'recent')?.sessions.map(session => session.id)).toEqual([
+            'twenty-minutes-old'
+        ])
+    })
+
     it('keeps unseen state on recent SHAPI completions without creating an Unviewed lane', () => {
         const now = new Date(2026, 8, 5, 12).getTime()
         const rows = mergeRecentCodexSessions([
@@ -1010,12 +1029,17 @@ describe('RecentCodexSessions', () => {
             expect(recent?.querySelector('[data-kanban-unviewed="true"]')).toHaveClass('session-kanban-card-unviewed')
         })
 
-        fireEvent.click(screen.getByRole('button', { name: /Open Fresh completion/ }))
+        const sessionList = screen.getByTestId('recent-codex-sessions')
+        sessionList.scrollTop = 240
+        const openFresh = screen.getByRole('button', { name: /Open Fresh completion/ })
+        fireEvent.click(openFresh)
         expect(onOpenHapi).toHaveBeenCalledWith(fresh)
+        expect(screen.getByRole('button', { name: /Open Fresh completion/ }).closest('.cupertino-session-card')).toHaveAttribute('data-session-selected', 'true')
         await waitFor(() => {
             expect(board.querySelector('[data-kanban-group="unviewed"]')).toBeNull()
             expect(board.querySelector('[data-kanban-group="pinned"]')).toHaveTextContent('Fresh completion')
             expect(board.querySelector('[data-kanban-unviewed="true"]')).toBeNull()
+            expect(sessionList.scrollTop).toBe(240)
         })
 
         const rerun = { ...fresh, updatedAt: fresh.updatedAt + 100, activeAt: fresh.activeAt + 100 }

@@ -95,6 +95,17 @@ describe('terminal execution details', () => {
         expect(getTerminalExecutionState(block)).toBe('completed')
     })
 
+    it('restores newlines from a nested Codex terminal command for the detail view', () => {
+        const block = makeBlock({ stdout: 'ok' }, {
+            command: `const result = await tools.exec_command({
+                cmd: "pwd\\nls -la",
+                workdir: "/workspace"
+            }); text(result.output);`
+        })
+
+        expect(getTerminalExecutionDetails(block).command).toBe('pwd\nls -la')
+    })
+
     it('unwraps the exec result envelope and keeps only its output', () => {
         const block = makeBlock({
             stdout: JSON.stringify({

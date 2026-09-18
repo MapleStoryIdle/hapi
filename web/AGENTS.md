@@ -9,4 +9,3 @@
   contract, guard, and regression-test updates.
 - For non-essential feature discovery, read `FUE.md`; do not add large,
   permanently visible onboarding blocks.
-

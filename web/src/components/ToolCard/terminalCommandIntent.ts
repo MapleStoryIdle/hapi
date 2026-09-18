@@ -33,6 +33,7 @@ export type TerminalCommandIntent =
     | { kind: 'run-program'; program: string }
 
 type Translator = (key: string, params?: Record<string, string | number>) => string
+type ReadRequestSubject = 'skill' | 'agentRules' | 'tests' | 'source' | 'configuration' | 'documentation'
 
 const COMMAND_START = String.raw`(?:^|[;&\n]\s*)`
 const TEST_COMMAND_RE = new RegExp(
@@ -568,12 +569,12 @@ function classifyShellInvocation(command: string): TerminalCommandIntent | null 
  * text. File reads remain requests: a shell command does not prove access.
  */
 export function getTerminalCommandIntent(input: unknown): TerminalCommandIntent | null {
-    const readTargets = getTerminalReadRequests(input)
+    const rawCommand = getTerminalCommandForSummary(input)
+    const readTargets = rawCommand ? getTerminalReadRequests({ command: rawCommand }) : []
     if (readTargets.length > 0) {
         return { kind: 'read-request', targets: readTargets }
     }
 
-    const rawCommand = getTerminalCommandForSummary(input)
     if (!rawCommand) return null
     const command = stripHeredocBodies(rawCommand)
 
@@ -681,9 +682,85 @@ function formatNames(names: string[]): string | null {
 
 function formatFileNamesOrCount(names: string[], t?: Translator): string | null {
     if (names.length <= 1) return formatNames(names)
+    const subject = getReadRequestSubject(names)
+    if (!subject) {
+        return t
+            ? t('toolGroup.compact.fileCount', { n: names.length })
+            : `${names.length} files`
+    }
     return t
-        ? t('toolGroup.compact.fileCount', { n: names.length })
-        : `${names.length} files`
+        ? t(`toolGroup.compact.targetBatch.${subject}`, { first: names[0]!, n: names.length })
+        : `${names[0]} · … and ${names.length} ${getReadSubjectFallbackName(subject, names.length)}`
+}
+
+function getReadRequestSubject(rawPaths: string[]): ReadRequestSubject | null {
+    const paths = rawPaths.map(path => path.replace(/\\/g, '/'))
+    const names = paths.map(path => path.split('/').filter(Boolean).pop() ?? '')
+    const all = (predicate: (path: string, name: string) => boolean) => (
+        paths.length > 0 && paths.every((path, index) => predicate(path, names[index]!))
+    )
+
+    if (all((path, name) => (
+        name === 'SKILL.md'
+        || /\/(?:\.codex|\.agents)\/skills\//.test(path)
+        || /\/skills\/[^/]+\/(?:references|scripts|assets)\//.test(path)
+    ))) return 'skill'
+    if (all((_path, name) => /^AGENTS?\.md$/i.test(name))) return 'agentRules'
+    if (all((_path, name) => /(?:^|[._-])(?:test|spec)\.[^.]+$/i.test(name))) return 'tests'
+    if (all((_path, name) => (
+        /^(?:package\.json|bun\.lockb?|tsconfig(?:\.[^.]+)?\.json|vite\.config\.[^.]+|vitest\.config\.[^.]+|\.env(?:\..+)?|Dockerfile|Makefile)$/i.test(name)
+        || /\.(?:json|ya?ml|toml|ini|conf|config)$/i.test(name)
+    ))) return 'configuration'
+    if (all((_path, name) => /\.(?:md|mdx|txt|rst|adoc)$/i.test(name))) return 'documentation'
+    if (all((_path, name) => /\.(?:[cm]?[jt]sx?|vue|svelte|astro|py|rb|go|rs|java|kt|kts|swift|php|cs|cpp|cc|c|h|hpp|sh|bash|zsh|fish)$/i.test(name))) return 'source'
+    return null
+}
+
+function getReadSubjectFallbackName(subject: ReadRequestSubject, count: number): string {
+    const plural = count === 1 ? '' : 's'
+    const names: Record<ReadRequestSubject, string> = {
+        skill: `Skill file${plural}`,
+        agentRules: `agent rule file${plural}`,
+        tests: `test file${plural}`,
+        source: `source file${plural}`,
+        configuration: `configuration file${plural}`,
+        documentation: count === 1 ? 'document' : 'documents'
+    }
+    return names[subject]
+}
+
+function getReadTargetDisplayName(path: string): string | null {
+    const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '')
+    const parts = normalized.split('/').filter(Boolean)
+    const name = safeFileName(normalized, true)
+    if (!name) return null
+    if (name === 'SKILL.md' && parts.length >= 2) return `${parts[parts.length - 2]}/SKILL.md`
+    return name
+}
+
+export function getTerminalReadRequestLabel(
+    intent: Extract<TerminalCommandIntent, { kind: 'read-request' }>,
+    t?: Translator
+): string {
+    const count = intent.targets.length
+    const names = intent.targets.map(target => getReadTargetDisplayName(target.path)).filter((name): name is string => name !== null)
+    const subject = getReadRequestSubject(intent.targets.map(target => target.path))
+    if (count === 1 && names[0]) {
+        const range = formatFileLineRange(intent.targets[0]?.lineRange ?? null)
+        const first = range ? `${names[0]} · ${range}` : names[0]
+        return t
+            ? t('toolGroup.compact.row.readNamed', { first })
+            : `Read ${first}`
+    }
+    if (!subject) {
+        if (count > 1) return t ? t('toolGroup.compact.row.readBatch', { n: count }) : `Read ${count} files`
+        return t ? t('tool.semanticTitle.readFile') : 'Read file'
+    }
+    const first = names[0]
+    if (!first) return t ? t('toolGroup.compact.row.readBatch', { n: count }) : `Read ${count} files`
+    return t
+        ? t(`toolGroup.compact.row.readSubject.${subject}.many`, { first, n: count })
+        : `Read ${first} · … and ${count} ${getReadSubjectFallbackName(subject, count)}`
 }
 
 function formatDatabaseDetail(intent: Extract<TerminalCommandIntent, { kind: 'query-database' }>): string | null {
@@ -703,7 +780,7 @@ function formatDatabaseDetail(intent: Extract<TerminalCommandIntent, { kind: 'qu
 export function getTerminalCommandIntentDetail(intent: TerminalCommandIntent, t?: Translator): string | null {
     if (intent.kind === 'read-request') {
         return formatFileNamesOrCount(intent.targets.map((target) => {
-            const name = safeFileName(target.path, true)
+            const name = getReadTargetDisplayName(target.path)
             if (!name) return ''
             const range = formatFileLineRange(target.lineRange)
             return range ? `${name} · ${range}` : name
@@ -714,12 +791,15 @@ export function getTerminalCommandIntentDetail(intent: TerminalCommandIntent, t?
         if (!intent.host) return null
         return `${intent.host}${intent.path ?? ''}`
     }
-    if (intent.kind === 'remote-command') return intent.host
+    if (intent.kind === 'remote-command') {
+        const files = formatFileNamesOrCount(intent.files, t)
+        return [intent.host, files].filter(Boolean).join(' · ') || null
+    }
     if (intent.kind === 'query-database') return formatDatabaseDetail(intent)
-    if (intent.kind === 'inspect-output') return formatNames(intent.files)
+    if (intent.kind === 'inspect-output') return formatFileNamesOrCount(intent.files, t)
     if (intent.kind === 'manage-files') {
         if (intent.move) return `${intent.move.from} → ${intent.move.to}`
-        return formatNames(intent.files)
+        return formatFileNamesOrCount(intent.files, t)
     }
     return null
 }
@@ -829,14 +909,22 @@ function getCodexOrchestrationTitle(input: unknown, t?: Translator): string | nu
     return t ? t('terminal.execution.toolAction') : 'Tool operation'
 }
 
-function getTerminalCommandForSummary(input: unknown): string | null {
-    const raw = getTerminalCommand(input) ?? getInputStringAny(input, ['command', 'cmd'])?.trim()
+/** Recover literal nested terminal commands for a transcript or command detail. */
+export function getTerminalCommandForDetail(input: unknown): string | null {
+    const raw = getInputStringAny(input, ['command', 'cmd'])?.trim() ?? getTerminalCommand(input)
     if (!raw) return null
 
     const orchestratedCommands = getOrchestratedTerminalCommands(raw)
     if (orchestratedCommands.length > 0) {
         return orchestratedCommands.join('\n')
     }
+
+    return raw
+}
+
+function getTerminalCommandForSummary(input: unknown): string | null {
+    const raw = getTerminalCommandForDetail(input)
+    if (!raw) return null
 
     // Historical Codex traces can carry malformed nested shell quotes. The
     // display summary may still safely inspect their command text.
@@ -879,6 +967,7 @@ export function getTerminalCommandIntentLabel(
     intent: TerminalCommandIntent,
     t?: Translator
 ): string {
+    if (intent.kind === 'read-request') return getTerminalReadRequestLabel(intent, t)
     const commandSummary = getTerminalCommandSummary(input)
     if (commandSummary && usesTerminalCommandAsLabel(intent)) return commandSummary
     return getTerminalCommandIntentTitle(intent, t)
@@ -891,6 +980,7 @@ export function getTerminalCommandDisplayTitle(input: unknown, t?: Translator): 
     const intent = getTerminalCommandIntent(input)
     if (intent) {
         const title = getTerminalCommandIntentLabel(input, intent, t)
+        if (intent.kind === 'read-request') return title
         const detail = getTerminalCommandIntentDetail(intent, t)
         return detail ? `${title} · ${detail}` : title
     }

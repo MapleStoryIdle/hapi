@@ -1104,10 +1104,11 @@ export class ApiClient {
         })
     }
 
-    async spawnSession(machineId: string, directory: string, agent?: AgentFlavor, model?: string, modelReasoningEffort?: string, yolo?: boolean, sessionType?: 'simple' | 'worktree', worktreeName?: string, effort?: string): Promise<SpawnResponse> {
+    async spawnSession(machineId: string, directory: string, agent?: AgentFlavor, model?: string, modelReasoningEffort?: string, yolo?: boolean, sessionType?: 'simple' | 'worktree', worktreeName?: string, effort?: string, requestId?: string): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
             body: JSON.stringify({
+                requestId: requestId ?? crypto.randomUUID(),
                 directory,
                 agent,
                 model,

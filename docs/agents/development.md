@@ -36,4 +36,3 @@ only the command, exit status, test counts, and duration. On failure print the
 first useful diagnostic plus at most a short tail. Never print compiled bundles
 or minified JavaScript while checking for a marker; use `rg -l` or a bounded
 match instead.
-

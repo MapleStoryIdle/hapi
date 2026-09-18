@@ -476,6 +476,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
     private currentThreadId: string | null = null;
     private currentTurnId: string | null = null;
     private readonly activeChildTurns = new Map<string, string>();
+    private cleanupPromise: Promise<void> | null = null;
 
     constructor(session: CodexSession) {
         super(process.env.DEBUG ? session.logPath : undefined);
@@ -4444,7 +4445,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 allowAnonymousTerminalEvent = false;
                 this.currentTurnId = null;
 
-                if (isAbortError) {
+                if (this.shouldExit) {
+                    logger.debug('[Codex] Ignoring turn failure during shutdown');
+                } else if (isAbortError) {
                     messageBuffer.addMessage('Aborted by user', 'status');
                     session.sendSessionEvent({ type: 'message', message: 'Aborted by user' });
                 } else if (failedThreadId && isCodexAppServerTransportError(error)) {
@@ -4504,7 +4507,20 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         markAllActiveSubagents('canceled', 'Session ended');
     }
 
-    protected async cleanup(): Promise<void> {
+    protected cleanup(): Promise<void> {
+        if (this.cleanupPromise) return this.cleanupPromise;
+        this.cleanupPromise = this.performCleanup();
+        return this.cleanupPromise;
+    }
+
+    public shutdown(): Promise<void> {
+        this.shouldExit = true;
+        this.exitReason ??= 'exit';
+        this.abortController.abort();
+        return this.cleanup();
+    }
+
+    private async performCleanup(): Promise<void> {
         logger.debug('[codex-remote]: cleanup start');
         this.appServerClient.setStderrHandler(null);
         try {
@@ -4534,5 +4550,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
 export async function codexRemoteLauncher(session: CodexSession): Promise<'switch' | 'exit'> {
     const launcher = new CodexRemoteLauncher(session);
-    return launcher.launch();
+    const cleanup = () => launcher.shutdown();
+    session.setActiveTransportCleanup(cleanup);
+    try {
+        return await launcher.launch();
+    } finally {
+        session.clearActiveTransportCleanup(cleanup);
+    }
 }

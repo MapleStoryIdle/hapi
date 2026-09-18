@@ -7,4 +7,3 @@
 - REST routes live in `src/web/routes/`; Socket handlers in
   `src/socket/handlers/cli/`; synchronization in `src/sync/`.
 - Hub/Web-only releases must not publish or bump Runner artifacts.
-

@@ -8,4 +8,3 @@
   `../docs/agents/release.md` and a Runner version bump.
 - CLI-only documentation or packaging changes do not automatically require a
   Runner release; decide by shipped runtime behavior.
-

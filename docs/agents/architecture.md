@@ -42,4 +42,3 @@ mode definitions consumed by the other packages.
 - Session modes: `local` and `remote` can switch during a session.
 - Isolation: workspace scope must hold across storage, HTTP, Socket.IO, SSE,
   and RPC boundaries.
-

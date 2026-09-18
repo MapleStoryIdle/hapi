@@ -19,4 +19,3 @@ export function useRunnerRelease(): RunnerReleaseManifest | null {
     })
     return query.data ?? null
 }
-

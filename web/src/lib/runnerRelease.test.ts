@@ -16,4 +16,3 @@ describe('runner release helpers', () => {
         expect(parseRunnerReleaseManifest('<html>')).toBeNull()
     })
 })
-

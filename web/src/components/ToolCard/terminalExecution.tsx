@@ -6,6 +6,7 @@ import { CodeBlock } from '@/components/CodeBlock'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { stripAnsiTerminalSequences } from './AnsiTerminalText'
+import { getTerminalCommandForDetail } from './terminalCommandIntent'
 
 const TERMINAL_EXECUTION_TOOL_NAMES = new Set(['Bash', 'CodexBash', 'shell_command', 'run_shell_command'])
 
@@ -124,7 +125,8 @@ function getCommandFromInput(input: unknown): string | null {
         if (parts.length > 0) return parts.join(' ')
     }
 
-    return firstString(record, ['command', 'cmd'])
+    const commandText = firstString(record, ['command', 'cmd'])
+    return commandText ? getTerminalCommandForDetail({ command: commandText }) : null
 }
 
 function getLegacyCommandOutput(result: unknown): { stdout: string | null; exitCode: number | null } | null {
@@ -154,7 +156,7 @@ export function getTerminalExecutionDetails(block: ToolCallBlock): TerminalExecu
     const stdout = firstString(result, ['stdout', 'output']) ?? legacy?.stdout ?? null
 
     return {
-        command: firstString(result, ['command', 'cmd']) ?? getCommandFromInput(block.tool.input),
+        command: getCommandFromInput(result) ?? getCommandFromInput(block.tool.input),
         cwd: firstString(result, ['cwd', 'workingDirectory', 'working_directory'])
             ?? firstString(input, ['cwd', 'workingDirectory', 'working_directory']),
         stdout: unwrapExecOutputEnvelope(stdout),

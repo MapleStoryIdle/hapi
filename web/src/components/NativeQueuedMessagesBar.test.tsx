@@ -49,3 +49,17 @@ it('renders a queued native question reply as readable text', () => {
     expect(screen.getByTestId('native-queued-messages-trigger')).toHaveTextContent('Continue?')
     expect(screen.queryByText(/send_user_message_question_reply/)).toBeNull()
 })
+
+it('renders a queued managed Skill as its user request, not internal XML', () => {
+    const text = [
+        '<shapi-managed-skill-ref id="agent-team" version="1.0.0">',
+        'private managed instructions',
+        '</shapi-managed-skill-ref>',
+        '',
+        'User request:',
+        'Check the release state.'
+    ].join('\n')
+    render(<I18nProvider><NativeQueuedMessagesBar messages={[{ id: 'skill', text, queuedAt: 1 }]} /></I18nProvider>)
+    expect(screen.getByTestId('native-queued-messages-trigger')).toHaveTextContent('$agent-team Check the release state.')
+    expect(screen.queryByText(/shapi-managed-skill-ref/)).toBeNull()
+})

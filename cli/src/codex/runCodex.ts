@@ -100,7 +100,8 @@ export async function runCodex(opts: {
     const lifecycle = createRunnerLifecycle({
         session,
         logTag: 'codex',
-        stopKeepAlive: () => sessionWrapperRef.current?.stopKeepAlive()
+        stopKeepAlive: () => sessionWrapperRef.current?.stopKeepAlive(),
+        onBeforeClose: () => sessionWrapperRef.current?.cleanupActiveTransport()
     });
 
     lifecycle.registerProcessHandlers();

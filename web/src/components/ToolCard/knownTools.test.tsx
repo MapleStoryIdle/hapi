@@ -86,8 +86,8 @@ describe('getToolPresentation — file access semantics', () => {
             metadata: null,
         })
 
-        expect(presentation.title).toBe('Read file')
-        expect(presentation.subtitle).toBe('App.tsx · L12–80')
+        expect(presentation.title).toBe('Read App.tsx · L12–80')
+        expect(presentation.subtitle).toBeNull()
     })
 
     it('reduces compound Codex terminal commands to their key command', () => {
@@ -116,8 +116,8 @@ describe('getToolPresentation — file access semantics', () => {
             metadata: null,
         })
 
-        expect(presentation.title).toBe('Read file')
-        expect(presentation.subtitle).toBe('2 files')
+        expect(presentation.title).toBe('Read 2 files')
+        expect(presentation.subtitle).toBeNull()
     })
 
     it('shows safe remote, SQL, request, and file targets without raw arguments', () => {

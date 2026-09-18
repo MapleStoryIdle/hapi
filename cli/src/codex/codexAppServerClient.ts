@@ -93,6 +93,7 @@ export class CodexAppServerClient extends JsonLineParser {
     private notificationHandler: ((method: string, params: unknown) => void) | null = null;
     private stderrHandler: ((text: string) => void) | null = null;
     private protocolError: Error | null = null;
+    private disconnectPromise: Promise<void> | null = null;
 
     static readonly DEFAULT_TIMEOUT_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -316,10 +317,21 @@ export class CodexAppServerClient extends JsonLineParser {
     }
 
     async disconnect(): Promise<void> {
-        if (!this.connected) {
-            return;
-        }
+        if (this.disconnectPromise) return this.disconnectPromise;
+        if (!this.connected && !this.process) return;
 
+        const disconnectPromise = this.performDisconnect();
+        this.disconnectPromise = disconnectPromise;
+        try {
+            await disconnectPromise;
+        } finally {
+            if (this.disconnectPromise === disconnectPromise) {
+                this.disconnectPromise = null;
+            }
+        }
+    }
+
+    private async performDisconnect(): Promise<void> {
         const child = this.process;
         this.process = null;
 

@@ -264,6 +264,8 @@ describe('SettingsPage', () => {
         expect(calledKeys).toContain('settings.display.sessionPreviewLimit')
         expect(calledKeys).toContain('settings.display.sessionPreviewLimit.decrease')
         expect(calledKeys).toContain('settings.display.sessionPreviewLimit.increase')
+        expect(calledKeys).toContain('settings.display.kanbanRecentMinutes')
+        expect(calledKeys).toContain('settings.display.kanbanRecentAutoRemove')
         expect(calledKeys).toContain('settings.display.sessionListStatus')
         expect(calledKeys).toContain('settings.display.sessionListStatus.standard')
     })
@@ -274,6 +276,12 @@ describe('SettingsPage', () => {
         expect(screen.getByLabelText('Sessions Before Folding')).toHaveValue(8)
         expect(screen.getAllByLabelText('Show fewer sessions before folding').length).toBeGreaterThanOrEqual(1)
         expect(screen.getAllByLabelText('Show more sessions before folding').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('renders Kanban Recent preferences with the product defaults', () => {
+        renderAdvancedSettings()
+        expect(screen.getByLabelText('Kanban Recent Window')).toHaveValue(15)
+        expect(screen.getByRole('checkbox', { name: 'Remove from Recent when opened' })).toBeChecked()
     })
 
     it('renders the Session list status setting', () => {

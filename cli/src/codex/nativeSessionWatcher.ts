@@ -7,12 +7,11 @@ import { getCodexHomePath } from './codexHome'
 
 export { getCodexHomePath } from './codexHome'
 
-const DEFAULT_DISCOVERY_INTERVAL_MS = 5_000
+const DEFAULT_DISCOVERY_INTERVAL_MS = 15_000
 const DEFAULT_DEBOUNCE_MS = 120
-// `fs.watch()` can consume a file descriptor per transcript on macOS. Keep
-// the automatic recent window comfortably below common runner limits, then
-// pin a small number of transcripts that a browser is actively reading.
-const MAX_WATCHED_TRANSCRIPTS = 128
+// `fs.watch()` can consume a file descriptor per transcript on macOS. Poll the
+// transcript tree for dormant sessions and reserve file watchers for sessions
+// that the browser or active-control path has explicitly observed.
 const MAX_OBSERVED_TRANSCRIPTS = 16
 
 export type NativeCodexSessionChange = {
@@ -30,7 +29,6 @@ export type NativeCodexSessionWatcherOptions = {
     debounceMs?: number
     watchFile?: NativeCodexFileWatcher
     now?: () => number
-    maxWatchedTranscripts?: number
     maxObservedTranscripts?: number
 }
 
@@ -91,9 +89,8 @@ export class NativeCodexSessionWatcher {
     private readonly watchFile: NativeCodexFileWatcher
     private readonly now: () => number
     private readonly onChange: (change: NativeCodexSessionChange) => void
-    private readonly maxWatchedTranscripts: number
     private readonly maxObservedTranscripts: number
-    private readonly watchedFiles = new Map<string, WatchedTranscript>()
+    private readonly discoveredFiles = new Map<string, WatchedTranscript>()
     private readonly observedFiles = new Map<string, WatchedTranscript>()
     private readonly fileWatchStops = new Map<string, () => void>()
     private readonly pendingChanges = new Map<string, PendingChange>()
@@ -108,7 +105,6 @@ export class NativeCodexSessionWatcher {
         this.watchFile = options.watchFile ?? defaultStartFileWatcher
         this.now = options.now ?? Date.now
         this.onChange = options.onChange
-        this.maxWatchedTranscripts = options.maxWatchedTranscripts ?? MAX_WATCHED_TRANSCRIPTS
         this.maxObservedTranscripts = options.maxObservedTranscripts ?? MAX_OBSERVED_TRANSCRIPTS
     }
 
@@ -135,7 +131,7 @@ export class NativeCodexSessionWatcher {
             stop()
         }
         this.fileWatchStops.clear()
-        this.watchedFiles.clear()
+        this.discoveredFiles.clear()
         this.observedFiles.clear()
     }
 
@@ -158,6 +154,9 @@ export class NativeCodexSessionWatcher {
 
         const previous = this.observedFiles.get(filePath)
         if (previous?.codexSessionId === codexSessionId && previous.modifiedAt === modifiedAt) {
+            // Refresh LRU order when an open detail view touches the same file.
+            this.observedFiles.delete(filePath)
+            this.observedFiles.set(filePath, previous)
             return
         }
         this.observedFiles.delete(filePath)
@@ -166,6 +165,7 @@ export class NativeCodexSessionWatcher {
             const oldestPath = this.observedFiles.keys().next().value
             if (!oldestPath) break
             this.observedFiles.delete(oldestPath)
+            this.stopWatchingFile(oldestPath)
         }
 
         if (this.started) {
@@ -181,9 +181,9 @@ export class NativeCodexSessionWatcher {
         candidates.sort((left, right) => right.modifiedAt - left.modifiedAt || left.filePath.localeCompare(right.filePath))
         const candidatesByPath = new Map(candidates.map((candidate) => [candidate.filePath, candidate]))
 
-        const previous = new Map(this.watchedFiles)
+        const previous = new Map(this.discoveredFiles)
         const next = new Map<string, WatchedTranscript>()
-        for (const candidate of candidates.slice(0, this.maxWatchedTranscripts)) {
+        for (const candidate of candidates) {
             const codexSessionId = getCodexSessionIdFromTranscriptPath(candidate.filePath)
             if (!codexSessionId) continue
             next.set(candidate.filePath, { codexSessionId, modifiedAt: candidate.modifiedAt })
@@ -194,32 +194,33 @@ export class NativeCodexSessionWatcher {
                 this.observedFiles.delete(filePath)
                 continue
             }
-            next.set(filePath, { ...observed, modifiedAt: candidate.modifiedAt })
+            this.observedFiles.set(filePath, { ...observed, modifiedAt: candidate.modifiedAt })
         }
-        this.watchedFiles.clear()
+        this.discoveredFiles.clear()
         for (const [filePath, transcript] of next) {
-            this.watchedFiles.set(filePath, transcript)
+            this.discoveredFiles.set(filePath, transcript)
         }
 
         for (const [filePath, previousTranscript] of previous) {
             if (!next.has(filePath)) {
-                // A recent-window reshuffle merely changes which files are
-                // watched. Only a real removal needs to invalidate the web.
-                if (!candidatesByPath.has(filePath)) {
-                    this.scheduleChange(previousTranscript.codexSessionId, filePath, this.now())
-                }
+                this.scheduleChange(previousTranscript.codexSessionId, filePath, this.now())
                 this.stopWatchingFile(filePath)
             }
         }
 
         for (const [filePath, transcript] of next) {
             const previousTranscript = previous.get(filePath)
-            if (!this.fileWatchStops.has(filePath)) {
+            if (this.observedFiles.has(filePath) && !this.fileWatchStops.has(filePath)) {
                 this.startWatchingFile(filePath)
             }
-            const wasJustObserved = this.observedFiles.has(filePath) && !previousTranscript
-            if (this.initialized && !wasJustObserved && (!previousTranscript || transcript.modifiedAt > previousTranscript.modifiedAt)) {
+            if (this.initialized && (!previousTranscript || transcript.modifiedAt > previousTranscript.modifiedAt)) {
                 this.scheduleChange(transcript.codexSessionId, filePath, transcript.modifiedAt)
+            }
+        }
+
+        for (const filePath of this.fileWatchStops.keys()) {
+            if (!this.observedFiles.has(filePath)) {
+                this.stopWatchingFile(filePath)
             }
         }
 
@@ -247,7 +248,7 @@ export class NativeCodexSessionWatcher {
 
     private handleFileChange(filePath: string): void {
         if (!this.started) return
-        const transcript = this.watchedFiles.get(filePath)
+        const transcript = this.discoveredFiles.get(filePath)
         if (!transcript) {
             this.refresh()
             return
@@ -262,7 +263,10 @@ export class NativeCodexSessionWatcher {
         // Keep discovery's baseline in sync with the file watcher. Otherwise
         // the next directory scan would see this same mtime as a second
         // change and emit a duplicate invalidation a few seconds later.
-        this.watchedFiles.set(filePath, { ...transcript, modifiedAt })
+        this.discoveredFiles.set(filePath, { ...transcript, modifiedAt })
+        if (this.observedFiles.has(filePath)) {
+            this.observedFiles.set(filePath, { ...transcript, modifiedAt })
+        }
         this.scheduleChange(transcript.codexSessionId, filePath, modifiedAt)
     }
 

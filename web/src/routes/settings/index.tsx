@@ -26,6 +26,12 @@ import { getComposerEnterBehaviorOptions, useComposerEnterBehavior, type Compose
 import { getSessionListStatusModeOptions, useSessionListStatusMode, type SessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import {
+    MAX_KANBAN_RECENT_MINUTES,
+    MIN_KANBAN_RECENT_MINUTES,
+    normalizeKanbanRecentMinutes,
+    useKanbanRecentPreferences,
+} from '@/hooks/useKanbanRecentPreferences'
+import {
     MAX_SESSION_PREVIEW_LIMIT,
     MIN_SESSION_PREVIEW_LIMIT,
     normalizeSessionPreviewLimit,
@@ -249,6 +255,61 @@ function SessionPreviewLimitControl(props: {
     )
 }
 
+function KanbanRecentMinutesControl(props: {
+    value: number
+    onChange: (value: number) => void
+    label: string
+    unit: string
+    description: string
+}) {
+    const [draft, setDraft] = useState(String(props.value))
+
+    useEffect(() => setDraft(String(props.value)), [props.value])
+
+    const commitDraft = () => {
+        const parsed = draft.trim() === '' ? props.value : Number(draft)
+        const next = normalizeKanbanRecentMinutes(parsed)
+        props.onChange(next)
+        setDraft(String(next))
+    }
+
+    return (
+        <div className="flex items-center justify-between gap-3 px-3 py-3">
+            <label htmlFor="kanban-recent-minutes" className="flex min-w-0 flex-col">
+                <span className="text-[var(--app-fg)]">{props.label}</span>
+                <span className="text-xs text-[var(--app-hint)]">{props.description}</span>
+            </label>
+            <span className="flex h-9 shrink-0 items-center rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm focus-within:ring-2 focus-within:ring-[var(--app-link)]">
+                <input
+                    id="kanban-recent-minutes"
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_KANBAN_RECENT_MINUTES}
+                    max={MAX_KANBAN_RECENT_MINUTES}
+                    aria-label={props.label}
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onBlur={commitDraft}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault()
+                            commitDraft()
+                            event.currentTarget.blur()
+                        }
+                        if (event.key === 'Escape') {
+                            event.preventDefault()
+                            setDraft(String(props.value))
+                            event.currentTarget.blur()
+                        }
+                    }}
+                    className="h-8 w-16 bg-transparent px-2 text-right text-sm font-medium tabular-nums text-[var(--app-fg)] outline-none"
+                />
+                <span className="pr-2 text-xs text-[var(--app-hint)]">{props.unit}</span>
+            </span>
+        </div>
+    )
+}
+
 export function SettingsPageContent(props: { mode?: 'settings' | 'voice'; onBack?: () => void } = {}) {
     const { t, locale, setLocale } = useTranslation()
     const { api } = useAppContext()
@@ -278,6 +339,12 @@ export function SettingsPageContent(props: { mode?: 'settings' | 'voice'; onBack
     const { composerEnterBehavior, setComposerEnterBehavior } = useComposerEnterBehavior()
     const { sessionListStatusMode, setSessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
+    const {
+        recentMinutes: kanbanRecentMinutes,
+        autoRemoveOnOpen: kanbanRecentAutoRemove,
+        setRecentMinutes: setKanbanRecentMinutes,
+        setAutoRemoveOnOpen: setKanbanRecentAutoRemove,
+    } = useKanbanRecentPreferences()
     const { appearance, setAppearance } = useAppearance()
 
     // Voice language state - read from localStorage
@@ -729,6 +796,30 @@ export function SettingsPageContent(props: { mode?: 'settings' | 'voice'; onBack
                             decreaseLabel={t('settings.display.sessionPreviewLimit.decrease')}
                             increaseLabel={t('settings.display.sessionPreviewLimit.increase')}
                         />
+                        <KanbanRecentMinutesControl
+                            label={t('settings.display.kanbanRecentMinutes')}
+                            description={t('settings.display.kanbanRecentMinutes.desc')}
+                            unit={t('settings.display.kanbanRecentMinutes.unit')}
+                            value={kanbanRecentMinutes}
+                            onChange={setKanbanRecentMinutes}
+                        />
+                        <div className="flex items-center justify-between gap-3 px-3 py-3">
+                            <div className="flex min-w-0 flex-col">
+                                <span className="text-[var(--app-fg)]">{t('settings.display.kanbanRecentAutoRemove')}</span>
+                                <span className="text-xs text-[var(--app-hint)]">{t('settings.display.kanbanRecentAutoRemove.desc')}</span>
+                            </div>
+                            <label className="relative inline-flex h-5 w-9 shrink-0 items-center">
+                                <input
+                                    type="checkbox"
+                                    checked={kanbanRecentAutoRemove}
+                                    onChange={(event) => setKanbanRecentAutoRemove(event.target.checked)}
+                                    className="peer sr-only"
+                                    aria-label={t('settings.display.kanbanRecentAutoRemove')}
+                                />
+                                <span className="absolute inset-0 rounded-full bg-[var(--app-border)] transition-colors peer-checked:bg-[var(--app-link)]" />
+                                <span className="absolute left-0.5 h-4 w-4 rounded-full bg-[var(--app-bg)] transition-transform peer-checked:translate-x-4" />
+                            </label>
+                        </div>
                         <div className="flex items-center justify-between gap-3 px-3 py-3">
                             <div className="flex flex-col">
                                 <span className="text-[var(--app-fg)]">{t('settings.display.activeSessionsOnly')}</span>

@@ -541,6 +541,12 @@ select {
     touch-action: pan-y;
 }
 
+@media (min-width: 1024px) {
+    .cupertino-session-index .cupertino-session-list.app-scroll-y {
+        overflow-anchor: none;
+    }
+}
+
 @media (hover: hover) and (pointer: fine) {
     .session-list-item:hover,
     .session-list-new-button:hover {
@@ -913,9 +919,10 @@ select {
     padding: 0.625rem 0.75rem;
 }
 
-.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-card[aria-current="page"] {
+.cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-card[data-session-selected="true"] {
     background: var(--cupertino-session-selected-fill);
     box-shadow: inset 3px 0 0 var(--cupertino-session-accent), var(--cupertino-session-shadow);
+    transition-property: transform;
 }
 
 .cupertino-session-index .cupertino-session-list[data-session-list-view="kanban"] .cupertino-session-card[data-kanban-card-status="processing"] {
@@ -1695,8 +1702,8 @@ html[data-drawer-chrome-closing='true'], html[data-drawer-chrome-closing='true']
   animation: session-kanban-thinking-border 2.4s linear infinite;
 }
 
-.session-kanban-card-unviewed,
-.session-kanban-card-recent-completed {
+.session-kanban-card-unviewed:not([data-session-selected="true"]),
+.session-kanban-card-recent-completed:not([data-session-selected="true"]) {
   outline: 1px solid color-mix(in srgb, var(--app-link) 72%, transparent);
   outline-offset: 1px;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-link) 18%, transparent), 0 4px 14px color-mix(in srgb, var(--app-link) 13%, transparent);
