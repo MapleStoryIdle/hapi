@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ToolGroupBlock } from '@/chat/toolGroups'
 import {
     closeAutoExpandedToolGroups,
+    shouldCloseAutoExpandedToolGroups,
     getDefaultToolGroupExpansionState,
     isToolGroupExpansionOpen,
     resolveToolGroupExpansionState
@@ -62,5 +63,28 @@ describe('tool group expansion state', () => {
 
         expect(state).toBe('user-open')
         expect(isToolGroupExpansionOpen(state)).toBe(true)
+    })
+})
+
+describe('shouldCloseAutoExpandedToolGroups', () => {
+    it('does not close when a completion marker arrives during an active session run', () => {
+        expect(shouldCloseAutoExpandedToolGroups(
+            { runActive: true, completionKey: null },
+            { runActive: true, completionKey: 'duration-1' }
+        )).toBe(false)
+    })
+
+    it('closes on the active-to-idle edge even when the completion marker is missing', () => {
+        expect(shouldCloseAutoExpandedToolGroups(
+            { runActive: true, completionKey: null },
+            { runActive: false, completionKey: null }
+        )).toBe(true)
+    })
+
+    it('closes for a new completion marker only while already idle', () => {
+        expect(shouldCloseAutoExpandedToolGroups(
+            { runActive: false, completionKey: 'duration-1' },
+            { runActive: false, completionKey: 'duration-2' }
+        )).toBe(true)
     })
 })

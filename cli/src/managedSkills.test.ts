@@ -76,6 +76,28 @@ describe('managed skill cache', () => {
         expect(subject.expandManagedSkillInvocation('$test-skill')).toContain('# Second')
     })
 
+    it('injects full instructions once per session and refreshes them after an update', async () => {
+        const { root, subject } = await loadSubject()
+        await subject.reconcileManagedSkill(payload('1.0.0', [{ path: 'SKILL.md', content: '# First' }]))
+        const expand = subject.createManagedSkillInvocationExpander()
+
+        const first = expand('$test-skill first request')
+        expect(first).toContain('<shapi-managed-skill id="test-skill" version="1.0.0">')
+        expect(first).toContain('# First')
+
+        const repeated = expand('$test-skill second request')
+        expect(repeated).toContain('<shapi-managed-skill-ref id="test-skill" version="1.0.0">')
+        expect(repeated).not.toContain('# First')
+        expect(repeated).toContain(join(root, 'managed-skills', 'test-skill', 'SKILL.md'))
+        expect(repeated).toContain('User request:\nsecond request')
+
+        await subject.reconcileManagedSkill(payload('1.1.0', [{ path: 'SKILL.md', content: '# Second' }]))
+        const updated = expand('$test-skill third request')
+        expect(updated).toContain('<shapi-managed-skill id="test-skill" version="1.1.0">')
+        expect(updated).toContain('# Second')
+        expect(updated).not.toContain('<shapi-managed-skill-ref')
+    })
+
     it('upgrades an intact legacy single-file SHAPI cache', async () => {
         const { root, subject } = await loadSubject()
         const target = join(root, 'managed-skills', 'test-skill')

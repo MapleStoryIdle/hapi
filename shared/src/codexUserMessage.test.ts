@@ -215,6 +215,44 @@ describe('normalizeCodexUserMessageText', () => {
         ].join('\n'))).toBe('Describe the visible problem.')
     })
 
+    it('drops a SHAPI managed skill mirror without exposing its instructions', () => {
+        const expanded = [
+            '<shapi-managed-skill id="git-merge-current-to-target" version="1.0.1">',
+            'Bundle root: /Users/dev/.hapi/managed-skills/git-merge-current-to-target',
+            'Resolve scripts, references, assets, and other relative paths from this bundle root.',
+            '',
+            'name: git-merge-current-to-target',
+            'description: private managed skill instructions',
+            '</shapi-managed-skill>',
+            '',
+            'User request:',
+            'test'
+        ].join('\n')
+
+        expect(normalizeCodexUserMessageText(expanded)).toBeNull()
+        expect(normalizeCodexUserMessageContent([
+            { type: 'input_text', text: expanded }
+        ])).toBeNull()
+
+        expect(normalizeCodexUserMessageText([
+            '<shapi-managed-skill id="agent-team" version="1.0.0">',
+            'private instructions',
+            '</shapi-managed-skill>',
+            '',
+            'User request:',
+            'Apply the agent-team skill.'
+        ].join('\n'))).toBeNull()
+
+        expect(normalizeCodexUserMessageText([
+            '<shapi-managed-skill-ref id="agent-team" version="1.0.0">',
+            'Reuse the managed skill instructions.',
+            '</shapi-managed-skill-ref>',
+            '',
+            'User request:',
+            'test again'
+        ].join('\n'))).toBeNull()
+    })
+
     it('drops complete internal-only wrappers but keeps a following user request', () => {
         const internalMessages = [
             '<environment_context>\n<context>internal</context>\n</environment_context>',

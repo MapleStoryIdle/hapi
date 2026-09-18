@@ -466,8 +466,28 @@ function normalizeAppshotScaffold(value: string): KnownNormalizationResult {
     return nested.recognized ? nested : { recognized: true, text: remainder }
 }
 
+function normalizeShapiManagedSkillScaffold(value: string): KnownNormalizationResult {
+    const opening = /^<shapi-managed-skill(-ref)? id="([a-z][a-z0-9-]{0,63})" version="[^"<>\r\n]+">/.exec(value)
+    if (!opening) return UNRECOGNIZED
+
+    const closingTag = opening[1] ? '</shapi-managed-skill-ref>' : '</shapi-managed-skill>'
+    const boundary = findLastClosingTagBoundary(
+        value,
+        closingTag,
+        opening[0].length,
+        tail => /^User request:[ \t]*(?:\r?\n|$)/.test(tail)
+    )
+    if (!boundary) return UNRECOGNIZED
+
+    // The Hub already persisted the original `$skill request`. This record is
+    // only Codex's expanded mirror; forwarding it would duplicate the user
+    // turn and expose internal managed instructions.
+    return { recognized: true, text: null }
+}
+
 function normalizeKnownScaffold(value: string): KnownNormalizationResult {
     return [
+        normalizeShapiManagedSkillScaffold,
         normalizeBrowserCommentsScaffold,
         normalizeResponseAnnotationsScaffold,
         normalizeDelegationScaffold,

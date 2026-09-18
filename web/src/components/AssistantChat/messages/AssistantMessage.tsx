@@ -57,7 +57,7 @@ function AssistantToolGroupMetaBar(props: {
     const ctx = useHappyChatContext()
     const { t } = useTranslation()
     const [now, setNow] = useState(() => Date.now())
-    const active = isToolGroupActive(props.block)
+    const active = isToolGroupActive(props.block, ctx.toolGroupRunActive)
 
     useEffect(() => {
         if (!active) {
@@ -68,7 +68,7 @@ function AssistantToolGroupMetaBar(props: {
         return () => clearInterval(interval)
     }, [active])
 
-    const label = formatToolGroupCompactTitle(props.block, now, t)
+    const label = formatToolGroupCompactTitle(props.block, now, t, ctx.toolGroupRunActive)
 
     return (
         <button

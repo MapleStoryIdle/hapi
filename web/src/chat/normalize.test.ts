@@ -92,6 +92,16 @@ describe('normalizeDecryptedMessage', () => {
         })
 
         expect(normalizeDecryptedMessage(message)).toBeNull()
+
+        const reference = makeMessage({
+            role: 'user',
+            content: {
+                type: 'text',
+                text: '<shapi-managed-skill-ref id="git-merge-current-to-target" version="1.0.1">\nReuse it.\n</shapi-managed-skill-ref>\n\nUser request:\ntest again'
+            },
+            meta: { sentFrom: 'cli' }
+        })
+        expect(normalizeDecryptedMessage(reference)).toBeNull()
     })
 
     it('drops Claude init system output records', () => {
@@ -450,6 +460,26 @@ describe('normalizeDecryptedMessage', () => {
             isSidechain: false,
             content: { type: 'text', text: 'Regular user message' }
         })
+    })
+
+    it('hides persisted SHAPI managed skill instructions from CLI user messages', () => {
+        const message = makeMessage({
+            role: 'user',
+            content: {
+                type: 'text',
+                text: [
+                    '<shapi-managed-skill id="git-merge-current-to-target" version="1.0.1">',
+                    'private managed skill instructions',
+                    '</shapi-managed-skill>',
+                    '',
+                    'User request:',
+                    'test'
+                ].join('\n')
+            },
+            meta: { sentFrom: 'cli' }
+        })
+
+        expect(normalizeDecryptedMessage(message)).toBeNull()
     })
 
     it('treats sidechain user output with mixed tool_result + text array as sidechain', () => {

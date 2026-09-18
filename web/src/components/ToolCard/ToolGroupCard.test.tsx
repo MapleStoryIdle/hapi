@@ -1462,17 +1462,17 @@ describe('ToolGroupCard', () => {
         expect(screen.queryByText('bun test')).not.toBeInTheDocument()
     })
 
-    it('automatically closes an untouched compact group when processing completes', async () => {
+    it('keeps the latest Process open across a missing terminal update until the session becomes idle', async () => {
         vi.useFakeTimers()
         const startedAt = Date.now() - 10_000
 
-        function makeActiveGroup(active: boolean): ToolGroupBlock {
+        function makeActiveGroup(toolActive: boolean, runActive: boolean): ToolGroupBlock {
             const tools = [
                 makeToolBlock('bash-1', 'Bash', { command: 'bun test' }, {
-                    state: active ? 'running' : 'completed',
+                    state: toolActive ? 'running' : 'completed',
                     createdAt: startedAt,
                     startedAt,
-                    completedAt: active ? null : startedAt + 10_000,
+                    completedAt: toolActive ? null : startedAt + 10_000,
                 }),
                 makeToolBlock('read-1', 'Read', { file_path: 'repo/src/a.ts' }, {
                     createdAt: startedAt + 1000,
@@ -1482,6 +1482,7 @@ describe('ToolGroupCard', () => {
             ]
             return makeGroup({
                 tools,
+                defaultOpen: runActive,
                 summary: {
                     totalTools: tools.length,
                     countsByKind: {
@@ -1498,14 +1499,15 @@ describe('ToolGroupCard', () => {
                     urlTargets: [],
                     otherTargets: [],
                     errorCount: 0,
-                    runningCount: active ? 1 : 0,
+                    runningCount: toolActive ? 1 : 0,
                     pendingCount: 0,
                 },
             })
         }
 
         function Harness() {
-            const [active, setActive] = useState(true)
+            const [toolActive, setToolActive] = useState(true)
+            const [runActive, setRunActive] = useState(true)
             const [expansionStates, setExpansionStates] = useState<ToolGroupExpansionStates>({})
             const setToolGroupExpansionState = useCallback((key: string, state: ToolGroupExpansionState) => {
                 setExpansionStates((current) => current[key] === state
@@ -1526,9 +1528,11 @@ describe('ToolGroupCard', () => {
                         loadOlderMessagesPreservingScroll: vi.fn(async () => false),
                         toolGroupExpansionStates: expansionStates,
                         setToolGroupExpansionState,
+                        toolGroupRunActive: runActive,
                     }}>
-                        <button type="button" onClick={() => setActive(false)}>finish</button>
-                        <ToolGroupCard block={makeActiveGroup(active)} metadata={{ path: 'repo', host: 'local' }} />
+                        <button type="button" onClick={() => setToolActive(false)}>lose terminal update</button>
+                        <button type="button" onClick={() => setRunActive(false)}>finish session</button>
+                        <ToolGroupCard block={makeActiveGroup(toolActive, runActive)} metadata={{ path: 'repo', host: 'local' }} />
                     </HappyChatProvider>
                 </I18nProvider>
             )
@@ -1551,7 +1555,13 @@ describe('ToolGroupCard', () => {
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
         expect(screen.getByText('bun test')).toBeInTheDocument()
 
-        fireEvent.click(screen.getByRole('button', { name: 'finish' }))
+        fireEvent.click(screen.getByRole('button', { name: 'lose terminal update' }))
+
+        toggle = within(view.container).getByRole('button', { name: /processing/i })
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByText('bun test')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'finish session' }))
 
         toggle = within(view.container).getByRole('button', { name: /processed/i })
         expect(toggle).toHaveAttribute('aria-expanded', 'false')

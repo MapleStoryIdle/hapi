@@ -12,9 +12,10 @@ import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } f
 import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
-import { expandManagedSkillInvocation } from '@/managedSkills';
+import { createManagedSkillInvocationExpander } from '@/managedSkills';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { resolveKimiRuntimeConfig } from './utils/config';
+import { configureNonInteractiveTerminalColors } from '@/agent/terminalColorEnv';
 
 export async function runKimi(opts: {
     startedBy?: 'runner' | 'terminal';
@@ -27,6 +28,7 @@ export async function runKimi(opts: {
 } = {}): Promise<void> {
     const workingDirectory = opts.workingDirectory ?? getInvokedCwd();
     const startedBy = opts.startedBy ?? 'terminal';
+    if (startedBy === 'runner') configureNonInteractiveTerminalColors();
 
     logger.debug(`[kimi] Starting with options: startedBy=${startedBy}, startingMode=${opts.startingMode}`);
 
@@ -70,6 +72,7 @@ export async function runKimi(opts: {
         permissionMode: mode.permissionMode,
         model: mode.model
     }));
+    const expandManagedSkill = createManagedSkillInvocationExpander();
 
     const sessionWrapperRef: { current: KimiSession | null } = { current: null };
     let currentPermissionMode: PermissionMode = opts.permissionMode ?? 'default';
@@ -99,7 +102,7 @@ export async function runKimi(opts: {
     };
 
     session.onUserMessage((message, localId) => {
-        const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
+        const formattedText = formatMessageWithAttachments(expandManagedSkill(message.content.text), message.content.attachments);
         const mode: KimiMode = {
             permissionMode: currentPermissionMode,
             model: resolvedModel

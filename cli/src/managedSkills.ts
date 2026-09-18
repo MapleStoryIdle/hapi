@@ -226,8 +226,7 @@ export async function listManagedSkillInventory(): Promise<Record<string, { vers
     return result
 }
 
-/** Expand only a leading skill token selected by SHAPI. Agent-native skill directories are never touched. */
-export function expandManagedSkillInvocation(text: string): string {
+function expandManagedSkillInvocationWithState(text: string, loadedSkills?: Map<string, string>): string {
     const match = text.match(/^\$([a-z][a-z0-9-]{0,63})(?:\s+|$)/)
     const id = match?.[1]
     if (!id) return text
@@ -239,8 +238,24 @@ export function expandManagedSkillInvocation(text: string): string {
         const expectedDigest = skillFile?.sha256 ?? marker.sha256
         if (marker.managedBy !== 'shapi' || marker.id !== id || digest(content) !== expectedDigest) return text
         const request = text.slice(match![0].length).trim()
+        const fingerprint = `${marker.version}:${expectedDigest}`
+        if (loadedSkills?.get(id) === fingerprint) {
+            return `<shapi-managed-skill-ref id="${id}" version="${marker.version}">\nReuse the SHAPI managed skill instructions already provided earlier in this session.\nIf they are no longer available after context compaction, read ${join(root, 'SKILL.md')} before acting.\nBundle root: ${root}\n</shapi-managed-skill-ref>\n\nUser request:\n${request || `Apply the ${id} skill.`}`
+        }
+        loadedSkills?.set(id, fingerprint)
         return `<shapi-managed-skill id="${id}" version="${marker.version}">\nBundle root: ${root}\nResolve scripts, references, assets, and other relative paths from this bundle root.\n\n${content.toString('utf8')}\n</shapi-managed-skill>\n\nUser request:\n${request || `Apply the ${id} skill.`}`
     } catch {
         return text
     }
+}
+
+/** Keep managed-skill expansion state inside one agent session. */
+export function createManagedSkillInvocationExpander(): (text: string) => string {
+    const loadedSkills = new Map<string, string>()
+    return (text) => expandManagedSkillInvocationWithState(text, loadedSkills)
+}
+
+/** Stateless expansion for one-off callers and tests. */
+export function expandManagedSkillInvocation(text: string): string {
+    return expandManagedSkillInvocationWithState(text)
 }

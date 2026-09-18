@@ -5,6 +5,7 @@ import { isObject } from '@hapi/protocol'
 import { CodeBlock } from '@/components/CodeBlock'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
+import { stripAnsiTerminalSequences } from './AnsiTerminalText'
 
 const TERMINAL_EXECUTION_TOOL_NAMES = new Set(['Bash', 'CodexBash', 'shell_command', 'run_shell_command'])
 
@@ -19,6 +20,72 @@ export type TerminalExecutionDetails = {
 }
 
 export type TerminalExecutionState = 'pending' | 'running' | 'completed' | 'failed'
+
+const EXEC_OUTPUT_ENVELOPE_KEYS = new Set([
+    'chunk_id',
+    'exit_code',
+    'original_token_count',
+    'output',
+    'session_id',
+    'wall_time_seconds'
+])
+
+function unwrapExecOutputEnvelope(value: string | null): string | null {
+    if (value === null) return null
+    const trimmed = value.trim()
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return value
+
+    try {
+        const parsed: unknown = JSON.parse(trimmed)
+        if (!isObject(parsed) || typeof parsed.output !== 'string') return value
+        const keys = Object.keys(parsed)
+        return keys.length > 0 && keys.every((key) => EXEC_OUTPUT_ENVELOPE_KEYS.has(key))
+            ? parsed.output
+            : value
+    } catch {
+        return value
+    }
+}
+
+export function formatTerminalOutput(value: string): { text: string; language: 'json' | 'text' } {
+    const withoutAnsi = stripAnsiTerminalSequences(value).trim()
+    const fenced = withoutAnsi.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i)?.[1]?.trim() ?? withoutAnsi
+    let candidate = fenced
+
+    // Some command wrappers serialize stdout once more, producing a JSON
+    // string whose contents are the actual object. Unwrap at most two layers.
+    for (let depth = 0; depth < 3; depth += 1) {
+        try {
+            const parsed: unknown = JSON.parse(candidate)
+            if (parsed !== null && typeof parsed === 'object') {
+                return { text: JSON.stringify(parsed, null, 2), language: 'json' }
+            }
+            if (typeof parsed !== 'string') break
+            candidate = parsed.trim()
+        } catch {
+            break
+        }
+    }
+
+    // JSON Lines is common for CLI output. Keep record boundaries instead of
+    // inventing an array, while making every record readable.
+    const lines = fenced.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    if (lines.length > 1) {
+        try {
+            const records = lines.map((line) => JSON.parse(line) as unknown)
+            if (records.every((record) => record !== null && typeof record === 'object')) {
+                return {
+                    text: records.map((record) => JSON.stringify(record, null, 2)).join('\n\n'),
+                    language: 'json'
+                }
+            }
+        } catch {
+            // Ordinary terminal text; preserve it exactly below.
+        }
+    }
+
+    return { text: value, language: 'text' }
+}
 
 
 export function isTerminalExecutionTool(toolName: string): boolean {
@@ -84,12 +151,13 @@ export function getTerminalExecutionDetails(block: ToolCallBlock): TerminalExecu
         : typeof block.durationMs === 'number' && Number.isFinite(block.durationMs)
             ? Math.max(0, block.durationMs)
             : null
+    const stdout = firstString(result, ['stdout', 'output']) ?? legacy?.stdout ?? null
 
     return {
         command: firstString(result, ['command', 'cmd']) ?? getCommandFromInput(block.tool.input),
         cwd: firstString(result, ['cwd', 'workingDirectory', 'working_directory'])
             ?? firstString(input, ['cwd', 'workingDirectory', 'working_directory']),
-        stdout: firstString(result, ['stdout', 'output']) ?? legacy?.stdout ?? null,
+        stdout: unwrapExecOutputEnvelope(stdout),
         stderr: firstString(result, ['stderr', 'error']),
         exitCode: firstNumber(result, ['exit_code', 'exitCode', 'exitcode']) ?? legacy?.exitCode ?? null,
         status: firstString(result, ['status']),
@@ -217,6 +285,8 @@ export function TerminalExecutionDetail(props: TerminalExecutionDetailProps) {
     const state = getTerminalExecutionState(props.block, details)
     const duration = formatTerminalExecutionDuration(details.durationMs)
     const hasOutput = Boolean(details.stdout || details.stderr)
+    const stdoutDisplay = details.stdout ? formatTerminalOutput(details.stdout) : null
+    const stderrDisplay = details.stderr ? formatTerminalOutput(details.stderr) : null
 
     if (props.surface === 'drawer') {
         return (
@@ -267,11 +337,11 @@ export function TerminalExecutionDetail(props: TerminalExecutionDetailProps) {
 
             <section className="flex shrink-0 flex-col gap-2" data-terminal-execution-output>
                 <h3 className="text-sm font-semibold text-[var(--app-fg)]">{t('terminal.execution.output')}</h3>
-                {details.stderr ? (
-                    <CodeBlock code={details.stderr} language="text" title={t('terminal.stderr')} scrollY maxHeight={420} size="comfortable" />
+                {stderrDisplay ? (
+                    <CodeBlock code={stderrDisplay.text} language={stderrDisplay.language} title={t('terminal.stderr')} scrollY maxHeight={420} size="comfortable" />
                 ) : null}
-                {details.stdout ? (
-                    <CodeBlock code={details.stdout} language="text" title={t('terminal.stdout')} scrollY maxHeight={420} size="comfortable" />
+                {stdoutDisplay ? (
+                    <CodeBlock code={stdoutDisplay.text} language={stdoutDisplay.language} title={t('terminal.stdout')} scrollY maxHeight={420} size="comfortable" />
                 ) : null}
                 {!hasOutput ? (
                     <p className="rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-3 text-sm leading-6 text-[var(--app-hint)]">

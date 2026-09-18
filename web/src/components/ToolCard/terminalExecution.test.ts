@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolCallBlock } from '@/chat/types'
 import {
+    formatTerminalOutput,
     formatTerminalExecutionDuration,
     getTerminalExecutionDetails,
     getTerminalExecutionState,
@@ -92,6 +93,48 @@ describe('terminal execution details', () => {
             status: null
         })
         expect(getTerminalExecutionState(block)).toBe('completed')
+    })
+
+    it('unwraps the exec result envelope and keeps only its output', () => {
+        const block = makeBlock({
+            stdout: JSON.stringify({
+                chunk_id: 'chunk-1',
+                wall_time_seconds: 2.1,
+                exit_code: 0,
+                original_token_count: 12,
+                output: '{"ok":true}'
+            })
+        })
+
+        expect(getTerminalExecutionDetails(block).stdout).toBe('{"ok":true}')
+        expect(formatTerminalOutput(getTerminalExecutionDetails(block).stdout!)).toEqual({
+            text: '{\n  "ok": true\n}',
+            language: 'json'
+        })
+    })
+
+    it('does not unwrap ordinary JSON objects that happen to contain output', () => {
+        const value = '{"name":"report","output":"kept"}'
+        expect(getTerminalExecutionDetails(makeBlock({ stdout: value })).stdout).toBe(value)
+    })
+
+    it('pretty prints wrapped, ANSI-colored, fenced, and JSON Lines output', () => {
+        expect(formatTerminalOutput('"{\\"ok\\":true,\\"items\\":[1,2]}"')).toEqual({
+            text: '{\n  "ok": true,\n  "items": [\n    1,\n    2\n  ]\n}',
+            language: 'json'
+        })
+        expect(formatTerminalOutput('\u001b[32m{"ok":true}\u001b[0m')).toEqual({
+            text: '{\n  "ok": true\n}',
+            language: 'json'
+        })
+        expect(formatTerminalOutput('```json\n{"ok":true}\n```')).toEqual({
+            text: '{\n  "ok": true\n}',
+            language: 'json'
+        })
+        expect(formatTerminalOutput('{"id":1}\n{"id":2}')).toEqual({
+            text: '{\n  "id": 1\n}\n\n{\n  "id": 2\n}',
+            language: 'json'
+        })
     })
 
     it('identifies only shell-like tools and formats readable durations', () => {

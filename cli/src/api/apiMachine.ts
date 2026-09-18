@@ -133,7 +133,7 @@ import { collectMachineHealth } from '@/utils/machineHealth'
 import { collectShapiResourceUsage, stopShapiResourceUsageCollection } from '@/utils/shapiResourceUsage'
 import { readGeneratedImageFileBytes, readSessionFileBytes } from '@/modules/common/handlers/files'
 import { readUploadFileBytes } from '@/modules/common/handlers/uploads'
-import { expandManagedSkillInvocation, listManagedSkillInventory, reconcileManagedSkill, removeManagedSkill } from '@/managedSkills'
+import { createManagedSkillInvocationExpander, listManagedSkillInventory, reconcileManagedSkill, removeManagedSkill } from '@/managedSkills'
 
 const CODEX_SSH_OWNERSHIP_MONITOR_INTERVAL_MS = 1_000
 const NATIVE_CODEX_ATTACHMENT_CLEANUP_INTERVAL_MS = 60 * 60 * 1_000
@@ -382,6 +382,7 @@ export class ApiMachineClient {
     private nativeControlRecoveryStatus: ((threadId: string) => { status: 'pending' | 'ready' | 'unconfirmed' } | null) | null = null
     private rpcHandlerManager: RpcHandlerManager
     private readonly nativeCodexSessionTitleCache = new NativeCodexSessionTitleCache()
+    private readonly nativeManagedSkillExpanders = new Map<string, (text: string) => string>()
     private readonly nativeCodexTurnLifecycle = new NativeCodexTurnLifecycleTracker({
         onUnconfirmedLeaseExpired: (codexSessionId) => this.handleNativeCodexLifecycleChange(codexSessionId),
         onUserInputLeaseExpired: (codexSessionId) => this.handleNativeCodexLifecycleChange(codexSessionId),
@@ -752,7 +753,7 @@ export class ApiMachineClient {
                     this.observeNativeCodexSession(sessionId)
                 }
                 const expandedMessage = typeof params?.message === 'string'
-                    ? expandManagedSkillInvocation(params.message)
+                    ? this.getNativeManagedSkillExpander(sessionId)(params.message)
                     : params?.message
                 return await this.nativeCodexSessionDirectSender.sendWithExternalControlCheck(
                     sessionId,
@@ -1109,6 +1110,22 @@ export class ApiMachineClient {
                 return await listOpencodeModelsForCwd(resolvedCwd)
             }
         )
+    }
+
+    private getNativeManagedSkillExpander(sessionId: string): (text: string) => string {
+        const existing = this.nativeManagedSkillExpanders.get(sessionId)
+        if (existing) {
+            this.nativeManagedSkillExpanders.delete(sessionId)
+            this.nativeManagedSkillExpanders.set(sessionId, existing)
+            return existing
+        }
+        if (this.nativeManagedSkillExpanders.size >= 128) {
+            const oldestSessionId = this.nativeManagedSkillExpanders.keys().next().value
+            if (typeof oldestSessionId === 'string') this.nativeManagedSkillExpanders.delete(oldestSessionId)
+        }
+        const created = createManagedSkillInvocationExpander()
+        this.nativeManagedSkillExpanders.set(sessionId, created)
+        return created
     }
 
     private isWithinWorkspaceRoots(absolutePath: string): boolean {
@@ -2031,6 +2048,7 @@ export class ApiMachineClient {
     }
 
     shutdown(): void {
+        this.nativeManagedSkillExpanders.clear()
         this.localServiceTunnels.dispose()
         this.stopKeepAlive()
         this.stopCodexSshOwnershipMonitor()

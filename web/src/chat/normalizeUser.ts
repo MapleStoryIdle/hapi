@@ -2,6 +2,16 @@ import type { NormalizedMessage } from '@/chat/types'
 import type { AttachmentMetadata } from '@/types/api'
 import { isObject } from '@hapi/protocol'
 
+export function isShapiManagedSkillEcho(content: unknown, meta: unknown): boolean {
+    if (!isObject(meta) || meta.sentFrom !== 'cli') return false
+    const text = typeof content === 'string'
+        ? content
+        : isObject(content) && content.type === 'text' && typeof content.text === 'string'
+            ? content.text
+            : null
+    return /^<shapi-managed-skill(?:-ref)? /.test(text?.trimStart() ?? '')
+}
+
 function parseAttachments(raw: unknown): AttachmentMetadata[] | undefined {
     if (!Array.isArray(raw)) return undefined
     const attachments: AttachmentMetadata[] = []

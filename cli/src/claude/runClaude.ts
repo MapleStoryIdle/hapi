@@ -19,10 +19,11 @@ import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
-import { expandManagedSkillInvocation } from '@/managedSkills';
+import { createManagedSkillInvocationExpander } from '@/managedSkills';
 import { normalizeClaudeSessionModel } from './model';
 import { normalizeClaudeSessionEffort } from './effort';
 import { getInvokedCwd } from '@/utils/invokedCwd';
+import { configureNonInteractiveTerminalColors } from '@/agent/terminalColorEnv';
 
 export interface StartOptions {
     model?: string
@@ -41,6 +42,7 @@ export interface StartOptions {
 export async function runClaude(options: StartOptions = {}): Promise<void> {
     const workingDirectory = options.workingDirectory ?? getInvokedCwd();
     const startedBy = options.startedBy ?? 'terminal';
+    if (startedBy === 'runner') configureNonInteractiveTerminalColors();
 
     // Log environment info at startup
     logger.debugLargeJson('[START] SHAPI process started', getEnvironmentInfo());
@@ -167,6 +169,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         allowedTools: mode.allowedTools,
         disallowedTools: mode.disallowedTools
     }));
+    const expandManagedSkill = createManagedSkillInvocationExpander();
 
     // Forward messages to the queue
     let currentPermissionMode: PermissionMode = options.permissionMode ?? 'default';
@@ -260,7 +263,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         const specialCommand = parseSpecialCommand(message.content.text);
 
         // Format message text with attachments for Claude
-        const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
+        const formattedText = formatMessageWithAttachments(expandManagedSkill(message.content.text), message.content.attachments);
 
         if (specialCommand.type === 'compact') {
             logger.debug('[start] Detected /compact command');

@@ -4,7 +4,7 @@ import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler'
 import { registerLocalHandoffHandler } from '@/agent/localHandoff';
 import { createRunnerLifecycle, createModeChangeHandler, setControlledByUser } from '@/agent/runnerLifecycle';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
-import { expandManagedSkillInvocation } from '@/managedSkills';
+import { createManagedSkillInvocationExpander } from '@/managedSkills';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { PiTransport } from './piTransport';
 import { PiSession } from './session';
@@ -14,6 +14,7 @@ import type { PiThinkingLevel } from './types';
 import type { SlashCommandsResponse } from '@hapi/protocol/apiTypes';
 import type { ListPiModelsResponse } from '@hapi/protocol/apiTypes';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import { configureNonInteractiveTerminalColors } from '@/agent/terminalColorEnv';
 
 export async function runPi(opts: {
     startedBy?: 'runner' | 'terminal';
@@ -26,6 +27,7 @@ export async function runPi(opts: {
 } = {}): Promise<void> {
     const workingDirectory = opts.workingDirectory ?? getInvokedCwd();
     const startedBy = opts.startedBy ?? 'terminal';
+    if (startedBy === 'runner') configureNonInteractiveTerminalColors();
     // Pi only runs as `pi --mode rpc` with piped stdio — there is no local
     // terminal/TUI input path (unlike Claude/Codex). Defaulting a terminal
     // launch to 'local' would mark the session local-controlled while the user
@@ -55,6 +57,7 @@ export async function runPi(opts: {
             model: undefined
         });
     const { session: apiSession } = bootstrap;
+    const expandManagedSkill = createManagedSkillInvocationExpander();
 
     setControlledByUser(apiSession, startingMode);
 
@@ -312,7 +315,7 @@ export async function runPi(opts: {
 
     // --- User message handler ---
     apiSession.onUserMessage((message, localId) => {
-        const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
+        const formattedText = formatMessageWithAttachments(expandManagedSkill(message.content.text), message.content.attachments);
         if (piSession.piIsStreaming) {
             // Steer does not start a new turn, so the localId would never be
             // drained by turn_start. Mark it consumed immediately so it does

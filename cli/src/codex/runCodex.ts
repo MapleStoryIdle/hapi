@@ -14,12 +14,13 @@ import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import { CodexCollaborationModeSchema, PermissionModeSchema } from '@hapi/protocol/schemas';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
-import { expandManagedSkillInvocation } from '@/managedSkills';
+import { createManagedSkillInvocationExpander } from '@/managedSkills';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import type { ReasoningEffort } from './appServerTypes';
 import { parseCodexSpecialCommand } from './codexSpecialCommands';
 import { listSlashCommands } from '@/modules/common/slashCommands';
 import { resolveCodexSlashCommand } from './utils/slashCommands';
+import { configureNonInteractiveTerminalColors } from '@/agent/terminalColorEnv';
 
 export { emitReadyIfIdle } from './utils/emitReadyIfIdle';
 
@@ -41,6 +42,7 @@ export async function runCodex(opts: {
 }): Promise<void> {
     const workingDirectory = opts.workingDirectory ?? getInvokedCwd();
     const startedBy = opts.startedBy ?? 'terminal';
+    if (startedBy === 'runner') configureNonInteractiveTerminalColors();
 
     logger.debug(`[codex] Starting with options: startedBy=${startedBy}`);
 
@@ -75,6 +77,7 @@ export async function runCodex(opts: {
         collaborationMode: mode.collaborationMode,
         serviceTier: mode.serviceTier
     }));
+    const expandManagedSkill = createManagedSkillInvocationExpander();
 
     const codexCliOverrides = parseCodexCliOverrides(opts.codexArgs);
     const sessionWrapperRef: { current: CodexSession | null } = { current: null };
@@ -248,7 +251,7 @@ export async function runCodex(opts: {
                         isolatedCommandText = message.content.text.trim();
                     }
                 }
-                text = formatMessageWithAttachments(expandManagedSkillInvocation(text), message.content.attachments);
+                text = formatMessageWithAttachments(expandManagedSkill(text), message.content.attachments);
 
                 const messagePermissionMode = currentPermissionMode;
                 logger.debug(
@@ -278,7 +281,7 @@ export async function runCodex(opts: {
                     collaborationMode: currentCollaborationMode,
                     serviceTier: currentServiceTier
                 };
-                const fallbackText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
+                const fallbackText = formatMessageWithAttachments(expandManagedSkill(message.content.text), message.content.attachments);
                 messageQueue.push(fallbackText, enhancedMode, localId);
             }
         }).catch((error) => {

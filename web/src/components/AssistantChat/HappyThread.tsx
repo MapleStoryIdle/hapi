@@ -13,6 +13,7 @@ import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import {
     closeAutoExpandedToolGroups,
+    shouldCloseAutoExpandedToolGroups,
     type ToolGroupExpansionState,
     type ToolGroupExpansionStates
 } from '@/components/ToolCard/toolGroupExpansion'
@@ -623,7 +624,10 @@ export function HappyThread(props: {
         startY: 0,
         active: false
     })
-    const previousToolGroupCompletionKeyRef = useRef(props.toolGroupCompletionKey)
+    const previousToolGroupRunSnapshotRef = useRef({
+        runActive: props.toolGroupRunActive,
+        completionKey: props.toolGroupCompletionKey
+    })
 
     const setToolGroupExpansionState = useCallback((key: string, state: ToolGroupExpansionState) => {
         setToolGroupExpansionStates((current) => current[key] === state
@@ -632,16 +636,17 @@ export function HappyThread(props: {
     }, [])
 
     useLayoutEffect(() => {
-        const previous = previousToolGroupCompletionKeyRef.current
-        if (previous === props.toolGroupCompletionKey) {
-            return
+        const previous = previousToolGroupRunSnapshotRef.current
+        const current = {
+            runActive: props.toolGroupRunActive,
+            completionKey: props.toolGroupCompletionKey
         }
-        previousToolGroupCompletionKeyRef.current = props.toolGroupCompletionKey
-        if (props.toolGroupCompletionKey === null) {
+        previousToolGroupRunSnapshotRef.current = current
+        if (!shouldCloseAutoExpandedToolGroups(previous, current)) {
             return
         }
         setToolGroupExpansionStates(closeAutoExpandedToolGroups)
-    }, [props.toolGroupCompletionKey])
+    }, [props.toolGroupCompletionKey, props.toolGroupRunActive])
 
     // Follow state is enabled by a send and stays enabled until the user
     // intentionally scrolls away from the latest message.

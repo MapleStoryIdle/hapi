@@ -4,6 +4,11 @@ export type ToolGroupExpansionState = 'auto-open' | 'auto-closed' | 'user-open' 
 
 export type ToolGroupExpansionStates = Record<string, ToolGroupExpansionState>
 
+export type ToolGroupRunSnapshot = {
+    runActive: boolean
+    completionKey: string | null
+}
+
 function uniqueKeys(keys: readonly string[]): string[] {
     return Array.from(new Set(keys.filter((key) => key.length > 0)))
 }
@@ -71,4 +76,19 @@ export function closeAutoExpandedToolGroups(states: ToolGroupExpansionStates): T
     }
 
     return changed ? next : states
+}
+
+/**
+ * A completion marker can arrive while the session still reports an active
+ * turn. The session state wins: consume the marker, but close only after the
+ * run becomes idle. The active-to-idle edge is also the fallback when a
+ * completion message never reaches the current message window.
+ */
+export function shouldCloseAutoExpandedToolGroups(
+    previous: ToolGroupRunSnapshot,
+    current: ToolGroupRunSnapshot
+): boolean {
+    if (current.runActive) return false
+    if (previous.runActive) return true
+    return current.completionKey !== null && current.completionKey !== previous.completionKey
 }

@@ -13,10 +13,11 @@ import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } f
 import { registerSessionConfigRpc } from '@/agent/sessionConfigRpc';
 import { startOpencodeHookServer } from './utils/startOpencodeHookServer';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
-import { expandManagedSkillInvocation } from '@/managedSkills';
+import { createManagedSkillInvocationExpander } from '@/managedSkills';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { listSlashCommands } from '@/modules/common/slashCommands';
 import { resolveOpencodeSlashCommand } from './utils/slashCommands';
+import { configureNonInteractiveTerminalColors } from '@/agent/terminalColorEnv';
 
 export async function runOpencode(opts: {
     startedBy?: 'runner' | 'terminal';
@@ -30,6 +31,7 @@ export async function runOpencode(opts: {
 } = {}): Promise<void> {
     const workingDirectory = opts.workingDirectory ?? getInvokedCwd();
     const startedBy = opts.startedBy ?? 'terminal';
+    if (startedBy === 'runner') configureNonInteractiveTerminalColors();
 
     logger.debug(`[opencode] Starting with options: startedBy=${startedBy}, startingMode=${opts.startingMode}`);
 
@@ -82,6 +84,7 @@ export async function runOpencode(opts: {
         model: mode.model === null ? '__reset__' : mode.model ?? null,
         modelReasoningEffort: mode.modelReasoningEffort ?? null
     }));
+    const expandManagedSkill = createManagedSkillInvocationExpander();
 
     const sessionWrapperRef: { current: OpencodeSession | null } = { current: null };
     let currentPermissionMode: PermissionMode = opts.permissionMode ?? 'default';
@@ -153,7 +156,7 @@ export async function runOpencode(opts: {
                 modelReasoningEffort: sessionModelReasoningEffort
             });
             const pushPlain = () => {
-                const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
+                const formattedText = formatMessageWithAttachments(expandManagedSkill(message.content.text), message.content.attachments);
                 messageQueue.push(formattedText, buildMode(), localId);
             };
             try {
@@ -218,7 +221,7 @@ export async function runOpencode(opts: {
                     text = slash.text;
                 }
 
-                const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(text), message.content.attachments);
+                const formattedText = formatMessageWithAttachments(expandManagedSkill(text), message.content.attachments);
                 messageQueue.push(formattedText, buildMode(), localId);
             } catch (error) {
                 logger.debug('[opencode] Failed to handle user message', error);

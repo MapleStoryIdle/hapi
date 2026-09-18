@@ -71,9 +71,10 @@ function getToolEndMs(tool: ToolCallBlock, now: number): number {
     return tool.tool.completedAt ?? tool.tool.startedAt ?? tool.tool.createdAt
 }
 
-export function isToolGroupActive(block: ToolGroupBlock): boolean {
+export function isToolGroupActive(block: ToolGroupBlock, sessionRunActive = false): boolean {
     return block.turnActive === true
         || block.tools.some((tool) => tool.tool.state === 'running' || tool.tool.state === 'pending')
+        || (sessionRunActive && block.defaultOpen)
 }
 
 export function getToolGroupDurationMs(block: ToolGroupBlock, now: number): number {
@@ -209,11 +210,14 @@ function getLatestLiveProcessBlock(block: ToolGroupBlock): ToolCallBlock | Exclu
 export function formatToolGroupCompactTitle(
     block: ToolGroupBlock,
     now: number,
-    t: (key: string, params?: Record<string, string | number>) => string
+    t: (key: string, params?: Record<string, string | number>) => string,
+    sessionRunActive = false
 ): string {
-    const label = getToolGroupCompactLabel(block, t)
+    const nativeActive = isToolGroupActive(block)
+    const active = isToolGroupActive(block, sessionRunActive)
+    const label = getToolGroupCompactLabel(block, t, active, active && !nativeActive)
     const duration = formatCompactDuration(getToolGroupDurationMs(block, now))
-    if (!isToolGroupActive(block) && label === t('toolGroup.compact.processed', { duration: '' }).trim()) {
+    if (!active && label === t('toolGroup.compact.processed', { duration: '' }).trim()) {
         return [label, duration].filter(Boolean).join(' ')
     }
     return joinTerminalSummaryParts([
@@ -224,9 +228,10 @@ export function formatToolGroupCompactTitle(
 
 function getToolGroupCompactLabel(
     block: ToolGroupBlock,
-    t: (key: string, params?: Record<string, string | number>) => string
+    t: (key: string, params?: Record<string, string | number>) => string,
+    active = isToolGroupActive(block),
+    sessionFallback = false
 ): string {
-    const active = isToolGroupActive(block)
     const runningTerminal = active
         ? block.tools.findLast((tool) => (
             isTerminalExecutionTool(tool.tool.name)
@@ -244,6 +249,9 @@ function getToolGroupCompactLabel(
             ? 'terminal.execution.pending'
             : 'terminal.execution.running')
         return terminalLabel ? `${stateLabel} · ${terminalLabel}` : stateLabel
+    }
+    if (sessionFallback) {
+        return t('toolGroup.compact.processing', { duration: '' }).trim()
     }
     const latestLiveBlock = getLatestLiveProcessBlock(block)
     if (latestLiveBlock?.kind === 'agent-text' || latestLiveBlock?.kind === 'agent-reasoning') {
@@ -849,7 +857,10 @@ export function ToolGroupCard(props: {
     const { suppressFocusRing, onTriggerPointerDown, onTriggerKeyDown, onTriggerBlur } = usePointerFocusRing()
     const compactHeaderState = useContext(ToolGroupCompactHeaderContext)
     const compactMode = ctx.terminalToolDisplayMode === 'compact' || props.block.forceCompact === true
-    const hasActiveTools = isToolGroupActive(props.block)
+    // The newest Process row can temporarily lose its latest terminal snapshot
+    // while the session is still running. Do not treat that transport gap as
+    // turn completion; the session-level run state is the final fallback.
+    const hasActiveTools = isToolGroupActive(props.block, ctx.toolGroupRunActive)
     const now = useSharedNow(compactMode && hasActiveTools)
     const requestsAutomaticExpansion = hasActiveTools && (
         hasRunningTerminal || props.block.defaultOpen || props.block.forceCompact !== true
@@ -1084,7 +1095,7 @@ export function ToolGroupCard(props: {
     const primaryTitle = formatGroupedHeaderTitle(props.block, t)
     const subtitle = formatGroupedHeaderSubtitle(props.block, t) ?? formatActionSummary(props.block, t)
     const fileCount = props.block.summary.fileTargets.length
-    const compactTitle = formatToolGroupCompactTitle(props.block, now, t)
+    const compactTitle = formatToolGroupCompactTitle(props.block, now, t, ctx.toolGroupRunActive)
     const toggleOpen = () => {
         setDisplayedOpen((value) => !value)
     }

@@ -13,10 +13,11 @@ import {
     resolveSessionConfigPermissionMode
 } from '@/agent/sessionConfigRpc';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
-import { expandManagedSkillInvocation } from '@/managedSkills';
+import { createManagedSkillInvocationExpander } from '@/managedSkills';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { enqueueCursorUserMessage } from './cursorUserMessageQueue';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import { configureNonInteractiveTerminalColors } from '@/agent/terminalColorEnv';
 
 const formatFailureReason = (message: string): string => {
     const maxLength = 200;
@@ -37,6 +38,7 @@ export async function runCursor(opts: {
 }): Promise<void> {
     const workingDirectory = opts.workingDirectory ?? getInvokedCwd();
     const startedBy = opts.startedBy ?? 'terminal';
+    if (startedBy === 'runner') configureNonInteractiveTerminalColors();
 
     logger.debug(`[cursor] Starting with options: startedBy=${startedBy}`);
 
@@ -69,6 +71,7 @@ export async function runCursor(opts: {
             model: mode.model
         })
     );
+    const expandManagedSkill = createManagedSkillInvocationExpander();
 
     const sessionWrapperRef: { current: CursorSession | null } = { current: null };
 
@@ -101,7 +104,7 @@ export async function runCursor(opts: {
             permissionMode: currentPermissionMode ?? 'default',
             model: currentModel
         };
-        const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
+        const formattedText = formatMessageWithAttachments(expandManagedSkill(message.content.text), message.content.attachments);
         enqueueCursorUserMessage(messageQueue, formattedText, enhancedMode, localId);
     });
 

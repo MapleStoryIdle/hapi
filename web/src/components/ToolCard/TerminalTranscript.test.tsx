@@ -19,6 +19,7 @@ describe('TerminalTranscript', () => {
         expect([...sections].map((pre) => pre.textContent)).toEqual([details.command, details.stdout, details.stderr])
         const input = view.container.querySelector('[data-terminal-execution-input]')!
         const output = view.container.querySelector('[data-terminal-execution-output]')!
+        expect(input.querySelector('pre')).toHaveAttribute('data-language', 'shellscript')
         expect(input).toHaveClass('terminal-transcript-section')
         expect(output).toHaveClass('terminal-transcript-section')
         expect(input.parentElement).toBe(output.parentElement)
@@ -26,7 +27,7 @@ describe('TerminalTranscript', () => {
         expect(view.container.querySelectorAll('.terminal-transcript-surface')).toHaveLength(1)
         expect(view.container.querySelectorAll('.terminal-transcript-toolbar')).toHaveLength(2)
         expect(view.container.querySelectorAll('.terminal-transcript-label')).toHaveLength(2)
-        expect(screen.getByText('$')).toHaveAttribute('aria-hidden', 'true')
+        expect(screen.getByText('❯')).toHaveAttribute('aria-hidden', 'true')
         for (const label of ['Wrap lines', 'Copy command', 'Copy output']) {
             const button = screen.getByRole('button', { name: label })
             expect(button).toHaveAttribute('title', label)
@@ -64,13 +65,31 @@ describe('TerminalTranscript', () => {
         expect(screen.getByText('stderr')).toHaveClass('text-[var(--app-badge-error-text)]')
     })
 
+    it('formats JSON output and does not repeat the stdout heading for one stream', () => {
+        const view = render(
+            <I18nProvider>
+                <TerminalTranscript
+                    details={{ ...details, stdout: '{"ok":true,"count":2}', stderr: null }}
+                    state="completed"
+                />
+            </I18nProvider>
+        )
+
+        const output = view.container.querySelector('[data-terminal-execution-output]')!
+        const code = output.querySelector('pre[data-language="json"]')
+        expect(code).toHaveTextContent('{ "ok": true, "count": 2 }')
+        expect(code?.textContent).toBe('{\n  "ok": true,\n  "count": 2\n}')
+        expect(screen.queryByText('stdout')).toBeNull()
+        expect(screen.getAllByText('Output')).toHaveLength(1)
+    })
+
     it('preserves multiline shell text and does not invent a missing command', () => {
         const command = 'printf "%s\\n" "$HOME"\ncat <<\'EOF\'\n<script>alert(1)</script>\nEOF'
         const view = render(<I18nProvider><TerminalTranscript details={{ ...details, command }} state="completed" /></I18nProvider>)
         expect(view.container.querySelector('[data-terminal-execution-input] code')?.textContent).toBe(command)
         expect(view.container.querySelector('script')).toBeNull()
         view.rerender(<I18nProvider><TerminalTranscript details={{ ...details, command: null }} state="completed" /></I18nProvider>)
-        expect(screen.queryByText('$')).toBeNull()
+        expect(screen.queryByText('❯')).toBeNull()
         expect(screen.queryByRole('button', { name: 'Copy command' })).toBeNull()
     })
 })

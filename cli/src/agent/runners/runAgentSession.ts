@@ -11,12 +11,13 @@ import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler';
 import { bootstrapSession } from '@/agent/sessionFactory';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
-import { expandManagedSkillInvocation } from '@/managedSkills';
+import { createManagedSkillInvocationExpander } from '@/managedSkills';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
 import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import type { SessionEndReason } from '@hapi/protocol';
+import { configureNonInteractiveTerminalColors } from '@/agent/terminalColorEnv';
 
 function emitReadyIfIdle(props: {
     queueSize: () => number;
@@ -35,6 +36,7 @@ export async function runAgentSession(opts: {
     startedBy?: 'runner' | 'terminal';
     permissionMode?: SessionPermissionMode;
 }): Promise<void> {
+    if (opts.startedBy === 'runner') configureNonInteractiveTerminalColors();
     const workingDirectory = getInvokedCwd();
     const initialState: AgentState = {
         controlledByUser: false
@@ -52,9 +54,10 @@ export async function runAgentSession(opts: {
     }));
 
     const messageQueue = new MessageQueue2<Record<string, never>>(() => hashObject({}));
+    const expandManagedSkill = createManagedSkillInvocationExpander();
 
     session.onUserMessage((message, localId) => {
-        const formattedText = formatMessageWithAttachments(expandManagedSkillInvocation(message.content.text), message.content.attachments);
+        const formattedText = formatMessageWithAttachments(expandManagedSkill(message.content.text), message.content.attachments);
         messageQueue.push(formattedText, {}, localId);
     });
 

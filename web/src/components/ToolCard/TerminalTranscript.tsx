@@ -2,14 +2,45 @@ import { useState } from 'react'
 import { WrapText } from 'lucide-react'
 import { DetailCopyButton } from '@/components/ui/DetailCopyButton'
 import { useTranslation } from '@/lib/use-translation'
-import type { TerminalExecutionDetails, TerminalExecutionState } from './terminalExecution'
+import { useShikiHighlighter } from '@/lib/shiki'
+import { formatTerminalOutput, type TerminalExecutionDetails, type TerminalExecutionState } from './terminalExecution'
+import { AnsiTerminalText, stripAnsiTerminalSequences } from './AnsiTerminalText'
+
+function JsonTranscriptOutput(props: { text: string; className: string }) {
+    const highlighted = useShikiHighlighter(props.text, 'json')
+    return <pre className={`terminal-transcript-code shiki ${props.className}`} data-language="json"><code>{highlighted ?? props.text}</code></pre>
+}
+
+function TranscriptOutput(props: { value: string; className: string }) {
+    const display = formatTerminalOutput(props.value)
+    if (display.language === 'json') {
+        return <JsonTranscriptOutput text={display.text} className={props.className} />
+    }
+    return <pre className={`terminal-transcript-code ${props.className}`} data-language="text"><code><AnsiTerminalText text={display.text} /></code></pre>
+}
+
+function TranscriptCommand(props: { value: string; className: string }) {
+    const plainCommand = stripAnsiTerminalSequences(props.value)
+    const highlighted = useShikiHighlighter(plainCommand, 'shellscript')
+    return (
+        <pre className={`terminal-transcript-code shiki ${props.className}`} data-language="shellscript">
+            <code>{highlighted ?? <AnsiTerminalText text={props.value} />}</code>
+        </pre>
+    )
+}
 
 /** Log viewer, not a PTY: never executes commands or invents stream ordering. */
 export function TerminalTranscript(props: { details: TerminalExecutionDetails; state: TerminalExecutionState }) {
     const { t } = useTranslation()
     const [wrap, setWrap] = useState(false)
     const { command, stdout, stderr } = props.details
-    const output = [stdout && `stdout:\n${stdout}`, stderr && `stderr:\n${stderr}`].filter(Boolean).join('\n\n')
+    const stdoutDisplay = stdout ? formatTerminalOutput(stdout).text : null
+    const stderrDisplay = stderr ? formatTerminalOutput(stderr).text : null
+    const hasBothStreams = Boolean(stdoutDisplay && stderrDisplay)
+    const outputWithAnsi = hasBothStreams
+        ? `stdout:\n${stdoutDisplay}\n\nstderr:\n${stderrDisplay}`
+        : stdoutDisplay ?? stderrDisplay ?? ''
+    const output = stripAnsiTerminalSequences(outputWithAnsi)
     const waiting = props.state === 'running' || props.state === 'pending'
     const codeClass = wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'
     return <div className="terminal-transcript terminal-transcript-surface" data-wrap={wrap}>
@@ -28,8 +59,8 @@ export function TerminalTranscript(props: { details: TerminalExecutionDetails; s
                 </div>
             </div>
             {command ? <div className="terminal-transcript-command-line">
-                <span className="terminal-transcript-prompt" aria-hidden="true">$</span>
-                <pre className={`terminal-transcript-code ${codeClass}`}><code>{command}</code></pre>
+                <span className="terminal-transcript-prompt" aria-hidden="true">❯</span>
+                <TranscriptCommand value={command} className={codeClass} />
             </div>
                 : <p className="terminal-transcript-empty">{t('terminal.execution.commandUnavailable')}</p>}
         </section>
@@ -39,12 +70,12 @@ export function TerminalTranscript(props: { details: TerminalExecutionDetails; s
                 {output ? <DetailCopyButton iconOnly value={output} label={t('terminal.execution.copyOutput')} /> : null}
             </div>
             {stdout ? <div>
-                <h3 className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--app-hint)]">stdout</h3>
-                <pre className={`terminal-transcript-code ${codeClass}`}><code>{stdout}</code></pre>
+                {hasBothStreams ? <h3 className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--app-hint)]">stdout</h3> : null}
+                <TranscriptOutput value={stdout} className={codeClass} />
             </div> : null}
             {stderr ? <div>
-                <h3 className={`px-3 pb-1 pt-2 text-xs font-medium ${props.state === 'failed' ? 'text-[var(--app-badge-error-text)]' : 'text-[var(--app-hint)]'}`}>stderr</h3>
-                <pre className={`terminal-transcript-code ${codeClass}`}><code>{stderr}</code></pre>
+                {hasBothStreams ? <h3 className={`px-3 pb-1 pt-2 text-xs font-medium ${props.state === 'failed' ? 'text-[var(--app-badge-error-text)]' : 'text-[var(--app-hint)]'}`}>stderr</h3> : null}
+                <TranscriptOutput value={stderr} className={codeClass} />
             </div> : null}
             {!stdout && !stderr ? <p className="terminal-transcript-empty" role="status">
                 {t(waiting ? 'terminal.execution.outputPending' : 'terminal.execution.noOutput')}
