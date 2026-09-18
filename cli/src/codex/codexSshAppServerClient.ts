@@ -42,6 +42,9 @@ type JsonRpcResponse = {
 
 type RequestHandler = (params: unknown, context?: { requestId: string | number | null }) => Promise<unknown> | unknown
 
+/** A shared observer saw a server request that belongs to another UI/turn. */
+export const CODEX_SSH_IGNORE_REQUEST = Symbol('CODEX_SSH_IGNORE_REQUEST')
+
 type PendingRequest = {
     resolve: (value: unknown) => void
     reject: (error: Error) => void
@@ -585,6 +588,7 @@ export class CodexSshAppServerClient {
         this.incomingRequests.set(responseId, pending)
         try {
             const result = await handler(params, { requestId: responseId })
+            if (result === CODEX_SSH_IGNORE_REQUEST) return
             if (this.incomingRequests.get(responseId) === pending) this.tryWritePayload({ id: responseId, result })
         } catch (error) {
             if (this.incomingRequests.get(responseId) === pending) this.tryWritePayload({

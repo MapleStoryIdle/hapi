@@ -28,6 +28,7 @@ import {
 } from '@hapi/protocol/codexTranscript'
 import { NATIVE_CODEX_PROCESSING_STALE_AFTER_MS } from './nativeTurnLifecycle'
 import { NativeCodexUserInputSchema, type NativeCodexUserInput } from '@hapi/protocol/codexSessionControl'
+import { CODEX_SSH_IGNORE_REQUEST } from './codexSshAppServerClient'
 import type {
     NativeCodexSessionControlState,
     NativeCodexSessionControlStore
@@ -380,13 +381,15 @@ type ActiveExecSend = ActiveSendBase & {
     lifecycleTimer: ReturnType<typeof setTimeout> | null
 }
 
+type PendingNativeUserInput = {
+    input: NativeCodexUserInput
+    requestId: string | number | null
+    resolve: (value: { answers: Record<string, { answers: string[] }> }) => void
+    reject: (error: Error) => void
+}
+
 type ActiveAppServerSend = ActiveSendBase & {
-    pendingUserInputs?: Array<{
-        input: NativeCodexUserInput
-        requestId: string | number | null
-        resolve: (value: { answers: Record<string, { answers: string[] }> }) => void
-        reject: (error: Error) => void
-    }>
+    pendingUserInputs?: PendingNativeUserInput[]
     kind: 'app-server'
     cwd: string
     client: NativeCodexAppServerClient
@@ -450,7 +453,15 @@ type SharedQueueDelivery = {
     acceptedAt: number | null
     /** Transient SHAPI socket; never the Desktop-owned app-server connection. */
     client: NativeCodexAppServerClient | null
+    observer: SharedTurnObserver | null
     lifecycleTimer: ReturnType<typeof setTimeout> | null
+}
+
+type SharedTurnObserver = {
+    clientMessageId: string
+    client: NativeCodexAppServerClient
+    turnId: string | null
+    pendingUserInputs: PendingNativeUserInput[]
 }
 
 const RECENT_FAILURE_TTL_MS = 60_000
@@ -619,6 +630,13 @@ function getNotificationError(params: unknown): string | null {
     return asString(record?.error ?? record?.message ?? record?.reason ?? status?.error ?? status?.message)
 }
 
+function getNotificationUserMessageClientId(params: unknown): string | null {
+    const item = asRecord(asRecord(params)?.item)
+    const type = asString(item?.type)?.toLowerCase().replace(/[-_\s]/g, '')
+    if (type !== 'usermessage') return null
+    return asString(item?.clientId ?? item?.client_id)
+}
+
 function getTurnId(response: TurnStartResponse): string | null {
     return asString(response.turn?.id)
 }
@@ -651,6 +669,8 @@ export class NativeCodexSessionDirectSender {
      * user-turn record confirms the receipt or recovery remains necessary.
      */
     private readonly sharedQueueDeliveries = new Map<string, SharedQueueDelivery>()
+    /** Exact shared-SSH turns submitted by SHAPI whose questions Web may answer. */
+    private readonly sharedTurnObservers = new Map<string, SharedTurnObserver>()
     /** Only these short-lived sockets belong to SHAPI and may be closed here. */
     private readonly sharedQueueClients = new Set<NativeCodexAppServerClient>()
     /** Recent native user turns, retained only long enough to settle a local SSH receipt. */
@@ -736,6 +756,7 @@ export class NativeCodexSessionDirectSender {
                         receipt,
                         acceptedAt: item.queuedAt,
                         client: null,
+                        observer: null,
                         lifecycleTimer: null
                     }
                     this.sharedQueueDeliveries.set(item.sessionId, delivery)
@@ -1243,6 +1264,9 @@ export class NativeCodexSessionDirectSender {
             }
         }
         this.sharedQueueDeliveries.clear()
+        for (const [sessionId, observer] of this.sharedTurnObservers) {
+            this.disposeSharedTurnObserver(sessionId, observer)
+        }
         this.transcriptUserMessageEvidence.clear()
         // Preserve the delivery boundary for the replacement runner: setup
         // can resume automatically, but attempted sends must not be replayed.
@@ -1291,9 +1315,14 @@ export class NativeCodexSessionDirectSender {
         try {
             if (action.action === 'answerUserInput') {
                 const active = this.activeSends.get(sessionId)
-                const pending = active?.kind === 'app-server'
+                const activePending = active?.kind === 'app-server'
                     ? active.pendingUserInputs?.find((entry) => entry.input.itemId === action.requestId && entry.input.turnId === action.expectedTurnId)
                     : undefined
+                const sharedObserver = this.sharedTurnObservers.get(sessionId)
+                const sharedPending = sharedObserver?.pendingUserInputs.find((entry) => (
+                    entry.input.itemId === action.requestId && entry.input.turnId === action.expectedTurnId
+                ))
+                const pending = activePending ?? sharedPending
                 if (!pending || pending.input.itemId !== action.requestId || pending.input.turnId !== action.expectedTurnId) {
                     return { success: false, code: 'turn_changed', error: 'This question is no longer pending. Refresh before answering.' }
                 }
@@ -1302,6 +1331,7 @@ export class NativeCodexSessionDirectSender {
                     return { success: false, code: 'invalid_request', error: 'Answer every question before submitting.' }
                 }
                 if (active?.kind === 'app-server') active.pendingUserInputs = active.pendingUserInputs?.filter((entry) => entry !== pending)
+                if (sharedObserver) sharedObserver.pendingUserInputs = sharedObserver.pendingUserInputs.filter((entry) => entry !== pending)
                 pending.resolve({ answers: action.answers })
                 this.notifyStateChange(sessionId)
                 result = { success: true, controls: this.getControls(sessionId, context) }
@@ -1684,7 +1714,12 @@ export class NativeCodexSessionDirectSender {
         this.reconcileActiveWithTranscript(sessionId, session)
         const reconciledSharedReceipt = this.reconcileSharedQueueDeliveryWithTranscript(sessionId)
         const reconciledRecoveryReceipt = this.reconcileRecoveryQueueWithTranscript(sessionId)
-        if (reconciledSharedReceipt || reconciledRecoveryReceipt) {
+        const sharedObserver = this.sharedTurnObservers.get(sessionId)
+        const completedSharedTurn = Boolean(sharedObserver?.turnId && session?.runState === 'idle')
+        if (completedSharedTurn && sharedObserver) {
+            this.disposeSharedTurnObserver(sessionId, sharedObserver)
+        }
+        if (reconciledSharedReceipt || reconciledRecoveryReceipt || completedSharedTurn) {
             this.notifyStateChange(sessionId)
         }
         if (this.archiveReservations.has(sessionId) || this.hasDeliveryLease(sessionId) || !this.queues.get(sessionId)?.length) {
@@ -1855,6 +1890,7 @@ export class NativeCodexSessionDirectSender {
     ): CodexLocalSessionStatusRpcResponse {
         this.reconcileActiveWithTranscript(sessionId, session)
         const active = this.activeSends.get(sessionId)
+        const sharedPendingInput = this.sharedTurnObservers.get(sessionId)?.pendingUserInputs[0]?.input
         const stalledSince = this.getStalledSince(session)
         const queuedMessages = this.getQueuedMessages(sessionId)
         if (queuedMessages.length > 0 && !queuedMessages[0]?.recoveryRequired) {
@@ -1890,6 +1926,7 @@ export class NativeCodexSessionDirectSender {
                 ...(sharedDelivery.clientMessageId && sharedDelivery.phase !== 'accepted'
                     ? { activeClientMessageId: sharedDelivery.clientMessageId }
                     : {}),
+                ...(sharedPendingInput ? { waitingForUserInput: true, pendingUserInput: sharedPendingInput } : {}),
                 queuedMessages
             }
         }
@@ -1907,7 +1944,9 @@ export class NativeCodexSessionDirectSender {
             // Keep the raw processing marker internally for guarded recovery,
             // but stop presenting an abandoned transcript as live thinking.
             status: stalledSince === null ? (session.runState ?? 'unknown') : 'unknown',
-            ...(session.waitingForUserInput === true ? { waitingForUserInput: true } : {}),
+            ...(sharedPendingInput
+                ? { waitingForUserInput: true, pendingUserInput: sharedPendingInput }
+                : session.waitingForUserInput === true ? { waitingForUserInput: true } : {}),
             ...(stalledSince === null ? {} : { stalledSince }),
             ...(recentFailure
                 ? {
@@ -2241,7 +2280,7 @@ export class NativeCodexSessionDirectSender {
             if (sharedDelivery) {
                 this.clearSharedQueueDeliveryTimer(sharedDelivery)
                 this.sharedQueueDeliveries.delete(sessionId)
-                this.disconnectSharedQueueClient(sharedDelivery.client)
+                this.disconnectSharedQueueDelivery(sessionId, sharedDelivery)
             }
             // Once Codex has accepted the message, local discard only removes
             // SHAPI's receipt. Do not delete staged attachments that Codex may
@@ -2299,7 +2338,7 @@ export class NativeCodexSessionDirectSender {
         if (sharedDelivery) {
             this.clearSharedQueueDeliveryTimer(sharedDelivery)
             this.sharedQueueDeliveries.delete(sessionId)
-            this.disconnectSharedQueueClient(sharedDelivery.client)
+            this.disconnectSharedQueueDelivery(sessionId, sharedDelivery)
         }
         // An uncertain receipt may already have crossed into Codex. Local
         // discard removes SHAPI's copy only, so retain any staged files that
@@ -3711,6 +3750,10 @@ export class NativeCodexSessionDirectSender {
             this.scheduleQueuePump(sessionId)
             return
         }
+        const previousObserver = this.sharedTurnObservers.get(sessionId)
+        if (previousObserver) {
+            this.disposeSharedTurnObserver(sessionId, previousObserver)
+        }
 
         const delivery: SharedQueueDelivery = {
             phase: 'setup',
@@ -3719,6 +3762,7 @@ export class NativeCodexSessionDirectSender {
             receipt: null,
             acceptedAt: null,
             client: null,
+            observer: null,
             lifecycleTimer: null
         }
         this.sharedQueueDeliveries.set(sessionId, delivery)
@@ -3730,6 +3774,19 @@ export class NativeCodexSessionDirectSender {
             }
             client = this.createSshAppServerClient()
             delivery.client = client
+            const observer: SharedTurnObserver = {
+                clientMessageId: item.id,
+                client,
+                turnId: null,
+                pendingUserInputs: []
+            }
+            delivery.observer = observer
+            client.setNotificationHandler((method, params) => {
+                this.handleSharedTurnNotification(sessionId, observer, method, params)
+            })
+            client.registerRequestHandler?.('item/tool/requestUserInput', (params, context) => (
+                this.handleSharedTurnUserInput(sessionId, observer, params, context?.requestId ?? null)
+            ))
             this.sharedQueueClients.add(client)
             this.scheduleSharedQueueSetupTimeout(sessionId, delivery, item)
             await client.connect()
@@ -3840,8 +3897,8 @@ export class NativeCodexSessionDirectSender {
                 this.sharedQueueDeliveries.delete(sessionId)
                 releasedLease = true
             }
-            if (client) {
-                this.disconnectSharedQueueClient(client)
+            if (client && this.sharedTurnObservers.get(sessionId) !== delivery.observer) {
+                this.disconnectSharedQueueDelivery(sessionId, delivery)
             }
             if (
                 releasedLease
@@ -3890,7 +3947,7 @@ export class NativeCodexSessionDirectSender {
 
             const retryHead = this.isCurrentQueuedItem(sessionId, item)
             this.sharedQueueDeliveries.delete(sessionId)
-            this.disconnectSharedQueueClient(delivery.client)
+            this.disconnectSharedQueueDelivery(sessionId, delivery)
             const queue = this.queues.get(sessionId)
             if (queue?.length && !queue[0]?.recoveryRequired) {
                 this.scheduleQueuePump(
@@ -3940,7 +3997,7 @@ export class NativeCodexSessionDirectSender {
             // post-await paths compare this exact object, so a late response
             // cannot acknowledge A or advance B.
             this.sharedQueueDeliveries.delete(sessionId)
-            this.disconnectSharedQueueClient(delivery.client)
+            this.disconnectSharedQueueDelivery(sessionId, delivery)
             if (stillHead) {
                 item.recoveryRequired = true
                 item.recoveryReason = 'session_status_unknown'
@@ -4080,7 +4137,7 @@ export class NativeCodexSessionDirectSender {
 
         this.clearSharedQueueDeliveryTimer(delivery)
         this.sharedQueueDeliveries.delete(sessionId)
-        this.disconnectSharedQueueClient(delivery.client)
+        this.disconnectSharedQueueDelivery(sessionId, delivery)
         this.recentFailures.set(sessionId, {
             message: 'Codex accepted this native message, but SHAPI did not see it appear in the transcript within five minutes',
             occurredAt: this.now(),
@@ -4089,6 +4146,90 @@ export class NativeCodexSessionDirectSender {
         })
         this.notifyStateChange(sessionId)
         return true
+    }
+
+    private handleSharedTurnUserInput(
+        sessionId: string,
+        observer: SharedTurnObserver,
+        params: unknown,
+        requestId: string | number | null
+    ): unknown {
+        const parsed = NativeCodexUserInputSchema.safeParse(params)
+        if (
+            !parsed.success
+            || this.sharedTurnObservers.get(sessionId) !== observer
+            || parsed.data.threadId !== sessionId
+            || observer.turnId === null
+            || parsed.data.turnId !== observer.turnId
+            || observer.pendingUserInputs.length >= 10
+            || observer.pendingUserInputs.some((entry) => entry.input.itemId === parsed.data.itemId)
+        ) {
+            return CODEX_SSH_IGNORE_REQUEST
+        }
+        return new Promise<{ answers: Record<string, { answers: string[] }> }>((resolve, reject) => {
+            observer.pendingUserInputs.push({ input: parsed.data, requestId, resolve, reject })
+            this.notifyStateChange(sessionId)
+        })
+    }
+
+    private handleSharedTurnNotification(
+        sessionId: string,
+        observer: SharedTurnObserver,
+        method: string,
+        params: unknown
+    ): void {
+        const threadId = getNotificationThreadId(params)
+        if (threadId && threadId !== sessionId) return
+
+        if (method === 'item/completed') {
+            const clientMessageId = getNotificationUserMessageClientId(params)
+            const turnId = getNotificationTurnId(params)
+            if (clientMessageId === observer.clientMessageId && turnId) {
+                observer.turnId = turnId
+            }
+            return
+        }
+
+        if (method === 'serverRequest/resolved') {
+            const record = asRecord(params)
+            const resolvedRequestId = record?.requestId
+            const pending = observer.pendingUserInputs.find((entry) => (
+                entry.requestId !== null && entry.requestId === resolvedRequestId
+            ))
+            if (!pending) return
+            observer.pendingUserInputs = observer.pendingUserInputs.filter((entry) => entry !== pending)
+            // The owning Desktop UI won the race. Releasing this Promise is
+            // local-only: CodexSshAppServerClient suppresses a second reply.
+            pending.resolve({ answers: {} })
+            this.notifyStateChange(sessionId)
+            return
+        }
+
+        if (method !== 'turn/completed' || observer.turnId === null || getNotificationTurnId(params) !== observer.turnId) {
+            return
+        }
+        this.disposeSharedTurnObserver(sessionId, observer)
+        this.scheduleQueuePump(sessionId, 0, { replacePending: true })
+        this.notifyStateChange(sessionId)
+    }
+
+    private disposeSharedTurnObserver(sessionId: string, observer: SharedTurnObserver): void {
+        if (this.sharedTurnObservers.get(sessionId) === observer) {
+            this.sharedTurnObservers.delete(sessionId)
+        }
+        observer.client.setNotificationHandler(null)
+        this.disconnectSharedQueueClient(observer.client)
+        const pending = observer.pendingUserInputs.splice(0)
+        for (const entry of pending) entry.reject(new Error('The shared native question connection has closed'))
+    }
+
+    private disconnectSharedQueueDelivery(sessionId: string, delivery: SharedQueueDelivery): void {
+        if (delivery.observer && this.sharedTurnObservers.get(sessionId) === delivery.observer) {
+            this.disposeSharedTurnObserver(sessionId, delivery.observer)
+            return
+        }
+        delivery.client?.setNotificationHandler(null)
+        this.disconnectSharedQueueClient(delivery.client)
     }
 
     /** Close only a transient SHAPI socket, once, never Desktop's connection. */
@@ -4178,6 +4319,9 @@ export class NativeCodexSessionDirectSender {
         delivery.phase = 'accepted'
         delivery.receipt = receipt
         delivery.acceptedAt = this.now()
+        if (delivery.observer) {
+            this.sharedTurnObservers.set(sessionId, delivery.observer)
+        }
         this.recentFailures.delete(sessionId)
         this.scheduleSharedQueueTranscriptConfirmationTimeout(sessionId, delivery)
         if (this.reconcileSharedQueueDeliveryWithTranscript(sessionId)) {

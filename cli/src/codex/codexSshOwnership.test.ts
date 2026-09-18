@@ -11,7 +11,7 @@ import {
     loadCodexSshHeldSessionIds,
     parseCodexSshLoadedThreadIds
 } from './codexSshOwnership'
-import { CodexSshAppServerClient } from './codexSshAppServerClient'
+import { CODEX_SSH_IGNORE_REQUEST, CodexSshAppServerClient } from './codexSshAppServerClient'
 import type { NativeCodexAppServerClient } from './nativeSessionDirectSend'
 
 const temporaryDirectories: string[] = []
@@ -326,7 +326,7 @@ describe('CodexSshAppServerClient', () => {
             expect(received.filter(message => message.id === 'rpc-1')).toEqual([])
         } finally { await client.disconnect(); await closeServer(server) }
     })
-    it.runIf(process.platform !== 'win32')('does not answer desktop questions or approvals while observing a shared connection', async () => {
+    it.runIf(process.platform !== 'win32')('explicitly ignores desktop questions or approvals while observing a shared connection', async () => {
         const socketPath = makeSocketPath()
         const received: Array<Record<string, unknown>> = []
         const server = createRawWebSocketServer((text, sendText) => {
@@ -343,6 +343,9 @@ describe('CodexSshAppServerClient', () => {
         })
         await listenOnSocket(server, socketPath)
         const client = new CodexSshAppServerClient({ socketPath, connectTimeoutMs: 1_000 })
+        for (const method of ['item/tool/requestUserInput', 'mcpServer/elicitation/request', 'item/commandExecution/requestApproval']) {
+            client.registerRequestHandler(method, () => CODEX_SSH_IGNORE_REQUEST)
+        }
         try {
             await client.connect()
             await client.initialize({ clientInfo: { name: 'hapi-observer-test', version: '1' }, capabilities: { experimentalApi: true } })

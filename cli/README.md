@@ -150,8 +150,10 @@ Its pending question is returned in session status and answered through the
 authenticated control endpoint with exact turn/item IDs. Closing the Web drawer
 does not answer the question; refreshing can reopen it while its Runner connection
 remains alive. A stopped/disconnected bridge cannot accept old answers.
-Shared Desktop observers never reply to server requests without an explicit
-handler, so checking status does not reject another UI's question or approval.
+Shared Desktop observers ignore unrelated server requests. For an exact SHAPI
+queue receipt, the runner keeps the shared socket alive, correlates its client
+message and turn IDs, and can expose that turn's synchronous question in Web.
+Desktop and Web may both answer it; Codex's first resolution wins.
 Desktop `request_user_input_async` forms can be recovered from loaded transcript
 history. Their `accepted` tool result is not a user answer: Web sends an explicit
 selection as an idempotent, structured user-message reply (queued when busy), not

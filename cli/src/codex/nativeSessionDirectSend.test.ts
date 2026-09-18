@@ -758,7 +758,9 @@ describe('NativeCodexSessionDirectSender', () => {
             ])
             expect(sharedClient.resumeCalls).toEqual([])
             expect(sharedClient.startTurnCalls).toEqual([])
-            expect(sharedClient.disconnectCalls).toBe(1)
+            // Keep the exact shared socket alive so a later synchronous
+            // request_user_input from this queued turn can be answered.
+            expect(sharedClient.disconnectCalls).toBe(0)
             expect(sender.getStatus(sessionId)).toMatchObject({
                 success: true,
                 status: 'processing',
@@ -771,6 +773,97 @@ describe('NativeCodexSessionDirectSender', () => {
             expect(spawn).not.toHaveBeenCalled()
             expect(archiveAttempt).not.toHaveBeenCalled()
             expect(externalControlChecker).toHaveBeenCalledTimes(1)
+        } finally {
+            sender.dispose()
+            rmSync(cwd, { recursive: true, force: true })
+        }
+    })
+
+    it('answers a synchronous question from the exact shared SSH queued turn', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'hapi-native-ssh-question-workspace-'))
+        const sessionId = '89345678-1234-4234-8234-123456789098'
+        const clientMessageId = 'ssh:question-1'
+        const sharedClient = new FakeAppServerClient()
+        const sender = new NativeCodexSessionDirectSender(
+            vi.fn<SpawnNativeCodexProcess>(),
+            () => 123,
+            1_000,
+            { getSummary: () => ({
+                id: sessionId,
+                title: 'Native thread',
+                cwd,
+                file: '/not-read.jsonl',
+                modifiedAt: 100,
+                runState: 'idle' as const
+            }) },
+            null,
+            null,
+            null,
+            async () => true,
+            () => sharedClient
+        )
+
+        try {
+            await expect(sender.sendWithExternalControlCheck(
+                sessionId,
+                'Ask from the shared turn',
+                undefined,
+                clientMessageId
+            )).resolves.toMatchObject({ success: true, status: 'queued' })
+            await flushAsyncWork()
+
+            sharedClient.emit('item/completed', {
+                threadId: sessionId,
+                turnId: 'shared-turn-1',
+                item: { type: 'userMessage', clientId: clientMessageId }
+            })
+            const input = {
+                threadId: sessionId,
+                turnId: 'shared-turn-1',
+                itemId: 'question-1',
+                questions: [{ id: 'choice', question: 'Continue?', options: [{ label: 'Yes' }, { label: 'No' }] }]
+            }
+            const answer = Promise.resolve(sharedClient.handlers.get('item/tool/requestUserInput')!(input, { requestId: 'rpc-question-1' }))
+
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                success: true,
+                waitingForUserInput: true,
+                pendingUserInput: input
+            })
+            const action = {
+                action: 'answerUserInput' as const,
+                expectedTurnId: 'shared-turn-1',
+                requestId: 'question-1',
+                answers: { choice: { answers: ['Yes'] } }
+            }
+            await expect(sender.control(sessionId, action, {
+                controlledByCodexSsh: true,
+                activeTurnId: 'shared-turn-1'
+            })).resolves.toMatchObject({ success: true })
+            await expect(answer).resolves.toEqual({ answers: { choice: { answers: ['Yes'] } } })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('pendingUserInput')
+
+            const desktopWonInput = { ...input, itemId: 'question-2' }
+            const desktopWonAnswer = Promise.resolve(sharedClient.handlers.get('item/tool/requestUserInput')!(
+                desktopWonInput,
+                { requestId: 'rpc-question-2' }
+            ))
+            expect(sender.getStatus(sessionId)).toMatchObject({
+                waitingForUserInput: true,
+                pendingUserInput: desktopWonInput
+            })
+            sharedClient.emit('serverRequest/resolved', {
+                threadId: sessionId,
+                requestId: 'rpc-question-2'
+            })
+            await expect(desktopWonAnswer).resolves.toEqual({ answers: {} })
+            expect(sender.getStatus(sessionId)).not.toHaveProperty('pendingUserInput')
+
+            sharedClient.emit('turn/completed', {
+                threadId: sessionId,
+                turn: { id: 'shared-turn-1', status: 'completed' }
+            })
+            expect(sharedClient.disconnectCalls).toBe(1)
         } finally {
             sender.dispose()
             rmSync(cwd, { recursive: true, force: true })
